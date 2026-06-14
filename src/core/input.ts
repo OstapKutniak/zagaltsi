@@ -6,19 +6,22 @@ import Phaser from 'phaser';
 export interface InputCommand {
   left: boolean;
   right: boolean;
+  up: boolean; // рух углиб сцени
+  down: boolean; // рух назовні (до камери)
   jump: boolean; // фронт сигналу: натиснуто саме цього кадру
-  jumpHeld: boolean; // утримується
   attack: boolean; // фронт сигналу
 }
 
-type StateKey = 'left' | 'right' | 'jumpHeld' | 'attackHeld';
+type StateKey = 'left' | 'right' | 'up' | 'down' | 'jump' | 'attack';
 
 export class InputController {
-  private state: Record<StateKey, boolean> = {
+  private held: Record<StateKey, boolean> = {
     left: false,
     right: false,
-    jumpHeld: false,
-    attackHeld: false,
+    up: false,
+    down: false,
+    jump: false,
+    attack: false,
   };
   private prevJump = false;
   private prevAttack = false;
@@ -29,14 +32,16 @@ export class InputController {
       const bind = (codes: string[], key: StateKey) => {
         for (const code of codes) {
           const k = kb.addKey(code);
-          k.on('down', () => { this.state[key] = true; });
-          k.on('up', () => { this.state[key] = false; });
+          k.on('down', () => { this.held[key] = true; });
+          k.on('up', () => { this.held[key] = false; });
         }
       };
       bind(['LEFT', 'A'], 'left');
       bind(['RIGHT', 'D'], 'right');
-      bind(['UP', 'W', 'SPACE'], 'jumpHeld');
-      bind(['J', 'K', 'F'], 'attackHeld');
+      bind(['UP', 'W'], 'up');
+      bind(['DOWN', 'S'], 'down');
+      bind(['SPACE', 'K'], 'jump');
+      bind(['J', 'F'], 'attack');
     }
     this.bindTouch();
   }
@@ -45,15 +50,17 @@ export class InputController {
     const map: Array<[string, StateKey]> = [
       ['btn-left', 'left'],
       ['btn-right', 'right'],
-      ['btn-jump', 'jumpHeld'],
-      ['btn-attack', 'attackHeld'],
+      ['btn-up', 'up'],
+      ['btn-down', 'down'],
+      ['btn-jump', 'jump'],
+      ['btn-attack', 'attack'],
     ];
     for (const [id, key] of map) {
       const el = document.getElementById(id);
       if (!el) continue;
       const set = (value: boolean) => (e: Event) => {
         e.preventDefault();
-        this.state[key] = value;
+        this.held[key] = value;
       };
       el.addEventListener('touchstart', set(true), { passive: false });
       el.addEventListener('touchend', set(false), { passive: false });
@@ -64,17 +71,18 @@ export class InputController {
     }
   }
 
-  // Знімок вводу за кадр. Фронти (jump/attack) рахуються тут.
+  // Знімок вводу за крок симуляції. Фронти (jump/attack) рахуються тут.
   sample(): InputCommand {
-    const jump = this.state.jumpHeld && !this.prevJump;
-    const attack = this.state.attackHeld && !this.prevAttack;
-    this.prevJump = this.state.jumpHeld;
-    this.prevAttack = this.state.attackHeld;
+    const jump = this.held.jump && !this.prevJump;
+    const attack = this.held.attack && !this.prevAttack;
+    this.prevJump = this.held.jump;
+    this.prevAttack = this.held.attack;
     return {
-      left: this.state.left,
-      right: this.state.right,
+      left: this.held.left,
+      right: this.held.right,
+      up: this.held.up,
+      down: this.held.down,
       jump,
-      jumpHeld: this.state.jumpHeld,
       attack,
     };
   }

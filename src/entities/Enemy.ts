@@ -1,26 +1,55 @@
 import Phaser from 'phaser';
-import { ENEMY } from '../config';
+import { Actor } from './Actor';
+import { ENEMY, BAND } from '../config';
 import type { Player } from './Player';
 
-// Простий ворог: іде в бік гравця по горизонталі, гине з одного удару.
-export class Enemy extends Phaser.Physics.Arcade.Sprite {
-  hp = ENEMY.hp;
+// Простий ворог: підходить до гравця по площині, у дистанції б'є по кулдауну.
+export class Enemy extends Actor {
+  private nextAttackAt = 0;
+  private immuneUntil = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, 'enemy');
-    scene.add.existing(this);
-    scene.physics.add.existing(this);
-    this.setCollideWorldBounds(true);
+    super(scene, x, y, 'enemy', ENEMY.hp);
   }
 
-  update(player: Player): void {
-    const dir = player.x < this.x ? -1 : 1;
-    this.setVelocityX(ENEMY.speed * dir);
-    this.setFlipX(dir === 1);
+  // Повертає шкоду, завдану гравцеві цього кроку (0, якщо не вдарив).
+  think(player: Player, time: number, dt: number): number {
+    const dx = player.floorX - this.fx;
+    const dy = player.floorY - this.fy;
+    this.facing = dx >= 0 ? 1 : -1;
+
+    if (Math.abs(dx) <= ENEMY.attackRange && Math.abs(dy) <= ENEMY.attackDepth) {
+      // У зоні удару — б'є по кулдауну, стоїть.
+      this.stepZ(dt);
+      this.sync();
+      if (time >= this.nextAttackAt) {
+        this.nextAttackAt = time + ENEMY.attackCooldown;
+        return ENEMY.damage;
+      }
+      return 0;
+    }
+
+    // Інакше підходить.
+    const len = Math.hypot(dx, dy) || 1;
+    this.fx += (dx / len) * ENEMY.speed * dt;
+    this.fy += (dy / len) * ENEMY.speed * dt;
+    this.fy = Phaser.Math.Clamp(this.fy, BAND.top, BAND.bottom);
+    this.stepZ(dt);
+    this.sync();
+    return 0;
   }
 
-  hit(): void {
-    this.hp -= 1;
-    if (this.hp <= 0) this.destroy();
+  vulnerable(time: number): boolean {
+    return time >= this.immuneUntil;
+  }
+
+  // Повертає true, якщо ворог загинув від цього удару.
+  hurt(dmg: number, time: number, fromX: number): boolean {
+    this.immuneUntil = time + 220; // i-frames: один змах = один удар
+    this.hp -= dmg;
+    this.fx += (this.fx < fromX ? -1 : 1) * 30; // відкидання
+    this.setTint(0xff8888);
+    this.scene.time.delayedCall(110, () => this.clearTint());
+    return this.hp <= 0;
   }
 }

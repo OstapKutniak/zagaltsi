@@ -21,18 +21,25 @@
         inset: auto 0 0 0;
         display: flex;
         justify-content: space-between;
+        align-items: flex-end;
         padding: 0 18px 24px;
         pointer-events: none;
       }
-      #touch .pad { display: flex; gap: 14px; pointer-events: auto; }
+      #touch .dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 56px); gap: 8px; pointer-events: auto; }
+      #touch .dpad #btn-up { grid-column: 2; grid-row: 1; }
+      #touch .dpad #btn-left { grid-column: 1; grid-row: 2; }
+      #touch .dpad #btn-down { grid-column: 2; grid-row: 2; }
+      #touch .dpad #btn-right { grid-column: 3; grid-row: 2; }
+      #touch .actions { display: flex; gap: 14px; pointer-events: auto; }
       #touch button {
-        width: 64px; height: 64px; border-radius: 50%;
+        width: 56px; height: 56px; border-radius: 14px;
         border: 2px solid rgba(255, 255, 255, 0.35);
         background: rgba(255, 255, 255, 0.12);
-        color: #fff; font-size: 24px;
+        color: #fff; font-size: 22px;
         touch-action: none; user-select: none; -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
+      #touch .actions button { width: 70px; height: 70px; border-radius: 50%; }
       #touch button:active { background: rgba(255, 255, 255, 0.3); }
       /* На широкому десктопі ховаємо кнопки — там грають з клавіатури */
       @media (pointer: fine) and (min-width: 900px) { #touch { opacity: 0.25; } }
@@ -41,13 +48,15 @@
   <body>
     <div id="game"></div>
     <div id="touch">
-      <div class="pad left">
+      <div class="dpad">
+        <button id="btn-up" aria-label="вгору">▲</button>
         <button id="btn-left" aria-label="ліворуч">◀</button>
+        <button id="btn-down" aria-label="вниз">▼</button>
         <button id="btn-right" aria-label="праворуч">▶</button>
       </div>
-      <div class="pad right">
+      <div class="actions">
         <button id="btn-attack" aria-label="удар">✊</button>
-        <button id="btn-jump" aria-label="стрибок">▲</button>
+        <button id="btn-jump" aria-label="стрибок">⤴</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
