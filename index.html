@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Загальці</title>
+    <!-- Telegram Mini App SDK. У звичайному браузері просто не активується. -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #1d2b53; }
+      #game { width: 100vw; height: 100vh; }
+      #game canvas { display: block; }
+
+      /* Екранні кнопки керування для телефона */
+      #touch {
+        position: fixed;
+        inset: auto 0 0 0;
+        display: flex;
+        justify-content: space-between;
+        padding: 0 18px 24px;
+        pointer-events: none;
+      }
+      #touch .pad { display: flex; gap: 14px; pointer-events: auto; }
+      #touch button {
+        width: 64px; height: 64px; border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff; font-size: 24px;
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #touch button:active { background: rgba(255, 255, 255, 0.3); }
+      /* На широкому десктопі ховаємо кнопки — там грають з клавіатури */
+      @media (pointer: fine) and (min-width: 900px) { #touch { opacity: 0.25; } }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="touch">
+      <div class="pad left">
+        <button id="btn-left" aria-label="ліворуч">◀</button>
+        <button id="btn-right" aria-label="праворуч">▶</button>
+      </div>
+      <div class="pad right">
+        <button id="btn-attack" aria-label="удар">✊</button>
+        <button id="btn-jump" aria-label="стрибок">▲</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

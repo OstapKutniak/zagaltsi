@@ -1,0 +1,19 @@
+{
+  "name": "zagaltsi",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Загальці — гумористичний 2D-платформер для Telegram Mini App",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "phaser": "^3.88.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}
