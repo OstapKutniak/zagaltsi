@@ -1,7 +1,12 @@
 import Phaser from 'phaser';
 import { Actor } from './Actor';
-import { PLAYER, JUMP, BAND, WORLD_WIDTH } from '../config';
+import { PLAYER, JUMP, WORLD_WIDTH } from '../config';
 import type { InputCommand } from '../core/input';
+
+interface Band {
+  top: number;
+  bottom: number;
+}
 
 // Герой. Уся поведінка керується командами вводу (cmd) — це "симуляція,
 // відокремлена від керування", фундамент під майбутній кооп.
@@ -16,7 +21,7 @@ export class Player extends Actor {
     super(scene, x, y, 'player', PLAYER.maxHp);
   }
 
-  update(cmd: InputCommand, time: number, dt: number): void {
+  update(cmd: InputCommand, time: number, dt: number, band: Band): void {
     // Під час удару герой "вкопаний" — не ходить.
     if (!this.isAttacking(time)) {
       let vx = 0;
@@ -31,7 +36,7 @@ export class Player extends Actor {
       this.fx += (vx / len) * PLAYER.speed * dt;
       this.fy += (vy / len) * PLAYER.speed * dt;
       this.fx = Phaser.Math.Clamp(this.fx, 20, this.maxX);
-      this.fy = Phaser.Math.Clamp(this.fy, BAND.top, BAND.bottom);
+      this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
 
       if (cmd.jump) this.jump(JUMP.power);
       if (cmd.attack) this.tryAttack(time);

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, WORLD_WIDTH, BAND, PLAYER } from '../config';
+import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER } from '../config';
 import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
@@ -13,10 +13,21 @@ export class GameScene extends Phaser.Scene {
   private player!: Player;
   private controls!: InputController;
   private enemies: Enemy[] = [];
+
+  // Динамічний макет: заповнюємо весь в'юпорт, смуга підлоги — від низу екрана.
+  private worldH = 540;
+  private bandTop = 320;
+  private bandBottom = 510;
+
+  private skyRect!: Phaser.GameObjects.Rectangle;
+  private groundRect!: Phaser.GameObjects.Rectangle;
+  private horizon!: Phaser.GameObjects.Rectangle;
+  private gateLine!: Phaser.GameObjects.Rectangle;
+  private goal!: Phaser.GameObjects.Rectangle;
+  private goalLabel!: Phaser.GameObjects.Text;
+
   private hud!: Phaser.GameObjects.Text;
   private banner!: Phaser.GameObjects.Text;
-  private goal!: Phaser.GameObjects.Rectangle;
-  private gateLine!: Phaser.GameObjects.Rectangle;
 
   private finished = false;
   private waveSpawned = false;
@@ -28,6 +39,10 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
+  private get band(): { top: number; bottom: number } {
+    return { top: this.bandTop, bottom: this.bandBottom };
+  }
+
   create(): void {
     this.finished = false;
     this.enemies = [];
@@ -36,34 +51,26 @@ export class GameScene extends Phaser.Scene {
     this.accumulator = 0;
     this.simTime = 0;
 
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
     this.cameras.main.setBackgroundColor('#2a2233');
+    this.computeLayout();
 
     // Фон: "небо" зверху + смуга підлоги знизу (присмерковий тон у дусі Don't Starve)
-    this.add.rectangle(WORLD_WIDTH / 2, BAND.top / 2, WORLD_WIDTH, BAND.top, 0x3a3148).setDepth(-1000);
-    this.add
-      .rectangle(WORLD_WIDTH / 2, (BAND.top + GAME_HEIGHT) / 2, WORLD_WIDTH, GAME_HEIGHT - BAND.top, 0x4a3f2e)
-      .setDepth(-1000);
-    this.add.rectangle(WORLD_WIDTH / 2, BAND.top, WORLD_WIDTH, 3, 0x000000, 0.25).setDepth(-999);
-
-    // Ворота арени (зникають після зачистки)
-    this.gateLine = this.add
-      .rectangle(GATE_X, (BAND.top + GAME_HEIGHT) / 2, 6, GAME_HEIGHT - BAND.top, 0x000000, 0.25)
-      .setDepth(-998);
+    this.skyRect = this.add.rectangle(0, 0, 10, 10, 0x3a3148).setDepth(-1000);
+    this.groundRect = this.add.rectangle(0, 0, 10, 10, 0x4a3f2e).setDepth(-1000);
+    this.horizon = this.add.rectangle(0, 0, 10, 3, 0x000000, 0.25).setDepth(-999);
+    this.gateLine = this.add.rectangle(0, 0, 6, 10, 0x000000, 0.25).setDepth(-998);
 
     // Магазин — ціль рівня
-    this.goal = this.add.rectangle(WORLD_WIDTH - 120, BAND.bottom, 70, 120, 0xffd000).setOrigin(0.5, 1);
-    this.goal.setDepth(BAND.bottom - 1);
-    this.add
-      .text(WORLD_WIDTH - 162, BAND.bottom - 150, 'МАГАЗИН', {
-        fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#ffd000',
-      })
-      .setDepth(10000);
+    this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
+    this.goalLabel = this.add.text(0, 0, 'МАГАЗИН', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ffd000',
+    });
+    this.repositionWorld();
 
     // Герой
-    this.player = new Player(this, 90, BAND.bottom - 10);
+    this.player = new Player(this, 90, this.bandBottom - 10);
     this.player.maxX = GATE_X - 30;
     this.controls = new InputController(this);
     this.cameras.main.startFollow(this.player, true, 0.08, 0);
@@ -84,25 +91,54 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(10000);
     this.banner = this.add
-      .text(GAME_WIDTH / 2, 92, '', {
-        fontFamily: 'monospace',
-        fontSize: '22px',
-        color: '#ffd000',
-      })
+      .text(0, 0, '', { fontFamily: 'monospace', fontSize: '20px', color: '#ffd000' })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(10000);
+
+    // Реакція на зміну розміру вікна Telegram / браузера
+    this.scale.on('resize', this.onResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
+  }
+
+  // Рахує смугу підлоги під поточний розмір екрана (без зуму: 1 світ = 1 піксель,
+  // тож HUD і спрайти лишаються чіткими та на місцях, а чорних полів немає).
+  private computeLayout(): void {
+    this.worldH = this.scale.height;
+    this.bandBottom = this.worldH - FLOOR_MARGIN;
+    this.bandTop = Math.max(this.worldH * 0.28, this.bandBottom - BAND_DEPTH);
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.worldH);
+  }
+
+  private repositionWorld(): void {
+    const h = this.worldH;
+    this.skyRect.setPosition(WORLD_WIDTH / 2, this.bandTop / 2).setSize(WORLD_WIDTH, this.bandTop);
+    this.groundRect.setPosition(WORLD_WIDTH / 2, (this.bandTop + h) / 2).setSize(WORLD_WIDTH, h - this.bandTop);
+    this.horizon.setPosition(WORLD_WIDTH / 2, this.bandTop).setSize(WORLD_WIDTH, 3);
+    this.gateLine.setPosition(GATE_X, (this.bandTop + h) / 2).setSize(6, h - this.bandTop);
+    this.goal.setPosition(WORLD_WIDTH - 120, this.bandBottom).setDepth(this.bandBottom - 1);
+    this.goalLabel.setPosition(WORLD_WIDTH - 162, this.bandBottom - 150);
+  }
+
+  private onResize(): void {
+    this.computeLayout();
+    this.repositionWorld();
+    if (this.banner) this.banner.setPosition(this.scale.width / 2, 84);
+    // Повертаємо персонажів у нову смугу
+    this.player?.clampDepth(this.bandTop, this.bandBottom);
+    for (const e of this.enemies) e.clampDepth(this.bandTop, this.bandBottom);
   }
 
   private spawnWave(): void {
     this.waveSpawned = true;
+    const mid = (this.bandTop + this.bandBottom) / 2;
     const spots: Array<[number, number]> = [
-      [950, BAND.top + 30],
-      [1060, BAND.bottom - 10],
-      [1120, BAND.top + 90],
+      [950, this.bandTop + 24],
+      [1060, this.bandBottom - 10],
+      [1120, mid],
     ];
     for (const [x, y] of spots) this.enemies.push(new Enemy(this, x, y));
-    this.banner.setText('БИЙСЯ! Зачисти ворогів');
+    this.banner.setPosition(this.scale.width / 2, 84).setText('БИЙСЯ! Зачисти ворогів');
   }
 
   // Phaser викликає update щокадру; ми накопичуємо час і крутимо симуляцію
@@ -119,9 +155,10 @@ export class GameScene extends Phaser.Scene {
   private step(dt: number): void {
     this.simTime += dt * 1000;
     const time = this.simTime;
+    const band = this.band;
 
     const cmd = this.controls.sample();
-    this.player.update(cmd, time, dt);
+    this.player.update(cmd, time, dt, band);
 
     // Тригер хвилі
     if (!this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();
@@ -144,7 +181,7 @@ export class GameScene extends Phaser.Scene {
 
     // Вороги думають і б'ють
     for (const e of this.enemies) {
-      const dmg = e.think(this.player, time, dt);
+      const dmg = e.think(this.player, time, dt, band);
       if (dmg > 0) this.player.takeDamage(time, dmg, e.floorX);
     }
 
@@ -153,7 +190,7 @@ export class GameScene extends Phaser.Scene {
       this.cleared = true;
       this.player.maxX = WORLD_WIDTH - 20;
       this.gateLine.setVisible(false);
-      this.banner.setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
+      this.banner.setPosition(this.scale.width / 2, 84).setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
       this.time.delayedCall(1600, () => this.banner.setText(''));
     }
 

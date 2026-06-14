@@ -36,6 +36,12 @@ export class Actor extends Phaser.GameObjects.Sprite {
     return this.airZ <= 0;
   }
 
+  // Затиснути позицію в смугу підлоги (після зміни розміру екрана).
+  clampDepth(top: number, bottom: number): void {
+    this.fy = Phaser.Math.Clamp(this.fy, top, bottom);
+    this.sync();
+  }
+
   jump(power: number): void {
     if (this.grounded) this.airVel = power;
   }

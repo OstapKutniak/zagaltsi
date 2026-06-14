@@ -1,7 +1,12 @@
 import Phaser from 'phaser';
 import { Actor } from './Actor';
-import { ENEMY, BAND } from '../config';
+import { ENEMY } from '../config';
 import type { Player } from './Player';
+
+interface Band {
+  top: number;
+  bottom: number;
+}
 
 // Простий ворог: підходить до гравця по площині, у дистанції б'є по кулдауну.
 export class Enemy extends Actor {
@@ -13,7 +18,7 @@ export class Enemy extends Actor {
   }
 
   // Повертає шкоду, завдану гравцеві цього кроку (0, якщо не вдарив).
-  think(player: Player, time: number, dt: number): number {
+  think(player: Player, time: number, dt: number, band: Band): number {
     const dx = player.floorX - this.fx;
     const dy = player.floorY - this.fy;
     this.facing = dx >= 0 ? 1 : -1;
@@ -33,7 +38,7 @@ export class Enemy extends Actor {
     const len = Math.hypot(dx, dy) || 1;
     this.fx += (dx / len) * ENEMY.speed * dt;
     this.fy += (dy / len) * ENEMY.speed * dt;
-    this.fy = Phaser.Math.Clamp(this.fy, BAND.top, BAND.bottom);
+    this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
     this.stepZ(dt);
     this.sync();
     return 0;
