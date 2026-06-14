@@ -38,7 +38,7 @@
     <div id="app">
       <div id="stageWrap">
         <canvas id="stage"></canvas>
-        <div class="hint">Клік — вибрати - тягни — рухати - колесо — зум - (режим Pivot: клік ставить півот)</div>
+        <div class="hint">drag&drop PNG на вибрану частину · <b>R</b> поворот · <b>S</b> розмір · <b>G</b> рух · клік — підтвердити, Esc — скасувати · колесо — зум</div>
       </div>
       <div id="side">
         <h2>Частини персонажа</h2>
@@ -66,7 +66,10 @@
         <h2>Завантаження</h2>
         <div class="row file"><input type="file" id="fileInput" accept="image/png,image/*" multiple /></div>
         <label class="check"><input type="checkbox" id="keyBg" checked /> чистити фон при завантаженні</label>
-        <label class="check"><input type="checkbox" id="showPivots" checked /> показувати півоти й манекен</label>
+        <label class="check"><input type="checkbox" id="showPivots" checked /> показувати півоти</label>
+        <div class="btns"><button id="refBtn">🎯 Силует-орієнтир</button><button id="refClear">✕</button></div>
+        <label class="check"><input type="checkbox" id="showRef" checked /> показувати орієнтир</label>
+        <input type="file" id="refInput" accept="image/*" style="display:none" />
 
         <hr />
         <h2>Файл</h2>
