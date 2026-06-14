@@ -3,3 +3,9 @@ dist/
 *.local
 .DS_Store
 .vite/
+
+# приватний Blender-аддон — НЕ для публічного репо
+*.rar
+BlenderAIReplace/
+# сирий арт і вихідні асети персонажів — тримаємо лише локально
+Characters/

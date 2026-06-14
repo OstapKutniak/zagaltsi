@@ -1,4 +1,5 @@
 import { emptyRig, sampleTrack, type RigDoc, type RigPart, type Clip, type Keyframe } from './format';
+import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 
 // ---- Веб-ріг-редактор (cutout). Vanilla TS + Canvas2D. ----
 // Завантаж PNG-частини -> постав pivot/ієрархію/шари -> зроби кліпи з ключів обертання
@@ -11,7 +12,7 @@ const ctx = canvas.getContext('2d')!;
 
 const state = {
   doc: emptyRig() as RigDoc,
-  images: new Map<string, HTMLImageElement>(),
+  images: new Map<string, HTMLCanvasElement>(), // частини як canvas (після кеїнгу фону)
   selected: null as string | null,
   clip: null as string | null, // null = режим bind-пози
   time: 0,
@@ -286,12 +287,17 @@ function status(msg: string): void {
 $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
   const files = (ev.target as HTMLInputElement).files;
   if (!files) return;
+  const keyBg = $<HTMLInputElement>('keyBg').checked;
   let z = state.doc.parts.length;
   for (const file of Array.from(files)) {
     const img = new Image();
-    img.onload = () => draw();
+    img.onload = () => {
+      // якщо фон суцільний і ввімкнено — чистимо тим самим методом, що й офлайн-скрипт
+      const canvas = keyBg && hasSolidBackground(img) ? keyImage(img) : imageToCanvas(img);
+      state.images.set(file.name, canvas);
+      draw();
+    };
     img.src = URL.createObjectURL(file);
-    state.images.set(file.name, img);
     if (!part(file.name)) {
       state.doc.parts.push({
         name: file.name.replace(/\.[^.]+$/, ''),
