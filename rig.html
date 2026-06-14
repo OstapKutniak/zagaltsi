@@ -3,80 +3,77 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Загальці — Ріг-редактор</title>
+    <title>Загальці — Конструктор персонажа</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { height: 100%; font-family: system-ui, sans-serif; background: #1b1822; color: #e8e2f0; }
+      :root { --bg:#23262e; --panel:#2c303a; --line:#3a3f4b; --ink:#e7eaf0; --muted:#8b93a3; --accent:#5aa0ff; }
+      html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); }
       #app { display: flex; height: 100vh; }
-      #stageWrap { flex: 1; position: relative; background: #2a2233; overflow: hidden; }
+      #stageWrap { flex: 1; position: relative; background: #3a3f4b; overflow: hidden; }
       #stage { display: block; width: 100%; height: 100%; }
-      #side { width: 320px; background: #221d2c; border-left: 1px solid #000; overflow-y: auto; padding: 12px; }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #9b8fb5; margin: 14px 0 6px; }
+      .hint { position: absolute; top: 10px; left: 12px; font-size: 12px; color: rgba(255,255,255,.5); pointer-events: none; }
+      #side { width: 300px; background: var(--panel); border-left: 1px solid #000; overflow-y: auto; padding: 14px; }
+      h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 16px 0 8px; }
       h2:first-child { margin-top: 0; }
-      .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 13px; }
-      .row label { flex: 0 0 84px; color: #b9aecd; }
-      .row input[type='number'], .row select { flex: 1; background: #15121c; color: #fff; border: 1px solid #3a3348; border-radius: 5px; padding: 4px 6px; }
-      .row input[type='range'] { flex: 1; }
-      button { background: #4a3f6e; color: #fff; border: 0; border-radius: 6px; padding: 7px 10px; cursor: pointer; font-size: 13px; }
-      button:hover { background: #5a4d85; }
-      button.sm { padding: 4px 8px; font-size: 12px; }
-      #partsList .part { padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; }
-      #partsList .part.sel { background: #4a3f6e; }
-      #partsList .part:hover { background: #322a42; }
-      #keyList { font-size: 12px; color: #b9aecd; max-height: 90px; overflow-y: auto; }
-      #keyList .k { display: inline-block; background: #15121c; border: 1px solid #3a3348; border-radius: 4px; padding: 2px 6px; margin: 2px; cursor: pointer; }
-      #status { font-size: 12px; color: #8a7fa5; margin-top: 8px; white-space: pre-wrap; }
-      .hint { position: absolute; top: 10px; left: 12px; font-size: 12px; color: #7a6f95; pointer-events: none; }
+      .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+      .row > label { flex: 0 0 78px; color: var(--muted); }
+      .row input[type=range] { flex: 1; accent-color: var(--accent); }
+      .row select { flex: 1; background: #1b1e25; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+      .val { flex: 0 0 38px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip { padding: 6px 10px; border-radius: 7px; background: #1b1e25; border: 1px solid var(--line); cursor: pointer; font-size: 12px; color: var(--ink); }
+      .chip.sel { background: var(--accent); border-color: var(--accent); color: #0a0e16; font-weight: 600; }
+      .chip.empty { color: var(--muted); }
+      button { background: #39414f; color: var(--ink); border: 0; border-radius: 7px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+      button:hover { background: #454f60; }
+      button.accent { background: var(--accent); color: #0a0e16; font-weight: 600; }
       .btns { display: flex; gap: 6px; flex-wrap: wrap; }
-      hr { border: 0; border-top: 1px solid #332b44; margin: 12px 0; }
+      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+      hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+      #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+      .file { font-size: 12px; }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="stageWrap">
         <canvas id="stage"></canvas>
-        <div class="hint">Клік — вибрати частину - тягни мишею, щоб рухати - колесо: зум</div>
+        <div class="hint">Клік — вибрати - тягни — рухати - колесо — зум - (режим Pivot: клік ставить півот)</div>
       </div>
       <div id="side">
-        <h2>Частини</h2>
-        <div class="row"><input type="file" id="fileInput" accept="image/png,image/*" multiple /></div>
-        <div class="row"><label>Чистити фон</label><input type="checkbox" id="keyBg" checked /></div>
-        <div id="partsList"></div>
+        <h2>Частини персонажа</h2>
+        <div class="chips" id="slotChips"></div>
 
         <hr />
         <h2>Вибрана частина</h2>
-        <div class="row"><label>Батько</label><select id="parentSel"></select></div>
-        <div class="row"><label>Шар (z)</label><input type="number" id="zVal" step="1" /></div>
-        <div class="row"><label>Pivot X</label><input type="range" id="pivotX" min="0" max="1" step="0.01" /></div>
-        <div class="row"><label>Pivot Y</label><input type="range" id="pivotY" min="0" max="1" step="0.01" /></div>
-        <div class="btns"><button class="sm" id="deletePart">Видалити частину</button></div>
+        <div class="row"><label>Картинка</label><select id="imgSel"></select></div>
+        <div class="row"><label>Поворот</label><input type="range" id="rot" min="-180" max="180" step="1" /><span class="val" id="rotV">0</span></div>
+        <div class="row"><label>Розмір</label><input type="range" id="scale" min="0.1" max="3" step="0.01" /><span class="val" id="scaleV">1.0</span></div>
+        <div class="btns">
+          <button id="setPivot">⌖ Тицьнути півот</button>
+          <button id="resetPart">Скинути</button>
+        </div>
 
         <hr />
-        <h2>Поза / Анімація</h2>
-        <div class="row"><label>Режим</label><select id="clipSel"></select></div>
-        <div class="btns">
-          <button class="sm" id="newClip">+ Кліп</button>
-          <button class="sm" id="renameClip">Перейм.</button>
-          <button class="sm" id="delClip">Видал. кліп</button>
-        </div>
-        <div class="row"><label>Тривал. с</label><input type="number" id="clipDuration" step="0.1" min="0.1" /></div>
-        <div class="row"><label>Цикл</label><input type="checkbox" id="clipLoop" /></div>
-        <div class="row"><label>Час</label><input type="range" id="timeline" min="0" max="1" step="0.01" /><span id="timeLabel">0.00</span></div>
-        <div class="row"><label>Кут°</label><input type="range" id="poseRot" min="-180" max="180" step="1" /><span id="rotLabel">0</span></div>
-        <div class="btns">
-          <button class="sm" id="setKey">⬤ Ключ тут</button>
-          <button class="sm" id="delKey">✕ Ключ</button>
-          <button class="sm" id="playPause">▶ Play</button>
-        </div>
-        <div id="keyList"></div>
+        <h2>Пропорції (база Остапа)</h2>
+        <div class="row"><label>Загальний</label><input type="range" id="p_overall" min="0.4" max="2" step="0.01" /><span class="val" id="p_overallV">1.0</span></div>
+        <div class="row"><label>Голова</label><input type="range" id="p_head" min="0.4" max="2" step="0.01" /><span class="val" id="p_headV">1.0</span></div>
+        <div class="row"><label>Торс</label><input type="range" id="p_torso" min="0.4" max="2" step="0.01" /><span class="val" id="p_torsoV">1.0</span></div>
+        <div class="row"><label>Руки</label><input type="range" id="p_arms" min="0.4" max="2" step="0.01" /><span class="val" id="p_armsV">1.0</span></div>
+        <div class="row"><label>Ноги</label><input type="range" id="p_legs" min="0.4" max="2" step="0.01" /><span class="val" id="p_legsV">1.0</span></div>
+
+        <hr />
+        <h2>Завантаження</h2>
+        <div class="row file"><input type="file" id="fileInput" accept="image/png,image/*" multiple /></div>
+        <label class="check"><input type="checkbox" id="keyBg" checked /> чистити фон при завантаженні</label>
+        <label class="check"><input type="checkbox" id="showPivots" checked /> показувати півоти й манекен</label>
 
         <hr />
         <h2>Файл</h2>
         <div class="btns">
-          <button id="exportBtn">⬇ Export JSON</button>
-          <button id="copyBtn">Copy JSON</button>
+          <button class="accent" id="exportBtn">⬇ Export JSON</button>
           <button id="importBtn">⬆ Import</button>
-          <input type="file" id="importInput" accept="application/json" style="display: none" />
+          <input type="file" id="importInput" accept="application/json" style="display:none" />
         </div>
         <div id="status"></div>
       </div>

@@ -1,494 +1,349 @@
-import { emptyRig, sampleTrack, type RigDoc, type RigPart, type Clip, type Keyframe } from './format';
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 
-// ---- Веб-ріг-редактор (cutout). Vanilla TS + Canvas2D. ----
-// Завантаж PNG-частини -> постав pivot/ієрархію/шари -> зроби кліпи з ключів обертання
-// -> Play для перевірки -> Export JSON (його читає гра).
+// ---- Конструктор персонажа (character creator) ----
+// Базовий манекен із пропорціями Остапа (бігунки) + слоти під PNG (голова/торс/руки/ноги).
+// Кожну частину можна вибрати, покрутити, підскейлити, перетягнути; для активної —
+// тицьнути, де її pivot. Цілі кінцівки (без дроблення). Без таймлайну — це збірка персонажа.
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+const rad = (d: number): number => (d * Math.PI) / 180;
+
+interface Slot {
+  image: string | null;
+  pivotX: number;
+  pivotY: number;
+  rot: number; // градуси, поверх "висіння" вздовж кістки
+  scale: number; // одиниць світу на піксель картинки (autofit при призначенні)
+  dx: number; // тонкий зсув від суглоба, в одиницях
+  dy: number;
+}
+
+// Опис скелета (профіль, обличчям праворуч). dir: -90 = вгору, 90 = вниз.
+const SLOT_DEFS = [
+  { key: 'leg_back', label: 'Нога зад', joint: 'hipBack', dir: 90, len: 'legs', w: 20, piv: [0.5, 0.06] },
+  { key: 'arm_back', label: 'Рука зад', joint: 'shBack', dir: 90, len: 'arms', w: 16, piv: [0.5, 0.08] },
+  { key: 'torso', label: 'Торс', joint: 'hip', dir: -90, len: 'torso', w: 34, piv: [0.5, 0.94] },
+  { key: 'head', label: 'Голова', joint: 'neck', dir: -90, len: 'head', w: 48, piv: [0.5, 0.94] },
+  { key: 'leg_front', label: 'Нога перед', joint: 'hipFront', dir: 90, len: 'legs', w: 20, piv: [0.5, 0.06] },
+  { key: 'arm_front', label: 'Рука перед', joint: 'shFront', dir: 90, len: 'arms', w: 16, piv: [0.5, 0.08] },
+] as const;
+
+const BASE = { torso: 105, head: 86, arms: 116, legs: 140 }; // базові довжини в одиницях
 
 const canvas = $<HTMLCanvasElement>('stage');
 const ctx = canvas.getContext('2d')!;
 
 const state = {
-  doc: emptyRig() as RigDoc,
-  images: new Map<string, HTMLCanvasElement>(), // частини як canvas (після кеїнгу фону)
-  selected: null as string | null,
-  clip: null as string | null, // null = режим bind-пози
-  time: 0,
-  playing: false,
+  images: new Map<string, HTMLCanvasElement>(),
+  imageNames: [] as string[],
+  prop: { overall: 1, head: 1, torso: 1, arms: 1, legs: 1 },
+  slots: {} as Record<string, Slot>,
+  selected: 'torso',
+  showPivots: true,
+  pivotMode: false,
   zoom: 1,
   origin: { x: 0, y: 0 },
+  viewScale: 1,
 };
 
-// ---------- утиліти моделі ----------
-const part = (name: string | null): RigPart | undefined => state.doc.parts.find((p) => p.name === name);
-const clipObj = (name: string | null): Clip | undefined => state.doc.clips.find((c) => c.name === name);
-
-function effective(p: RigPart): { rotation: number; x: number; y: number } {
-  const c = clipObj(state.clip);
-  if (c) {
-    const track = c.tracks[p.name];
-    if (track && track.length) return sampleTrack(track, state.time);
-  }
-  return { rotation: p.rotation, x: p.x, y: p.y };
+for (const d of SLOT_DEFS) {
+  state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0 };
 }
 
-interface WorldT {
-  px: number; // світова позиція півота
-  py: number;
-  rot: number; // світовий кут (рад)
+// ---- геометрія скелета ----
+function lenOf(key: string): number {
+  const which = SLOT_DEFS.find((d) => d.key === key)!.len as keyof typeof BASE;
+  return BASE[which] * state.prop[which];
+}
+function joints(): Record<string, { x: number; y: number }> {
+  const t = BASE.torso * state.prop.torso;
+  return {
+    hip: { x: 0, y: 0 },
+    neck: { x: 0, y: -t },
+    shBack: { x: -7, y: -t + 12 },
+    shFront: { x: 7, y: -t + 12 },
+    hipBack: { x: -9, y: -4 },
+    hipFront: { x: 9, y: -4 },
+  };
+}
+// одиниці -> екран
+function toPx(ux: number, uy: number): { x: number; y: number } {
+  const s = state.viewScale * state.prop.overall;
+  return { x: state.origin.x + ux * s, y: state.origin.y + uy * s };
 }
 
-function computeWorld(): Map<string, WorldT> {
-  const out = new Map<string, WorldT>();
-  // топологічний порядок: батьки перед дітьми
-  const pending = [...state.doc.parts];
-  let guard = 0;
-  while (pending.length && guard++ < 9999) {
-    const p = pending.shift()!;
-    if (p.parent && !out.has(p.parent)) {
-      pending.push(p);
-      continue;
-    }
-    const e = effective(p);
-    const rad = (e.rotation * Math.PI) / 180;
-    if (!p.parent) {
-      out.set(p.name, { px: state.origin.x + e.x, py: state.origin.y + e.y, rot: rad });
-    } else {
-      const pw = out.get(p.parent)!;
-      const cos = Math.cos(pw.rot);
-      const sin = Math.sin(pw.rot);
-      out.set(p.name, {
-        px: pw.px + (e.x * cos - e.y * sin),
-        py: pw.py + (e.x * sin + e.y * cos),
-        rot: pw.rot + rad,
-      });
-    }
-  }
-  return out;
-}
-
-// ---------- рендер ----------
+// ---- рендер ----
 function resize(): void {
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
   state.origin.x = canvas.width * 0.5;
-  state.origin.y = canvas.height * 0.62;
+  state.origin.y = canvas.height * 0.58;
+  state.viewScale = (Math.min(canvas.width, canvas.height) / 360) * state.zoom;
 }
 
 function draw(): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.translate(state.origin.x, state.origin.y);
-  ctx.scale(state.zoom, state.zoom);
-  ctx.translate(-state.origin.x, -state.origin.y);
+  const J = joints();
+  const s = state.viewScale * state.prop.overall;
 
   // підлога-орієнтир
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  const floor = toPx(0, lenOf('leg_back') + 6);
+  ctx.strokeStyle = 'rgba(255,255,255,.08)';
   ctx.beginPath();
-  ctx.moveTo(0, state.origin.y);
-  ctx.lineTo(canvas.width, state.origin.y);
+  ctx.moveTo(0, floor.y);
+  ctx.lineTo(canvas.width, floor.y);
   ctx.stroke();
 
-  const world = computeWorld();
-  const sorted = [...state.doc.parts].sort((a, b) => a.z - b.z);
-  for (const p of sorted) {
-    const w = world.get(p.name);
-    if (!w) continue;
-    const img = state.images.get(p.image);
-    ctx.save();
-    ctx.translate(w.px, w.py);
-    ctx.rotate(w.rot);
+  for (const d of SLOT_DEFS) {
+    const slot = state.slots[d.key];
+    const j = toPx(J[d.joint].x, J[d.joint].y);
+    const img = slot.image ? state.images.get(slot.image) : undefined;
+
     if (img) {
-      ctx.drawImage(img, -p.pivotX * img.width, -p.pivotY * img.height);
-    } else {
-      ctx.fillStyle = 'rgba(200,120,120,0.4)';
-      ctx.fillRect(-20, -40, 40, 80); // плейсхолдер, якщо картинку ще не підвантажено
+      ctx.save();
+      ctx.translate(j.x + slot.dx * s, j.y + slot.dy * s);
+      ctx.rotate(rad(slot.rot));
+      const sc = slot.scale * s;
+      ctx.scale(sc, sc);
+      ctx.drawImage(img, -slot.pivotX * img.width, -slot.pivotY * img.height);
+      ctx.restore();
+    } else if (state.showPivots) {
+      // чорний манекен уздовж кістки
+      const end = toPx(J[d.joint].x + Math.cos(rad(d.dir)) * lenOf(d.key), J[d.joint].y + Math.sin(rad(d.dir)) * lenOf(d.key));
+      ctx.strokeStyle = d.key === state.selected ? '#3b4250' : '#15171c';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = d.w * s;
+      ctx.beginPath();
+      ctx.moveTo(j.x, j.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
     }
-    ctx.restore();
   }
 
-  // маркери вибраної частини
-  const sel = part(state.selected);
-  if (sel) {
-    const w = world.get(sel.name);
-    if (w) {
-      if (sel.parent && world.get(sel.parent)) {
-        const pw = world.get(sel.parent)!;
+  if (state.showPivots) {
+    // суглоби + півоти
+    for (const d of SLOT_DEFS) {
+      const slot = state.slots[d.key];
+      const j = toPx(J[d.joint].x, J[d.joint].y);
+      const sel = d.key === state.selected;
+      // позиція pivot картинки (= суглоб + зсув)
+      const px = j.x + slot.dx * s;
+      const py = j.y + slot.dy * s;
+      ctx.fillStyle = sel ? '#ffd000' : '#5aa0ff';
+      ctx.beginPath();
+      ctx.arc(px, py, (sel ? 6 : 4), 0, Math.PI * 2);
+      ctx.fill();
+      if (sel) {
         ctx.strokeStyle = '#ffd000';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(pw.px, pw.py);
-        ctx.lineTo(w.px, w.py);
+        ctx.arc(px, py, 11, 0, Math.PI * 2);
         ctx.stroke();
       }
-      ctx.fillStyle = '#ffd000';
-      ctx.beginPath();
-      ctx.arc(w.px, w.py, 4 / state.zoom, 0, Math.PI * 2);
-      ctx.fill();
     }
   }
-  ctx.restore();
 }
 
-// курсор -> світові координати
-function toWorld(ev: MouseEvent): { x: number; y: number } {
+// курсор -> екранні координати канвасу
+function cursor(ev: MouseEvent): { x: number; y: number } {
   const r = canvas.getBoundingClientRect();
-  const cx = ev.clientX - r.left;
-  const cy = ev.clientY - r.top;
-  return {
-    x: (cx - state.origin.x) / state.zoom + state.origin.x,
-    y: (cy - state.origin.y) / state.zoom + state.origin.y,
-  };
+  return { x: ev.clientX - r.left, y: ev.clientY - r.top };
 }
 
-function hitTest(wx: number, wy: number): string | null {
-  const world = computeWorld();
-  const sorted = [...state.doc.parts].sort((a, b) => b.z - a.z); // спереду назад
-  for (const p of sorted) {
-    const w = world.get(p.name);
-    const img = state.images.get(p.image);
-    if (!w) continue;
-    const iw = img ? img.width : 40;
-    const ih = img ? img.height : 80;
-    // інверсна трансформація точки у простір картинки
-    const dx = wx - w.px;
-    const dy = wy - w.py;
-    const cos = Math.cos(-w.rot);
-    const sin = Math.sin(-w.rot);
-    const lx = dx * cos - dy * sin + p.pivotX * iw;
-    const ly = dx * sin + dy * cos + p.pivotY * ih;
-    if (lx >= 0 && lx <= iw && ly >= 0 && ly <= ih) return p.name;
+// інверсна трансформація точки у простір картинки слота
+function toLocal(slotKey: string, sx: number, sy: number): { lx: number; ly: number; iw: number; ih: number } | null {
+  const slot = state.slots[slotKey];
+  const img = slot.image ? state.images.get(slot.image) : undefined;
+  if (!img) return null;
+  const J = joints();
+  const d = SLOT_DEFS.find((dd) => dd.key === slotKey)!;
+  const s = state.viewScale * state.prop.overall;
+  const j = toPx(J[d.joint].x, J[d.joint].y);
+  const ox = j.x + slot.dx * s;
+  const oy = j.y + slot.dy * s;
+  const a = rad(-slot.rot);
+  const dx = sx - ox;
+  const dy = sy - oy;
+  const rx = dx * Math.cos(a) - dy * Math.sin(a);
+  const ry = dx * Math.sin(a) + dy * Math.cos(a);
+  const sc = slot.scale * s;
+  return { lx: rx / sc + slot.pivotX * img.width, ly: ry / sc + slot.pivotY * img.height, iw: img.width, ih: img.height };
+}
+
+function hitTest(sx: number, sy: number): string | null {
+  for (let i = SLOT_DEFS.length - 1; i >= 0; i--) {
+    const key = SLOT_DEFS[i].key;
+    const loc = toLocal(key, sx, sy);
+    if (loc && loc.lx >= 0 && loc.lx <= loc.iw && loc.ly >= 0 && loc.ly <= loc.ih) return key;
   }
   return null;
 }
 
-// ---------- редагування пози ----------
-function applyPose(p: RigPart, next: { rotation?: number; x?: number; y?: number }): void {
-  const cur = effective(p);
-  const val = { rotation: next.rotation ?? cur.rotation, x: next.x ?? cur.x, y: next.y ?? cur.y };
-  const c = clipObj(state.clip);
-  if (c) {
-    upsertKey(c, p.name, state.time, val);
-  } else {
-    p.rotation = val.rotation;
-    p.x = val.x;
-    p.y = val.y;
+// ---- autofit при призначенні картинки ----
+function assignImage(slotKey: string, name: string | null): void {
+  const slot = state.slots[slotKey];
+  slot.image = name;
+  if (name) {
+    const img = state.images.get(name);
+    if (img) slot.scale = lenOf(slotKey) / img.height; // вписати висоту в кістку
+    slot.rot = 0;
+    slot.dx = 0;
+    slot.dy = 0;
+    const d = SLOT_DEFS.find((dd) => dd.key === slotKey)!;
+    slot.pivotX = d.piv[0];
+    slot.pivotY = d.piv[1];
   }
 }
 
-function upsertKey(c: Clip, partName: string, t: number, v: { rotation: number; x: number; y: number }): void {
-  const track = (c.tracks[partName] ??= []);
-  const eps = 0.02;
-  const existing = track.find((k) => Math.abs(k.t - t) < eps);
-  if (existing) {
-    existing.rotation = v.rotation;
-    existing.x = v.x;
-    existing.y = v.y;
-  } else {
-    track.push({ t, rotation: v.rotation, x: v.x, y: v.y });
-    track.sort((a, b) => a.t - b.t);
-  }
-}
-
-// ---------- UI ----------
-function refreshPartsList(): void {
-  const list = $('partsList');
-  list.innerHTML = '';
-  for (const p of state.doc.parts) {
-    const div = document.createElement('div');
-    div.className = 'part' + (p.name === state.selected ? ' sel' : '');
-    div.innerHTML = `<span>${p.name}</span><span style="color:#7a6f95">z${p.z}</span>`;
-    div.onclick = () => {
-      state.selected = p.name;
-      refreshAll();
-    };
-    list.appendChild(div);
-  }
-}
-
-function refreshParentSel(): void {
-  const sel = $<HTMLSelectElement>('parentSel');
-  const p = part(state.selected);
-  sel.innerHTML = '<option value="">(немає)</option>';
-  for (const o of state.doc.parts) {
-    if (p && o.name === p.name) continue;
-    const opt = document.createElement('option');
-    opt.value = o.name;
-    opt.textContent = o.name;
-    sel.appendChild(opt);
-  }
-  if (p) sel.value = p.parent ?? '';
-}
-
-function refreshClipSel(): void {
-  const sel = $<HTMLSelectElement>('clipSel');
-  sel.innerHTML = '<option value="">(bind-поза)</option>';
-  for (const c of state.doc.clips) {
-    const opt = document.createElement('option');
-    opt.value = c.name;
-    opt.textContent = c.name;
-    sel.appendChild(opt);
-  }
-  sel.value = state.clip ?? '';
-}
-
-function refreshSelectedControls(): void {
-  const p = part(state.selected);
-  const c = clipObj(state.clip);
-  $<HTMLInputElement>('zVal').value = p ? String(p.z) : '0';
-  $<HTMLInputElement>('pivotX').value = p ? String(p.pivotX) : '0.5';
-  $<HTMLInputElement>('pivotY').value = p ? String(p.pivotY) : '0.5';
-  const e = p ? effective(p) : { rotation: 0, x: 0, y: 0 };
-  $<HTMLInputElement>('poseRot').value = String(Math.round(e.rotation));
-  $('rotLabel').textContent = String(Math.round(e.rotation));
-  const tl = $<HTMLInputElement>('timeline');
-  tl.max = String(c ? c.duration : 1);
-  tl.disabled = !c;
-  tl.value = String(state.time);
-  $('timeLabel').textContent = state.time.toFixed(2);
-  $<HTMLInputElement>('clipDuration').value = String(c ? c.duration : 1);
-  $<HTMLInputElement>('clipLoop').checked = c ? c.loop : false;
-  $<HTMLButtonElement>('playPause').textContent = state.playing ? '⏸ Pause' : '▶ Play';
-  refreshKeyList();
-}
-
-function refreshKeyList(): void {
-  const box = $('keyList');
+// ---- UI ----
+function refreshChips(): void {
+  const box = $('slotChips');
   box.innerHTML = '';
-  const c = clipObj(state.clip);
-  const p = part(state.selected);
-  if (!c || !p) return;
-  const track = c.tracks[p.name] ?? [];
-  for (const k of track) {
-    const span = document.createElement('span');
-    span.className = 'k';
-    span.textContent = `${k.t.toFixed(2)}s`;
-    span.onclick = () => {
-      state.time = k.t;
-      refreshAll();
+  for (const d of SLOT_DEFS) {
+    const has = !!state.slots[d.key].image;
+    const el = document.createElement('div');
+    el.className = 'chip' + (d.key === state.selected ? ' sel' : '') + (has ? '' : ' empty');
+    el.textContent = d.label + (has ? '' : ' ○');
+    el.onclick = () => {
+      state.selected = d.key;
+      state.pivotMode = false;
+      refreshUI();
     };
-    box.appendChild(span);
+    box.appendChild(el);
   }
 }
-
-function refreshAll(): void {
-  refreshPartsList();
-  refreshParentSel();
-  refreshClipSel();
-  refreshSelectedControls();
+function refreshImgSel(): void {
+  const sel = $<HTMLSelectElement>('imgSel');
+  sel.innerHTML = '<option value="">(немає)</option>';
+  for (const n of state.imageNames) {
+    const o = document.createElement('option');
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  }
+  sel.value = state.slots[state.selected].image ?? '';
+}
+function refreshUI(): void {
+  refreshChips();
+  refreshImgSel();
+  const slot = state.slots[state.selected];
+  $<HTMLInputElement>('rot').value = String(Math.round(slot.rot));
+  $('rotV').textContent = String(Math.round(slot.rot));
+  $<HTMLInputElement>('scale').value = String(slot.scale);
+  $('scaleV').textContent = (slot.scale * 100 < 10 ? slot.scale.toFixed(2) : slot.scale.toFixed(1));
+  for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
+    $<HTMLInputElement>(`p_${k}`).value = String(state.prop[k]);
+    $(`p_${k}V`).textContent = state.prop[k].toFixed(2);
+  }
+  $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни на частині…' : '⌖ Тицьнути півот';
+  draw();
+}
+function status(m: string): void {
+  $('status').textContent = m;
 }
 
-function status(msg: string): void {
-  $('status').textContent = msg;
+// ---- події ----
+$<HTMLSelectElement>('imgSel').addEventListener('change', (e) => {
+  assignImage(state.selected, (e.target as HTMLSelectElement).value || null);
+  refreshUI();
+});
+$<HTMLInputElement>('rot').addEventListener('input', (e) => {
+  state.slots[state.selected].rot = Number((e.target as HTMLInputElement).value);
+  $('rotV').textContent = (e.target as HTMLInputElement).value;
+  draw();
+});
+$<HTMLInputElement>('scale').addEventListener('input', (e) => {
+  state.slots[state.selected].scale = Number((e.target as HTMLInputElement).value);
+  draw();
+});
+$<HTMLButtonElement>('setPivot').addEventListener('click', () => {
+  state.pivotMode = !state.pivotMode;
+  refreshUI();
+});
+$<HTMLButtonElement>('resetPart').addEventListener('click', () => {
+  const name = state.slots[state.selected].image;
+  assignImage(state.selected, name);
+  refreshUI();
+});
+for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
+  $<HTMLInputElement>(`p_${k}`).addEventListener('input', (e) => {
+    state.prop[k] = Number((e.target as HTMLInputElement).value);
+    $(`p_${k}V`).textContent = state.prop[k].toFixed(2);
+    draw();
+  });
 }
-
-// ---------- завантаження картинок ----------
-$<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
-  const files = (ev.target as HTMLInputElement).files;
-  if (!files) return;
-  const keyBg = $<HTMLInputElement>('keyBg').checked;
-  let z = state.doc.parts.length;
-  for (const file of Array.from(files)) {
-    const img = new Image();
-    img.onload = () => {
-      // якщо фон суцільний і ввімкнено — чистимо тим самим методом, що й офлайн-скрипт
-      const canvas = keyBg && hasSolidBackground(img) ? keyImage(img) : imageToCanvas(img);
-      state.images.set(file.name, canvas);
-      draw();
-    };
-    img.src = URL.createObjectURL(file);
-    if (!part(file.name)) {
-      state.doc.parts.push({
-        name: file.name.replace(/\.[^.]+$/, ''),
-        image: file.name,
-        parent: null,
-        z: z++,
-        pivotX: 0.5,
-        pivotY: 0.5,
-        x: 0,
-        y: 0,
-        rotation: 0,
-      });
-    }
-  }
-  // зв'язати щойно додані частини з їх іменем-без-розширення
-  for (const p of state.doc.parts) {
-    if (!state.images.has(p.image)) {
-      const match = [...state.images.keys()].find((k) => k.replace(/\.[^.]+$/, '') === p.name);
-      if (match) p.image = match;
-    }
-  }
-  status(`Завантажено картинок: ${state.images.size}`);
-  refreshAll();
+$<HTMLInputElement>('showPivots').addEventListener('change', (e) => {
+  state.showPivots = (e.target as HTMLInputElement).checked;
+  draw();
 });
 
-// ---------- контролери частини ----------
-$<HTMLSelectElement>('parentSel').addEventListener('change', (ev) => {
-  const p = part(state.selected);
-  if (p) p.parent = (ev.target as HTMLSelectElement).value || null;
-});
-$<HTMLInputElement>('zVal').addEventListener('input', (ev) => {
-  const p = part(state.selected);
-  if (p) p.z = Number((ev.target as HTMLInputElement).value);
-});
-$<HTMLInputElement>('pivotX').addEventListener('input', (ev) => {
-  const p = part(state.selected);
-  if (p) p.pivotX = Number((ev.target as HTMLInputElement).value);
-});
-$<HTMLInputElement>('pivotY').addEventListener('input', (ev) => {
-  const p = part(state.selected);
-  if (p) p.pivotY = Number((ev.target as HTMLInputElement).value);
-});
-$<HTMLButtonElement>('deletePart').addEventListener('click', () => {
-  const p = part(state.selected);
-  if (!p) return;
-  state.doc.parts = state.doc.parts.filter((x) => x !== p);
-  for (const o of state.doc.parts) if (o.parent === p.name) o.parent = null;
-  for (const c of state.doc.clips) delete c.tracks[p.name];
-  state.selected = null;
-  refreshAll();
-});
-
-// ---------- кліпи / анімація ----------
-$<HTMLSelectElement>('clipSel').addEventListener('change', (ev) => {
-  state.clip = (ev.target as HTMLSelectElement).value || null;
-  state.time = 0;
-  state.playing = false;
-  refreshSelectedControls();
-});
-$<HTMLButtonElement>('newClip').addEventListener('click', () => {
-  const name = prompt('Назва кліпу (напр. idle, walk, punch):', 'walk');
-  if (!name) return;
-  if (clipObj(name)) {
-    status('Кліп з такою назвою вже є');
-    return;
-  }
-  state.doc.clips.push({ name, duration: 1, loop: true, tracks: {} });
-  state.clip = name;
-  state.time = 0;
-  refreshAll();
-});
-$<HTMLButtonElement>('renameClip').addEventListener('click', () => {
-  const c = clipObj(state.clip);
-  if (!c) return;
-  const name = prompt('Нова назва кліпу:', c.name);
-  if (!name) return;
-  c.name = name;
-  state.clip = name;
-  refreshAll();
-});
-$<HTMLButtonElement>('delClip').addEventListener('click', () => {
-  const c = clipObj(state.clip);
-  if (!c) return;
-  state.doc.clips = state.doc.clips.filter((x) => x !== c);
-  state.clip = null;
-  refreshAll();
-});
-$<HTMLInputElement>('clipDuration').addEventListener('input', (ev) => {
-  const c = clipObj(state.clip);
-  if (c) c.duration = Math.max(0.1, Number((ev.target as HTMLInputElement).value));
-  refreshSelectedControls();
-});
-$<HTMLInputElement>('clipLoop').addEventListener('change', (ev) => {
-  const c = clipObj(state.clip);
-  if (c) c.loop = (ev.target as HTMLInputElement).checked;
-});
-$<HTMLInputElement>('timeline').addEventListener('input', (ev) => {
-  state.time = Number((ev.target as HTMLInputElement).value);
-  state.playing = false;
-  refreshSelectedControls();
-});
-$<HTMLInputElement>('poseRot').addEventListener('input', (ev) => {
-  const p = part(state.selected);
-  if (!p) return;
-  applyPose(p, { rotation: Number((ev.target as HTMLInputElement).value) });
-  $('rotLabel').textContent = (ev.target as HTMLInputElement).value;
-  refreshKeyList();
-});
-$<HTMLButtonElement>('setKey').addEventListener('click', () => {
-  const p = part(state.selected);
-  const c = clipObj(state.clip);
-  if (!p || !c) {
-    status('Спершу вибери кліп і частину');
-    return;
-  }
-  const e = effective(p);
-  upsertKey(c, p.name, state.time, e);
-  refreshKeyList();
-});
-$<HTMLButtonElement>('delKey').addEventListener('click', () => {
-  const p = part(state.selected);
-  const c = clipObj(state.clip);
-  if (!p || !c) return;
-  const track = c.tracks[p.name];
-  if (!track) return;
-  c.tracks[p.name] = track.filter((k) => Math.abs(k.t - state.time) >= 0.02);
-  refreshKeyList();
-});
-$<HTMLButtonElement>('playPause').addEventListener('click', () => {
-  if (!clipObj(state.clip)) {
-    status('Вибери кліп, щоб програти');
-    return;
-  }
-  state.playing = !state.playing;
-  refreshSelectedControls();
-});
-
-// ---------- canvas взаємодія ----------
-let drag: { name: string; startWX: number; startWY: number; baseX: number; baseY: number } | null = null;
-
+// canvas: вибір / перетягування / pivot-режим / зум
+let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null = null;
 canvas.addEventListener('mousedown', (ev) => {
-  const w = toWorld(ev);
-  const hit = hitTest(w.x, w.y);
+  const c = cursor(ev);
+  if (state.pivotMode) {
+    const loc = toLocal(state.selected, c.x, c.y);
+    if (loc) {
+      state.slots[state.selected].pivotX = Math.max(0, Math.min(1, loc.lx / loc.iw));
+      state.slots[state.selected].pivotY = Math.max(0, Math.min(1, loc.ly / loc.ih));
+    }
+    state.pivotMode = false;
+    refreshUI();
+    return;
+  }
+  const hit = hitTest(c.x, c.y);
   if (hit) {
     state.selected = hit;
-    const p = part(hit)!;
-    const e = effective(p);
-    drag = { name: hit, startWX: w.x, startWY: w.y, baseX: e.x, baseY: e.y };
-    refreshAll();
+    const slot = state.slots[hit];
+    drag = { key: hit, sx: c.x, sy: c.y, dx: slot.dx, dy: slot.dy };
+    refreshUI();
   }
 });
 window.addEventListener('mousemove', (ev) => {
   if (!drag) return;
-  const p = part(drag.name);
-  if (!p) return;
-  const w = toWorld(ev);
-  let dwx = w.x - drag.startWX;
-  let dwy = w.y - drag.startWY;
-  // зсув у системі батька
-  const pw = p.parent ? computeWorld().get(p.parent) : undefined;
-  if (pw) {
-    const cos = Math.cos(-pw.rot);
-    const sin = Math.sin(-pw.rot);
-    const rx = dwx * cos - dwy * sin;
-    const ry = dwx * sin + dwy * cos;
-    dwx = rx;
-    dwy = ry;
-  }
-  applyPose(p, { x: drag.baseX + dwx, y: drag.baseY + dwy });
+  const c = cursor(ev);
+  const s = state.viewScale * state.prop.overall;
+  state.slots[drag.key].dx = drag.dx + (c.x - drag.sx) / s;
+  state.slots[drag.key].dy = drag.dy + (c.y - drag.sy) / s;
+  draw();
 });
 window.addEventListener('mouseup', () => {
   drag = null;
 });
 canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
-  state.zoom = Math.min(3, Math.max(0.2, state.zoom * (ev.deltaY < 0 ? 1.1 : 0.9)));
+  state.zoom = Math.min(3, Math.max(0.3, state.zoom * (ev.deltaY < 0 ? 1.1 : 0.9)));
+  resize();
+  draw();
 }, { passive: false });
 
-// ---------- експорт / імпорт ----------
+// завантаження картинок (із вшитим кеїнгом фону)
+$<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
+  const files = (ev.target as HTMLInputElement).files;
+  if (!files) return;
+  const keyBg = $<HTMLInputElement>('keyBg').checked;
+  for (const file of Array.from(files)) {
+    const img = new Image();
+    img.onload = () => {
+      const cv = keyBg && hasSolidBackground(img) ? keyImage(img) : imageToCanvas(img);
+      state.images.set(file.name, cv);
+      if (!state.imageNames.includes(file.name)) state.imageNames.push(file.name);
+      refreshUI();
+    };
+    img.src = URL.createObjectURL(file);
+  }
+  status(`Завантажую ${files.length}… назви: ${Array.from(files).map((f) => f.name).join(', ')}`);
+});
+
+// експорт / імпорт
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
-  const json = JSON.stringify(state.doc, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
+  const doc = { version: 2, proportions: state.prop, slots: state.slots };
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'rig.json';
+  a.download = 'ostap_character.json';
   a.click();
-  status('Експортовано rig.json');
-});
-$<HTMLButtonElement>('copyBtn').addEventListener('click', async () => {
-  await navigator.clipboard.writeText(JSON.stringify(state.doc, null, 2));
-  status('JSON скопійовано в буфер');
+  status('Експортовано ostap_character.json');
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
 $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
@@ -497,11 +352,11 @@ $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      state.doc = JSON.parse(String(reader.result)) as RigDoc;
-      state.selected = state.doc.parts[0]?.name ?? null;
-      state.clip = null;
+      const doc = JSON.parse(String(reader.result));
+      if (doc.proportions) Object.assign(state.prop, doc.proportions);
+      if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
       status('Імпортовано. Підвантаж ті самі PNG, якщо картинок не видно.');
-      refreshAll();
+      refreshUI();
     } catch {
       status('Помилка читання JSON');
     }
@@ -509,27 +364,10 @@ $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
   reader.readAsText(file);
 });
 
-// ---------- цикл ----------
-let lastTs = 0;
-function loop(ts: number): void {
-  const dt = (ts - lastTs) / 1000 || 0;
-  lastTs = ts;
-  if (state.playing) {
-    const c = clipObj(state.clip);
-    if (c) {
-      state.time += dt;
-      if (state.time > c.duration) state.time = c.loop ? state.time % c.duration : c.duration;
-      const tl = $<HTMLInputElement>('timeline');
-      tl.value = String(state.time);
-      $('timeLabel').textContent = state.time.toFixed(2);
-    }
-  }
+window.addEventListener('resize', () => {
+  resize();
   draw();
-  requestAnimationFrame(loop);
-}
-
-window.addEventListener('resize', resize);
+});
 resize();
-refreshAll();
-requestAnimationFrame(loop);
-status('Готово. Кинь PNG-частини через «Вибрати файли».');
+refreshUI();
+status('Завантаж частини Остапа й збирай. Колесо — зум.');
