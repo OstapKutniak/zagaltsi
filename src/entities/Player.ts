@@ -12,6 +12,7 @@ interface Band {
 // відокремлена від керування", фундамент під майбутній кооп.
 export class Player extends Actor {
   maxX = WORLD_WIDTH - 20; // межа просування (ворота арени піднімають її)
+  moving = false; // чи рухається цього кроку (для вибору анімації)
 
   private attackUntil = 0;
   private nextAttackAt = 0;
@@ -22,6 +23,7 @@ export class Player extends Actor {
   }
 
   update(cmd: InputCommand, time: number, dt: number, band: Band): void {
+    this.moving = false;
     // Під час удару герой "вкопаний" — не ходить.
     if (!this.isAttacking(time)) {
       let vx = 0;
@@ -31,6 +33,7 @@ export class Player extends Actor {
       if (cmd.up) vy = -1;
       else if (cmd.down) vy = 1;
       if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
+      this.moving = vx !== 0 || vy !== 0;
 
       const len = Math.hypot(vx, vy) || 1; // нормалізація діагоналі
       this.fx += (vx / len) * PLAYER.speed * dt;

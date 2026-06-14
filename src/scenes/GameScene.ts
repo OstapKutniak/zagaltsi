@@ -3,6 +3,7 @@ import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER } from '../config';
 import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
+import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { getUser, saveValue } from '../telegram';
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -13,6 +14,7 @@ export class GameScene extends Phaser.Scene {
   private player!: Player;
   private controls!: InputController;
   private enemies: Enemy[] = [];
+  private character: CutoutCharacter | null = null;
 
   // Динамічний макет: заповнюємо весь в'юпорт, смуга підлоги — від низу екрана.
   private worldH = 540;
@@ -74,6 +76,15 @@ export class GameScene extends Phaser.Scene {
     this.player.maxX = GATE_X - 30;
     this.controls = new InputController(this);
     this.cameras.main.startFollow(this.player, true, 0.08, 0);
+
+    // Якщо є зібраний персонаж із ріг-тулзи (public/character.json) — малюємо його
+    // замість прямокутника. Немає файлу -> лишається прямокутник-плейсхолдер.
+    this.character = null;
+    fetch(`${import.meta.env.BASE_URL}character.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((doc: CharDoc | null) => (doc && doc.slots ? CutoutCharacter.load(this, doc) : null))
+      .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
+      .catch(() => { /* нема файлу — ок */ });
 
     // HUD (прикріплений до екрана)
     this.hud = this.add
@@ -159,6 +170,14 @@ export class GameScene extends Phaser.Scene {
 
     const cmd = this.controls.sample();
     this.player.update(cmd, time, dt, band);
+
+    // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
+    if (this.character) {
+      this.character.setAnim(!this.player.grounded ? 'jump' : this.player.moving ? 'walk' : 'idle');
+      this.character.tick(dt, this.player.facing);
+      this.character.setPosition(this.player.x, this.player.y - this.character.feetOffset());
+      this.character.setDepth(this.player.depth + 0.1);
+    }
 
     // Тригер хвилі
     if (!this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();

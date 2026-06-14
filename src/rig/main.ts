@@ -428,10 +428,14 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
-  const doc = { version: 2, proportions: state.prop, slots: state.slots };
-  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ostap_character.json'; a.click();
-  status('Експортовано ostap_character.json');
+  // самодостатній файл: вшиваємо використані картинки як base64 -> гра читає лише один файл
+  const used = new Set(Object.values(state.slots).map((sl) => sl.image).filter(Boolean) as string[]);
+  const images: Record<string, string> = {};
+  for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
+  const doc = { version: 3, proportions: state.prop, slots: state.slots, images };
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();
+  status(`Експортовано character.json (частин: ${used.size}) — кинь у гру`);
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
 $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
@@ -442,7 +446,14 @@ $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
       const doc = JSON.parse(String(reader.result));
       if (doc.proportions) Object.assign(state.prop, doc.proportions);
       if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
-      status('Імпортовано. Підвантаж ті самі PNG, якщо картинок не видно.'); refreshUI();
+      if (doc.images) {
+        for (const [name, data] of Object.entries(doc.images as Record<string, string>)) {
+          const im = new Image();
+          im.onload = () => { state.images.set(name, imageToCanvas(im)); if (!state.imageNames.includes(name)) state.imageNames.push(name); refreshUI(); };
+          im.src = data;
+        }
+      }
+      status('Імпортовано.'); refreshUI();
     } catch { status('Помилка читання JSON'); }
   };
   reader.readAsText(file);
