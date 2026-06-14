@@ -63,6 +63,16 @@
         <div class="row"><label>Ноги</label><input type="range" id="p_legs" min="0.4" max="2" step="0.01" /><span class="val" id="p_legsV">1.0</span></div>
 
         <hr />
+        <h2>Перевірка руху</h2>
+        <div class="row"><label>Анімація</label><select id="anim">
+          <option value="">— стоп —</option>
+          <option value="idle">Idle (дихання)</option>
+          <option value="walk">Walk (хода)</option>
+          <option value="run">Run (біг)</option>
+          <option value="jump">Jump (стрибок)</option>
+        </select></div>
+
+        <hr />
         <h2>Завантаження</h2>
         <div class="row file"><input type="file" id="fileInput" accept="image/png,image/*" multiple /></div>
         <label class="check"><input type="checkbox" id="keyBg" checked /> чистити фон при завантаженні</label>

@@ -8,7 +8,7 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const rad = (d: number): number => (d * Math.PI) / 180;
 
-interface Tf { rot: number; scale: number; dx: number; dy: number }
+interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number }
 interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 
@@ -29,8 +29,10 @@ const ctx = canvas.getContext('2d')!;
 const state = {
   images: new Map<string, HTMLCanvasElement>(),
   imageNames: [] as string[],
-  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0 } as Ref,
+  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1 } as Ref,
   showRef: true,
+  anim: null as null | string,
+  animT: 0,
   prop: { overall: 1, head: 1.4, torso: 0.95, arms: 1.1, legs: 1.3 },
   slots: {} as Record<string, Slot>,
   selected: 'torso',
@@ -47,7 +49,7 @@ const state = {
   startMx: 0,
   startMy: 0,
 };
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0 };
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1 };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * state.prop[w]; };
 function joints(): Record<string, { x: number; y: number }> {
@@ -74,13 +76,56 @@ function baseUnit(sel: string): { x: number; y: number } {
   return joints()[def(sel).joint];
 }
 function anchorPx(sel: string): { x: number; y: number } {
-  const b = baseUnit(sel); const t = tf(sel); const j = toPx(b.x, b.y);
+  const b = baseUnit(sel); const t = eff(sel); const j = toPx(b.x, b.y);
   return { x: j.x + t.dx * s(), y: j.y + t.dy * s() };
+}
+
+// Ефективний трансформ = база + накладена тест-анімація (кути/зсуви; масштаб/flip без змін).
+function eff(sel: string): Tf {
+  const t = tf(sel);
+  if (!state.anim || sel === 'ref') return t;
+  const o = animOff(state.anim, state.animT, sel);
+  return { rot: t.rot + o.drot, scale: t.scale, dx: t.dx + o.ddx, dy: t.dy + o.ddy, flip: t.flip };
+}
+
+// Процедурні анімації: лише ОБЕРТАННЯ кісток + малі зсуви -> працюють за будь-яких пропорцій.
+function animOff(name: string, t: number, key: string): { drot: number; ddx: number; ddy: number } {
+  const z = { drot: 0, ddx: 0, ddy: 0 };
+  if (name === 'idle') {
+    const b = Math.sin(t * 1.8);
+    if (key === 'torso') return { drot: 0, ddx: 0, ddy: b * 1.5 };
+    if (key === 'head') return { drot: b * 2, ddx: 0, ddy: b * 1.2 };
+    if (key.startsWith('arm')) return { drot: b * 3, ddx: 0, ddy: 0 };
+    return z;
+  }
+  if (name === 'walk' || name === 'run') {
+    const spd = name === 'run' ? 9 : 5.5;
+    const amp = name === 'run' ? 34 : 24;
+    const aArm = name === 'run' ? 32 : 20;
+    const ph = t * spd;
+    const back = Math.sin(ph);
+    const front = Math.sin(ph + Math.PI);
+    if (key === 'leg_front') return { drot: front * amp, ddx: 0, ddy: 0 };
+    if (key === 'leg_back') return { drot: back * amp, ddx: 0, ddy: 0 };
+    if (key === 'arm_front') return { drot: back * aArm, ddx: 0, ddy: 0 };
+    if (key === 'arm_back') return { drot: front * aArm, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: Math.sin(ph) * 2, ddx: 0, ddy: -Math.abs(Math.sin(ph)) * (name === 'run' ? 5 : 3) };
+    if (key === 'head') return { drot: 0, ddx: 0, ddy: -Math.abs(Math.sin(ph)) * 1.5 };
+    return z;
+  }
+  if (name === 'jump') {
+    const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); // 0..1..0
+    if (key === 'torso' || key === 'head') return { drot: 0, ddx: 0, ddy: -up * 28 };
+    if (key.startsWith('leg')) return { drot: -up * 38 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: -up * 10 };
+    if (key.startsWith('arm')) return { drot: -up * 34, ddx: 0, ddy: 0 };
+    return z;
+  }
+  return z;
 }
 
 // ---- undo ----
 const undoStack: string[] = [];
-const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy }, sel: state.selected });
+const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy, flip: state.ref.flip }, sel: state.selected });
 function pushUndo(): void { undoStack.push(snapshot()); if (undoStack.length > 80) undoStack.shift(); }
 function undo(): void {
   const s0 = undoStack.pop(); if (!s0) { status('Нема що відміняти'); return; }
@@ -100,13 +145,13 @@ function resize(): void {
 }
 function drawImageAt(sel: string, alpha: number): void {
   const img = imgOf(sel); if (!img) return;
-  const t = tf(sel); const p = pivotOf(sel); const a = anchorPx(sel);
+  const t = eff(sel); const p = pivotOf(sel); const a = anchorPx(sel);
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(a.x, a.y);
   ctx.rotate(rad(t.rot));
   const sc = t.scale * s();
-  ctx.scale(sc, sc);
+  ctx.scale(t.flip * sc, sc); // flip<0 — дзеркало по X навколо півота
   ctx.drawImage(img, -p.x * img.width, -p.y * img.height);
   ctx.restore();
 }
@@ -141,7 +186,8 @@ function curLocal(sel: string, sx: number, sy: number): { lx: number; ly: number
   const ang = rad(-t.rot); const dx = sx - a.x, dy = sy - a.y;
   const rx = dx * Math.cos(ang) - dy * Math.sin(ang); const ry = dx * Math.sin(ang) + dy * Math.cos(ang);
   const sc = t.scale * s();
-  return { lx: rx / sc + p.x * img.width, ly: ry / sc + p.y * img.height, iw: img.width, ih: img.height };
+  let localX = rx / sc; if (t.flip < 0) localX = -localX; // врахувати дзеркало
+  return { lx: localX + p.x * img.width, ly: ry / sc + p.y * img.height, iw: img.width, ih: img.height };
 }
 function hitTest(sx: number, sy: number): string | null {
   for (let i = SLOT_DEFS.length - 1; i >= 0; i--) {
@@ -176,7 +222,7 @@ function startMode(m: 'R' | 'S' | 'G'): void {
   pushUndo();
   const t = tf(state.selected);
   state.mode = m; state.pivotMode = false;
-  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy };
+  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip };
   const a = anchorPx(state.selected);
   state.startMx = state.mouse.x; state.startMy = state.mouse.y;
   state.startAng = Math.atan2(state.mouse.y - a.y, state.mouse.x - a.x);
@@ -278,6 +324,7 @@ window.addEventListener('keydown', (ev) => {
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+  else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
   else if (ev.code === 'Escape') endMode(false);
   else if (ev.code === 'Enter') endMode(true);
@@ -318,6 +365,24 @@ $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
   };
   reader.readAsText(file);
 });
+
+// ---- цикл тест-анімації ----
+let raf = 0;
+let lastTs = 0;
+function tick(ts: number): void {
+  if (!state.anim) return;
+  const dt = (ts - lastTs) / 1000 || 0;
+  lastTs = ts;
+  state.animT += dt;
+  draw();
+  raf = requestAnimationFrame(tick);
+}
+function setAnim(name: string): void {
+  cancelAnimationFrame(raf);
+  state.anim = name || null;
+  if (state.anim) { state.animT = 0; lastTs = performance.now(); raf = requestAnimationFrame(tick); } else draw();
+}
+$<HTMLSelectElement>('anim').addEventListener('change', (e) => setAnim((e.target as HTMLSelectElement).value));
 
 window.addEventListener('resize', () => { resize(); draw(); });
 resize(); refreshUI();
