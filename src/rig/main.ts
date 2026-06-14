@@ -145,6 +145,19 @@ function undo(): void {
   refreshUI();
 }
 
+// автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
+function saveLocal(): void {
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: state.slots })); } catch { /* ignore */ }
+}
+function restoreLocal(): void {
+  try {
+    const o = JSON.parse(localStorage.getItem('ostap_char') || 'null');
+    if (!o) return;
+    if (o.prop) Object.assign(state.prop, o.prop);
+    if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
+  } catch { /* ignore */ }
+}
+
 // ---- рендер ----
 function resize(): void {
   canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
@@ -275,9 +288,13 @@ function addImageFile(file: File, fallbackToSelected: boolean): void {
     const cv = keyBg && hasSolidBackground(img) ? keyImage(img) : imageToCanvas(img);
     state.images.set(file.name, cv);
     if (!state.imageNames.includes(file.name)) state.imageNames.push(file.name);
-    // визначаємо слот за назвою файлу; якщо не вгадали і файл один — у вибраний
-    const target = slotForName(file.name) ?? (fallbackToSelected && state.selected !== 'ref' ? state.selected : null);
-    if (target) assignImage(target, file.name);
+    // якщо якийсь слот уже посилається на цю назву (після Import) — лише підвантажуємо
+    // пікселі, НЕ чіпаючи позицію/поворот/масштаб. Інакше — призначаємо за назвою.
+    const linked = Object.values(state.slots).some((sl) => sl.image === file.name);
+    if (!linked) {
+      const target = slotForName(file.name) ?? (fallbackToSelected && state.selected !== 'ref' ? state.selected : null);
+      if (target) assignImage(target, file.name);
+    }
     refreshUI();
   };
   img.src = URL.createObjectURL(file);
@@ -339,6 +356,7 @@ function refreshUI(): void {
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
+  saveLocal();
   draw();
 }
 const status = (m: string): void => { $('status').textContent = m; };
@@ -478,5 +496,6 @@ function setAnim(name: string): void {
 $<HTMLSelectElement>('anim').addEventListener('change', (e) => setAnim((e.target as HTMLSelectElement).value));
 
 window.addEventListener('resize', () => { resize(); draw(); });
+restoreLocal();
 resize(); refreshUI();
 status('Завантаж орієнтир-силует і частини. G/R/S — рух/поворот/розмір, Q — півот, Ctrl+Z — відміна.');

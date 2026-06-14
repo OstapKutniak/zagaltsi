@@ -82,7 +82,7 @@ export class GameScene extends Phaser.Scene {
     this.character = null;
     fetch(`${import.meta.env.BASE_URL}character.json`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((doc: CharDoc | null) => (doc && doc.slots ? CutoutCharacter.load(this, doc) : null))
+      .then((doc: CharDoc | null) => (doc && doc.slots && doc.images ? CutoutCharacter.load(this, doc) : null))
       .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
       .catch(() => { /* нема файлу — ок */ });
 
