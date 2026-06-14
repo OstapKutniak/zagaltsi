@@ -9,7 +9,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
 interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number }
-interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number }
+interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 
 const SLOT_DEFS = [
@@ -38,6 +38,7 @@ const state = {
   selected: 'torso',
   showPivots: true,
   pivotMode: false,
+  cutMode: false,
   zoom: 1,
   origin: { x: 0, y: 0 },
   viewScale: 1,
@@ -49,7 +50,7 @@ const state = {
   startMx: 0,
   startMy: 0,
 };
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1 };
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, cut: null, bend: 0 };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * state.prop[w]; };
 function joints(): Record<string, { x: number; y: number }> {
@@ -80,22 +81,31 @@ function anchorPx(sel: string): { x: number; y: number } {
   return { x: j.x + t.dx * s(), y: j.y + t.dy * s() };
 }
 
-// Ефективний трансформ = база + накладена тест-анімація (кути/зсуви; масштаб/flip без змін).
+// Ефективний трансформ = база + СПІЛЬНИЙ рух кореня (усе тіло) + ЛОКАЛЬНИЙ догин кістки.
+// Завдяки спільному кореню частини не "відриваються" (фікс стрибка).
 function eff(sel: string): Tf {
   const t = tf(sel);
   if (!state.anim || sel === 'ref') return t;
   const o = animOff(state.anim, state.animT, sel);
-  return { rot: t.rot + o.drot, scale: t.scale, dx: t.dx + o.ddx, dy: t.dy + o.ddy, flip: t.flip };
+  const r = animRoot(state.anim, state.animT);
+  return { rot: t.rot + o.drot, scale: t.scale, dx: t.dx + o.ddx + r.ddx, dy: t.dy + o.ddy + r.ddy, flip: t.flip };
 }
 
-// Процедурні анімації: лише ОБЕРТАННЯ кісток + малі зсуви -> працюють за будь-яких пропорцій.
+// Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
+function animRoot(name: string, t: number): { ddx: number; ddy: number } {
+  if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
+  if (name === 'run') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 9)) * 5 };
+  if (name === 'jump') return { ddx: 0, ddy: -Math.sin(((t % 1.6) / 1.6) * Math.PI) * 32 };
+  if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
+  return { ddx: 0, ddy: 0 };
+}
+
+// Локальний догин кістки (лише ОБЕРТАННЯ) — поверх руху кореня. Пропорційно-незалежно.
 function animOff(name: string, t: number, key: string): { drot: number; ddx: number; ddy: number } {
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
-    const b = Math.sin(t * 1.8);
-    if (key === 'torso') return { drot: 0, ddx: 0, ddy: b * 1.5 };
-    if (key === 'head') return { drot: b * 2, ddx: 0, ddy: b * 1.2 };
-    if (key.startsWith('arm')) return { drot: b * 3, ddx: 0, ddy: 0 };
+    if (key === 'head') return { drot: Math.sin(t * 1.8) * 2, ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: Math.sin(t * 1.8) * 3, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'walk' || name === 'run') {
@@ -109,14 +119,12 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     if (key === 'leg_back') return { drot: back * amp, ddx: 0, ddy: 0 };
     if (key === 'arm_front') return { drot: back * aArm, ddx: 0, ddy: 0 };
     if (key === 'arm_back') return { drot: front * aArm, ddx: 0, ddy: 0 };
-    if (key === 'torso') return { drot: Math.sin(ph) * 2, ddx: 0, ddy: -Math.abs(Math.sin(ph)) * (name === 'run' ? 5 : 3) };
-    if (key === 'head') return { drot: 0, ddx: 0, ddy: -Math.abs(Math.sin(ph)) * 1.5 };
+    if (key === 'torso') return { drot: Math.sin(ph) * 2, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'jump') {
-    const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); // 0..1..0
-    if (key === 'torso' || key === 'head') return { drot: 0, ddx: 0, ddy: -up * 28 };
-    if (key.startsWith('leg')) return { drot: -up * 38 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: -up * 10 };
+    const up = Math.sin(((t % 1.6) / 1.6) * Math.PI);
+    if (key.startsWith('leg')) return { drot: -up * 38 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
     if (key.startsWith('arm')) return { drot: -up * 34, ddx: 0, ddy: 0 };
     return z;
   }
@@ -146,13 +154,33 @@ function resize(): void {
 function drawImageAt(sel: string, alpha: number): void {
   const img = imgOf(sel); if (!img) return;
   const t = eff(sel); const p = pivotOf(sel); const a = anchorPx(sel);
+  const slot = sel === 'ref' ? null : state.slots[sel];
+  const w = img.width, h = img.height;
+  const ox = -p.x * w, oy = -p.y * h;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(a.x, a.y);
   ctx.rotate(rad(t.rot));
   const sc = t.scale * s();
   ctx.scale(t.flip * sc, sc); // flip<0 — дзеркало по X навколо півота
-  ctx.drawImage(img, -p.x * img.width, -p.y * img.height);
+
+  if (slot && slot.cut != null) {
+    const cutY = oy + slot.cut * h; // лінія розрізу в локальних координатах
+    const jx = ox + 0.5 * w; // суглоб згину — по центру вздовж кістки
+    // верхня частина
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, slot.cut * h + 4); ctx.clip();
+    ctx.drawImage(img, ox, oy);
+    ctx.restore();
+    // нижня частина — обертається на bend навколо суглоба
+    ctx.save();
+    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend)); ctx.translate(-jx, -cutY);
+    ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
+    ctx.drawImage(img, ox, oy);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, ox, oy);
+  }
   ctx.restore();
 }
 function draw(): void {
@@ -173,9 +201,24 @@ function draw(): void {
   if (state.showPivots) for (const d of SLOT_DEFS) drawMark(d.key);
   drawMark(state.selected); // вибраний завжди
 
-  if (state.mode || state.pivotMode) {
+  // маркер суглоба згину (рожевий) для вибраної розрізаної частини
+  const ssel = state.selected !== 'ref' ? state.slots[state.selected] : null;
+  if (ssel && ssel.cut != null) {
+    const img = imgOf(state.selected);
+    if (img) {
+      const t = eff(state.selected); const a = anchorPx(state.selected); const sc = t.scale * s();
+      const lx = (0.5 - ssel.pivotX) * img.width * t.flip;
+      const ly = (ssel.cut - ssel.pivotY) * img.height;
+      const cr = Math.cos(rad(t.rot)), sr = Math.sin(rad(t.rot));
+      ctx.fillStyle = '#ff45c0';
+      ctx.beginPath(); ctx.arc(a.x + (lx * cr - ly * sr) * sc, a.y + (lx * sr + ly * cr) * sc, 5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#ffd000'; ctx.font = '14px monospace';
-    ctx.fillText(state.pivotMode ? 'PIVOT: клікни на частині' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`, 12, canvas.height - 16);
+    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
 
@@ -202,16 +245,39 @@ function assignImage(key: string, name: string | null): void {
   if (name) {
     const img = state.images.get(name); if (img) slot.scale = lenOf(key) / img.height;
     slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
+    slot.cut = null; slot.bend = 0;
   }
 }
-function addImageFile(file: File, assignToSelected: boolean): void {
+
+// яка частина тіла за назвою файлу
+function slotForName(name: string): string | null {
+  const n = name.toLowerCase();
+  if (/head|голов/.test(n)) return 'head';
+  if (/torso|shirt|body|тор|сороч/.test(n)) return 'torso';
+  if (/arm|рук/.test(n)) return /back|зад/.test(n) ? 'arm_back' : 'arm_front';
+  if (/leg|ног/.test(n)) return /back|зад/.test(n) ? 'leg_back' : 'leg_front';
+  return null;
+}
+
+function toggleCut(): void {
+  if (state.selected === 'ref') return;
+  const slot = state.slots[state.selected];
+  if (!slot.image) { status('Спершу признач картинку частині'); return; }
+  pushUndo();
+  if (slot.cut != null) { slot.cut = null; slot.bend = 0; state.cutMode = false; status('Розріз прибрано'); }
+  else { state.cutMode = true; status('Клікни на частині, де різати (лікоть/коліно)'); }
+  refreshUI();
+}
+function addImageFile(file: File, fallbackToSelected: boolean): void {
   const keyBg = $<HTMLInputElement>('keyBg').checked;
   const img = new Image();
   img.onload = () => {
     const cv = keyBg && hasSolidBackground(img) ? keyImage(img) : imageToCanvas(img);
     state.images.set(file.name, cv);
     if (!state.imageNames.includes(file.name)) state.imageNames.push(file.name);
-    if (assignToSelected && state.selected !== 'ref') assignImage(state.selected, file.name);
+    // визначаємо слот за назвою файлу; якщо не вгадали і файл один — у вибраний
+    const target = slotForName(file.name) ?? (fallbackToSelected && state.selected !== 'ref' ? state.selected : null);
+    if (target) assignImage(target, file.name);
     refreshUI();
   };
   img.src = URL.createObjectURL(file);
@@ -269,6 +335,10 @@ function refreshUI(): void {
   $<HTMLInputElement>('scale').value = String(t.scale); $('scaleV').textContent = t.scale < 1 ? t.scale.toFixed(2) : t.scale.toFixed(1);
   for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) { $<HTMLInputElement>(`p_${k}`).value = String(state.prop[k]); $(`p_${k}V`).textContent = state.prop[k].toFixed(2); }
   $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни на частині…' : '⌖ Тицьнути півот (Q)';
+  const ss = state.selected !== 'ref' ? state.slots[state.selected] : null;
+  $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
+  $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
+  $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
   draw();
 }
 const status = (m: string): void => { $('status').textContent = m; };
@@ -279,6 +349,9 @@ $<HTMLInputElement>('rot').addEventListener('pointerdown', pushUndo);
 $<HTMLInputElement>('rot').addEventListener('input', (e) => { tf(state.selected).rot = Number((e.target as HTMLInputElement).value); $('rotV').textContent = (e.target as HTMLInputElement).value; draw(); });
 $<HTMLInputElement>('scale').addEventListener('pointerdown', pushUndo);
 $<HTMLInputElement>('scale').addEventListener('input', (e) => { tf(state.selected).scale = Number((e.target as HTMLInputElement).value); draw(); });
+$<HTMLInputElement>('bend').addEventListener('pointerdown', pushUndo);
+$<HTMLInputElement>('bend').addEventListener('input', (e) => { if (state.selected !== 'ref') { state.slots[state.selected].bend = Number((e.target as HTMLInputElement).value); $('bendV').textContent = (e.target as HTMLInputElement).value; draw(); } });
+$<HTMLButtonElement>('cutBtn').addEventListener('click', toggleCut);
 $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } });
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
 for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
@@ -299,6 +372,11 @@ let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null
 canvas.addEventListener('mousedown', (ev) => {
   const c = { x: ev.offsetX, y: ev.offsetY };
   if (state.mode) { endMode(ev.button === 0); return; }
+  if (state.cutMode && state.selected !== 'ref') {
+    const loc = curLocal(state.selected, c.x, c.y);
+    if (loc) { state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); pushUndo(); }
+    state.cutMode = false; status('Розріз поставлено. Крути «Згин».'); refreshUI(); return;
+  }
   if (state.pivotMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
     if (loc) { state.slots[state.selected].pivotX = Math.max(0, Math.min(1, loc.lx / loc.iw)); state.slots[state.selected].pivotY = Math.max(0, Math.min(1, loc.ly / loc.ih)); }
@@ -325,6 +403,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
+  else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
   else if (ev.code === 'Escape') endMode(false);
   else if (ev.code === 'Enter') endMode(true);
@@ -336,13 +415,16 @@ const stageEl = $('stageWrap');
 stageEl.addEventListener('drop', (ev) => {
   ev.preventDefault();
   const files = Array.from((ev as DragEvent).dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
-  if (files.length && state.selected !== 'ref') pushUndo();
-  files.forEach((f, i) => addImageFile(f, i === 0));
-  if (files.length) status(`Перетягнуто → "${state.selected === 'ref' ? 'бібліотека' : tfLabel(state.selected)}"`);
+  if (files.length) pushUndo();
+  files.forEach((f) => addImageFile(f, files.length === 1));
+  if (files.length) status(`Перетягнуто ${files.length} — розкладаю по назвах…`);
 });
-const tfLabel = (key: string): string => (key === 'ref' ? 'Орієнтир' : def(key).label);
 
-$<HTMLInputElement>('fileInput').addEventListener('change', (ev) => { Array.from((ev.target as HTMLInputElement).files ?? []).forEach((f, i) => addImageFile(f, i === 0)); });
+$<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
+  const files = Array.from((ev.target as HTMLInputElement).files ?? []);
+  if (files.length) pushUndo();
+  files.forEach((f) => addImageFile(f, files.length === 1));
+});
 
 // ---- експорт / імпорт ----
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
