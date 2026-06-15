@@ -80,11 +80,17 @@ export class GameScene extends Phaser.Scene {
     // Якщо є зібраний персонаж із ріг-тулзи (public/character.json) — малюємо його
     // замість прямокутника. Немає файлу -> лишається прямокутник-плейсхолдер.
     this.character = null;
-    fetch(`${import.meta.env.BASE_URL}character.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((doc: CharDoc | null) => (doc && doc.slots && doc.images ? CutoutCharacter.load(this, doc) : null))
+    // 1) спершу беремо персонажа, відправленого з тулзи (Export у гру, той самий домен);
+    // 2) інакше — закомічений public/character.json.
+    let localDoc: CharDoc | null = null;
+    try { const s = localStorage.getItem('zag_game_char'); if (s) localDoc = JSON.parse(s) as CharDoc; } catch { /* ignore */ }
+    const docP: Promise<CharDoc | null> = localDoc
+      ? Promise.resolve(localDoc)
+      : fetch(`${import.meta.env.BASE_URL}character.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    docP
+      .then((doc) => (doc && doc.slots && doc.images ? CutoutCharacter.load(this, doc) : null))
       .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
-      .catch(() => { /* нема файлу — ок */ });
+      .catch(() => { /* нема — лишається прямокутник */ });
 
     // HUD (прикріплений до екрана)
     this.hud = this.add

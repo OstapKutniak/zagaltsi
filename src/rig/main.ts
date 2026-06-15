@@ -226,12 +226,12 @@ function restoreLocal(): void {
 // ---- рендер ----
 function applyOrigin(): void {
   state.origin.x = canvas.width * 0.5 + state.pan.x;
-  state.origin.y = canvas.height * 0.58 + state.pan.y;
+  state.origin.y = canvas.height * 0.55 + state.pan.y; // стегно ~центр -> скелет по центру
 }
 function resize(): void {
   canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
   applyOrigin();
-  state.viewScale = (Math.min(canvas.width, canvas.height) / 360) * state.zoom;
+  state.viewScale = (Math.min(canvas.width, canvas.height) / 470) * state.zoom; // ввесь персонаж влазить
 }
 function drawImageAt(sel: string, alpha: number): void {
   const img = imgOf(sel); if (!img) return;
@@ -268,6 +268,10 @@ function drawImageAt(sel: string, alpha: number): void {
 }
 function draw(): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // лінія землі — де мають стояти ноги
+  const groundY = toPx(0, -4 + BASE.legs * state.prop.legs).y;
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
@@ -426,7 +430,6 @@ function refreshUI(): void {
   const t = tf(state.selected);
   $<HTMLInputElement>('rot').value = String(Math.round(t.rot)); $('rotV').textContent = String(Math.round(t.rot));
   $<HTMLInputElement>('scale').value = String(t.scale); $('scaleV').textContent = t.scale < 1 ? t.scale.toFixed(2) : t.scale.toFixed(1);
-  for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) { $<HTMLInputElement>(`p_${k}`).value = String(state.prop[k]); $(`p_${k}V`).textContent = state.prop[k].toFixed(2); }
   $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни на частині…' : '⌖ Тицьнути півот (Q)';
   const ss = state.selected !== 'ref' ? state.slots[state.selected] : null;
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
@@ -450,10 +453,6 @@ $<HTMLInputElement>('bend').addEventListener('input', (e) => { if (state.selecte
 $<HTMLButtonElement>('cutBtn').addEventListener('click', toggleCut);
 $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } });
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
-for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
-  $<HTMLInputElement>(`p_${k}`).addEventListener('pointerdown', pushUndo);
-  $<HTMLInputElement>(`p_${k}`).addEventListener('input', (e) => { state.prop[k] = Number((e.target as HTMLInputElement).value); $(`p_${k}V`).textContent = state.prop[k].toFixed(2); draw(); });
-}
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('showRef').addEventListener('change', (e) => { state.showRef = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLButtonElement>('faceBtn').addEventListener('click', () => { state.facing *= -1; refreshUI(); });
@@ -606,6 +605,12 @@ $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();
   status(`Експортовано character.json (частин: ${Object.keys(doc.images).length}) — кинь у гру`);
+});
+// Export у гру: пишемо в localStorage (той самий домен, що й гра) — гра підхопить
+// при наступному відкритті. Працює на ЦЬОМУ браузері/пристрої без git і без мене.
+$<HTMLButtonElement>('toGameBtn').addEventListener('click', () => {
+  try { localStorage.setItem('zag_game_char', JSON.stringify(buildDoc())); status('✔ Відправлено в гру. Онови/відкрий вкладку гри.'); }
+  catch { status('Не вдалося — переповнення сховища браузера'); }
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
 $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
