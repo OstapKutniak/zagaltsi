@@ -40,6 +40,7 @@ const state = {
   pivotMode: false,
   cutMode: false,
   zoom: 1,
+  pan: { x: 0, y: 0 },
   origin: { x: 0, y: 0 },
   viewScale: 1,
   mouse: { x: 0, y: 0 },
@@ -159,9 +160,13 @@ function restoreLocal(): void {
 }
 
 // ---- рендер ----
+function applyOrigin(): void {
+  state.origin.x = canvas.width * 0.5 + state.pan.x;
+  state.origin.y = canvas.height * 0.58 + state.pan.y;
+}
 function resize(): void {
   canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
-  state.origin.x = canvas.width * 0.5; state.origin.y = canvas.height * 0.58;
+  applyOrigin();
   state.viewScale = (Math.min(canvas.width, canvas.height) / 360) * state.zoom;
 }
 function drawImageAt(sel: string, alpha: number): void {
@@ -387,8 +392,12 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
 
 // ---- canvas ----
 let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null = null;
+let panning = false;
+let panStart = { mx: 0, my: 0, px: 0, py: 0 };
 canvas.addEventListener('mousedown', (ev) => {
   const c = { x: ev.offsetX, y: ev.offsetY };
+  // середня кнопка (колесо) — панорама в'юпорта (Blender-стиль)
+  if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: c.x, my: c.y, px: state.pan.x, py: state.pan.y }; return; }
   if (state.mode) { endMode(ev.button === 0); return; }
   if (state.cutMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
@@ -407,10 +416,11 @@ canvas.addEventListener('mousedown', (ev) => {
 window.addEventListener('mousemove', (ev) => {
   const r = canvas.getBoundingClientRect();
   state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-  if (state.mode) applyMode();
+  if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); }
+  else if (state.mode) applyMode();
   else if (drag) { tf(drag.key).dx = drag.dx + (state.mouse.x - drag.sx) / s(); tf(drag.key).dy = drag.dy + (state.mouse.y - drag.sy) / s(); draw(); }
 });
-window.addEventListener('mouseup', () => { drag = null; });
+window.addEventListener('mouseup', () => { drag = null; panning = false; });
 canvas.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (state.mode) endMode(false); });
 canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); state.zoom = Math.min(3, Math.max(0.3, state.zoom * (ev.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
 
