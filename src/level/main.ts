@@ -19,7 +19,8 @@ const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interac
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number }
-interface Level { name: string; placed: Placed[]; collider: string[] }
+interface Level { name: string; placed: Placed[]; collider: string[]; spawn: { x: number; y: number }; start: number; end: number }
+const newLevel = (name: string): Level => ({ name, placed: [], collider: [], spawn: { x: 120, y: 0 }, start: 0, end: 2400 });
 
 const canvas = $<HTMLCanvasElement>('stage');
 const ctx = canvas.getContext('2d')!;
@@ -35,6 +36,7 @@ const state = {
   orig: null as null | { x: number; y: number; rot: number; scale: number },
   startAng: 0, startDist: 1, startWx: 0, startWy: 0,
   colliderTool: 'paint' as 'paint' | 'erase',
+  markerMode: null as null | 'spawn' | 'start' | 'end',
   grid: 48,
   snap: true,
   showCollider: true,
@@ -66,7 +68,12 @@ function load(): void {
     const l = JSON.parse(localStorage.getItem('zag_levels') || 'null');
     if (l && l.levels?.length) { state.levels = l.levels; state.cur = l.cur || 0; }
   } catch { /* ignore */ }
-  if (!state.levels.length) state.levels = [{ name: 'Рівень 1', placed: [], collider: [] }];
+  if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
+  for (const lv of state.levels) { // міграція старих рівнів
+    if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
+    if (typeof lv.start !== 'number') lv.start = 0;
+    if (typeof lv.end !== 'number') lv.end = 2400;
+  }
 }
 function loadImg(a: Asset): void {
   const im = new Image();
@@ -121,6 +128,19 @@ function draw(): void {
       ctx.strokeStyle = 'rgba(90,255,140,0.5)'; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
   }
+
+  // маркери: початок (зелена лінія), кінець (червона), спавн (жовтий прапорець)
+  const lv = level();
+  const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#5aff8f'; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
+  ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
+  ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
+  ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
+  const sp = toScreen(lv.spawn.x, lv.spawn.y);
+  ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
+  ctx.fillStyle = '#ffd000'; ctx.fillRect(sp.x, sp.y - 42, 20, 13);
+  ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
 }
 
 // ---- hit test (інверсна трансформація, AABB у локалі картинки) ----
@@ -154,7 +174,7 @@ function refreshLevels(): void {
   });
 }
 $<HTMLButtonElement>('addLevel').addEventListener('click', () => {
-  state.levels.push({ name: `Рівень ${state.levels.length + 1}`, placed: [], collider: [] });
+  state.levels.push(newLevel(`Рівень ${state.levels.length + 1}`));
   state.cur = state.levels.length - 1; state.selected = null; refreshLevels(); draw(); save();
 });
 
@@ -259,6 +279,13 @@ function paintAt(sx: number, sy: number): void {
 canvas.addEventListener('mousedown', (ev) => {
   const x = ev.offsetX, y = ev.offsetY;
   if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
+  if (state.markerMode) {
+    const w = toWorld(x, y); const lv = level();
+    if (state.markerMode === 'spawn') lv.spawn = { x: w.x, y: w.y };
+    else if (state.markerMode === 'start') lv.start = w.x;
+    else lv.end = w.x;
+    state.markerMode = null; setStatus('Маркер поставлено'); draw(); save(); return;
+  }
   if (state.mode) { state.mode = null; state.orig = null; save(); return; } // підтвердити
   if (state.cat === 'collider') { painting = true; paintAt(x, y); return; }
   const hit = hitTest(x, y);
@@ -306,14 +333,26 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.code === 'Escape' && state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); }
 });
 
+// ---- маркери: наступний клік по полю ставить маркер ----
+$<HTMLButtonElement>('setSpawn').addEventListener('click', () => { state.markerMode = 'spawn'; setStatus('Клікни, де спавн'); });
+$<HTMLButtonElement>('setStart').addEventListener('click', () => { state.markerMode = 'start'; setStatus('Клікни — початок рівня'); });
+$<HTMLButtonElement>('setEnd').addEventListener('click', () => { state.markerMode = 'end'; setStatus('Клікни — кінець рівня'); });
+
 // ---- експорт ----
-$<HTMLButtonElement>('exportLevel').addEventListener('click', () => {
+function buildLevelDoc(): unknown {
   const lv = level();
-  const usedAssets = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-  const doc = { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, assets: usedAssets };
+  const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
+  return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawn, start: lv.start, end: lv.end, assets: used };
+}
+$<HTMLButtonElement>('exportLevel').addEventListener('click', () => {
+  const doc = buildLevelDoc();
   const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
-  const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = `${lv.name}.json`; aEl.click();
-  setStatus(`Експортовано ${lv.name}`);
+  const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = `${level().name}.json`; aEl.click();
+  setStatus(`Експортовано ${level().name}`);
+});
+$<HTMLButtonElement>('toGame').addEventListener('click', () => {
+  try { localStorage.setItem('zag_level', JSON.stringify(buildLevelDoc())); setStatus('✔ Рівень у грі. Онови вкладку гри.'); }
+  catch { setStatus('Не вдалося — переповнення сховища'); }
 });
 
 window.addEventListener('resize', () => { resize(); draw(); });

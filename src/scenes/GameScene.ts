@@ -4,6 +4,7 @@ import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
+import { buildLevelView, type LevelDoc } from '../level/LevelView';
 import { getUser, saveValue } from '../telegram';
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -34,6 +35,9 @@ export class GameScene extends Phaser.Scene {
   private finished = false;
   private waveSpawned = false;
   private cleared = false;
+  private levelMode = false;
+  private levelStart = 0;
+  private levelEnd = WORLD_WIDTH;
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
 
@@ -92,6 +96,15 @@ export class GameScene extends Phaser.Scene {
       .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
       .catch(() => { /* нема — лишається прямокутник */ });
 
+    // Рівень із редактора (localStorage zag_level або public/level.json)
+    this.levelMode = false;
+    let lvlDoc: LevelDoc | null = null;
+    try { const s = localStorage.getItem('zag_level'); if (s) lvlDoc = JSON.parse(s) as LevelDoc; } catch { /* ignore */ }
+    const lvP: Promise<LevelDoc | null> = lvlDoc
+      ? Promise.resolve(lvlDoc)
+      : fetch(`${import.meta.env.BASE_URL}level.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    lvP.then((doc) => { if (doc && doc.placed) this.applyLevel(doc); }).catch(() => {});
+
     // HUD (прикріплений до екрана)
     this.hud = this.add
       .text(12, 12, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffffff' })
@@ -124,7 +137,25 @@ export class GameScene extends Phaser.Scene {
     this.worldH = this.scale.height;
     this.bandBottom = this.worldH - FLOOR_MARGIN;
     this.bandTop = Math.max(this.worldH * 0.28, this.bandBottom - BAND_DEPTH);
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.worldH);
+    if (this.levelMode) this.cameras.main.setBounds(this.levelStart, 0, Math.max(1, this.levelEnd - this.levelStart), this.worldH);
+    else this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.worldH);
+  }
+
+  // Застосувати рівень із редактора: візуал + спавн + межі камери/гравця.
+  private applyLevel(doc: LevelDoc): void {
+    this.levelMode = true;
+    this.skyRect.setVisible(false); this.groundRect.setVisible(false); this.horizon.setVisible(false);
+    this.gateLine.setVisible(false); this.goal.setVisible(false); this.goalLabel.setVisible(false);
+    for (const e of this.enemies) e.destroy();
+    this.enemies = [];
+    this.levelStart = doc.start ?? 0;
+    this.levelEnd = Math.max(this.levelStart + 200, doc.end ?? WORLD_WIDTH);
+    this.player.minX = this.levelStart + 20;
+    this.player.maxX = this.levelEnd - 20;
+    this.player.spawnAt(doc.spawn?.x ?? this.levelStart + 60);
+    this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
+    void buildLevelView(this, doc, this.bandBottom);
+    this.banner.setText('');
   }
 
   private repositionWorld(): void {
@@ -187,8 +218,8 @@ export class GameScene extends Phaser.Scene {
       this.character.setDepth(this.player.depth + 0.1);
     }
 
-    // Тригер хвилі
-    if (!this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();
+    // Тригер хвилі (демо-арена; у режимі рівня вимкнено)
+    if (!this.levelMode && !this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();
 
     // Удар гравця: зона перед ним з урахуванням глибини
     if (this.player.isAttacking(time) && this.player.grounded) {
@@ -213,7 +244,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Арена зачищена — відкриваємо шлях
-    if (this.waveSpawned && !this.cleared && this.enemies.length === 0) {
+    if (!this.levelMode && this.waveSpawned && !this.cleared && this.enemies.length === 0) {
       this.cleared = true;
       this.player.maxX = WORLD_WIDTH - 20;
       this.gateLine.setVisible(false);
@@ -221,8 +252,8 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(1600, () => this.banner.setText(''));
     }
 
-    // Досягнення магазину
-    if (this.cleared && Math.abs(this.player.floorX - this.goal.x) < 55) {
+    // Досягнення магазину (демо; у режимі рівня вимкнено)
+    if (!this.levelMode && this.cleared && Math.abs(this.player.floorX - this.goal.x) < 55) {
       this.completeLevel();
     }
 

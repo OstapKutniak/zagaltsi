@@ -12,6 +12,7 @@ interface Band {
 // відокремлена від керування", фундамент під майбутній кооп.
 export class Player extends Actor {
   maxX = WORLD_WIDTH - 20; // межа просування (ворота арени піднімають її)
+  minX = 20; // ліва межа (початок рівня)
   moving = false; // чи рухається цього кроку (для вибору анімації)
   running = false; // біг (Shift)
 
@@ -44,7 +45,7 @@ export class Player extends Actor {
       const spd = PLAYER.speed * (cmd.run ? 1.7 : 1);
       this.fx += (vx / len) * spd * dt;
       this.fy += (vy / len) * spd * dt;
-      this.fx = Phaser.Math.Clamp(this.fx, 20, this.maxX);
+      this.fx = Phaser.Math.Clamp(this.fx, this.minX, this.maxX);
       this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
 
       if (cmd.jump) this.jump(JUMP.power);
@@ -63,6 +64,8 @@ export class Player extends Actor {
     this.nextAttackAt = time + PLAYER.attackCooldown;
     this.attackAnimUntil = time + 700;
   }
+
+  spawnAt(x: number): void { this.fx = x; }
 
   isAttacking(time: number): boolean {
     return time < this.attackUntil;

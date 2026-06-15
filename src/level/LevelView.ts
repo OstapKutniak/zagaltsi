@@ -1,0 +1,42 @@
+import Phaser from 'phaser';
+
+// Малює рівень (з редактора рівнів) у грі: тайли/фон/небо/декор як спрайти у світі.
+// Координати рівня: x — уздовж рівня, y — від лінії землі (0 = підлога, де ноги).
+
+export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number }
+export interface LevelDoc {
+  name?: string;
+  placed: LevelPlaced[];
+  assets: { id: string; url: string }[];
+  spawn: { x: number; y: number };
+  start: number;
+  end: number;
+  collider?: string[];
+  grid?: number;
+}
+
+// шари: небо/фон/карта — позаду персонажа; декор/інтерактив/пастки — теж позаду (поки)
+const LAYER: Record<string, number> = { sky: -1200, bg: -1100, map: -1000, decor: -300, interactive: -250, trap: -250 };
+
+function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
+  return new Promise((res) => {
+    if (scene.textures.exists(key)) { res(); return; }
+    const img = new Image();
+    img.onload = () => { if (!scene.textures.exists(key)) scene.textures.addImage(key, img); res(); };
+    img.onerror = () => res();
+    img.src = url;
+  });
+}
+
+// Будує спрайти рівня. floorY — світова Y лінії підлоги (де стоять ноги).
+export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY: number): Promise<void> {
+  await Promise.all(doc.assets.map((a) => loadTex(scene, 'lvl_' + a.id, a.url)));
+  for (const p of doc.placed) {
+    const key = 'lvl_' + p.asset;
+    if (!scene.textures.exists(key)) continue;
+    const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);
+    im.setRotation((p.rot * Math.PI) / 180);
+    im.setScale(p.scale * p.flip, p.scale);
+    im.setDepth(LAYER[p.cat] ?? -500);
+  }
+}
