@@ -101,7 +101,15 @@ function eff(sel: string): Tf {
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
   if (name === 'run') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 9)) * 5 };
-  if (name === 'jump') { const ph = (t % 1.6) / 1.6; const ddy = ph < 0.16 ? (ph / 0.16) * 10 : 10 - Math.sin(((ph - 0.16) / 0.84) * Math.PI) * 48; return { ddx: 0, ddy }; }
+  if (name === 'jump') {
+    const ph = (t % 1.6) / 1.6; let ddy: number;
+    if (ph < 0.16) ddy = (ph / 0.16) * 10;
+    else if (ph < 0.35) ddy = 10 - ((ph - 0.16) / 0.19) * 48;
+    else if (ph < 0.6) ddy = -38;
+    else if (ph < 0.85) ddy = -38 + ((ph - 0.6) / 0.25) * 48;
+    else ddy = 10 - ((ph - 0.85) / 0.15) * 10;
+    return { ddx: 0, ddy };
+  }
   if (name === 'attack') { const ap = (t % 0.7) / 0.7; return { ddx: 0, ddy: ap < 0.45 ? (ap / 0.45) * 6 : 6 * (1 - (ap - 0.45) / 0.55) }; }
   if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); return { ddx: -r * 12, ddy: -r * 3 }; }
   if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
@@ -131,7 +139,8 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     return z;
   }
   if (name === 'jump') {
-    const ph = (t % 1.6) / 1.6; const air = ph < 0.16 ? 0 : Math.sin(((ph - 0.16) / 0.84) * Math.PI);
+    const ph = (t % 1.6) / 1.6;
+    const air = ph >= 0.16 && ph < 0.85 ? Math.sin(((ph - 0.16) / 0.69) * Math.PI) : 0;
     if (key.startsWith('leg')) return { drot: -air * 26 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
     if (key.startsWith('arm')) return { drot: -air * 28, ddx: 0, ddy: 0 };
     return z;
@@ -139,17 +148,16 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
   if (name === 'attack') {
     const ap = (t % 0.7) / 0.7;
     let af: number;
-    if (ap < 0.45) af = (ap / 0.45) * 40; else if (ap < 0.6) af = 40 - ((ap - 0.45) / 0.15) * 95; else af = -55 + ((ap - 0.6) / 0.4) * 55;
+    if (ap < 0.45) af = (ap / 0.45) * 30; else if (ap < 0.6) af = 30 - ((ap - 0.45) / 0.15) * 70; else af = -40 + ((ap - 0.6) / 0.4) * 40;
     if (key === 'arm_front') return { drot: af, ddx: 0, ddy: 0 };
-    if (key === 'arm_back') return { drot: -af * 0.3, ddx: 0, ddy: 0 };
-    if (key === 'torso') return { drot: ap < 0.45 ? (ap / 0.45) * 6 : -6 + ((ap - 0.45) / 0.55) * 6, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: ap < 0.45 ? (ap / 0.45) * 4 : -4 + ((ap - 0.45) / 0.55) * 4, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'hurt') {
     const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI);
-    if (key === 'torso') return { drot: r * 12, ddx: 0, ddy: 0 };
-    if (key === 'head') return { drot: r * 8, ddx: 0, ddy: 0 };
-    if (key.startsWith('arm')) return { drot: -r * 20, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: r * 6, ddx: 0, ddy: 0 };
+    if (key === 'head') return { drot: r * 7, ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -r * 8, ddx: 0, ddy: 0 };
     return z;
   }
   return z;
@@ -169,9 +177,10 @@ function animBend(name: string, t: number, key: string): number {
   }
   if (name === 'jump') {
     const ph = (t % 1.6) / 1.6;
-    const crouch = ph < 0.16 ? (ph / 0.16) : 0; const air = ph < 0.16 ? 0 : Math.sin(((ph - 0.16) / 0.84) * Math.PI);
-    if (key.startsWith('leg')) return -(crouch * 30 + air * 54);
-    if (key.startsWith('arm')) return -air * 34;
+    const crouch = ph < 0.16 ? ph / 0.16 : ph > 0.85 ? 1 - (ph - 0.85) / 0.15 : 0;
+    const air = ph >= 0.16 && ph < 0.85 ? Math.sin(((ph - 0.16) / 0.69) * Math.PI) : 0;
+    if (key.startsWith('leg')) return -(crouch * 28 + air * 50);
+    if (key.startsWith('arm')) return -air * 30;
     return 0;
   }
   if (name === 'attack') {

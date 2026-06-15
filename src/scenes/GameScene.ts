@@ -174,7 +174,7 @@ export class GameScene extends Phaser.Scene {
     // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
     if (this.character) {
       const p = this.player;
-      const anim = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? 'walk' : 'idle';
+      const anim = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? (p.running ? 'run' : 'walk') : 'idle';
       this.character.setAnim(anim);
       this.character.tick(dt, this.player.facing);
       this.character.setPosition(this.player.x, this.player.y - this.character.feetOffset());

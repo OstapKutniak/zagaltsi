@@ -38,11 +38,19 @@
         padding: 0 18px 24px;
         pointer-events: none;
       }
-      #touch .dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 56px); gap: 8px; pointer-events: auto; }
-      #touch .dpad #btn-up { grid-column: 2; grid-row: 1; }
-      #touch .dpad #btn-left { grid-column: 1; grid-row: 2; }
-      #touch .dpad #btn-down { grid-column: 2; grid-row: 2; }
-      #touch .dpad #btn-right { grid-column: 3; grid-row: 2; }
+      /* Віртуальний джойстик переміщення (трохи відсунутий від лівого краю) */
+      #stick {
+        position: relative; width: 132px; height: 132px; margin-left: 28px;
+        border-radius: 50%; background: rgba(255, 255, 255, 0.10);
+        border: 2px solid rgba(255, 255, 255, 0.28);
+        pointer-events: auto; touch-action: none;
+      }
+      #stickKnob {
+        position: absolute; left: 50%; top: 50%; width: 60px; height: 60px;
+        margin: -30px 0 0 -30px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.30); border: 2px solid rgba(255, 255, 255, 0.5);
+        pointer-events: none;
+      }
       #touch .actions { display: flex; gap: 14px; pointer-events: auto; }
       #touch button {
         width: 56px; height: 56px; border-radius: 14px;
@@ -62,12 +70,7 @@
     <div id="stage">
       <div id="game"></div>
       <div id="touch">
-        <div class="dpad">
-          <button id="btn-up" aria-label="вгору">▲</button>
-          <button id="btn-left" aria-label="ліворуч">◀</button>
-          <button id="btn-down" aria-label="вниз">▼</button>
-          <button id="btn-right" aria-label="праворуч">▶</button>
-        </div>
+        <div id="stick"><div id="stickKnob"></div></div>
         <div class="actions">
           <button id="btn-attack" aria-label="удар">✊</button>
           <button id="btn-jump" aria-label="стрибок">⤴</button>

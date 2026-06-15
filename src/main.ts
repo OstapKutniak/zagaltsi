@@ -9,17 +9,16 @@ initTelegram();
 // Scale.NONE: розміром керуємо вручну через setupViewport (заповнення вікна +
 // автоповорот у ландшафт). Бітемап рухається по власній площині з глибиною;
 // Arcade-фізика не потрібна — рух і зіткнення рахуємо вручну (детермінована симуляція).
-// FIT: фіксований дизайн-кадр (як на телефоні), масштабується під вікно з чорними
-// полями (леттербокс) — однаковий вид на ПК і телефоні. Поля згодом замінимо дизайном.
+// NONE: рендеримо в нативному розширенні екрана (чітко, без апскейл-блюру).
+// setupViewport заповнює вікно й повертає сцену на телефоні в ландшафт.
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#2a2233',
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 1280,
-    height: 576,
+    mode: Phaser.Scale.NONE,
+    width: window.innerWidth,
+    height: window.innerHeight,
   },
   scene: [BootScene, GameScene],
 });

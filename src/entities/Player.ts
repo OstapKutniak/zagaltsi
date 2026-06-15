@@ -13,6 +13,7 @@ interface Band {
 export class Player extends Actor {
   maxX = WORLD_WIDTH - 20; // межа просування (ворота арени піднімають її)
   moving = false; // чи рухається цього кроку (для вибору анімації)
+  running = false; // біг (Shift)
 
   private attackUntil = 0;
   private nextAttackAt = 0;
@@ -26,6 +27,7 @@ export class Player extends Actor {
 
   update(cmd: InputCommand, time: number, dt: number, band: Band): void {
     this.moving = false;
+    this.running = false;
     // Під час удару герой "вкопаний" — не ходить.
     if (!this.isAttacking(time)) {
       let vx = 0;
@@ -36,10 +38,12 @@ export class Player extends Actor {
       else if (cmd.down) vy = 1;
       if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
       this.moving = vx !== 0 || vy !== 0;
+      this.running = this.moving && cmd.run;
 
       const len = Math.hypot(vx, vy) || 1; // нормалізація діагоналі
-      this.fx += (vx / len) * PLAYER.speed * dt;
-      this.fy += (vy / len) * PLAYER.speed * dt;
+      const spd = PLAYER.speed * (cmd.run ? 1.7 : 1);
+      this.fx += (vx / len) * spd * dt;
+      this.fy += (vy / len) * spd * dt;
       this.fx = Phaser.Math.Clamp(this.fx, 20, this.maxX);
       this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
 
