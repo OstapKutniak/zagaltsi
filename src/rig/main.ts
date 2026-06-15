@@ -14,15 +14,36 @@ interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 const SLOT_DEFS = [
-  { key: 'leg_back', label: 'Нога зад', joint: 'hipBack', len: 'legs', piv: [0.5, 0.06] },
-  { key: 'arm_back', label: 'Рука зад', joint: 'shBack', len: 'arms', piv: [0.5, 0.08] },
-  { key: 'leg_front', label: 'Нога перед', joint: 'hipFront', len: 'legs', piv: [0.5, 0.06] },
-  { key: 'torso', label: 'Торс', joint: 'hip', len: 'torso', piv: [0.5, 0.94] },
-  { key: 'head', label: 'Голова', joint: 'neck', len: 'head', piv: [0.5, 0.94] },
-  { key: 'arm_front', label: 'Рука перед', joint: 'shFront', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'leg_back', label: 'Нога зад', len: 'legs', piv: [0.5, 0.06] },
+  { key: 'arm_back', label: 'Рука зад', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'leg_front', label: 'Нога перед', len: 'legs', piv: [0.5, 0.06] },
+  { key: 'torso', label: 'Торс', len: 'torso', piv: [0.5, 0.94] },
+  { key: 'neck', label: 'Шия', len: 'neck', piv: [0.5, 0.9] },
+  { key: 'head', label: 'Голова', len: 'head', piv: [0.5, 0.94] },
+  { key: 'arm_front', label: 'Рука перед', len: 'arms', piv: [0.5, 0.08] },
 ] as const;
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
-const BASE = { torso: 105, head: 86, arms: 116, legs: 140 };
+const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
+
+// Ієрархія кісток: торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
+// Дитина обертається/рухається разом із батьком -> нічого не "відривається".
+const PARENT: Record<string, string | null> = {
+  torso: null, neck: 'torso', head: 'neck', arm_back: 'torso', arm_front: 'torso', leg_back: 'torso', leg_front: 'torso',
+};
+// Точка кріплення дитини в ЛОКАЛЬНІЙ системі батька (одиниці). Збережено стару
+// геометрію: при bind (усі rot=0) позиції ті самі, що були (нічого не з'їжджає).
+function conn(sel: string): { x: number; y: number } {
+  const t = BASE.torso * state.prop.torso;
+  switch (sel) {
+    case 'neck': return { x: 0, y: -t };
+    case 'head': return { x: 0, y: 0 };
+    case 'arm_back': return { x: -7, y: -t + 12 };
+    case 'arm_front': return { x: 7, y: -t + 12 };
+    case 'leg_back': return { x: -9, y: -4 };
+    case 'leg_front': return { x: 9, y: -4 };
+    default: return { x: 0, y: 0 };
+  }
+}
 
 const canvas = $<HTMLCanvasElement>('stage');
 const ctx = canvas.getContext('2d')!;
@@ -56,11 +77,7 @@ const state = {
 };
 for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, cut: null, bend: 0 };
 
-const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * state.prop[w]; };
-function joints(): Record<string, { x: number; y: number }> {
-  const t = BASE.torso * state.prop.torso;
-  return { hip: { x: 0, y: 0 }, neck: { x: 0, y: -t }, shBack: { x: -7, y: -t + 12 }, shFront: { x: 7, y: -t + 12 }, hipBack: { x: -9, y: -4 }, hipFront: { x: 9, y: -4 } };
-}
+const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
 const s = (): number => state.viewScale * state.prop.overall;
 const toPx = (ux: number, uy: number): { x: number; y: number } => ({ x: state.origin.x + ux * s(), y: state.origin.y + uy * s() });
 
@@ -72,17 +89,36 @@ const imgOf = (sel: string): HTMLCanvasElement | null => {
   return sl.image ? state.images.get(sl.image) ?? null : null;
 };
 const pivotOf = (sel: string): { x: number; y: number } => (sel === 'ref' ? { x: 0.5, y: 0.5 } : { x: state.slots[sel].pivotX, y: state.slots[sel].pivotY });
-function baseUnit(sel: string): { x: number; y: number } {
+// Світовий трансформ слота з урахуванням ієрархії (рекурсивно по батьках).
+function worldOf(sel: string): { x: number; y: number; rot: number } {
+  const t = eff(sel);
+  const p = PARENT[sel];
+  if (!p) {
+    return { x: state.origin.x + t.dx * s(), y: state.origin.y + t.dy * s(), rot: rad(t.rot) };
+  }
+  const pw = worldOf(p);
+  const c = conn(sel);
+  const lx = c.x + t.dx;
+  const ly = c.y + t.dy;
+  const cos = Math.cos(pw.rot), sin = Math.sin(pw.rot);
+  return {
+    x: pw.x + (lx * cos - ly * sin) * s(),
+    y: pw.y + (lx * sin + ly * cos) * s(),
+    rot: pw.rot + rad(t.rot),
+  };
+}
+function anchorPx(sel: string): { x: number; y: number } {
   if (sel === 'ref') {
     const top = -(BASE.torso * state.prop.torso + BASE.head * state.prop.head);
     const bottom = BASE.legs * state.prop.legs;
-    return { x: 0, y: (top + bottom) / 2 };
+    const cy = (top + bottom) / 2;
+    return { x: state.origin.x + state.ref.dx * s(), y: state.origin.y + (cy + state.ref.dy) * s() };
   }
-  return joints()[def(sel).joint];
+  return worldOf(sel);
 }
-function anchorPx(sel: string): { x: number; y: number } {
-  const b = baseUnit(sel); const t = eff(sel); const j = toPx(b.x, b.y);
-  return { x: j.x + t.dx * s(), y: j.y + t.dy * s() };
+// сумарний кут повороту слота (для рендеру/інверсії), 'ref' — власний
+function worldRot(sel: string): number {
+  return sel === 'ref' ? rad(state.ref.rot) : worldOf(sel).rot;
 }
 // дзеркалення X курсора у "несвічений" світ (бо сцену малюємо дзеркально при facing<0)
 const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - x : x);
@@ -93,8 +129,10 @@ function eff(sel: string): Tf {
   const t = tf(sel);
   if (!state.anim || sel === 'ref') return t;
   const o = animOff(state.anim, state.animT, sel);
-  const r = animRoot(state.anim, state.animT);
-  return { rot: t.rot + o.drot * state.animDir, scale: t.scale, dx: t.dx + o.ddx + r.ddx, dy: t.dy + o.ddy + r.ddy, flip: t.flip };
+  let dx = t.dx + o.ddx;
+  let dy = t.dy + o.ddy;
+  if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; } // корінь рухає все тіло
+  return { rot: t.rot + o.drot * state.animDir, scale: t.scale, dx, dy, flip: t.flip };
 }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
@@ -242,7 +280,7 @@ function drawImageAt(sel: string, alpha: number): void {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(a.x, a.y);
-  ctx.rotate(rad(t.rot));
+  ctx.rotate(worldRot(sel)); // сумарний кут (з урахуванням батьків)
   const sc = t.scale * s();
   ctx.scale(t.flip * sc, sc); // flip<0 — дзеркало по X навколо півота
 
@@ -317,7 +355,7 @@ function draw(): void {
 function curLocal(sel: string, sx: number, sy: number): { lx: number; ly: number; iw: number; ih: number } | null {
   const img = imgOf(sel); if (!img) return null;
   const t = tf(sel); const p = pivotOf(sel); const a = anchorPx(sel);
-  const ang = rad(-t.rot); const dx = sx - a.x, dy = sy - a.y;
+  const ang = -worldRot(sel); const dx = sx - a.x, dy = sy - a.y;
   const rx = dx * Math.cos(ang) - dy * Math.sin(ang); const ry = dx * Math.sin(ang) + dy * Math.cos(ang);
   const sc = t.scale * s();
   let localX = rx / sc; if (t.flip < 0) localX = -localX; // врахувати дзеркало
@@ -345,6 +383,7 @@ function slotForName(name: string): string | null {
   const n = name.toLowerCase();
   if (/head|голов/.test(n)) return 'head';
   if (/torso|shirt|body|тор|сороч/.test(n)) return 'torso';
+  if (/neck|шия|шиї/.test(n)) return 'neck';
   if (/arm|рук/.test(n)) return /back|зад/.test(n) ? 'arm_back' : 'arm_front';
   if (/leg|ног/.test(n)) return /back|зад/.test(n) ? 'leg_back' : 'leg_front';
   return null;
@@ -395,8 +434,13 @@ function applyMode(): void {
   if (!state.mode || !state.orig) return;
   const t = tf(state.selected); const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x); const my = state.mouse.y;
-  if (state.mode === 'G') { t.dx = state.orig.dx + (mx - state.startMx) / s(); t.dy = state.orig.dy + (my - state.startMy) / s(); }
-  else if (state.mode === 'R') { const ang = Math.atan2(my - a.y, mx - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
+  if (state.mode === 'G') {
+    const pr = state.selected !== 'ref' && PARENT[state.selected] ? worldOf(PARENT[state.selected]!).rot : 0;
+    const wdx = mx - state.startMx, wdy = my - state.startMy;
+    const c = Math.cos(-pr), s2 = Math.sin(-pr);
+    t.dx = state.orig.dx + (wdx * c - wdy * s2) / s();
+    t.dy = state.orig.dy + (wdx * s2 + wdy * c) / s();
+  } else if (state.mode === 'R') { const ang = Math.atan2(my - a.y, mx - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
   else if (state.mode === 'S') { const d = Math.hypot(mx - a.x, my - a.y); t.scale = Math.max(0.02, state.orig.scale * (d / state.startDist)); }
   draw();
 }
@@ -493,7 +537,15 @@ window.addEventListener('mousemove', (ev) => {
   state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
   if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); }
   else if (state.mode) applyMode();
-  else if (drag) { const wx = mirrorX(state.mouse.x); tf(drag.key).dx = drag.dx + (wx - drag.sx) / s(); tf(drag.key).dy = drag.dy + (state.mouse.y - drag.sy) / s(); draw(); }
+  else if (drag) {
+    const wx = mirrorX(state.mouse.x);
+    const pr = drag.key !== 'ref' && PARENT[drag.key] ? worldOf(PARENT[drag.key]!).rot : 0;
+    const wdx = wx - drag.sx, wdy = state.mouse.y - drag.sy;
+    const c = Math.cos(-pr), s2 = Math.sin(-pr);
+    tf(drag.key).dx = drag.dx + (wdx * c - wdy * s2) / s();
+    tf(drag.key).dy = drag.dy + (wdx * s2 + wdy * c) / s();
+    draw();
+  }
 });
 window.addEventListener('mouseup', () => { drag = null; panning = false; });
 canvas.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (state.mode) endMode(false); });
@@ -548,16 +600,29 @@ function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<
   }
   refreshUI();
 }
-// мініатюра для бібліотеки (bind-поза, цілі кінцівки)
+// мініатюра для бібліотеки (bind-поза, ієрархія, цілі кінцівки)
 function composeThumb(w: number, h: number): string {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const cx = c.getContext('2d')!; const J = joints(); const us = (h * 0.8) / 430; const ox = w / 2, oy = h * 0.46;
+  const cx = c.getContext('2d')!; const us = (h * 0.8) / 430; const ox = w / 2, oy = h * 0.46;
+  const cache: Record<string, { x: number; y: number; rot: number }> = {};
+  const wof = (sel: string): { x: number; y: number; rot: number } => {
+    if (cache[sel]) return cache[sel];
+    const sl = state.slots[sel]; const p = PARENT[sel];
+    let r: { x: number; y: number; rot: number };
+    if (!p) r = { x: ox + sl.dx * us, y: oy + sl.dy * us, rot: rad(sl.rot) };
+    else {
+      const pw = wof(p); const cn = conn(sel); const lx = cn.x + sl.dx, ly = cn.y + sl.dy;
+      const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
+      r = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(sl.rot) };
+    }
+    cache[sel] = r; return r;
+  };
   for (const d of SLOT_DEFS) {
     const sl = state.slots[d.key]; const img = sl.image ? state.images.get(sl.image) : undefined; if (!img) continue;
-    const j = J[d.joint];
+    const wt = wof(d.key);
     cx.save();
-    cx.translate(ox + (j.x + sl.dx) * us, oy + (j.y + sl.dy) * us);
-    cx.rotate(rad(sl.rot)); const sc = sl.scale * us; cx.scale(sl.flip * sc, sc);
+    cx.translate(wt.x, wt.y);
+    cx.rotate(wt.rot); const sc = sl.scale * us; cx.scale(sl.flip * sc, sc);
     cx.drawImage(img, -sl.pivotX * img.width, -sl.pivotY * img.height);
     cx.restore();
   }

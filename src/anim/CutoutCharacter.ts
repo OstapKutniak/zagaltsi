@@ -9,21 +9,29 @@ const TARGET_PX = 410; // цільова висота персонажа (при
 
 // шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
-  { key: 'leg_back', joint: 'hipBack' },
-  { key: 'arm_back', joint: 'shBack' },
-  { key: 'leg_front', joint: 'hipFront' },
-  { key: 'torso', joint: 'hip' },
-  { key: 'head', joint: 'neck' },
-  { key: 'arm_front', joint: 'shFront' },
+  { key: 'leg_back' }, { key: 'arm_back' }, { key: 'leg_front' },
+  { key: 'torso' }, { key: 'neck' }, { key: 'head' }, { key: 'arm_front' },
 ] as const;
-const BASE = { torso: 105, head: 86, arms: 116, legs: 140 };
+const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
 interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number }
 export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number }
 
-function joints(p: CharDoc['proportions']): Record<string, { x: number; y: number }> {
+// Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
+const PARENT: Record<string, string | null> = {
+  torso: null, neck: 'torso', head: 'neck', arm_back: 'torso', arm_front: 'torso', leg_back: 'torso', leg_front: 'torso',
+};
+function conn(sel: string, p: CharDoc['proportions']): { x: number; y: number } {
   const t = BASE.torso * p.torso;
-  return { hip: { x: 0, y: 0 }, neck: { x: 0, y: -t }, shBack: { x: -7, y: -t + 12 }, shFront: { x: 7, y: -t + 12 }, hipBack: { x: -9, y: -4 }, hipFront: { x: 9, y: -4 } };
+  switch (sel) {
+    case 'neck': return { x: 0, y: -t };
+    case 'head': return { x: 0, y: 0 };
+    case 'arm_back': return { x: -7, y: -t + 12 };
+    case 'arm_front': return { x: 7, y: -t + 12 };
+    case 'leg_back': return { x: -9, y: -4 };
+    case 'leg_front': return { x: 9, y: -4 };
+    default: return { x: 0, y: 0 };
+  }
 }
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
@@ -147,18 +155,39 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
 
   tick(dt: number, facing: number): void {
     this.t += dt;
-    const J = joints(this.prop);
     const us = this.unitScale();
-    const r = animRoot(this.anim, this.t);
     const hurt = this.anim === 'hurt';
+    // світовий трансформ слота в локалі контейнера (ієрархія)
+    const cache: Record<string, { x: number; y: number; rot: number }> = {};
+    const wof = (sel: string): { x: number; y: number; rot: number } => {
+      if (cache[sel]) return cache[sel];
+      const sl = this.slots[sel];
+      const o = animOff(this.anim, this.t, sel);
+      const lrot = (sl?.rot ?? 0) + o.drot;
+      let ldx = (sl?.dx ?? 0) + o.ddx;
+      let ldy = (sl?.dy ?? 0) + o.ddy;
+      const p = PARENT[sel];
+      let res: { x: number; y: number; rot: number };
+      if (!p) {
+        const ar = animRoot(this.anim, this.t); // корінь рухає все тіло
+        ldx += ar.ddx; ldy += ar.ddy;
+        res = { x: ldx * us, y: ldy * us, rot: rad(lrot) };
+      } else {
+        const pw = wof(p);
+        const cn = conn(sel, this.prop);
+        const lx = cn.x + ldx, ly = cn.y + ldy;
+        const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
+        res = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(lrot) };
+      }
+      cache[sel] = res; return res;
+    };
     for (const d of SLOT_DEFS) {
       const im = this.parts[d.key];
       if (!im) continue;
       const sl = this.slots[d.key];
-      const o = animOff(this.anim, this.t, d.key);
-      const j = J[d.joint];
-      im.setPosition((j.x + sl.dx + o.ddx + r.ddx) * us, (j.y + sl.dy + o.ddy + r.ddy) * us);
-      im.setRotation(rad(sl.rot + o.drot));
+      const wt = wof(d.key);
+      im.setPosition(wt.x, wt.y);
+      im.setRotation(wt.rot);
       im.setScale(sl.scale * us * sl.flip, sl.scale * us);
       if (hurt) im.setTint(0xff5555); else im.clearTint();
     }
