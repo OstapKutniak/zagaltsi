@@ -5,7 +5,7 @@ import Phaser from 'phaser';
 // Примітка: розріз/згин (cut/bend) у грі поки не рендеримо — цілі кінцівки (v1).
 
 const rad = (d: number): number => (d * Math.PI) / 180;
-const CHAR_SCALE = 0.3; // одиниці тулзи -> ігрові пікселі (множиться на proportions.overall)
+const TARGET_PX = 165; // цільова висота персонажа (при overall=1) у пікселях гри
 
 // шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
@@ -19,7 +19,7 @@ const SLOT_DEFS = [
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140 };
 
 interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number }
-export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string> }
+export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number }
 
 function joints(p: CharDoc['proportions']): Record<string, { x: number; y: number }> {
   const t = BASE.torso * p.torso;
@@ -75,11 +75,20 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private parts: Record<string, Phaser.GameObjects.Image> = {};
   private anim = 'idle';
   private t = 0;
+  private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
 
   private constructor(scene: Phaser.Scene, doc: CharDoc) {
     super(scene, 0, 0);
     this.prop = doc.proportions;
     this.slots = doc.slots;
+    this.docFacing = doc.facing ?? 1;
+  }
+
+  // масштаб одиниці->піксель так, щоб висота персонажа = TARGET_PX (overall — множник)
+  private unitScale(): number {
+    const p = this.prop;
+    const hBase = BASE.torso * p.torso + BASE.head * p.head + BASE.legs * p.legs;
+    return (TARGET_PX / hBase) * p.overall;
   }
 
   static async load(scene: Phaser.Scene, doc: CharDoc): Promise<CutoutCharacter> {
@@ -99,13 +108,21 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
 
   setAnim(name: string): void { this.anim = name; }
 
-  // висота від стегна до п'ят (щоб ставити персонажа на землю)
-  feetOffset(): number { return BASE.legs * this.prop.legs * CHAR_SCALE * this.prop.overall; }
+  // відстань від кореня (стегна) до найнижчої точки ніг — щоб ступні стали на землю
+  feetOffset(): number {
+    let feet = 0;
+    for (const key of ['leg_front', 'leg_back']) {
+      const im = this.parts[key];
+      if (im) { const b = im.y + im.displayHeight * (1 - im.originY); if (b > feet) feet = b; }
+    }
+    if (feet <= 0) feet = BASE.legs * this.prop.legs * this.unitScale();
+    return feet;
+  }
 
   tick(dt: number, facing: number): void {
     this.t += dt;
     const J = joints(this.prop);
-    const us = CHAR_SCALE * this.prop.overall;
+    const us = this.unitScale();
     const r = animRoot(this.anim, this.t);
     for (const d of SLOT_DEFS) {
       const im = this.parts[d.key];
@@ -117,7 +134,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       im.setRotation(rad(sl.rot + o.drot));
       im.setScale(sl.scale * us * sl.flip, sl.scale * us);
     }
-    this.scaleX = facing;
+    this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
     this.scaleY = 1;
   }
 }

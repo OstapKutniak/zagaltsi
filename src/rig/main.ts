@@ -42,7 +42,8 @@ const state = {
   cutMode: false,
   zoom: 1,
   pan: { x: 0, y: 0 },
-  facing: 1, // 1 — дивиться праворуч, -1 — ліворуч (дзеркалить сцену й згини)
+  facing: 1, // 1 праворуч, -1 ліворуч — ДЗЕРКАЛИТЬ АРТ (кнопка «Лицем»)
+  animDir: 1, // напрям анімації кісток (НЕ чіпає арт; гнеться в інший бік)
   origin: { x: 0, y: 0 },
   viewScale: 1,
   mouse: { x: 0, y: 0 },
@@ -93,7 +94,7 @@ function eff(sel: string): Tf {
   if (!state.anim || sel === 'ref') return t;
   const o = animOff(state.anim, state.animT, sel);
   const r = animRoot(state.anim, state.animT);
-  return { rot: t.rot + o.drot, scale: t.scale, dx: t.dx + o.ddx + r.ddx, dy: t.dy + o.ddy + r.ddy, flip: t.flip };
+  return { rot: t.rot + o.drot * state.animDir, scale: t.scale, dx: t.dx + o.ddx + r.ddx, dy: t.dy + o.ddy + r.ddy, flip: t.flip };
 }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
@@ -169,13 +170,14 @@ function undo(): void {
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: state.slots })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: state.slots, facing: state.facing })); } catch { /* ignore */ }
 }
 function restoreLocal(): void {
   try {
     const o = JSON.parse(localStorage.getItem('ostap_char') || 'null');
     if (!o) return;
     if (o.prop) Object.assign(state.prop, o.prop);
+    if (typeof o.facing === 'number') state.facing = o.facing;
     if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   } catch { /* ignore */ }
 }
@@ -212,7 +214,7 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.drawImage(img, ox, oy);
     ctx.restore();
     // нижня частина — обертається на bend (+ анімаційний згин) навколо суглоба
-    const animB = state.anim ? animBend(state.anim, state.animT, sel) : 0;
+    const animB = state.anim ? animBend(state.anim, state.animT, sel) * state.animDir : 0;
     ctx.save();
     ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend + animB)); ctx.translate(-jx, -cutY);
     ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
@@ -389,7 +391,8 @@ function refreshUI(): void {
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
-  $<HTMLButtonElement>('faceBtn').textContent = '↔ Дивиться: ' + (state.facing > 0 ? '→' : '←');
+  $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
+  $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
   saveLocal();
   draw();
 }
@@ -413,6 +416,7 @@ for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('showRef').addEventListener('change', (e) => { state.showRef = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLButtonElement>('faceBtn').addEventListener('click', () => { state.facing *= -1; refreshUI(); });
+$<HTMLButtonElement>('animDirBtn').addEventListener('click', () => { state.animDir *= -1; refreshUI(); });
 $<HTMLButtonElement>('refBtn').addEventListener('click', () => $<HTMLInputElement>('refInput').click());
 $<HTMLButtonElement>('refClear').addEventListener('click', () => { pushUndo(); state.ref.canvas = null; draw(); });
 $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
@@ -487,13 +491,14 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
-function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string> } {
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number } {
   const used = new Set(Object.values(state.slots).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  return { version: 3, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(state.slots)), images };
+  return { version: 3, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(state.slots)), images, facing: state.facing };
 }
-function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string> }): void {
+function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number }): void {
+  if (typeof doc.facing === 'number') state.facing = doc.facing;
   if (doc.proportions) Object.assign(state.prop, doc.proportions);
   if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
   if (doc.images) for (const [name, data] of Object.entries(doc.images)) {
@@ -541,8 +546,11 @@ function renderLibrary(): void {
 function saveCharacter(): void {
   const name = prompt('Назва персонажа:', 'Остап'); if (!name) return;
   const lib = loadLib();
-  lib.push({ id: 'c' + Date.now(), name, doc: buildDoc(), thumb: composeThumb(150, 190) });
-  storeLib(lib); renderLibrary(); status(`Збережено: ${name}`);
+  const item: LibItem = { id: 'c' + Date.now(), name, doc: buildDoc(), thumb: composeThumb(150, 190) };
+  const i = lib.findIndex((x) => x.name === name);
+  if (i >= 0) { item.id = lib[i].id; lib[i] = item; status(`Оновлено: ${name}`); } // та сама назва -> замінюємо
+  else { lib.push(item); status(`Збережено: ${name}`); }
+  storeLib(lib); renderLibrary();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
 
