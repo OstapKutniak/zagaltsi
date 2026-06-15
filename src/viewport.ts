@@ -14,27 +14,22 @@ export function setupViewport(game: Phaser.Game): void {
     const h = window.innerHeight;
     const portrait = h > w;
 
-    let gw: number;
-    let gh: number;
     if (portrait) {
       // Ландшафтна сцена, повернута на 90° навколо верхнього-лівого кута.
-      gw = h;
-      gh = w;
       stage.style.left = `${w}px`;
       stage.style.top = '0px';
       stage.style.width = `${h}px`;
       stage.style.height = `${w}px`;
       stage.style.transform = 'rotate(90deg)';
     } else {
-      gw = w;
-      gh = h;
       stage.style.left = '0px';
       stage.style.top = '0px';
       stage.style.width = `${w}px`;
       stage.style.height = `${h}px`;
       stage.style.transform = 'none';
     }
-    game.scale.resize(gw, gh);
+    // Scale.FIT сам вписує дизайн у #stage із чорними полями — лише оновлюємо.
+    game.scale.refresh();
   };
 
   apply();

@@ -101,7 +101,9 @@ function eff(sel: string): Tf {
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
   if (name === 'run') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 9)) * 5 };
-  if (name === 'jump') return { ddx: 0, ddy: -Math.sin(((t % 1.6) / 1.6) * Math.PI) * 32 };
+  if (name === 'jump') { const ph = (t % 1.6) / 1.6; const ddy = ph < 0.16 ? (ph / 0.16) * 10 : 10 - Math.sin(((ph - 0.16) / 0.84) * Math.PI) * 48; return { ddx: 0, ddy }; }
+  if (name === 'attack') { const ap = (t % 0.7) / 0.7; return { ddx: 0, ddy: ap < 0.45 ? (ap / 0.45) * 6 : 6 * (1 - (ap - 0.45) / 0.55) }; }
+  if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); return { ddx: -r * 12, ddy: -r * 3 }; }
   if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
   return { ddx: 0, ddy: 0 };
 }
@@ -129,9 +131,25 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     return z;
   }
   if (name === 'jump') {
-    const up = Math.sin(((t % 1.6) / 1.6) * Math.PI);
-    if (key.startsWith('leg')) return { drot: -up * 38 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
-    if (key.startsWith('arm')) return { drot: -up * 34, ddx: 0, ddy: 0 };
+    const ph = (t % 1.6) / 1.6; const air = ph < 0.16 ? 0 : Math.sin(((ph - 0.16) / 0.84) * Math.PI);
+    if (key.startsWith('leg')) return { drot: -air * 26 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -air * 28, ddx: 0, ddy: 0 };
+    return z;
+  }
+  if (name === 'attack') {
+    const ap = (t % 0.7) / 0.7;
+    let af: number;
+    if (ap < 0.45) af = (ap / 0.45) * 40; else if (ap < 0.6) af = 40 - ((ap - 0.45) / 0.15) * 95; else af = -55 + ((ap - 0.6) / 0.4) * 55;
+    if (key === 'arm_front') return { drot: af, ddx: 0, ddy: 0 };
+    if (key === 'arm_back') return { drot: -af * 0.3, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: ap < 0.45 ? (ap / 0.45) * 6 : -6 + ((ap - 0.45) / 0.55) * 6, ddx: 0, ddy: 0 };
+    return z;
+  }
+  if (name === 'hurt') {
+    const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI);
+    if (key === 'torso') return { drot: r * 12, ddx: 0, ddy: 0 };
+    if (key === 'head') return { drot: r * 8, ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -r * 20, ddx: 0, ddy: 0 };
     return z;
   }
   return z;
@@ -149,7 +167,21 @@ function animBend(name: string, t: number, key: string): number {
     if (key === 'arm_back') return -(0.4 + 0.6 * Math.abs(Math.sin(ph + Math.PI))) * armAmp;
     return 0;
   }
-  if (name === 'jump') { const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); if (key.startsWith('leg')) return -up * 54; if (key.startsWith('arm')) return -up * 34; return 0; }
+  if (name === 'jump') {
+    const ph = (t % 1.6) / 1.6;
+    const crouch = ph < 0.16 ? (ph / 0.16) : 0; const air = ph < 0.16 ? 0 : Math.sin(((ph - 0.16) / 0.84) * Math.PI);
+    if (key.startsWith('leg')) return -(crouch * 30 + air * 54);
+    if (key.startsWith('arm')) return -air * 34;
+    return 0;
+  }
+  if (name === 'attack') {
+    const ap = (t % 0.7) / 0.7;
+    // лікоть передньої руки: зігнутий на замаху, розпрямляється на ударі
+    if (key === 'arm_front') return ap < 0.45 ? -(ap / 0.45) * 70 : ap < 0.6 ? -70 + ((ap - 0.45) / 0.15) * 70 : 0;
+    if (key.startsWith('leg')) return -(ap < 0.45 ? (ap / 0.45) * 18 : 18 * (1 - (ap - 0.45) / 0.55)); // легке присідання
+    return 0;
+  }
+  if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); if (key.startsWith('arm')) return -r * 25; return 0; }
   if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
   return 0;
 }

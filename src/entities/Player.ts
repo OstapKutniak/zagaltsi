@@ -17,6 +17,8 @@ export class Player extends Actor {
   private attackUntil = 0;
   private nextAttackAt = 0;
   private invulnUntil = 0;
+  private hurtUntil = 0; // для анімації отримання удару
+  private attackAnimUntil = 0; // для анімації удару
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'player', PLAYER.maxHp);
@@ -55,16 +57,24 @@ export class Player extends Actor {
     if (time < this.nextAttackAt) return;
     this.attackUntil = time + PLAYER.attackActive;
     this.nextAttackAt = time + PLAYER.attackCooldown;
+    this.attackAnimUntil = time + 700;
   }
 
   isAttacking(time: number): boolean {
     return time < this.attackUntil;
+  }
+  isInAttack(time: number): boolean {
+    return time < this.attackAnimUntil;
+  }
+  isHurt(time: number): boolean {
+    return time < this.hurtUntil;
   }
 
   takeDamage(time: number, dmg: number, fromX: number): boolean {
     if (time < this.invulnUntil) return false;
     this.hp -= dmg;
     this.invulnUntil = time + PLAYER.invulnDuration;
+    this.hurtUntil = time + 600;
     this.fx += (this.fx < fromX ? -1 : 1) * 26; // відкидання
     return true;
   }

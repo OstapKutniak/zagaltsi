@@ -5,7 +5,7 @@ import Phaser from 'phaser';
 // Примітка: розріз/згин (cut/bend) у грі поки не рендеримо — цілі кінцівки (v1).
 
 const rad = (d: number): number => (d * Math.PI) / 180;
-const TARGET_PX = 165; // цільова висота персонажа (при overall=1) у пікселях гри
+const TARGET_PX = 410; // цільова висота персонажа (при overall=1) у пікселях гри
 
 // шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
@@ -28,7 +28,9 @@ function joints(p: CharDoc['proportions']): Record<string, { x: number; y: numbe
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
   if (name === 'run') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 9)) * 5 };
-  if (name === 'jump') return { ddx: 0, ddy: -Math.sin(((t % 1.6) / 1.6) * Math.PI) * 32 };
+  if (name === 'jump') { const ph = (t % 1.6) / 1.6; const ddy = ph < 0.16 ? (ph / 0.16) * 10 : 10 - Math.sin(((ph - 0.16) / 0.84) * Math.PI) * 48; return { ddx: 0, ddy }; }
+  if (name === 'attack') { const ap = (t % 0.7) / 0.7; return { ddx: 0, ddy: ap < 0.45 ? (ap / 0.45) * 6 : 6 * (1 - (ap - 0.45) / 0.55) }; }
+  if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); return { ddx: -r * 12, ddy: -r * 3 }; }
   if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
   return { ddx: 0, ddy: 0 };
 }
@@ -50,9 +52,25 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     return z;
   }
   if (name === 'jump') {
-    const up = Math.sin(((t % 1.6) / 1.6) * Math.PI);
-    if (key.startsWith('leg')) return { drot: -up * 38 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
-    if (key.startsWith('arm')) return { drot: -up * 34, ddx: 0, ddy: 0 };
+    const ph = (t % 1.6) / 1.6; const air = ph < 0.16 ? 0 : Math.sin(((ph - 0.16) / 0.84) * Math.PI);
+    if (key.startsWith('leg')) return { drot: -air * 26 + (key.includes('front') ? 6 : -6), ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -air * 28, ddx: 0, ddy: 0 };
+    return z;
+  }
+  if (name === 'attack') {
+    const ap = (t % 0.7) / 0.7;
+    let af: number;
+    if (ap < 0.45) af = (ap / 0.45) * 40; else if (ap < 0.6) af = 40 - ((ap - 0.45) / 0.15) * 95; else af = -55 + ((ap - 0.6) / 0.4) * 55;
+    if (key === 'arm_front') return { drot: af, ddx: 0, ddy: 0 };
+    if (key === 'arm_back') return { drot: -af * 0.3, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: ap < 0.45 ? (ap / 0.45) * 6 : -6 + ((ap - 0.45) / 0.55) * 6, ddx: 0, ddy: 0 };
+    return z;
+  }
+  if (name === 'hurt') {
+    const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI);
+    if (key === 'torso') return { drot: r * 12, ddx: 0, ddy: 0 };
+    if (key === 'head') return { drot: r * 8, ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -r * 20, ddx: 0, ddy: 0 };
     return z;
   }
   return z;
@@ -106,7 +124,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     return c;
   }
 
-  setAnim(name: string): void { this.anim = name; }
+  setAnim(name: string): void { if (name !== this.anim) { this.anim = name; this.t = 0; } }
 
   // відстань від кореня (стегна) до найнижчої точки ніг — щоб ступні стали на землю
   feetOffset(): number {
@@ -124,6 +142,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     const J = joints(this.prop);
     const us = this.unitScale();
     const r = animRoot(this.anim, this.t);
+    const hurt = this.anim === 'hurt';
     for (const d of SLOT_DEFS) {
       const im = this.parts[d.key];
       if (!im) continue;
@@ -133,6 +152,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       im.setPosition((j.x + sl.dx + o.ddx + r.ddx) * us, (j.y + sl.dy + o.ddy + r.ddy) * us);
       im.setRotation(rad(sl.rot + o.drot));
       im.setScale(sl.scale * us * sl.flip, sl.scale * us);
+      if (hurt) im.setTint(0xff5555); else im.clearTint();
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
     this.scaleY = 1;
