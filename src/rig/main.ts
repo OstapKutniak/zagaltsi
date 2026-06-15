@@ -133,8 +133,17 @@ const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - 
 
 // Ефективний трансформ = база + СПІЛЬНИЙ рух кореня (усе тіло) + ЛОКАЛЬНИЙ догин кістки.
 // Завдяки спільному кореню частини не "відриваються" (фікс стрибка).
-// Слоти — джерело істини для пози (таймлайн пише в них семпл кліпу). Тому eff = слот.
-function eff(sel: string): Tf { return tf(sel); }
+// Поза: авторські ключі (вже в слотах) / редагування -> слот; порожній кліп при ▶ -> процедурне прев'ю.
+function eff(sel: string): Tf {
+  if (sel === 'ref' || !state.anim) return tf(sel);
+  const clip = state.clips[state.anim];
+  if ((clip && clip.keys.length) || !state.playing) return tf(sel);
+  const su = rigSlots()[sel];
+  const o = animOff(state.anim, state.animT, sel);
+  let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
+  if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; }
+  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip };
+}
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
@@ -297,8 +306,10 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.drawImage(img, ox, oy);
     ctx.restore();
     // нижня частина — обертається на bend навколо суглоба (інверсія при дзеркаленні)
+    const proc = !!(state.anim && state.playing && !(state.clips[state.anim]?.keys.length));
+    const bendVal = (slot.bend + (proc ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * (slot.flip < 0 ? -1 : 1);
     ctx.save();
-    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend * (slot.flip < 0 ? -1 : 1))); ctx.translate(-jx, -cutY);
+    ctx.translate(jx, cutY); ctx.rotate(rad(bendVal)); ctx.translate(-jx, -cutY);
     ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
@@ -802,7 +813,7 @@ function tick(ts: number): void {
   if (!state.playing) return;
   const dt = (ts - lastTs) / 1000 || 0; lastTs = ts;
   const clip = curClip();
-  if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; loadFrame(state.animT); }
+  if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; if (clip.keys.length) loadFrame(state.animT); }
   draw();
   $('tlTime').textContent = state.animT.toFixed(2);
   $<HTMLInputElement>('timeline').value = String(state.animT);
