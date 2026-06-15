@@ -455,34 +455,79 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 });
 
 // ---- експорт / імпорт ----
-$<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
-  // самодостатній файл: вшиваємо використані картинки як base64 -> гра читає лише один файл
+// самодостатній doc: пропорції + слоти + вшиті картинки (base64)
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string> } {
   const used = new Set(Object.values(state.slots).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  const doc = { version: 3, proportions: state.prop, slots: state.slots, images };
+  return { version: 3, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(state.slots)), images };
+}
+function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string> }): void {
+  if (doc.proportions) Object.assign(state.prop, doc.proportions);
+  if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
+  if (doc.images) for (const [name, data] of Object.entries(doc.images)) {
+    const im = new Image();
+    im.onload = () => { state.images.set(name, imageToCanvas(im)); if (!state.imageNames.includes(name)) state.imageNames.push(name); refreshUI(); };
+    im.src = data;
+  }
+  refreshUI();
+}
+// мініатюра для бібліотеки (bind-поза, цілі кінцівки)
+function composeThumb(w: number, h: number): string {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const cx = c.getContext('2d')!; const J = joints(); const us = (h * 0.8) / 430; const ox = w / 2, oy = h * 0.46;
+  for (const d of SLOT_DEFS) {
+    const sl = state.slots[d.key]; const img = sl.image ? state.images.get(sl.image) : undefined; if (!img) continue;
+    const j = J[d.joint];
+    cx.save();
+    cx.translate(ox + (j.x + sl.dx) * us, oy + (j.y + sl.dy) * us);
+    cx.rotate(rad(sl.rot)); const sc = sl.scale * us; cx.scale(sl.flip * sc, sc);
+    cx.drawImage(img, -sl.pivotX * img.width, -sl.pivotY * img.height);
+    cx.restore();
+  }
+  return c.toDataURL('image/png');
+}
+
+// ---- бібліотека персонажів (localStorage) ----
+interface LibItem { id: string; name: string; doc: ReturnType<typeof buildDoc>; thumb: string }
+const LIB_KEY = 'ostap_library';
+const loadLib = (): LibItem[] => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); } catch { return []; } };
+const storeLib = (lib: LibItem[]): void => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { status('Не вдалося зберегти — переповнення сховища браузера'); } };
+function renderLibrary(): void {
+  const box = $('libList'); box.innerHTML = '';
+  const lib = loadLib();
+  if (!lib.length) { box.innerHTML = '<div class="libEmpty">Порожньо. Збери персонажа й тисни «Save Character».</div>'; return; }
+  for (const c of lib) {
+    const card = document.createElement('div'); card.className = 'libCard';
+    const img = document.createElement('img'); img.src = c.thumb;
+    const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = c.name;
+    const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕';
+    card.onclick = () => { loadCharFromDoc(c.doc); status(`Завантажено: ${c.name}`); };
+    del.onclick = (e) => { e.stopPropagation(); storeLib(loadLib().filter((x) => x.id !== c.id)); renderLibrary(); };
+    card.appendChild(img); card.appendChild(nm); card.appendChild(del); box.appendChild(card);
+  }
+}
+function saveCharacter(): void {
+  const name = prompt('Назва персонажа:', 'Остап'); if (!name) return;
+  const lib = loadLib();
+  lib.push({ id: 'c' + Date.now(), name, doc: buildDoc(), thumb: composeThumb(150, 190) });
+  storeLib(lib); renderLibrary(); status(`Збережено: ${name}`);
+}
+$<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
+
+$<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
+  const doc = buildDoc();
   const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();
-  status(`Експортовано character.json (частин: ${used.size}) — кинь у гру`);
+  status(`Експортовано character.json (частин: ${Object.keys(doc.images).length}) — кинь у гру`);
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
 $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
   const file = (ev.target as HTMLInputElement).files?.[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try {
-      const doc = JSON.parse(String(reader.result));
-      if (doc.proportions) Object.assign(state.prop, doc.proportions);
-      if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
-      if (doc.images) {
-        for (const [name, data] of Object.entries(doc.images as Record<string, string>)) {
-          const im = new Image();
-          im.onload = () => { state.images.set(name, imageToCanvas(im)); if (!state.imageNames.includes(name)) state.imageNames.push(name); refreshUI(); };
-          im.src = data;
-        }
-      }
-      status('Імпортовано.'); refreshUI();
-    } catch { status('Помилка читання JSON'); }
+    try { loadCharFromDoc(JSON.parse(String(reader.result))); status('Імпортовано.'); }
+    catch { status('Помилка читання JSON'); }
   };
   reader.readAsText(file);
 });
@@ -508,4 +553,5 @@ $<HTMLSelectElement>('anim').addEventListener('change', (e) => setAnim((e.target
 window.addEventListener('resize', () => { resize(); draw(); });
 restoreLocal();
 resize(); refreshUI();
+renderLibrary();
 status('Завантаж орієнтир-силует і частини. G/R/S — рух/поворот/розмір, Q — півот, Ctrl+Z — відміна.');
