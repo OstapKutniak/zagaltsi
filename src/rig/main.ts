@@ -42,6 +42,7 @@ const state = {
   cutMode: false,
   zoom: 1,
   pan: { x: 0, y: 0 },
+  facing: 1, // 1 — дивиться праворуч, -1 — ліворуч (дзеркалить сцену й згини)
   origin: { x: 0, y: 0 },
   viewScale: 1,
   mouse: { x: 0, y: 0 },
@@ -82,6 +83,8 @@ function anchorPx(sel: string): { x: number; y: number } {
   const b = baseUnit(sel); const t = eff(sel); const j = toPx(b.x, b.y);
   return { x: j.x + t.dx * s(), y: j.y + t.dy * s() };
 }
+// дзеркалення X курсора у "несвічений" світ (бо сцену малюємо дзеркально при facing<0)
+const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - x : x);
 
 // Ефективний трансформ = база + СПІЛЬНИЙ рух кореня (усе тіло) + ЛОКАЛЬНИЙ догин кістки.
 // Завдяки спільному кореню частини не "відриваються" (фікс стрибка).
@@ -222,6 +225,8 @@ function drawImageAt(sel: string, alpha: number): void {
 }
 function draw(): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
   for (const d of SLOT_DEFS) drawImageAt(d.key, 1);
 
@@ -251,6 +256,8 @@ function draw(): void {
       ctx.beginPath(); ctx.arc(a.x + (lx * cr - ly * sr) * sc, a.y + (lx * sr + ly * cr) * sc, 5, 0, Math.PI * 2); ctx.fill();
     }
   }
+
+  ctx.restore(); // кінець дзеркального шару (підказка нижче — нормальним текстом)
 
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#ffd000'; ctx.font = '14px monospace';
@@ -331,17 +338,19 @@ function startMode(m: 'R' | 'S' | 'G'): void {
   state.mode = m; state.pivotMode = false;
   state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip };
   const a = anchorPx(state.selected);
-  state.startMx = state.mouse.x; state.startMy = state.mouse.y;
-  state.startAng = Math.atan2(state.mouse.y - a.y, state.mouse.x - a.x);
-  state.startDist = Math.max(8, Math.hypot(state.mouse.x - a.x, state.mouse.y - a.y));
+  const mx = mirrorX(state.mouse.x);
+  state.startMx = mx; state.startMy = state.mouse.y;
+  state.startAng = Math.atan2(state.mouse.y - a.y, mx - a.x);
+  state.startDist = Math.max(8, Math.hypot(mx - a.x, state.mouse.y - a.y));
   draw();
 }
 function applyMode(): void {
   if (!state.mode || !state.orig) return;
   const t = tf(state.selected); const a = anchorPx(state.selected);
-  if (state.mode === 'G') { t.dx = state.orig.dx + (state.mouse.x - state.startMx) / s(); t.dy = state.orig.dy + (state.mouse.y - state.startMy) / s(); }
-  else if (state.mode === 'R') { const ang = Math.atan2(state.mouse.y - a.y, state.mouse.x - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
-  else if (state.mode === 'S') { const d = Math.hypot(state.mouse.x - a.x, state.mouse.y - a.y); t.scale = Math.max(0.02, state.orig.scale * (d / state.startDist)); }
+  const mx = mirrorX(state.mouse.x); const my = state.mouse.y;
+  if (state.mode === 'G') { t.dx = state.orig.dx + (mx - state.startMx) / s(); t.dy = state.orig.dy + (my - state.startMy) / s(); }
+  else if (state.mode === 'R') { const ang = Math.atan2(my - a.y, mx - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
+  else if (state.mode === 'S') { const d = Math.hypot(mx - a.x, my - a.y); t.scale = Math.max(0.02, state.orig.scale * (d / state.startDist)); }
   draw();
 }
 function endMode(commit: boolean): void {
@@ -380,6 +389,7 @@ function refreshUI(): void {
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
+  $<HTMLButtonElement>('faceBtn').textContent = '↔ Дивиться: ' + (state.facing > 0 ? '→' : '←');
   saveLocal();
   draw();
 }
@@ -402,6 +412,7 @@ for (const k of ['overall', 'head', 'torso', 'arms', 'legs'] as const) {
 }
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('showRef').addEventListener('change', (e) => { state.showRef = (e.target as HTMLInputElement).checked; draw(); });
+$<HTMLButtonElement>('faceBtn').addEventListener('click', () => { state.facing *= -1; refreshUI(); });
 $<HTMLButtonElement>('refBtn').addEventListener('click', () => $<HTMLInputElement>('refInput').click());
 $<HTMLButtonElement>('refClear').addEventListener('click', () => { pushUndo(); state.ref.canvas = null; draw(); });
 $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
@@ -414,9 +425,10 @@ let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null
 let panning = false;
 let panStart = { mx: 0, my: 0, px: 0, py: 0 };
 canvas.addEventListener('mousedown', (ev) => {
-  const c = { x: ev.offsetX, y: ev.offsetY };
-  // середня кнопка (колесо) — панорама в'юпорта (Blender-стиль)
-  if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: c.x, my: c.y, px: state.pan.x, py: state.pan.y }; return; }
+  const raw = { x: ev.offsetX, y: ev.offsetY };
+  // середня кнопка (колесо) — панорама в'юпорта (Blender-стиль), у сирих координатах
+  if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: raw.x, my: raw.y, px: state.pan.x, py: state.pan.y }; return; }
+  const c = { x: mirrorX(raw.x), y: raw.y };
   if (state.mode) { endMode(ev.button === 0); return; }
   if (state.cutMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
@@ -437,7 +449,7 @@ window.addEventListener('mousemove', (ev) => {
   state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
   if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); }
   else if (state.mode) applyMode();
-  else if (drag) { tf(drag.key).dx = drag.dx + (state.mouse.x - drag.sx) / s(); tf(drag.key).dy = drag.dy + (state.mouse.y - drag.sy) / s(); draw(); }
+  else if (drag) { const wx = mirrorX(state.mouse.x); tf(drag.key).dx = drag.dx + (wx - drag.sx) / s(); tf(drag.key).dy = drag.dy + (state.mouse.y - drag.sy) / s(); draw(); }
 });
 window.addEventListener('mouseup', () => { drag = null; panning = false; });
 canvas.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (state.mode) endMode(false); });
