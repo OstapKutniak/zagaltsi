@@ -557,14 +557,17 @@ function composeThumb(w: number, h: number): string {
 }
 
 // ---- бібліотека персонажів (localStorage) ----
-interface LibItem { id: string; name: string; doc: ReturnType<typeof buildDoc>; thumb: string }
+interface LibItem { id: string; name: string; cat: 'char' | 'enemy'; doc: ReturnType<typeof buildDoc>; thumb: string }
 const LIB_KEY = 'ostap_library';
+let libCat: 'char' | 'enemy' = 'char'; // активна вкладка бібліотеки
 const loadLib = (): LibItem[] => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); } catch { return []; } };
 const storeLib = (lib: LibItem[]): void => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { status('Не вдалося зберегти — переповнення сховища браузера'); } };
 function renderLibrary(): void {
+  $<HTMLButtonElement>('tabChar').classList.toggle('active', libCat === 'char');
+  $<HTMLButtonElement>('tabEnemy').classList.toggle('active', libCat === 'enemy');
   const box = $('libList'); box.innerHTML = '';
-  const lib = loadLib();
-  if (!lib.length) { box.innerHTML = '<div class="libEmpty">Порожньо. Збери персонажа й тисни «Save Character».</div>'; return; }
+  const lib = loadLib().filter((c) => (c.cat ?? 'char') === libCat);
+  if (!lib.length) { box.innerHTML = '<div class="libEmpty">Порожньо. Збери й тисни «Save».</div>'; return; }
   for (const c of lib) {
     const card = document.createElement('div'); card.className = 'libCard';
     const img = document.createElement('img'); img.src = c.thumb;
@@ -576,15 +579,18 @@ function renderLibrary(): void {
   }
 }
 function saveCharacter(): void {
-  const name = prompt('Назва персонажа:', 'Остап'); if (!name) return;
+  const what = libCat === 'enemy' ? 'ворога' : 'персонажа';
+  const name = prompt(`Назва ${what}:`, libCat === 'enemy' ? 'Ворог' : 'Остап'); if (!name) return;
   const lib = loadLib();
-  const item: LibItem = { id: 'c' + Date.now(), name, doc: buildDoc(), thumb: composeThumb(150, 190) };
-  const i = lib.findIndex((x) => x.name === name);
-  if (i >= 0) { item.id = lib[i].id; lib[i] = item; status(`Оновлено: ${name}`); } // та сама назва -> замінюємо
+  const item: LibItem = { id: 'c' + Date.now(), name, cat: libCat, doc: buildDoc(), thumb: composeThumb(150, 190) };
+  const i = lib.findIndex((x) => x.name === name && (x.cat ?? 'char') === libCat); // та сама назва В ЦІЙ вкладці -> заміна
+  if (i >= 0) { item.id = lib[i].id; lib[i] = item; status(`Оновлено: ${name}`); }
   else { lib.push(item); status(`Збережено: ${name}`); }
   storeLib(lib); renderLibrary();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
+$<HTMLButtonElement>('tabChar').addEventListener('click', () => { libCat = 'char'; renderLibrary(); });
+$<HTMLButtonElement>('tabEnemy').addEventListener('click', () => { libCat = 'enemy'; renderLibrary(); });
 
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
   const doc = buildDoc();
