@@ -7,12 +7,13 @@ import Phaser from 'phaser';
 const rad = (d: number): number => (d * Math.PI) / 180;
 const CHAR_SCALE = 0.3; // одиниці тулзи -> ігрові пікселі (множиться на proportions.overall)
 
+// шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
   { key: 'leg_back', joint: 'hipBack' },
   { key: 'arm_back', joint: 'shBack' },
+  { key: 'leg_front', joint: 'hipFront' },
   { key: 'torso', joint: 'hip' },
   { key: 'head', joint: 'neck' },
-  { key: 'leg_front', joint: 'hipFront' },
   { key: 'arm_front', joint: 'shFront' },
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140 };

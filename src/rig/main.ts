@@ -12,12 +12,13 @@ interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number 
 interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 
+// Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 const SLOT_DEFS = [
   { key: 'leg_back', label: 'Нога зад', joint: 'hipBack', len: 'legs', piv: [0.5, 0.06] },
   { key: 'arm_back', label: 'Рука зад', joint: 'shBack', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'leg_front', label: 'Нога перед', joint: 'hipFront', len: 'legs', piv: [0.5, 0.06] },
   { key: 'torso', label: 'Торс', joint: 'hip', len: 'torso', piv: [0.5, 0.94] },
   { key: 'head', label: 'Голова', joint: 'neck', len: 'head', piv: [0.5, 0.94] },
-  { key: 'leg_front', label: 'Нога перед', joint: 'hipFront', len: 'legs', piv: [0.5, 0.06] },
   { key: 'arm_front', label: 'Рука перед', joint: 'shFront', len: 'arms', piv: [0.5, 0.08] },
 ] as const;
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
@@ -132,6 +133,22 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
   return z;
 }
 
+// Згин у суглобі (коліно/лікоть) для розрізаних кінцівок — градуси, поверх slot.bend.
+function animBend(name: string, t: number, key: string): number {
+  if (name === 'walk' || name === 'run') {
+    const spd = name === 'run' ? 9 : 5.5; const ph = t * spd;
+    const legAmp = name === 'run' ? 38 : 22, armAmp = name === 'run' ? 26 : 15;
+    if (key === 'leg_front') return Math.max(0, Math.sin(ph + Math.PI)) * legAmp;
+    if (key === 'leg_back') return Math.max(0, Math.sin(ph)) * legAmp;
+    if (key === 'arm_front') return (0.5 + 0.5 * Math.sin(ph)) * armAmp;
+    if (key === 'arm_back') return (0.5 + 0.5 * Math.sin(ph + Math.PI)) * armAmp;
+    return 0;
+  }
+  if (name === 'jump') { const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); if (key.startsWith('leg')) return up * 48; if (key.startsWith('arm')) return up * 26; return 0; }
+  if (name === 'idle') { if (key.startsWith('arm')) return (0.5 + 0.5 * Math.sin(t * 1.8)) * 4; return 0; }
+  return 0;
+}
+
 // ---- undo ----
 const undoStack: string[] = [];
 const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy, flip: state.ref.flip }, sel: state.selected });
@@ -190,9 +207,10 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, slot.cut * h + 4); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
-    // нижня частина — обертається на bend навколо суглоба
+    // нижня частина — обертається на bend (+ анімаційний згин) навколо суглоба
+    const animB = state.anim ? animBend(state.anim, state.animT, sel) : 0;
     ctx.save();
-    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend)); ctx.translate(-jx, -cutY);
+    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend + animB)); ctx.translate(-jx, -cutY);
     ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
