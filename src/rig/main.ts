@@ -134,18 +134,19 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
 }
 
 // Згин у суглобі (коліно/лікоть) для розрізаних кінцівок — градуси, поверх slot.bend.
+// Знак від'ємний — коліно/лікоть гнуться "назад" (природно).
 function animBend(name: string, t: number, key: string): number {
   if (name === 'walk' || name === 'run') {
     const spd = name === 'run' ? 9 : 5.5; const ph = t * spd;
-    const legAmp = name === 'run' ? 38 : 22, armAmp = name === 'run' ? 26 : 15;
-    if (key === 'leg_front') return Math.max(0, Math.sin(ph + Math.PI)) * legAmp;
-    if (key === 'leg_back') return Math.max(0, Math.sin(ph)) * legAmp;
-    if (key === 'arm_front') return (0.5 + 0.5 * Math.sin(ph)) * armAmp;
-    if (key === 'arm_back') return (0.5 + 0.5 * Math.sin(ph + Math.PI)) * armAmp;
+    const legAmp = name === 'run' ? 46 : 28, armAmp = name === 'run' ? 50 : 34;
+    if (key === 'leg_front') return -Math.max(0, Math.sin(ph + Math.PI)) * legAmp;
+    if (key === 'leg_back') return -Math.max(0, Math.sin(ph)) * legAmp;
+    if (key === 'arm_front') return -(0.4 + 0.6 * Math.abs(Math.sin(ph))) * armAmp;
+    if (key === 'arm_back') return -(0.4 + 0.6 * Math.abs(Math.sin(ph + Math.PI))) * armAmp;
     return 0;
   }
-  if (name === 'jump') { const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); if (key.startsWith('leg')) return up * 48; if (key.startsWith('arm')) return up * 26; return 0; }
-  if (name === 'idle') { if (key.startsWith('arm')) return (0.5 + 0.5 * Math.sin(t * 1.8)) * 4; return 0; }
+  if (name === 'jump') { const up = Math.sin(((t % 1.6) / 1.6) * Math.PI); if (key.startsWith('leg')) return -up * 54; if (key.startsWith('arm')) return -up * 34; return 0; }
+  if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
   return 0;
 }
 
