@@ -14,8 +14,8 @@ interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 const SLOT_DEFS = [
-  { key: 'leg_back', label: 'Нога зад', len: 'legs', piv: [0.5, 0.06] },
   { key: 'arm_back', label: 'Рука зад', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'leg_back', label: 'Нога зад', len: 'legs', piv: [0.5, 0.06] },
   { key: 'leg_front', label: 'Нога перед', len: 'legs', piv: [0.5, 0.06] },
   { key: 'torso', label: 'Торс', len: 'torso', piv: [0.5, 0.94] },
   { key: 'neck', label: 'Шия', len: 'neck', piv: [0.5, 0.9] },

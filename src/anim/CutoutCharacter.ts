@@ -9,7 +9,7 @@ const TARGET_PX = 410; // цільова висота персонажа (при
 
 // шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
-  { key: 'leg_back' }, { key: 'arm_back' }, { key: 'leg_front' },
+  { key: 'arm_back' }, { key: 'leg_back' }, { key: 'leg_front' },
   { key: 'torso' }, { key: 'neck' }, { key: 'head' }, { key: 'arm_front' },
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
