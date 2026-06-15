@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         rig: 'rig.html',
+        level: 'level.html',
       },
     },
   },
