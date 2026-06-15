@@ -11,6 +11,10 @@ const rad = (d: number): number => (d * Math.PI) / 180;
 interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number }
 interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
+// ---- анімації (таймлайн) ----
+interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
+interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
+interface Clip { duration: number; keys: Keyframe[] }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 const SLOT_DEFS = [
@@ -53,8 +57,12 @@ const state = {
   imageNames: [] as string[],
   ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1 } as Ref,
   showRef: true,
-  anim: null as null | string,
-  animT: 0,
+  anim: null as null | string, // активний кліп (редагується)
+  animT: 0, // час на таймлайні
+  clips: {} as Record<string, Clip>, // авторські анімації
+  playing: false,
+  selKeys: [] as number[], // вибрані ключі (для звʼязування)
+  setup: null as Record<string, Slot> | null, // bind-поза, поки редагуємо кліп
   prop: { overall: 1, head: 1.4, torso: 0.95, arms: 1.1, legs: 1.3 },
   slots: {} as Record<string, Slot>,
   selected: 'torso',
@@ -125,15 +133,8 @@ const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - 
 
 // Ефективний трансформ = база + СПІЛЬНИЙ рух кореня (усе тіло) + ЛОКАЛЬНИЙ догин кістки.
 // Завдяки спільному кореню частини не "відриваються" (фікс стрибка).
-function eff(sel: string): Tf {
-  const t = tf(sel);
-  if (!state.anim || sel === 'ref') return t;
-  const o = animOff(state.anim, state.animT, sel);
-  let dx = t.dx + o.ddx;
-  let dy = t.dy + o.ddy;
-  if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; } // корінь рухає все тіло
-  return { rot: t.rot + o.drot * state.animDir, scale: t.scale, dx, dy, flip: t.flip };
-}
+// Слоти — джерело істини для пози (таймлайн пише в них семпл кліпу). Тому eff = слот.
+function eff(sel: string): Tf { return tf(sel); }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
@@ -235,7 +236,7 @@ function animBend(name: string, t: number, key: string): number {
 
 // ---- undo ----
 const undoStack: string[] = [];
-const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy, flip: state.ref.flip }, sel: state.selected });
+const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy, flip: state.ref.flip }, sel: state.selected, clips: state.clips });
 function pushUndo(): void { undoStack.push(snapshot()); if (undoStack.length > 80) undoStack.shift(); }
 function undo(): void {
   const s0 = undoStack.pop(); if (!s0) { status('Нема що відміняти'); return; }
@@ -243,13 +244,15 @@ function undo(): void {
   Object.assign(state.prop, o.prop);
   for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   Object.assign(state.ref, o.ref);
+  if (o.clips) state.clips = o.clips;
   if (o.sel) state.selected = o.sel;
+  if (state.anim) { refreshTimeline(); }
   refreshUI();
 }
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: state.slots, facing: state.facing })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigSlots(), facing: state.facing, clips: state.clips })); } catch { /* ignore */ }
 }
 function restoreLocal(): void {
   try {
@@ -257,6 +260,7 @@ function restoreLocal(): void {
     if (!o) return;
     if (o.prop) Object.assign(state.prop, o.prop);
     if (typeof o.facing === 'number') state.facing = o.facing;
+    if (o.clips) state.clips = o.clips;
     if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   } catch { /* ignore */ }
 }
@@ -292,10 +296,9 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, slot.cut * h + 4); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
-    // нижня частина — обертається на bend (+ анімаційний згин) навколо суглоба
-    const animB = state.anim ? animBend(state.anim, state.animT, sel) * state.animDir : 0;
+    // нижня частина — обертається на bend навколо суглоба (інверсія при дзеркаленні)
     ctx.save();
-    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend + animB)); ctx.translate(-jx, -cutY);
+    ctx.translate(jx, cutY); ctx.rotate(rad(slot.bend * (slot.flip < 0 ? -1 : 1))); ctx.translate(-jx, -cutY);
     ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
@@ -559,6 +562,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
+  else if (ev.code === 'KeyK') { ev.preventDefault(); if (state.anim) setKey(); }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
   else if (ev.code === 'Escape') endMode(false);
   else if (ev.code === 'Enter') endMode(true);
@@ -583,15 +587,18 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
-function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number } {
-  const used = new Set(Object.values(state.slots).map((sl) => sl.image).filter(Boolean) as string[]);
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; clips: Record<string, Clip> } {
+  const rig = rigSlots();
+  const used = new Set(Object.values(rig).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  return { version: 3, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(state.slots)), images, facing: state.facing };
+  return { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, clips: JSON.parse(JSON.stringify(state.clips)) };
 }
-function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number }): void {
+function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; clips?: Record<string, Clip> }): void {
+  state.anim = null; exitClip(); // вийти з режиму анімації перед завантаженням
   if (typeof doc.facing === 'number') state.facing = doc.facing;
   if (doc.proportions) Object.assign(state.prop, doc.proportions);
+  if (doc.clips) state.clips = doc.clips;
   if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
   if (doc.images) for (const [name, data] of Object.entries(doc.images)) {
     const im = new Image();
@@ -688,26 +695,145 @@ $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
   reader.readAsText(file);
 });
 
-// ---- цикл тест-анімації ----
+// ---- таймлайн / авторські анімації ----
+const SMOOTH = (f: number): number => f * f * (3 - 2 * f);
+function curClip(): Clip | null { return state.anim ? (state.clips[state.anim] ??= { duration: 1, keys: [] }) : null; }
+function rigSlots(): Record<string, Slot> { return state.setup ?? state.slots; } // bind-поза
+function enterClip(): void { if (!state.setup) state.setup = JSON.parse(JSON.stringify(state.slots)) as Record<string, Slot>; }
+function exitClip(): void { if (state.setup) { for (const k of Object.keys(state.slots)) Object.assign(state.slots[k], state.setup[k]); state.setup = null; } }
+
+function sampleClip(clip: Clip, t: number, sel: string): KeyPose {
+  const su = rigSlots()[sel];
+  const base: KeyPose = { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend };
+  const ks = clip.keys;
+  if (!ks.length) return base;
+  if (t <= ks[0].t) return ks[0].pose[sel] ?? base;
+  const last = ks[ks.length - 1];
+  if (t >= last.t) return last.pose[sel] ?? base;
+  for (let i = 0; i < ks.length - 1; i++) {
+    const a = ks[i], b = ks[i + 1];
+    if (t >= a.t && t <= b.t) {
+      let f = (t - a.t) / ((b.t - a.t) || 1);
+      if (a.interp === 'smooth') f = SMOOTH(f);
+      const pa = a.pose[sel] ?? base, pb = b.pose[sel] ?? base;
+      const L = (x: number, y: number): number => x + (y - x) * f;
+      return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend) };
+    }
+  }
+  return base;
+}
+function loadFrame(t: number): void {
+  state.animT = t;
+  const clip = curClip();
+  if (clip) for (const d of SLOT_DEFS) {
+    const sp = sampleClip(clip, t, d.key); const sl = state.slots[d.key];
+    sl.rot = sp.rot; sl.dx = sp.dx; sl.dy = sp.dy; sl.scale = sp.scale; sl.bend = sp.bend;
+  }
+}
+function snapPose(): Record<string, KeyPose> {
+  const pose: Record<string, KeyPose> = {};
+  for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; pose[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend }; }
+  return pose;
+}
+function setKey(): void {
+  const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
+  pushUndo();
+  const t = state.animT; const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+  if (i >= 0) clip.keys[i].pose = snapPose();
+  else { clip.keys.push({ t, interp: 'linear', pose: snapPose() }); clip.keys.sort((a, b) => a.t - b.t); }
+  refreshTimeline(); status('⬤ Ключ поставлено');
+}
+function delKey(): void {
+  const clip = curClip(); if (!clip) return;
+  pushUndo(); clip.keys = clip.keys.filter((k) => Math.abs(k.t - state.animT) >= 0.02);
+  state.selKeys = []; refreshTimeline();
+}
+function resetAnim(): void {
+  const clip = curClip(); if (!clip) return;
+  pushUndo(); clip.keys = []; state.selKeys = [];
+  loadFrame(state.animT); refreshTimeline(); refreshUI(); status('↺ Анімацію очищено');
+}
+function bakeProcedural(): void {
+  const clip = curClip(); if (!clip || !state.anim) return;
+  pushUndo();
+  const N = 8; const dur = clip.duration; clip.keys = [];
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * dur; const pose: Record<string, KeyPose> = {};
+    for (const d of SLOT_DEFS) {
+      const sl = rigSlots()[d.key];
+      const o = animOff(state.anim, t, d.key);
+      let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
+      if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: sl.bend + animBend(state.anim, t, d.key) * state.animDir };
+    }
+    clip.keys.push({ t, interp: 'linear', pose });
+  }
+  loadFrame(state.animT); refreshTimeline(); refreshUI(); status('⚙ Запечено базову — далі редагуй ключі');
+}
+function setInterp(mode: 'linear' | 'smooth'): void {
+  const clip = curClip(); if (!clip || !state.selKeys.length) { status('Виділи ключі (Shift-клік по точках)'); return; }
+  pushUndo(); for (const i of state.selKeys) if (clip.keys[i]) clip.keys[i].interp = mode;
+  refreshTimeline(); status(mode === 'smooth' ? 'Звʼязано: згладжено' : 'Звʼязано: лінійно');
+}
+function refreshTimeline(): void {
+  const clip = curClip(); const dur = clip ? clip.duration : 1;
+  const tl = $<HTMLInputElement>('timeline'); tl.max = String(dur); tl.value = String(Math.min(state.animT, dur));
+  $('tlTime').textContent = state.animT.toFixed(2);
+  $<HTMLInputElement>('dur').value = String(dur);
+  $<HTMLButtonElement>('playBtn').textContent = state.playing ? '⏸' : '▶';
+  $<HTMLSelectElement>('anim').value = state.anim ?? '';
+  const track = $('keyTrack'); track.innerHTML = '';
+  if (clip) for (let i = 0; i < clip.keys.length; i++) {
+    const k = clip.keys[i];
+    const dot = document.createElement('div');
+    dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
+    dot.style.left = `${(k.t / dur) * 100}%`;
+    dot.onclick = (e) => {
+      if (e.shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
+      else state.selKeys = [i];
+      loadFrame(k.t); refreshTimeline(); refreshUI();
+    };
+    track.appendChild(dot);
+  }
+}
 let raf = 0;
 let lastTs = 0;
 function tick(ts: number): void {
-  if (!state.anim) return;
-  const dt = (ts - lastTs) / 1000 || 0;
-  lastTs = ts;
-  state.animT += dt;
+  if (!state.playing) return;
+  const dt = (ts - lastTs) / 1000 || 0; lastTs = ts;
+  const clip = curClip();
+  if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; loadFrame(state.animT); }
   draw();
+  $('tlTime').textContent = state.animT.toFixed(2);
+  $<HTMLInputElement>('timeline').value = String(state.animT);
   raf = requestAnimationFrame(tick);
 }
-function setAnim(name: string): void {
+function play(on: boolean): void {
+  state.playing = on && !!state.anim;
   cancelAnimationFrame(raf);
-  state.anim = name || null;
-  if (state.anim) { state.animT = 0; lastTs = performance.now(); raf = requestAnimationFrame(tick); } else draw();
+  if (state.playing) { lastTs = performance.now(); raf = requestAnimationFrame(tick); }
+  refreshTimeline();
 }
-$<HTMLSelectElement>('anim').addEventListener('change', (e) => setAnim((e.target as HTMLSelectElement).value));
+$<HTMLSelectElement>('anim').addEventListener('change', (e) => {
+  play(false);
+  const v = (e.target as HTMLSelectElement).value;
+  if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); }
+  else { state.anim = null; exitClip(); }
+  refreshTimeline(); refreshUI();
+});
+$<HTMLButtonElement>('playBtn').addEventListener('click', () => play(!state.playing));
+$<HTMLInputElement>('timeline').addEventListener('input', (e) => { play(false); loadFrame(Number((e.target as HTMLInputElement).value)); refreshTimeline(); refreshUI(); });
+$<HTMLInputElement>('dur').addEventListener('input', (e) => { const c = curClip(); if (c) { c.duration = Math.max(0.2, Number((e.target as HTMLInputElement).value)); refreshTimeline(); } });
+$<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
+$<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
+$<HTMLButtonElement>('bakeBtn').addEventListener('click', bakeProcedural);
+$<HTMLButtonElement>('linkLin').addEventListener('click', () => setInterp('linear'));
+$<HTMLButtonElement>('linkSmooth').addEventListener('click', () => setInterp('smooth'));
+$<HTMLButtonElement>('resetAnim').addEventListener('click', resetAnim);
 
 window.addEventListener('resize', () => { resize(); draw(); });
 restoreLocal();
 resize(); refreshUI();
 renderLibrary();
+refreshTimeline();
 status('Завантаж орієнтир-силует і частини. G/R/S — рух/поворот/розмір, Q — півот, Ctrl+Z — відміна.');

@@ -14,8 +14,11 @@ const SLOT_DEFS = [
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
-interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number }
-export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number }
+interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number }
+interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
+interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
+interface Clip { duration: number; keys: Keyframe[] }
+export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; clips?: Record<string, Clip> }
 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
 const PARENT: Record<string, string | null> = {
@@ -110,12 +113,36 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private anim = 'idle';
   private t = 0;
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
+  private clips: Record<string, Clip> = {};
 
   private constructor(scene: Phaser.Scene, doc: CharDoc) {
     super(scene, 0, 0);
     this.prop = doc.proportions;
     this.slots = doc.slots;
     this.docFacing = doc.facing ?? 1;
+    this.clips = doc.clips ?? {};
+  }
+
+  // вибірка авторського кліпу в момент t для слота (локальний трансформ)
+  private sampleClip(clip: Clip, t: number, sel: string): KeyPose {
+    const su = this.slots[sel];
+    const base: KeyPose = su ? { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend ?? 0 } : { rot: 0, dx: 0, dy: 0, scale: 1, flip: 1, bend: 0 };
+    const ks = clip.keys;
+    if (!ks.length) return base;
+    if (t <= ks[0].t) return ks[0].pose[sel] ?? base;
+    const last = ks[ks.length - 1];
+    if (t >= last.t) return last.pose[sel] ?? base;
+    for (let i = 0; i < ks.length - 1; i++) {
+      const a = ks[i], b = ks[i + 1];
+      if (t >= a.t && t <= b.t) {
+        let f = (t - a.t) / ((b.t - a.t) || 1);
+        if (a.interp === 'smooth') f = f * f * (3 - 2 * f);
+        const pa = a.pose[sel] ?? base, pb = b.pose[sel] ?? base;
+        const L = (x: number, y: number): number => x + (y - x) * f;
+        return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend) };
+      }
+    }
+    return base;
   }
 
   // масштаб одиниці->піксель так, щоб висота персонажа = TARGET_PX (overall — множник)
@@ -157,27 +184,33 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     this.t += dt;
     const us = this.unitScale();
     const hurt = this.anim === 'hurt';
+    const clip = this.clips[this.anim];
+    const authored = !!(clip && clip.keys.length); // є авторська анімація -> грати її
+    const ct = authored ? this.t % clip!.duration : 0;
+    // локальний трансформ слота (авторський семпл АБО процедурний)
+    const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number } => {
+      const sl = this.slots[sel];
+      if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale }; }
+      const o = animOff(this.anim, this.t, sel);
+      let dx = (sl?.dx ?? 0) + o.ddx, dy = (sl?.dy ?? 0) + o.ddy;
+      if (!PARENT[sel]) { const ar = animRoot(this.anim, this.t); dx += ar.ddx; dy += ar.ddy; }
+      return { rot: (sl?.rot ?? 0) + o.drot, dx, dy, scale: sl?.scale ?? 1 };
+    };
     // світовий трансформ слота в локалі контейнера (ієрархія)
     const cache: Record<string, { x: number; y: number; rot: number }> = {};
     const wof = (sel: string): { x: number; y: number; rot: number } => {
       if (cache[sel]) return cache[sel];
-      const sl = this.slots[sel];
-      const o = animOff(this.anim, this.t, sel);
-      const lrot = (sl?.rot ?? 0) + o.drot;
-      let ldx = (sl?.dx ?? 0) + o.ddx;
-      let ldy = (sl?.dy ?? 0) + o.ddy;
+      const lp = localOf(sel);
       const p = PARENT[sel];
       let res: { x: number; y: number; rot: number };
       if (!p) {
-        const ar = animRoot(this.anim, this.t); // корінь рухає все тіло
-        ldx += ar.ddx; ldy += ar.ddy;
-        res = { x: ldx * us, y: ldy * us, rot: rad(lrot) };
+        res = { x: lp.dx * us, y: lp.dy * us, rot: rad(lp.rot) };
       } else {
         const pw = wof(p);
         const cn = conn(sel, this.prop);
-        const lx = cn.x + ldx, ly = cn.y + ldy;
+        const lx = cn.x + lp.dx, ly = cn.y + lp.dy;
         const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
-        res = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(lrot) };
+        res = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(lp.rot) };
       }
       cache[sel] = res; return res;
     };
@@ -186,9 +219,10 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       if (!im) continue;
       const sl = this.slots[d.key];
       const wt = wof(d.key);
+      const lp = localOf(d.key);
       im.setPosition(wt.x, wt.y);
       im.setRotation(wt.rot);
-      im.setScale(sl.scale * us * sl.flip, sl.scale * us);
+      im.setScale(lp.scale * us * sl.flip, lp.scale * us);
       if (hurt) im.setTint(0xff5555); else im.clearTint();
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
