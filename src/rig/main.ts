@@ -8,7 +8,7 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const rad = (d: number): number => (d * Math.PI) / 180;
 
-interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number }
+interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number; sx: number; sy: number }
 interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number; bendFlip: boolean }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
@@ -57,7 +57,7 @@ const ctx = canvas.getContext('2d')!;
 const state = {
   images: new Map<string, HTMLCanvasElement>(),
   imageNames: [] as string[],
-  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1 } as Ref,
+  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1 } as Ref,
   showRef: true,
   anim: null as null | string, // активний кліп (редагується)
   animT: 0, // час на таймлайні
@@ -79,13 +79,14 @@ const state = {
   viewScale: 1,
   mouse: { x: 0, y: 0 },
   mode: null as null | 'R' | 'S' | 'G',
+  axis: null as null | 'x' | 'z', // обмеження осі (X/Z) під час G/S, як у Blender
   orig: null as null | Tf,
   startAng: 0,
   startDist: 1,
   startMx: 0,
   startMy: 0,
 };
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, cut: null, bend: 0, bendFlip: false };
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, cut: null, bend: 0, bendFlip: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
 const s = (): number => state.viewScale * state.prop.overall;
@@ -144,7 +145,7 @@ function eff(sel: string): Tf {
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
   if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; }
-  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip };
+  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy };
 }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
@@ -287,6 +288,18 @@ function resize(): void {
   applyOrigin();
   state.viewScale = (Math.min(canvas.width, canvas.height) / 470) * state.zoom; // ввесь персонаж влазить
 }
+// межі персонажа в екранних px — для габаритної рамки
+const charBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+function resetBounds(): void { charBB.minX = charBB.minY = Infinity; charBB.maxX = charBB.maxY = -Infinity; }
+function accumBounds(a: { x: number; y: number }, ang: number, sxv: number, syv: number, ox: number, oy: number, w: number, h: number): void {
+  const cos = Math.cos(ang), sin = Math.sin(ang);
+  for (const c of [[ox, oy], [ox + w, oy], [ox, oy + h], [ox + w, oy + h]]) {
+    const px = a.x + cos * (sxv * c[0]) - sin * (syv * c[1]);
+    const py = a.y + sin * (sxv * c[0]) + cos * (syv * c[1]);
+    if (px < charBB.minX) charBB.minX = px; if (px > charBB.maxX) charBB.maxX = px;
+    if (py < charBB.minY) charBB.minY = py; if (py > charBB.maxY) charBB.maxY = py;
+  }
+}
 function drawImageAt(sel: string, alpha: number): void {
   const img = imgOf(sel); if (!img) return;
   const t = eff(sel); const p = pivotOf(sel); const a = anchorPx(sel);
@@ -297,8 +310,9 @@ function drawImageAt(sel: string, alpha: number): void {
   ctx.globalAlpha = alpha;
   ctx.translate(a.x, a.y);
   ctx.rotate(worldRot(sel)); // сумарний кут (з урахуванням батьків)
-  const sc = t.scale * s();
-  ctx.scale(t.flip * sc, sc); // flip<0 — дзеркало по X навколо півота
+  const scx = t.scale * t.sx * s(), scy = t.scale * t.sy * s(); // sx/sy — неоднорідний масштаб (S X / S Z)
+  ctx.scale(t.flip * scx, scy); // flip<0 — дзеркало по X навколо півота
+  if (sel !== 'ref') accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
 
   if (slot && slot.cut != null) {
     const cutY = oy + slot.cut * h; // лінія розрізу в локальних координатах
@@ -327,14 +341,7 @@ function draw(): void {
   const groundY = toPx(0, -4 + BASE.legs * state.prop.legs).y;
   ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
-  // ГАБАРИТ базового ігрового персонажа: низ = лінія землі (як залітає в гру),
-  // вихід за прямокутник зверху/збоку — норм, персонаж може бути більшим.
-  const GAB_W = 180, GAB_H = 360; // одиниці тулзи (підкрутимо за фідбеком)
-  const gw = GAB_W * s(), gh = GAB_H * s();
-  ctx.save();
-  ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,154,31,0.5)'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(state.origin.x - gw / 2, groundY - gh, gw, gh);
-  ctx.restore();
+  resetBounds(); // межі персонажа збираються під час малювання частин
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
@@ -369,8 +376,19 @@ function draw(): void {
 
   ctx.restore(); // кінець дзеркального шару (підказка нижче — нормальним текстом)
 
+  // ГАБАРИТ = реальні межі персонажа (низ ~ ноги/земля). Малюємо ПОВЕРХ, по факту арту.
+  if (isFinite(charBB.minX)) {
+    let x0 = charBB.minX, x1 = charBB.maxX;
+    if (state.facing < 0) { x0 = 2 * state.origin.x - charBB.maxX; x1 = 2 * state.origin.x - charBB.minX; }
+    const pad = 4;
+    ctx.save();
+    ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,154,31,0.6)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0 - pad, charBB.minY - pad, (x1 - x0) + pad * 2, (charBB.maxY - charBB.minY) + pad * 2);
+    ctx.restore();
+  }
+
   if (state.mode || state.pivotMode || state.cutMode) {
-    ctx.fillStyle = '#ffd000'; ctx.font = '14px monospace';
+    ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
     const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
@@ -382,9 +400,9 @@ function curLocal(sel: string, sx: number, sy: number): { lx: number; ly: number
   const t = tf(sel); const p = pivotOf(sel); const a = anchorPx(sel);
   const ang = -worldRot(sel); const dx = sx - a.x, dy = sy - a.y;
   const rx = dx * Math.cos(ang) - dy * Math.sin(ang); const ry = dx * Math.sin(ang) + dy * Math.cos(ang);
-  const sc = t.scale * s();
-  let localX = rx / sc; if (t.flip < 0) localX = -localX; // врахувати дзеркало
-  return { lx: localX + p.x * img.width, ly: ry / sc + p.y * img.height, iw: img.width, ih: img.height };
+  const scx = t.scale * t.sx * s(), scy = t.scale * t.sy * s();
+  let localX = rx / scx; if (t.flip < 0) localX = -localX; // врахувати дзеркало
+  return { lx: localX + p.x * img.width, ly: ry / scy + p.y * img.height, iw: img.width, ih: img.height };
 }
 function hitTest(sx: number, sy: number): string | null {
   for (let i = SLOT_DEFS.length - 1; i >= 0; i--) {
@@ -398,7 +416,7 @@ function assignImage(key: string, name: string | null): void {
   const slot = state.slots[key]; slot.image = name;
   if (name) {
     const img = state.images.get(name); if (img) slot.scale = lenOf(key) / img.height;
-    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
+    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.sx = 1; slot.sy = 1; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
     slot.cut = null; slot.bend = 0; slot.bendFlip = false;
   }
 }
@@ -446,8 +464,8 @@ function addImageFile(file: File, fallbackToSelected: boolean): void {
 function startMode(m: 'R' | 'S' | 'G'): void {
   pushUndo();
   const t = tf(state.selected);
-  state.mode = m; state.pivotMode = false;
-  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip };
+  state.mode = m; state.pivotMode = false; state.axis = null;
+  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy };
   const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x);
   state.startMx = mx; state.startMy = state.mouse.y;
@@ -461,18 +479,24 @@ function applyMode(): void {
   const mx = mirrorX(state.mouse.x); const my = state.mouse.y;
   if (state.mode === 'G') {
     const pr = state.selected !== 'ref' && PARENT[state.selected] ? worldOf(PARENT[state.selected]!).rot : 0;
-    const wdx = mx - state.startMx, wdy = my - state.startMy;
+    let wdx = mx - state.startMx, wdy = my - state.startMy;
+    if (state.axis === 'x') wdy = 0; else if (state.axis === 'z') wdx = 0; // обмеження осі (екранна гориз./верт.)
     const c = Math.cos(-pr), s2 = Math.sin(-pr);
     t.dx = state.orig.dx + (wdx * c - wdy * s2) / s();
     t.dy = state.orig.dy + (wdx * s2 + wdy * c) / s();
   } else if (state.mode === 'R') { const ang = Math.atan2(my - a.y, mx - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
-  else if (state.mode === 'S') { const d = Math.hypot(mx - a.x, my - a.y); t.scale = Math.max(0.02, state.orig.scale * (d / state.startDist)); }
+  else if (state.mode === 'S') {
+    const ratio = Math.max(0.02, Math.hypot(mx - a.x, my - a.y) / state.startDist);
+    if (state.axis === 'x') t.sx = Math.max(0.02, state.orig.sx * ratio);
+    else if (state.axis === 'z') t.sy = Math.max(0.02, state.orig.sy * ratio);
+    else t.scale = Math.max(0.02, state.orig.scale * ratio);
+  }
   draw();
 }
 function endMode(commit: boolean): void {
   if (!state.mode) return;
   if (!commit && state.orig) Object.assign(tf(state.selected), state.orig);
-  state.mode = null; state.orig = null; refreshUI();
+  state.mode = null; state.orig = null; state.axis = null; refreshUI();
 }
 
 // ---- UI ----
@@ -586,8 +610,9 @@ $<HTMLButtonElement>('loadImgBtn').addEventListener('click', () => $<HTMLInputEl
 let importMode = false;
 const exportBtnEl = $<HTMLButtonElement>('exportBtn');
 function refreshExportBtn(): void {
-  exportBtnEl.textContent = importMode ? '⬆ Імпортувати JSON' : '⬇ Експортувати JSON';
+  exportBtnEl.textContent = importMode ? 'Імпортувати JSON' : 'Експортувати JSON';
   exportBtnEl.title = importMode ? 'ПКМ — назад на Експорт' : 'ПКМ — перемкнути на Імпорт';
+  exportBtnEl.classList.toggle('light', importMode);
 }
 exportBtnEl.addEventListener('contextmenu', (e) => { e.preventDefault(); importMode = !importMode; refreshExportBtn(); });
 
@@ -603,13 +628,13 @@ canvas.addEventListener('mousedown', (ev) => {
   if (state.mode) { endMode(ev.button === 0); return; }
   if (state.cutMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
-    if (loc) { state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); pushUndo(); }
+    if (loc) { pushUndo(); state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); }
     state.cutMode = false; status('Розріз поставлено. Крути «Згин».'); refreshUI(); return;
   }
   if (state.pivotMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
-    if (loc) { state.slots[state.selected].pivotX = Math.max(0, Math.min(1, loc.lx / loc.iw)); state.slots[state.selected].pivotY = Math.max(0, Math.min(1, loc.ly / loc.ih)); }
-    pushUndo(); state.pivotMode = false; refreshUI(); return;
+    if (loc) { pushUndo(); state.slots[state.selected].pivotX = Math.max(0, Math.min(1, loc.lx / loc.iw)); state.slots[state.selected].pivotY = Math.max(0, Math.min(1, loc.ly / loc.ih)); }
+    state.pivotMode = false; refreshUI(); return;
   }
   const hit = hitTest(c.x, c.y);
   const key = hit ?? (state.selected === 'ref' && state.ref.canvas ? 'ref' : null);
@@ -639,6 +664,12 @@ window.addEventListener('keydown', (ev) => {
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
+  // обмеження осі під час G/S (Blender: X — гориз., Z — верт.; повторне натискання знімає)
+  if (state.mode && (ev.code === 'KeyX' || ev.code === 'KeyZ')) {
+    ev.preventDefault(); const ax = ev.code === 'KeyX' ? 'x' : 'z';
+    state.axis = state.axis === ax ? null : ax; applyMode(); return;
+  }
+  if (ev.code === 'Space') { ev.preventDefault(); if (state.anim) play(!state.playing); return; } // пробіл — плей/пауза
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyB') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } }
@@ -696,31 +727,17 @@ function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<
   }
   refreshUI();
 }
-// мініатюра для бібліотеки (bind-поза, ієрархія, цілі кінцівки)
+// Превʼю персонажа = його ГОЛОВА (PNG зі слота head), вписана в мініатюру.
+// (Не кадруємо зібраного персонажа — беремо саме завантажену картинку голови.)
 function composeThumb(w: number, h: number): string {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const cx = c.getContext('2d')!; const us = (h * 0.8) / 430; const ox = w / 2, oy = h * 0.46;
-  const cache: Record<string, { x: number; y: number; rot: number }> = {};
-  const wof = (sel: string): { x: number; y: number; rot: number } => {
-    if (cache[sel]) return cache[sel];
-    const sl = state.slots[sel]; const p = PARENT[sel];
-    let r: { x: number; y: number; rot: number };
-    if (!p) r = { x: ox + sl.dx * us, y: oy + sl.dy * us, rot: rad(sl.rot) };
-    else {
-      const pw = wof(p); const cn = conn(sel); const lx = cn.x + sl.dx, ly = cn.y + sl.dy;
-      const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
-      r = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(sl.rot) };
-    }
-    cache[sel] = r; return r;
-  };
-  for (const d of SLOT_DEFS) {
-    const sl = state.slots[d.key]; const img = sl.image ? state.images.get(sl.image) : undefined; if (!img) continue;
-    const wt = wof(d.key);
-    cx.save();
-    cx.translate(wt.x, wt.y);
-    cx.rotate(wt.rot); const sc = sl.scale * us; cx.scale(sl.flip * sc, sc);
-    cx.drawImage(img, -sl.pivotX * img.width, -sl.pivotY * img.height);
-    cx.restore();
+  const cx = c.getContext('2d')!;
+  const head = state.slots['head'];
+  const img = head.image ? state.images.get(head.image) : undefined;
+  if (img) {
+    const scale = Math.min(w / img.width, h / img.height) * 0.9; // вписати з невеликим відступом
+    const dw = img.width * scale, dh = img.height * scale;
+    cx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
   }
   return c.toDataURL('image/png');
 }
@@ -867,28 +884,56 @@ function setInterp(mode: 'linear' | 'smooth'): void {
   pushUndo(); for (const i of state.selKeys) if (clip.keys[i]) clip.keys[i].interp = mode;
   refreshTimeline(); status(mode === 'smooth' ? 'Звʼязано: згладжено' : 'Звʼязано: лінійно');
 }
+const FPS = 24; // кадрів на секунду (таймлайн показує НОМЕРИ КАДРІВ)
+const frameOf = (t: number): number => Math.round(t * FPS);
+let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
+function movePlayhead(): void {
+  const dur = curClip()?.duration ?? 1; const pct = (Math.min(state.animT, dur) / dur) * 100;
+  if (playheadEl) playheadEl.style.left = pct + '%';
+  if (badgeEl) badgeEl.textContent = String(frameOf(state.animT));
+  $('tlTime').textContent = state.animT.toFixed(2);
+}
 function refreshTimeline(): void {
   const clip = curClip(); const dur = clip ? clip.duration : 1;
-  const tl = $<HTMLInputElement>('timeline'); tl.max = String(dur); tl.value = String(Math.min(state.animT, dur));
-  $('tlTime').textContent = state.animT.toFixed(2);
   $<HTMLInputElement>('dur').value = String(dur);
   $<HTMLButtonElement>('playBtn').textContent = state.playing ? 'Пауза' : 'Грати';
   $<HTMLButtonElement>('playBtn').classList.toggle('light', state.playing);
   $<HTMLSelectElement>('anim').value = state.anim ?? '';
-  const track = $('keyTrack'); track.innerHTML = '';
+  const track = $('track'); track.innerHTML = '';
+  const total = Math.max(1, Math.round(dur * FPS));
+  const step = total <= 12 ? 1 : total <= 30 ? 2 : total <= 80 ? 5 : 10;
+  for (let f = 0; f <= total; f += step) {
+    const tk = document.createElement('div'); tk.className = 'tick'; tk.style.left = `${(f / total) * 100}%`; tk.textContent = String(f);
+    track.appendChild(tk);
+  }
   if (clip) for (let i = 0; i < clip.keys.length; i++) {
     const k = clip.keys[i];
     const dot = document.createElement('div');
     dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
     dot.style.left = `${(k.t / dur) * 100}%`;
-    dot.onclick = (e) => {
+    dot.addEventListener('mousedown', (e) => {
+      e.stopPropagation(); // не скрабити при кліку по ключу
       if (e.shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
       else state.selKeys = [i];
-      loadFrame(k.t); refreshTimeline(); refreshUI();
-    };
+      play(false); loadFrame(k.t); refreshTimeline(); refreshUI();
+    });
     track.appendChild(dot);
   }
+  const ph = document.createElement('div'); ph.className = 'playhead';
+  const badge = document.createElement('div'); badge.className = 'phBadge'; badge.textContent = String(frameOf(state.animT));
+  ph.appendChild(badge); track.appendChild(ph);
+  playheadEl = ph; badgeEl = badge; movePlayhead();
 }
+// скраб: тягни по треку — вибираєш кадр
+let scrubbing = false;
+function scrubTo(clientX: number): void {
+  const r = $('track').getBoundingClientRect(); const dur = curClip()?.duration ?? 1;
+  const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  loadFrame(f * dur); movePlayhead(); refreshUI();
+}
+$('track').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+window.addEventListener('mousemove', (e) => { if (scrubbing) scrubTo((e as MouseEvent).clientX); });
+window.addEventListener('mouseup', () => { scrubbing = false; });
 let raf = 0;
 let lastTs = 0;
 function tick(ts: number): void {
@@ -897,8 +942,7 @@ function tick(ts: number): void {
   const clip = curClip();
   if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; if (clip.keys.length) loadFrame(state.animT); }
   draw();
-  $('tlTime').textContent = state.animT.toFixed(2);
-  $<HTMLInputElement>('timeline').value = String(state.animT);
+  movePlayhead();
   raf = requestAnimationFrame(tick);
 }
 function play(on: boolean): void {
@@ -914,13 +958,16 @@ $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
 });
 $<HTMLButtonElement>('playBtn').addEventListener('click', () => play(!state.playing));
-$<HTMLInputElement>('timeline').addEventListener('input', (e) => { play(false); loadFrame(Number((e.target as HTMLInputElement).value)); refreshTimeline(); refreshUI(); });
 $<HTMLInputElement>('dur').addEventListener('input', (e) => { const c = curClip(); if (c) { c.duration = Math.max(0.2, Number((e.target as HTMLInputElement).value)); refreshTimeline(); } });
 $<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
 $<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
 $<HTMLButtonElement>('bakeBtn').addEventListener('click', bakeProcedural);
-$<HTMLButtonElement>('linkLin').addEventListener('click', () => setInterp('linear'));
-$<HTMLButtonElement>('linkSmooth').addEventListener('click', () => setInterp('smooth'));
+// «Звʼязати» — одна кнопка: ЛКМ застосовує режим, ПКМ перемикає лінійно/згладжено (білий = згладжено)
+let linkMode: 'linear' | 'smooth' = 'linear';
+function refreshLinkBtn(): void { const b = $<HTMLButtonElement>('linkBtn'); b.textContent = 'Звʼязати: ' + (linkMode === 'linear' ? 'лінійно' : 'згладжено'); b.classList.toggle('light', linkMode === 'smooth'); }
+$<HTMLButtonElement>('linkBtn').addEventListener('click', () => setInterp(linkMode));
+$<HTMLButtonElement>('linkBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); linkMode = linkMode === 'linear' ? 'smooth' : 'linear'; refreshLinkBtn(); });
+refreshLinkBtn();
 $<HTMLButtonElement>('resetAnim').addEventListener('click', resetAnim);
 
 window.addEventListener('resize', () => { resize(); draw(); });

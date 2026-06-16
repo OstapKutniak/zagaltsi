@@ -54,12 +54,15 @@
       .tlrow select { background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; }
       .tlrow button { font-size: 12px; }
       .tltime { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: auto; }
-      #timeline { width: 100%; accent-color: var(--accent); }
-      #ruler { position: relative; height: 18px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-      #keyTrack { position: relative; height: 16px; margin-top: 2px; }
-      .keyDot { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 1px solid #000; cursor: pointer; }
+      /* трек анімації: номери кадрів зверху, вертикальний плейхед, ключі */
+      #track { position: relative; height: 54px; background: var(--rail); border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; cursor: pointer; overflow: hidden; user-select: none; }
+      #track .tick { position: absolute; top: 2px; transform: translateX(-50%); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
+      #track .tick::after { content: ''; position: absolute; left: 50%; top: 14px; width: 1px; height: 6px; background: var(--line); }
+      .keyDot { position: absolute; bottom: 8px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 1px solid #000; cursor: pointer; z-index: 3; }
       .keyDot.sel { background: #fff; }
       .keyDot.smooth { border-radius: 3px; }
+      .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; z-index: 4; }
+      .phBadge { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: var(--accent); color: #1b1b1b; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 0 0 4px 4px; font-variant-numeric: tabular-nums; }
 
       /* ---- права панель (ширша) ---- */
       #right { width: 480px; flex: 0 0 auto; }
@@ -124,15 +127,12 @@
             <button id="playBtn">Грати</button>
             <button id="keyBtn">Ключ (K)</button>
             <button id="delKeyBtn">Видалити ключ</button>
-            <button id="linkLin">Звʼязати (лінійно)</button>
-            <button id="linkSmooth">Звʼязати (згладж.)</button>
-            <button id="bakeBtn">Запекти базову</button>
+            <button id="linkBtn" title="ПКМ — перемкнути лінійно/згладжено">Звʼязати: лінійно</button>
+            <button id="bakeBtn">Зберегти анімацію</button>
             <button id="resetAnim">Скинути</button>
             <span class="tltime">трив. <input type="number" id="dur" value="1" min="0.2" step="0.1" style="width:46px" /> с · <span id="tlTime">0.00</span></span>
           </div>
-          <input type="range" id="timeline" min="0" max="1" step="0.01" value="0" />
-          <div id="ruler"></div>
-          <div id="keyTrack"></div>
+          <div id="track"></div>
         </div>
       </section>
 
