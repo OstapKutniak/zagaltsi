@@ -65,7 +65,7 @@ export class Player extends Actor {
     this.attackAnimUntil = time + 700;
   }
 
-  spawnAt(x: number): void { this.fx = x; }
+  spawnAt(x: number, y?: number): void { this.fx = x; if (y != null) this.fy = y; }
 
   isAttacking(time: number): boolean {
     return time < this.attackUntil;

@@ -39,6 +39,7 @@ export class GameScene extends Phaser.Scene {
   private levelMode = false;
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
+  private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
 
@@ -47,7 +48,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private get band(): { top: number; bottom: number } {
-    return { top: this.bandTop, bottom: this.bandBottom };
+    return this.levelBand ?? { top: this.bandTop, bottom: this.bandBottom };
   }
 
   create(): void {
@@ -151,7 +152,30 @@ export class GameScene extends Phaser.Scene {
     this.levelEnd = Math.max(this.levelStart + 200, doc.end ?? WORLD_WIDTH);
     this.player.minX = this.levelStart + 20;
     this.player.maxX = this.levelEnd - 20;
-    this.player.spawnAt(doc.spawn?.x ?? this.levelStart + 60);
+
+    // Прохідна смуга (глибина) — з намальованих колайдерів. Координати ті самі,
+    // що й у візуалі рівня (gameY = bandBottom + редакторний y), тож персонаж
+    // ходить саме там, де намальовано «де можна ходити». Нема колайдерів -> дефолт.
+    // Висота намальованої зони = глибина прохідної смуги. Смугу кладемо так, щоб
+    // її передній край був на лінії підлоги (найближче до камери), а вглиб вона
+    // тягнеться вгору по екрану. Це тримає всю зону у видимій частині (редактор
+    // має «землю» на 60% висоти, а гра — біля самого низу, тож пряме перенесення
+    // редакторного Y затягувало б персонажа за нижній край екрана).
+    this.levelBand = null;
+    const cells = doc.collider ?? [];
+    if (cells.length) {
+      const gs = doc.grid ?? 48;
+      let minCy = Infinity, maxCy = -Infinity;
+      for (const c of cells) { const cy = Number(c.split(',')[1]); if (Number.isFinite(cy)) { if (cy < minCy) minCy = cy; if (cy > maxCy) maxCy = cy; } }
+      if (minCy !== Infinity) {
+        const depth = (maxCy + 1 - minCy) * gs;
+        this.levelBand = { top: this.bandBottom - depth, bottom: this.bandBottom };
+      }
+    }
+
+    const spawnX = doc.spawn?.x ?? this.levelStart + 60;
+    const b = this.band;
+    this.player.spawnAt(spawnX, (b.top + b.bottom) / 2); // спавн у середині прохідної смуги
     this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
     void buildLevelView(this, doc, this.bandBottom);
     this.banner.setText('');
@@ -172,8 +196,8 @@ export class GameScene extends Phaser.Scene {
     this.repositionWorld();
     if (this.banner) this.banner.setPosition(this.scale.width / 2, 84);
     // Повертаємо персонажів у нову смугу
-    this.player?.clampDepth(this.bandTop, this.bandBottom);
-    for (const e of this.enemies) e.clampDepth(this.bandTop, this.bandBottom);
+    this.player?.clampDepth(this.band.top, this.band.bottom);
+    for (const e of this.enemies) e.clampDepth(this.band.top, this.band.bottom);
   }
 
   private spawnWave(): void {
