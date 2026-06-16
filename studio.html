@@ -25,11 +25,12 @@
       /* ---- ліва бібліотека (ширша) ---- */
       #library { width: 280px; flex: 0 0 auto; padding: 8px; }
       #libToggle { width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
-      #libList { flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; align-items: start; }
-      .libCard { position: relative; aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
+      #libList { flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
+      .libCard { position: relative; width: calc(50% - 4px); background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
+      .libCard::before { content: ''; display: block; padding-top: 100%; } /* квадрат: у flex % padding надійно бере ширину картки */
       .libCard.empty { cursor: default; background: #434343; }
       .libCard:not(.empty):hover { border-color: var(--sel); }
-      .libCard img { width: 100%; height: 100%; object-fit: contain; }
+      .libCard img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
       .libName { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; background: rgba(0,0,0,.5); padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .libDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.55); font-size: 11px; line-height: 1; }
 
@@ -76,12 +77,13 @@
       #tools .body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
       .btns { display: flex; gap: 6px; }
       .btns.oneRow button { flex: 1; font-size: 12px; padding: 8px 4px; }
-      #imgGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 224px; overflow-y: auto; }
-      .imgCell { position: relative; aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; }
+      #imgGrid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 224px; overflow-y: auto; align-content: flex-start; }
+      .imgCell { position: relative; width: calc(33.333% - 4px); background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; }
+      .imgCell::before { content: ''; display: block; padding-top: 100%; } /* квадрат */
       .imgCell.empty { cursor: default; background: #434343; }
       .imgCell.sel { border-color: var(--accent); }
       .imgCell:not(.empty):hover { border-color: var(--sel); }
-      .imgCell img { width: 100%; height: 100%; object-fit: contain; }
+      .imgCell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
       .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
       .row > label { flex: 0 0 64px; color: var(--muted); }
       .row input[type=range] { flex: 1; accent-color: var(--sel); }
