@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite';
 
 // base: './' — щоб усе працювало з будь-якого підшляху на хостингу/в Telegram.
-// Дві сторінки: гра (index.html) і ріг-редактор (rig.html).
+// Сторінки: гра (index.html), студія-оболонка (studio.html) + окремі тулзи
+// (rig.html, level.html) — студія вбудовує їх як секції через iframe.
 export default defineConfig({
   base: './',
   server: { host: true },
@@ -9,6 +10,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'index.html',
+        studio: 'studio.html',
         rig: 'rig.html',
         level: 'level.html',
       },
