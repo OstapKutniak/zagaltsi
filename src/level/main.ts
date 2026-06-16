@@ -93,6 +93,16 @@ function loadImg(a: Asset): void {
 
 const setStatus = (m: string): void => { $('status').textContent = m; };
 
+// ---- undo (знімки рівнів JSON; смикаємо pushUndo ПЕРЕД мутацією) ----
+const undoStack: string[] = [];
+function pushUndo(): void { undoStack.push(JSON.stringify({ levels: state.levels, cur: state.cur })); if (undoStack.length > 80) undoStack.shift(); }
+function undo(): void {
+  const s0 = undoStack.pop(); if (!s0) { setStatus('Нема що відміняти'); return; }
+  const o = JSON.parse(s0) as { levels: Level[]; cur: number };
+  state.levels = o.levels; state.cur = Math.min(o.cur, o.levels.length - 1); state.selected = null;
+  refreshLevels(); refreshSel(); draw(); save(); setStatus('↩ Відмінено');
+}
+
 // ---- рендер ----
 function applyOrigin(): void { state.origin.x = canvas.width * 0.35 + state.pan.x; state.origin.y = canvas.height * 0.6 + state.pan.y; }
 function resize(): void {
@@ -178,11 +188,12 @@ function refreshLevels(): void {
     nm.onclick = () => { state.cur = i; state.selected = null; refreshLevels(); draw(); save(); };
     nm.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; refreshLevels(); save(); } };
     const x = document.createElement('span'); x.className = 'x'; x.textContent = '✕';
-    x.onclick = (e) => { e.stopPropagation(); if (state.levels.length > 1) { state.levels.splice(i, 1); state.cur = Math.max(0, state.cur - 1); refreshLevels(); draw(); save(); } };
+    x.onclick = (e) => { e.stopPropagation(); if (state.levels.length > 1) { pushUndo(); state.levels.splice(i, 1); state.cur = Math.max(0, state.cur - 1); refreshLevels(); draw(); save(); } };
     el.appendChild(nm); el.appendChild(x); box.appendChild(el);
   });
 }
 $<HTMLButtonElement>('addLevel').addEventListener('click', () => {
+  pushUndo();
   state.levels.push(newLevel(`Рівень ${state.levels.length + 1}`));
   state.cur = state.levels.length - 1; state.selected = null; refreshLevels(); draw(); save();
 });
@@ -204,7 +215,7 @@ function refreshAssets(): void {
   const box = $('assets'); box.innerHTML = '';
   for (const a of state.assets.filter((x) => x.cat === state.cat)) {
     const el = document.createElement('div'); el.className = 'asset'; el.draggable = true;
-    const img = document.createElement('img'); img.src = a.url;
+    const img = document.createElement('img'); img.src = a.url; img.draggable = false; // інакше браузер тягне саму картинку, а не контейнер — drop без id
     const nm = document.createElement('div'); nm.textContent = a.name;
     el.appendChild(img); el.appendChild(nm);
     el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
@@ -230,6 +241,7 @@ canvas.addEventListener('drop', (e) => {
   e.preventDefault();
   const id = e.dataTransfer?.getData('text/plain'); if (!id) return;
   const a = state.assets.find((x) => x.id === id); if (!a) return;
+  pushUndo();
   const r = canvas.getBoundingClientRect();
   const w = toWorld(e.clientX - r.left, e.clientY - r.top);
   const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: 0, scale: 1, flip: 1 };
@@ -239,14 +251,13 @@ canvas.addEventListener('drop', (e) => {
 // ---- вибраний обʼєкт ----
 function refreshSel(): void {
   const p = sel();
-  $<HTMLInputElement>('rot').value = String(Math.round(p?.rot ?? 0)); $('rotV').textContent = String(Math.round(p?.rot ?? 0));
   $<HTMLInputElement>('scale').value = String(p?.scale ?? 1); $('scaleV').textContent = (p?.scale ?? 1).toFixed(2);
 }
-$<HTMLInputElement>('rot').addEventListener('input', (e) => { const p = sel(); if (p) { p.rot = Number((e.target as HTMLInputElement).value); $('rotV').textContent = (e.target as HTMLInputElement).value; draw(); save(); } });
-$<HTMLInputElement>('scale').addEventListener('input', (e) => { const p = sel(); if (p) { p.scale = Number((e.target as HTMLInputElement).value); draw(); save(); } });
-$<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { const p = sel(); if (p) { p.flip *= -1; draw(); save(); } });
+$<HTMLInputElement>('scale').addEventListener('pointerdown', () => { if (sel()) pushUndo(); });
+$<HTMLInputElement>('scale').addEventListener('input', (e) => { const p = sel(); if (p) { p.scale = Number((e.target as HTMLInputElement).value); $('scaleV').textContent = p.scale.toFixed(2); draw(); save(); } });
+$<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } });
 $<HTMLButtonElement>('delBtn').addEventListener('click', deleteSel);
-function deleteSel(): void { const p = sel(); if (!p) return; level().placed = level().placed.filter((x) => x !== p); state.selected = null; refreshSel(); draw(); save(); }
+function deleteSel(): void { const p = sel(); if (!p) return; pushUndo(); level().placed = level().placed.filter((x) => x !== p); state.selected = null; refreshSel(); draw(); save(); }
 
 // ---- налаштування ----
 $<HTMLInputElement>('snap').addEventListener('change', (e) => { state.snap = (e.target as HTMLInputElement).checked; });
@@ -270,7 +281,7 @@ function snapToEdge(): void {
       if (!best || d < best.d) best = { d, x: nx, y: q.y };
     }
   }
-  if (best && best.d < 400) { p.x = best.x; p.y = best.y; draw(); save(); setStatus('Снеп до краю'); }
+  if (best && best.d < 400) { pushUndo(); p.x = best.x; p.y = best.y; draw(); save(); setStatus('Снеп до краю'); }
   void h;
 }
 
@@ -289,6 +300,7 @@ canvas.addEventListener('mousedown', (ev) => {
   const x = ev.offsetX, y = ev.offsetY;
   if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
   if (state.markerMode) {
+    pushUndo();
     const w = toWorld(x, y); const lv = level();
     if (state.markerMode === 'spawn') lv.spawn = { x: w.x, y: w.y };
     else if (state.markerMode === 'start') lv.start = w.x;
@@ -296,10 +308,10 @@ canvas.addEventListener('mousedown', (ev) => {
     state.markerMode = null; setStatus('Маркер поставлено'); draw(); save(); return;
   }
   if (state.mode) { state.mode = null; state.orig = null; save(); return; } // підтвердити
-  if (state.cat === 'collider') { painting = true; paintAt(x, y); return; }
+  if (state.cat === 'collider') { pushUndo(); painting = true; paintAt(x, y); return; }
   const hit = hitTest(x, y);
   state.selected = hit;
-  if (hit) { const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
+  if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
   refreshSel(); draw();
 });
 window.addEventListener('mousemove', (ev) => {
@@ -316,6 +328,7 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = Math.
 
 function startMode(m: 'G' | 'R' | 'S'): void {
   const p = sel(); if (!p) return;
+  pushUndo();
   state.mode = m; state.orig = { x: p.x, y: p.y, rot: p.rot, scale: p.scale };
   const o = toScreen(p.x, p.y);
   state.startWx = state.mouse.x; state.startWy = state.mouse.y;
@@ -335,8 +348,9 @@ function applyMode(): void {
 window.addEventListener('keydown', (ev) => {
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
-  else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { p.flip *= -1; draw(); save(); } }
+  else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
   else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
   else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
   else if (ev.code === 'Escape' && state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); }

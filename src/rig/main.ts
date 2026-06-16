@@ -9,7 +9,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
 interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number }
-interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number }
+interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number; bendFlip: boolean }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
@@ -83,7 +83,7 @@ const state = {
   startMx: 0,
   startMy: 0,
 };
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, cut: null, bend: 0 };
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, cut: null, bend: 0, bendFlip: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
 const s = (): number => state.viewScale * state.prop.overall;
@@ -308,7 +308,7 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.restore();
     // нижня частина — обертається на bend навколо суглоба (інверсія при дзеркаленні)
     const proc = !!(state.anim && state.playing && !(state.clips[state.anim]?.keys.length));
-    const bendVal = (slot.bend + (proc ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * (slot.flip < 0 ? -1 : 1);
+    const bendVal = (slot.bend + (proc ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * (slot.flip < 0 ? -1 : 1) * (slot.bendFlip ? -1 : 1);
     ctx.save();
     ctx.translate(jx, cutY); ctx.rotate(rad(bendVal)); ctx.translate(-jx, -cutY);
     ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
@@ -389,7 +389,7 @@ function assignImage(key: string, name: string | null): void {
   if (name) {
     const img = state.images.get(name); if (img) slot.scale = lenOf(key) / img.height;
     slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
-    slot.cut = null; slot.bend = 0;
+    slot.cut = null; slot.bend = 0; slot.bendFlip = false;
   }
 }
 
@@ -494,6 +494,7 @@ function refreshUI(): void {
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
+  $<HTMLButtonElement>('bendFlipBtn').textContent = '↕ Згин: ' + (ss && ss.bendFlip ? 'навпаки' : 'норма');
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
   saveLocal();
@@ -510,6 +511,11 @@ $<HTMLInputElement>('scale').addEventListener('input', (e) => { tf(state.selecte
 $<HTMLInputElement>('bend').addEventListener('pointerdown', pushUndo);
 $<HTMLInputElement>('bend').addEventListener('input', (e) => { if (state.selected !== 'ref') { state.slots[state.selected].bend = Number((e.target as HTMLInputElement).value); $('bendV').textContent = (e.target as HTMLInputElement).value; draw(); } });
 $<HTMLButtonElement>('cutBtn').addEventListener('click', toggleCut);
+$<HTMLButtonElement>('bendFlipBtn').addEventListener('click', () => {
+  if (state.selected === 'ref') return;
+  pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip;
+  status(sl.bendFlip ? 'Згин цієї кістки — навпаки' : 'Згин цієї кістки — нормальний'); refreshUI();
+});
 $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } });
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
