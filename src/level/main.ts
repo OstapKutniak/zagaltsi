@@ -3,6 +3,8 @@
 // Праворуч: бібліотека по категоріях. Керування як у ріг-тулзі: G/R/S/M, J — снеп до краю,
 // колесо — зум, затиск колеса — пан. Колайдер — малюємо квадратами, де можна ходити.
 
+import { idbGet, idbSet } from '../store';
+
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -53,20 +55,27 @@ const toScreen = (wx: number, wy: number) => ({ x: state.origin.x + wx * sc(), y
 const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
 const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
 
-// ---- persistence ----
+// ---- persistence (IndexedDB; localStorage переповнювався на 2 PNG) ----
+// Записи дебаунсимо — save() смикається на кожен рух повзунка, а IndexedDB асинхронний.
+let saveTimer = 0;
 function save(): void {
-  try {
-    localStorage.setItem('zag_levels', JSON.stringify({ levels: state.levels, cur: state.cur }));
-    localStorage.setItem('zag_assets', JSON.stringify(state.assets));
-  } catch { setStatus('Сховище переповнене'); }
+  clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => setStatus('Не вдалося зберегти'));
+    idbSet('zag_assets', state.assets).catch(() => setStatus('Не вдалося зберегти'));
+  }, 250);
 }
-function load(): void {
+async function load(): Promise<void> {
   try {
-    const a = JSON.parse(localStorage.getItem('zag_assets') || '[]') as Asset[];
-    state.assets = a;
-    for (const as of a) loadImg(as);
-    const l = JSON.parse(localStorage.getItem('zag_levels') || 'null');
+    let a = await idbGet<Asset[]>('zag_assets');
+    let l = await idbGet<{ levels: Level[]; cur: number }>('zag_levels');
+    // одноразова міграція зі старого localStorage (звідки бралося переповнення)
+    if (!a) { try { const s = localStorage.getItem('zag_assets'); if (s) { a = JSON.parse(s) as Asset[]; await idbSet('zag_assets', a); } } catch { /* ignore */ } }
+    if (!l) { try { const s = localStorage.getItem('zag_levels'); if (s) { l = JSON.parse(s); await idbSet('zag_levels', l); } } catch { /* ignore */ } }
+    if (a) { state.assets = a; for (const as of a) loadImg(as); }
     if (l && l.levels?.length) { state.levels = l.levels; state.cur = l.cur || 0; }
+    // звільняємо старе сховище — більше ним не користуємось
+    try { localStorage.removeItem('zag_assets'); localStorage.removeItem('zag_levels'); } catch { /* ignore */ }
   } catch { /* ignore */ }
   if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
   for (const lv of state.levels) { // міграція старих рівнів
@@ -351,11 +360,13 @@ $<HTMLButtonElement>('exportLevel').addEventListener('click', () => {
   setStatus(`Експортовано ${level().name}`);
 });
 $<HTMLButtonElement>('toGame').addEventListener('click', () => {
-  try { localStorage.setItem('zag_level', JSON.stringify(buildLevelDoc())); setStatus('✔ Рівень у грі. Онови вкладку гри.'); }
-  catch { setStatus('Не вдалося — переповнення сховища'); }
+  idbSet('zag_level', buildLevelDoc())
+    .then(() => setStatus('✔ Рівень у грі. Онови вкладку гри.'))
+    .catch(() => setStatus('Не вдалося зберегти рівень'));
 });
 
 window.addEventListener('resize', () => { resize(); draw(); });
-load();
-resize(); refreshLevels(); refreshTabs(); refreshAssets(); refreshSel(); draw();
-setStatus('Завантаж PNG у бібліотеку (праворуч) і тягни на доріжку.');
+load().then(() => {
+  resize(); refreshLevels(); refreshTabs(); refreshAssets(); refreshSel(); draw();
+  setStatus('Завантаж PNG у бібліотеку (праворуч) і тягни на доріжку.');
+});

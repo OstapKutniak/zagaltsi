@@ -18,7 +18,7 @@ interface Slot { image: string | null; pivotX: number; pivotY: number; rot: numb
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
 interface Clip { duration: number; keys: Keyframe[] }
-export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; clips?: Record<string, Clip> }
+export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }
 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
 const PARENT: Record<string, string | null> = {
@@ -113,6 +113,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private anim = 'idle';
   private t = 0;
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
+  private animDir = 1; // напрям кроку кісток (з тулзи «Хода в бік»); не чіпає арт
   private clips: Record<string, Clip> = {};
 
   private constructor(scene: Phaser.Scene, doc: CharDoc) {
@@ -120,6 +121,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     this.prop = doc.proportions;
     this.slots = doc.slots;
     this.docFacing = doc.facing ?? 1;
+    this.animDir = doc.animDir ?? 1;
     this.clips = doc.clips ?? {};
   }
 
@@ -194,7 +196,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       const o = animOff(this.anim, this.t, sel);
       let dx = (sl?.dx ?? 0) + o.ddx, dy = (sl?.dy ?? 0) + o.ddy;
       if (!PARENT[sel]) { const ar = animRoot(this.anim, this.t); dx += ar.ddx; dy += ar.ddy; }
-      return { rot: (sl?.rot ?? 0) + o.drot, dx, dy, scale: sl?.scale ?? 1 };
+      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1 };
     };
     // світовий трансформ слота в локалі контейнера (ієрархія)
     const cache: Record<string, { x: number; y: number; rot: number }> = {};

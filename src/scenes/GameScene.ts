@@ -6,6 +6,7 @@ import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { buildLevelView, type LevelDoc } from '../level/LevelView';
 import { getUser, saveValue } from '../telegram';
+import { idbGet } from '../store';
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
 const GATE_X = 1150; // поки арена не зачищена, далі не пройти
@@ -96,13 +97,11 @@ export class GameScene extends Phaser.Scene {
       .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
       .catch(() => { /* нема — лишається прямокутник */ });
 
-    // Рівень із редактора (localStorage zag_level або public/level.json)
+    // Рівень із редактора (IndexedDB zag_level або public/level.json)
     this.levelMode = false;
-    let lvlDoc: LevelDoc | null = null;
-    try { const s = localStorage.getItem('zag_level'); if (s) lvlDoc = JSON.parse(s) as LevelDoc; } catch { /* ignore */ }
-    const lvP: Promise<LevelDoc | null> = lvlDoc
-      ? Promise.resolve(lvlDoc)
-      : fetch(`${import.meta.env.BASE_URL}level.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const lvP: Promise<LevelDoc | null> = idbGet<LevelDoc>('zag_level')
+      .then((stored) => stored ?? fetch(`${import.meta.env.BASE_URL}level.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null))
+      .catch(() => null);
     lvP.then((doc) => { if (doc && doc.placed) this.applyLevel(doc); }).catch(() => {});
 
     // HUD (прикріплений до екрана)

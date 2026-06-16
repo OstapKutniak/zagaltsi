@@ -261,7 +261,7 @@ function undo(): void {
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigSlots(), facing: state.facing, clips: state.clips })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigSlots(), facing: state.facing, animDir: state.animDir, clips: state.clips })); } catch { /* ignore */ }
 }
 function restoreLocal(): void {
   try {
@@ -269,6 +269,7 @@ function restoreLocal(): void {
     if (!o) return;
     if (o.prop) Object.assign(state.prop, o.prop);
     if (typeof o.facing === 'number') state.facing = o.facing;
+    if (typeof o.animDir === 'number') state.animDir = o.animDir;
     if (o.clips) state.clips = o.clips;
     if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   } catch { /* ignore */ }
@@ -598,16 +599,17 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
-function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; clips: Record<string, Clip> } {
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip> } {
   const rig = rigSlots();
   const used = new Set(Object.values(rig).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  return { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, clips: JSON.parse(JSON.stringify(state.clips)) };
+  return { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)) };
 }
-function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; clips?: Record<string, Clip> }): void {
+function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }): void {
   state.anim = null; exitClip(); // вийти з режиму анімації перед завантаженням
   if (typeof doc.facing === 'number') state.facing = doc.facing;
+  if (typeof doc.animDir === 'number') state.animDir = doc.animDir;
   if (doc.proportions) Object.assign(state.prop, doc.proportions);
   if (doc.clips) state.clips = doc.clips;
   if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
@@ -826,11 +828,10 @@ function play(on: boolean): void {
   refreshTimeline();
 }
 $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
+  const v = (e.target as HTMLSelectElement).value; // ВАЖЛИВО: зчитати ДО play(false) — play()→refreshTimeline() скидає цей select назад на state.anim (тоді ще порожній) і вибір губився
   play(false);
-  const v = (e.target as HTMLSelectElement).value;
-  if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); }
-  else { state.anim = null; exitClip(); }
-  refreshTimeline(); refreshUI();
+  if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
+  else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
 });
 $<HTMLButtonElement>('playBtn').addEventListener('click', () => play(!state.playing));
 $<HTMLInputElement>('timeline').addEventListener('input', (e) => { play(false); loadFrame(Number((e.target as HTMLInputElement).value)); refreshTimeline(); refreshUI(); });

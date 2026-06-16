@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Загальці — гумористичний 2D-платформер для Telegram Mini App",
+  "description": "Хоругва — гумористичний 2D-платформер для Telegram Mini App",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
