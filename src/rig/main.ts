@@ -18,14 +18,16 @@ interface Clip { duration: number; keys: Keyframe[] }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 const SLOT_DEFS = [
-  { key: 'arm_back', label: 'Рука зад', len: 'arms', piv: [0.5, 0.08] },
-  { key: 'leg_back', label: 'Нога зад', len: 'legs', piv: [0.5, 0.06] },
-  { key: 'leg_front', label: 'Нога перед', len: 'legs', piv: [0.5, 0.06] },
+  { key: 'arm_back', label: 'Задня рука', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'leg_back', label: 'Задня нога', len: 'legs', piv: [0.5, 0.06] },
+  { key: 'leg_front', label: 'Передня нога', len: 'legs', piv: [0.5, 0.06] },
   { key: 'torso', label: 'Торс', len: 'torso', piv: [0.5, 0.94] },
   { key: 'neck', label: 'Шия', len: 'neck', piv: [0.5, 0.9] },
   { key: 'head', label: 'Голова', len: 'head', piv: [0.5, 0.94] },
-  { key: 'arm_front', label: 'Рука перед', len: 'arms', piv: [0.5, 0.08] },
+  { key: 'arm_front', label: 'Передня рука', len: 'arms', piv: [0.5, 0.08] },
 ] as const;
+// Порядок ВІДОБРАЖЕННЯ у списку частин (не плутати зі SLOT_DEFS = порядок шарів).
+const LIST_ORDER = ['arm_front', 'head', 'neck', 'torso', 'leg_front', 'leg_back', 'arm_back'] as const;
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
@@ -341,7 +343,7 @@ function draw(): void {
   // маркери pivot
   const drawMark = (sel: string) => {
     const a = anchorPx(sel); const on = sel === state.selected;
-    ctx.strokeStyle = on ? '#ffd000' : '#5aa0ff'; ctx.fillStyle = ctx.strokeStyle;
+    ctx.strokeStyle = on ? '#ff9a1f' : '#9a9a9a'; ctx.fillStyle = ctx.strokeStyle;
     if (on) {
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(a.x - 9, a.y); ctx.lineTo(a.x + 9, a.y); ctx.moveTo(a.x, a.y - 9); ctx.lineTo(a.x, a.y + 9); ctx.stroke();
@@ -360,7 +362,7 @@ function draw(): void {
       const lx = (0.5 - ssel.pivotX) * img.width * t.flip;
       const ly = (ssel.cut - ssel.pivotY) * img.height;
       const cr = Math.cos(rad(t.rot)), sr = Math.sin(rad(t.rot));
-      ctx.fillStyle = '#ff45c0';
+      ctx.fillStyle = '#e8e8e8';
       ctx.beginPath(); ctx.arc(a.x + (lx * cr - ly * sr) * sc, a.y + (lx * sr + ly * cr) * sc, 5, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -479,31 +481,47 @@ function refreshChips(): void {
   const make = (key: string, label: string, empty: boolean) => {
     const el = document.createElement('div');
     el.className = 'chip' + (key === state.selected ? ' sel' : '') + (empty ? ' empty' : '');
-    el.textContent = label + (empty ? ' ○' : '');
+    el.textContent = label;
     el.onclick = () => { state.selected = key; state.pivotMode = false; state.mode = null; refreshUI(); };
     box.appendChild(el);
   };
-  for (const d of SLOT_DEFS) make(d.key, d.label, !state.slots[d.key].image);
-  make('ref', '🎯 Фоновий концепт', !state.ref.canvas);
+  for (const key of LIST_ORDER) make(key, def(key).label, !state.slots[key].image);
+  make('ref', 'Фоновий концепт', !state.ref.canvas);
 }
-function refreshImgSel(): void {
-  const sel = $<HTMLSelectElement>('imgSel'); sel.innerHTML = '<option value="">(немає)</option>';
-  for (const n of state.imageNames) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); }
-  sel.value = state.selected === 'ref' ? '' : state.slots[state.selected].image ?? '';
-  sel.disabled = state.selected === 'ref';
+// Грід завантажених PNG (як бібліотека): клік = призначити вибраній частині.
+const IMG_GRID_MIN = 9; // мінімум слотів (з пустими) — щоб видно сітку/скрол
+function refreshImgGrid(): void {
+  const box = $('imgGrid'); box.innerHTML = '';
+  const cur = state.selected !== 'ref' ? state.slots[state.selected].image : null;
+  for (const n of state.imageNames) {
+    const cell = document.createElement('div');
+    cell.className = 'imgCell' + (n === cur ? ' sel' : '');
+    cell.title = n;
+    const cv = state.images.get(n);
+    if (cv) { const im = document.createElement('img'); im.src = cv.toDataURL('image/png'); im.draggable = false; cell.appendChild(im); }
+    cell.onclick = () => {
+      if (state.selected === 'ref') { status('Концепт вантаж через «Фоновий концепт» у Додатково'); return; }
+      pushUndo(); assignImage(state.selected, n); refreshUI();
+    };
+    box.appendChild(cell);
+  }
+  for (let i = state.imageNames.length; i < IMG_GRID_MIN; i++) {
+    const e = document.createElement('div'); e.className = 'imgCell empty'; box.appendChild(e);
+  }
 }
 function refreshUI(): void {
-  refreshChips(); refreshImgSel();
+  refreshChips(); refreshImgGrid();
   const t = tf(state.selected);
   $<HTMLInputElement>('rot').value = String(Math.round(t.rot)); $('rotV').textContent = String(Math.round(t.rot));
   $<HTMLInputElement>('scale').value = String(t.scale); $('scaleV').textContent = t.scale < 1 ? t.scale.toFixed(2) : t.scale.toFixed(1);
-  $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни…' : '⌖ Півот (Q)';
+  $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? 'Клікни…' : 'Півот (Q)';
   $<HTMLButtonElement>('setPivot').classList.toggle('light', state.pivotMode);
   const ss = state.selected !== 'ref' ? state.slots[state.selected] : null;
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
-  $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
-  $<HTMLButtonElement>('bendFlipBtn').textContent = '↕ Напрям (B)';
+  $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? 'Прибрати розріз (D)' : 'Розріз (D)';
+  $<HTMLButtonElement>('cutBtn').classList.toggle('light', !!(ss && ss.cut != null));
+  $<HTMLButtonElement>('bendFlipBtn').textContent = 'Напрям (B)';
   $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', !!(ss && ss.bendFlip));
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
@@ -513,7 +531,6 @@ function refreshUI(): void {
 const status = (m: string): void => { $('status').textContent = m; };
 
 // ---- контроли ----
-$<HTMLSelectElement>('imgSel').addEventListener('change', (e) => { pushUndo(); assignImage(state.selected, (e.target as HTMLSelectElement).value || null); refreshUI(); });
 $<HTMLInputElement>('rot').addEventListener('pointerdown', pushUndo);
 $<HTMLInputElement>('rot').addEventListener('input', (e) => { tf(state.selected).rot = Number((e.target as HTMLInputElement).value); $('rotV').textContent = (e.target as HTMLInputElement).value; draw(); });
 $<HTMLInputElement>('scale').addEventListener('pointerdown', pushUndo);
@@ -545,6 +562,13 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
   if (go) b.addEventListener('click', () => { window.location.href = go; });
   else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
 }
+
+// ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
+let partsOpen = true;
+$<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
+  partsOpen = !partsOpen;
+  $('partsList').style.display = partsOpen ? '' : 'none';
+});
 
 // ---- Мірор (M): дзеркалити арт вибраної частини ----
 $<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); });
@@ -701,21 +725,24 @@ const LIB_KEY = 'ostap_library';
 let libCat: 'char' | 'enemy' = 'char'; // активна вкладка бібліотеки
 const loadLib = (): LibItem[] => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); } catch { return []; } };
 const storeLib = (lib: LibItem[]): void => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { status('Не вдалося зберегти — переповнення сховища браузера'); } };
+const LIB_MIN = 18; // мінімум слотів (з пустими) — щоб видно сітку/скрол
 function renderLibrary(): void {
-  $<HTMLButtonElement>('tabChar').classList.toggle('light', libCat === 'char');
-  $<HTMLButtonElement>('tabEnemy').classList.toggle('light', libCat === 'enemy');
+  // одна кнопка-тогл: показує поточний розділ; Герої = світла, Вороги = темна
+  const tog = $<HTMLButtonElement>('libToggle');
+  tog.textContent = libCat === 'char' ? 'Герої' : 'Вороги';
+  tog.classList.toggle('light', libCat === 'char');
   const box = $('libList'); box.innerHTML = '';
   const lib = loadLib().filter((c) => (c.cat ?? 'char') === libCat);
-  if (!lib.length) { box.innerHTML = '<div class="libEmpty">Порожньо. Збери й тисни «Save».</div>'; return; }
   for (const c of lib) {
     const card = document.createElement('div'); card.className = 'libCard';
-    const img = document.createElement('img'); img.src = c.thumb;
+    const img = document.createElement('img'); img.src = c.thumb; img.draggable = false;
     const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = c.name;
     const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕';
     card.onclick = () => { loadCharFromDoc(c.doc); status(`Завантажено: ${c.name}`); };
     del.onclick = (e) => { e.stopPropagation(); storeLib(loadLib().filter((x) => x.id !== c.id)); renderLibrary(); };
     card.appendChild(img); card.appendChild(nm); card.appendChild(del); box.appendChild(card);
   }
+  for (let i = lib.length; i < LIB_MIN; i++) { const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e); }
 }
 function saveCharacter(): void {
   const what = libCat === 'enemy' ? 'ворога' : 'персонажа';
@@ -728,8 +755,7 @@ function saveCharacter(): void {
   storeLib(lib); renderLibrary();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
-$<HTMLButtonElement>('tabChar').addEventListener('click', () => { libCat = 'char'; renderLibrary(); });
-$<HTMLButtonElement>('tabEnemy').addEventListener('click', () => { libCat = 'enemy'; renderLibrary(); });
+$<HTMLButtonElement>('libToggle').addEventListener('click', () => { libCat = libCat === 'char' ? 'enemy' : 'char'; renderLibrary(); });
 
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
   if (importMode) { $<HTMLInputElement>('importInput').click(); return; } // у режимі імпорту (ПКМ) — відкрити файл
@@ -840,7 +866,8 @@ function refreshTimeline(): void {
   const tl = $<HTMLInputElement>('timeline'); tl.max = String(dur); tl.value = String(Math.min(state.animT, dur));
   $('tlTime').textContent = state.animT.toFixed(2);
   $<HTMLInputElement>('dur').value = String(dur);
-  $<HTMLButtonElement>('playBtn').textContent = state.playing ? '⏸' : '▶';
+  $<HTMLButtonElement>('playBtn').textContent = state.playing ? 'Пауза' : 'Грати';
+  $<HTMLButtonElement>('playBtn').classList.toggle('light', state.playing);
   $<HTMLSelectElement>('anim').value = state.anim ?? '';
   const track = $('keyTrack'); track.innerHTML = '';
   if (clip) for (let i = 0; i < clip.keys.length; i++) {
@@ -895,4 +922,4 @@ restoreLocal();
 resize(); refreshUI();
 renderLibrary();
 refreshTimeline();
-status('Завантаж орієнтир-силует і частини. G/R/S — рух/поворот/розмір, Q — півот, Ctrl+Z — відміна.');
+status('');
