@@ -325,6 +325,14 @@ function draw(): void {
   const groundY = toPx(0, -4 + BASE.legs * state.prop.legs).y;
   ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
+  // ГАБАРИТ базового ігрового персонажа: низ = лінія землі (як залітає в гру),
+  // вихід за прямокутник зверху/збоку — норм, персонаж може бути більшим.
+  const GAB_W = 180, GAB_H = 360; // одиниці тулзи (підкрутимо за фідбеком)
+  const gw = GAB_W * s(), gh = GAB_H * s();
+  ctx.save();
+  ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,154,31,0.5)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(state.origin.x - gw / 2, groundY - gh, gw, gh);
+  ctx.restore();
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
@@ -476,7 +484,7 @@ function refreshChips(): void {
     box.appendChild(el);
   };
   for (const d of SLOT_DEFS) make(d.key, d.label, !state.slots[d.key].image);
-  make('ref', '🎯 Орієнтир', !state.ref.canvas);
+  make('ref', '🎯 Фоновий концепт', !state.ref.canvas);
 }
 function refreshImgSel(): void {
   const sel = $<HTMLSelectElement>('imgSel'); sel.innerHTML = '<option value="">(немає)</option>';
@@ -489,12 +497,14 @@ function refreshUI(): void {
   const t = tf(state.selected);
   $<HTMLInputElement>('rot').value = String(Math.round(t.rot)); $('rotV').textContent = String(Math.round(t.rot));
   $<HTMLInputElement>('scale').value = String(t.scale); $('scaleV').textContent = t.scale < 1 ? t.scale.toFixed(2) : t.scale.toFixed(1);
-  $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни на частині…' : '⌖ Тицьнути півот (Q)';
+  $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? '⌖ Клікни…' : '⌖ Півот (Q)';
+  $<HTMLButtonElement>('setPivot').classList.toggle('light', state.pivotMode);
   const ss = state.selected !== 'ref' ? state.slots[state.selected] : null;
   $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? '✕ Прибрати розріз (D)' : '✂ Розріз (D)';
-  $<HTMLButtonElement>('bendFlipBtn').textContent = '↕ Згин: ' + (ss && ss.bendFlip ? 'навпаки' : 'норма');
+  $<HTMLButtonElement>('bendFlipBtn').textContent = '↕ Напрям (B)';
+  $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', !!(ss && ss.bendFlip));
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
   saveLocal();
@@ -528,6 +538,34 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
   const f = (ev.target as HTMLInputElement).files?.[0]; if (!f) return;
   const img = new Image(); img.onload = () => { state.ref.canvas = imageToCanvas(img); state.selected = 'ref'; refreshUI(); }; img.src = URL.createObjectURL(f);
 });
+
+// ---- верхні таби розділів (навігація між редакторами) ----
+for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
+  const go = b.getAttribute('data-go');
+  if (go) b.addEventListener('click', () => { window.location.href = go; });
+  else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
+}
+
+// ---- Мірор (M): дзеркалити арт вибраної частини ----
+$<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); });
+// ---- Фліп (F): перемкнути напрям згину УСІХ кісток одразу ----
+function flipAllBends(): void {
+  pushUndo();
+  for (const d of SLOT_DEFS) state.slots[d.key].bendFlip = !state.slots[d.key].bendFlip;
+  status('Напрям згину всіх кісток перемкнено'); refreshUI();
+}
+$<HTMLButtonElement>('flipAllBtn').addEventListener('click', flipAllBends);
+// ---- Завантажити картинку ----
+$<HTMLButtonElement>('loadImgBtn').addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
+
+// ---- Export JSON / (ПКМ) Import JSON — одна кнопка з тоглом ----
+let importMode = false;
+const exportBtnEl = $<HTMLButtonElement>('exportBtn');
+function refreshExportBtn(): void {
+  exportBtnEl.textContent = importMode ? '⬆ Імпортувати JSON' : '⬇ Експортувати JSON';
+  exportBtnEl.title = importMode ? 'ПКМ — назад на Експорт' : 'ПКМ — перемкнути на Імпорт';
+}
+exportBtnEl.addEventListener('contextmenu', (e) => { e.preventDefault(); importMode = !importMode; refreshExportBtn(); });
 
 // ---- canvas ----
 let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null = null;
@@ -579,6 +617,8 @@ window.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
+  else if (ev.code === 'KeyB') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } }
+  else if (ev.code === 'KeyF') { ev.preventDefault(); flipAllBends(); }
   else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
   else if (ev.code === 'KeyK') { ev.preventDefault(); if (state.anim) setKey(); }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
@@ -662,8 +702,8 @@ let libCat: 'char' | 'enemy' = 'char'; // активна вкладка бібл
 const loadLib = (): LibItem[] => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); } catch { return []; } };
 const storeLib = (lib: LibItem[]): void => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { status('Не вдалося зберегти — переповнення сховища браузера'); } };
 function renderLibrary(): void {
-  $<HTMLButtonElement>('tabChar').classList.toggle('active', libCat === 'char');
-  $<HTMLButtonElement>('tabEnemy').classList.toggle('active', libCat === 'enemy');
+  $<HTMLButtonElement>('tabChar').classList.toggle('light', libCat === 'char');
+  $<HTMLButtonElement>('tabEnemy').classList.toggle('light', libCat === 'enemy');
   const box = $('libList'); box.innerHTML = '';
   const lib = loadLib().filter((c) => (c.cat ?? 'char') === libCat);
   if (!lib.length) { box.innerHTML = '<div class="libEmpty">Порожньо. Збери й тисни «Save».</div>'; return; }
@@ -692,6 +732,7 @@ $<HTMLButtonElement>('tabChar').addEventListener('click', () => { libCat = 'char
 $<HTMLButtonElement>('tabEnemy').addEventListener('click', () => { libCat = 'enemy'; renderLibrary(); });
 
 $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
+  if (importMode) { $<HTMLInputElement>('importInput').click(); return; } // у режимі імпорту (ПКМ) — відкрити файл
   const doc = buildDoc();
   const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();

@@ -3,74 +3,119 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Хоругва - Редактор персонажів</title>
+    <title>Хоругва Studio · Персонаж</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      :root { --bg:#23262e; --panel:#2c303a; --line:#3a3f4b; --ink:#e7eaf0; --muted:#8b93a3; --accent:#5aa0ff; }
-      html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); }
-      #app { display: flex; height: 100vh; }
-      #stageWrap { flex: 1; position: relative; background: #3a3f4b; overflow: hidden; display: flex; flex-direction: column; }
-      #stage { display: block; width: 100%; flex: 1; min-height: 0; }
-      .hint { position: absolute; top: 10px; left: 12px; font-size: 12px; color: rgba(255,255,255,.5); pointer-events: none; }
-      /* таймлайн знизу стейджа */
-      #timelineBar { flex: 0 0 auto; background: #1b1e25; border-top: 1px solid #000; padding: 8px 12px; }
+      :root { --bg:#3a3f4b; --panel:#2c303a; --rail:#23262e; --line:#454b58; --ink:#e7eaf0; --muted:#9aa2b1; --accent:#ff9a1f; --sel:#5aa0ff; }
+      html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); overflow: hidden; }
+      button { background: #4a505e; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+      button:hover { background: #555c6c; }
+      button.light { background: #e7eaf0; color: #1b1e25; font-weight: 600; } /* активна / «світла з темним написом» */
+      button:disabled { opacity: .4; cursor: default; }
+
+      #app { display: flex; height: 100vh; gap: 8px; padding: 8px; }
+      .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+      .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      h3 { font-size: 12px; color: var(--ink); text-align: center; padding: 9px; background: var(--rail); border-radius: 11px 11px 0 0; font-weight: 600; }
+
+      /* ---- ліва бібліотека ---- */
+      #library { width: 200px; flex: 0 0 auto; }
+      #libHeader { display: flex; padding: 6px; gap: 4px; }
+      #libHeader button { flex: 1; padding: 9px 4px; font-size: 13px; }
+      #libList { flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 8px 8px; align-content: start; }
+      .libCard { position: relative; aspect-ratio: 1; background: #4a505e; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
+      .libCard:hover { border-color: var(--sel); }
+      .libCard img { width: 100%; height: 100%; object-fit: contain; }
+      .libName { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; background: rgba(0,0,0,.5); padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .libDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.55); font-size: 11px; line-height: 1; }
+      .libEmpty { grid-column: 1/3; font-size: 12px; color: var(--muted); text-align: center; padding: 16px 6px; }
+
+      /* ---- центр ---- */
+      #center { flex: 1; min-width: 0; }
+      #topTabs { display: flex; gap: 8px; }
+      #topTabs button { flex: 1; padding: 11px 6px; font-size: 14px; }
+      #centerMid { flex: 1; display: flex; gap: 8px; min-height: 0; }
+      #stageWrap { flex: 1; position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      #stage { display: block; width: 100%; height: 100%; }
+      .hint { position: absolute; bottom: 8px; left: 12px; right: 12px; font-size: 11px; color: rgba(255,255,255,.45); pointer-events: none; text-align: center; }
+      /* список частин персонажа */
+      #partsList { width: 210px; flex: 0 0 auto; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+      #slotChips { display: flex; flex-direction: column; gap: 6px; }
+      .chip { display: block; width: 100%; text-align: center; padding: 9px 8px; border-radius: 8px; background: #4a505e; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); }
+      .chip:hover { background: #555c6c; }
+      .chip.sel { background: #e7eaf0; color: #1b1e25; border-color: #e7eaf0; font-weight: 600; }
+      .chip.empty { color: var(--muted); }
+      /* пари (брова/око) поруч */
+      .chipPair { display: flex; gap: 6px; }
+      .chipPair .chip { flex: 1; }
+
+      /* ---- таймлайн знизу ---- */
+      #timelineBar { flex: 0 0 auto; padding: 8px; }
       .tlrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
-      .tlrow select { background: #15121c; color: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
-      .tlrow button { padding: 6px 9px; font-size: 12px; }
+      .tlrow select { background: #1b1e25; color: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; }
+      .tlrow button { font-size: 12px; }
       .tltime { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: auto; }
       #timeline { width: 100%; accent-color: var(--accent); }
+      #ruler { position: relative; height: 18px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      #ruler span { position: absolute; transform: translateX(-50%); }
       #keyTrack { position: relative; height: 16px; margin-top: 2px; }
-      .keyDot { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #ffd000; border: 1px solid #000; cursor: pointer; }
+      .keyDot { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 1px solid #000; cursor: pointer; }
       .keyDot.sel { background: #5aff8f; }
       .keyDot.smooth { border-radius: 3px; }
-      #side { width: 300px; background: var(--panel); border-left: 1px solid #000; overflow-y: auto; padding: 14px; }
-      h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 16px 0 8px; }
-      h2:first-child { margin-top: 0; }
-      .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
-      .row > label { flex: 0 0 78px; color: var(--muted); }
-      .row input[type=range] { flex: 1; accent-color: var(--accent); }
-      .row select { flex: 1; background: #1b1e25; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
-      .val { flex: 0 0 38px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-      .chip { padding: 6px 10px; border-radius: 7px; background: #1b1e25; border: 1px solid var(--line); cursor: pointer; font-size: 12px; color: var(--ink); }
-      .chip.sel { background: var(--accent); border-color: var(--accent); color: #0a0e16; font-weight: 600; }
-      .chip.empty { color: var(--muted); }
-      button { background: #39414f; color: var(--ink); border: 0; border-radius: 7px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
-      button:hover { background: #454f60; }
-      button.accent { background: var(--accent); color: #0a0e16; font-weight: 600; }
+
+      /* ---- права панель ---- */
+      #right { width: 360px; flex: 0 0 auto; }
+      #preview { flex: 0 0 auto; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+      #iconBar { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px; }
+      .iconToggle { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 9px; background: #4a505e; border: 1px solid var(--line); cursor: pointer; font-size: 18px; }
+      .iconToggle input { display: none; }
+      .iconToggle:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #1b1e25; }
+      #tools { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+      #tools .body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
       .btns { display: flex; gap: 6px; flex-wrap: wrap; }
-      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
-      hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
-      #status { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 16px; }
+      .btns.cols button { flex: 1 1 30%; }
+      #imgSel { background: #1b1e25; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 13px; width: 100%; }
+      .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+      .row > label { flex: 0 0 64px; color: var(--muted); }
+      .row input[type=range] { flex: 1; accent-color: var(--sel); }
+      .val { flex: 0 0 36px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+      details.adv { border-top: 1px solid var(--line); padding-top: 6px; }
+      details.adv summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
+      details.adv .row { margin-top: 6px; }
+      #status { font-size: 12px; color: var(--muted); min-height: 16px; padding: 4px 0; }
       .file { font-size: 12px; }
-      /* ліва панель — бібліотека персонажів */
-      #library { width: 172px; background: var(--panel); border-right: 1px solid #000; overflow-y: auto; padding: 12px; flex: 0 0 auto; }
-      #libList { display: flex; flex-direction: column; gap: 8px; }
-      .libCard { position: relative; background: #1b1e25; border: 1px solid var(--line); border-radius: 8px; padding: 6px; cursor: pointer; text-align: center; }
-      .libCard:hover { border-color: var(--accent); }
-      .libCard img { width: 100%; height: 104px; object-fit: contain; background: #3a3f4b; border-radius: 5px; display: block; }
-      .libName { font-size: 12px; margin-top: 5px; color: var(--ink); word-break: break-word; }
-      .libDel { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; line-height: 1; font-size: 12px; }
-      .libEmpty { font-size: 12px; color: var(--muted); }
-      #libTabs { display: flex; gap: 4px; margin-bottom: 8px; }
-      .libTab { flex: 1; padding: 6px 4px; font-size: 12px; background: #1b1e25; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); cursor: pointer; }
-      .libTab.active { background: var(--accent); border-color: var(--accent); color: #0a0e16; font-weight: 600; }
     </style>
   </head>
   <body>
     <div id="app">
-      <div id="library">
-        <h2>Бібліотека</h2>
-        <div id="libTabs">
-          <button id="tabChar" class="libTab active">Персонажі</button>
-          <button id="tabEnemy" class="libTab">Вороги</button>
+      <!-- ЛІВА БІБЛІОТЕКА -->
+      <aside id="library" class="col pane">
+        <div id="libHeader">
+          <button id="tabEnemy">Вороги</button>
+          <button id="tabChar" class="light">Герої</button>
         </div>
         <div id="libList"></div>
-      </div>
-      <div id="stageWrap">
-        <canvas id="stage"></canvas>
-        <div class="hint"><b>G</b> рух · <b>R</b> поворот · <b>S</b> розмір · <b>Q</b> півот · <b>K</b> ключ · <b>Ctrl+Z</b> · колесо — зум · затиск колеса — панорама · drag&drop PNG</div>
-        <div id="timelineBar">
+      </aside>
+
+      <!-- ЦЕНТР -->
+      <section id="center" class="col">
+        <div id="topTabs">
+          <button class="light" data-tab="char">Редактор Персонажів</button>
+          <button data-go="level.html">Редактор Рівнів</button>
+          <button data-soon>Редактор Інтерфейсу</button>
+          <button data-soon>Редактор Звуку</button>
+          <button data-soon>Редактор Історії</button>
+        </div>
+        <div id="centerMid">
+          <div id="stageWrap">
+            <canvas id="stage"></canvas>
+            <div class="hint"><b>G</b> рух · <b>R</b> поворот · <b>S</b> розмір · <b>Q</b> півот · <b>D</b> розріз · <b>B</b> напрям згину · <b>K</b> ключ · <b>Ctrl+Z</b> · колесо — зум · затиск колеса — панорама · drag&drop PNG</div>
+          </div>
+          <div id="partsList" class="pane">
+            <div id="slotChips"></div>
+          </div>
+        </div>
+        <div id="timelineBar" class="pane">
           <div class="tlrow">
             <select id="anim">
               <option value="">— стоп (поза) —</option>
@@ -83,59 +128,66 @@
             </select>
             <button id="playBtn">▶</button>
             <button id="keyBtn">⬤ Ключ (K)</button>
-            <button id="delKeyBtn">✕ ключ</button>
+            <button id="delKeyBtn">✕ Видалити ключ</button>
+            <button id="linkLin">Зв'язати (лінійно)</button>
+            <button id="linkSmooth">Зв'язати (згладж.)</button>
             <button id="bakeBtn">⚙ Запекти базову</button>
-            <button id="linkLin">Лінійно</button>
-            <button id="linkSmooth">Згладжено</button>
             <button id="resetAnim">↺ Скинути</button>
-            <span class="tltime">тривал. <input type="number" id="dur" value="1" min="0.2" step="0.1" style="width:46px" /> с · <span id="tlTime">0.00</span></span>
+            <span class="tltime">трив. <input type="number" id="dur" value="1" min="0.2" step="0.1" style="width:46px" /> с · <span id="tlTime">0.00</span></span>
           </div>
           <input type="range" id="timeline" min="0" max="1" step="0.01" value="0" />
+          <div id="ruler"></div>
           <div id="keyTrack"></div>
         </div>
-      </div>
-      <div id="side">
-        <h2>Частини персонажа</h2>
-        <div class="chips" id="slotChips"></div>
+      </section>
 
-        <hr />
-        <h2>Вибрана частина</h2>
-        <div class="row"><label>Картинка</label><select id="imgSel"></select></div>
-        <div class="row"><label>Поворот</label><input type="range" id="rot" min="-180" max="180" step="1" /><span class="val" id="rotV">0</span></div>
-        <div class="row"><label>Розмір</label><input type="range" id="scale" min="0.1" max="3" step="0.01" /><span class="val" id="scaleV">1.0</span></div>
-        <div class="row"><label>Згин</label><input type="range" id="bend" min="-150" max="150" step="1" value="0" /><span class="val" id="bendV">0</span></div>
-        <div class="btns">
-          <button id="setPivot">⌖ Тицьнути півот (Q)</button>
-          <button id="cutBtn">✂ Розріз (D)</button>
-          <button id="bendFlipBtn">↕ Згин навпаки</button>
-          <button id="resetPart">Скинути</button>
+      <!-- ПРАВА ПАНЕЛЬ -->
+      <aside id="right" class="col">
+        <div id="preview">Превʼю гри 20:9</div>
+        <div id="iconBar">
+          <label class="iconToggle" title="Показувати півоти"><input type="checkbox" id="showPivots" checked />👁</label>
+          <label class="iconToggle" title="Показувати фоновий концепт"><input type="checkbox" id="showRef" checked />🎯</label>
+          <label class="iconToggle" title="Чистити фон при завантаженні"><input type="checkbox" id="keyBg" checked />🧹</label>
         </div>
+        <div id="tools" class="pane">
+          <h3>Частини персонажа</h3>
+          <div class="body">
+            <div class="btns cols">
+              <button id="setPivot">⌖ Півот (Q)</button>
+              <button id="mirrorBtn">⇋ Мірор (M)</button>
+              <button id="cutBtn">✂ Розріз (D)</button>
+              <button id="bendFlipBtn">↕ Напрям (B)</button>
+              <button id="flipAllBtn">⇅ Фліп (F)</button>
+            </div>
+            <button id="loadImgBtn">＋ Завантажити картинку</button>
+            <input type="file" id="fileInput" accept="image/png,image/*" multiple style="display:none" />
+            <select id="imgSel"></select>
 
-        <hr />
-        <h2>Перевірка руху</h2>
-        <div class="row"><label>Лицем</label><button id="faceBtn" style="flex:1">🔄 Перевернути арт: →</button></div>
-        <div class="row"><label>Напрям руху</label><button id="animDirBtn" style="flex:1">🦵 Хода в бік: →</button></div>
+            <div class="btns">
+              <button id="saveChar" class="light" style="flex:1">💾 Зберегти персонажа</button>
+            </div>
+            <div class="btns">
+              <button id="exportBtn" class="light" style="flex:1" title="ПКМ — перемкнути на Імпорт">⬇ Експортувати JSON</button>
+              <button id="importBtn" style="display:none">⬆ Import</button>
+              <input type="file" id="importInput" accept="application/json" style="display:none" />
+            </div>
+            <div class="btns"><button id="toGameBtn" style="flex:1">🎮 Export у гру</button></div>
 
-        <hr />
-        <h2>Завантаження</h2>
-        <div class="row file"><input type="file" id="fileInput" accept="image/png,image/*" multiple /></div>
-        <label class="check"><input type="checkbox" id="keyBg" checked /> чистити фон при завантаженні</label>
-        <label class="check"><input type="checkbox" id="showPivots" checked /> показувати півоти</label>
-        <div class="btns"><button id="refBtn">🎯 Силует-орієнтир</button><button id="refClear">✕</button></div>
-        <label class="check"><input type="checkbox" id="showRef" checked /> показувати орієнтир</label>
-        <input type="file" id="refInput" accept="image/*" style="display:none" />
-
-        <hr />
-        <h2>Файл</h2>
-        <div class="btns"><button class="accent" id="saveChar">💾 Save Character</button></div>
-        <div class="btns"><button class="accent" id="toGameBtn">🎮 Export у гру</button></div>
-        <div class="btns">
-          <button class="accent" id="exportBtn">⬇ Export JSON</button>
-          <button id="importBtn">⬆ Import</button>
-          <input type="file" id="importInput" accept="application/json" style="display:none" />
+            <details class="adv">
+              <summary>Додатково (трансформи, орієнтир, напрям ходи)</summary>
+              <div class="row"><label>Поворот</label><input type="range" id="rot" min="-180" max="180" step="1" /><span class="val" id="rotV">0</span></div>
+              <div class="row"><label>Розмір</label><input type="range" id="scale" min="0.1" max="3" step="0.01" /><span class="val" id="scaleV">1.0</span></div>
+              <div class="row"><label>Згин</label><input type="range" id="bend" min="-150" max="150" step="1" value="0" /><span class="val" id="bendV">0</span></div>
+              <div class="btns"><button id="resetPart" style="flex:1">Скинути частину</button></div>
+              <div class="row" style="margin-top:8px"><label>Лицем</label><button id="faceBtn" style="flex:1">🔄 Перевернути арт: →</button></div>
+              <div class="row"><label>Хода</label><button id="animDirBtn" style="flex:1">🦵 Хода в бік: →</button></div>
+              <div class="btns" style="margin-top:8px"><button id="refBtn" style="flex:1">🎯 Фоновий концепт</button><button id="refClear">✕</button></div>
+              <input type="file" id="refInput" accept="image/*" style="display:none" />
+            </details>
+            <div id="status"></div>
+          </div>
         </div>
-        <div id="status"></div>
-      </div>
+      </aside>
     </div>
     <script type="module" src="/src/rig/main.ts"></script>
   </body>
