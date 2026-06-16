@@ -264,7 +264,7 @@ function undo(): void {
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigSlots(), facing: state.facing, animDir: state.animDir, clips: state.clips })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigForExport(), facing: state.facing, animDir: state.animDir, clips: state.clips })); } catch { /* ignore */ }
 }
 function restoreLocal(): void {
   try {
@@ -338,9 +338,14 @@ function drawImageAt(sel: string, alpha: number): void {
 function draw(): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   // лінія землі — де мають стояти ноги
-  const groundY = toPx(0, -4 + BASE.legs * state.prop.legs).y;
+  const groundUY = -4 + BASE.legs * state.prop.legs;
+  const groundY = toPx(0, groundUY).y;
   ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
+  // лінія МАКІВКИ — орієнтир висоти базового персонажа (фіксована висота над підлогою; підкрутити BASE_CHAR_H за Остапом)
+  const BASE_CHAR_H = 470;
+  const headY = toPx(0, groundUY - BASE_CHAR_H).y;
+  ctx.beginPath(); ctx.moveTo(0, headY); ctx.lineTo(canvas.width, headY); ctx.stroke();
   resetBounds(); // межі персонажа збираються під час малювання частин
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
@@ -707,7 +712,7 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
 function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip> } {
-  const rig = rigSlots();
+  const rig = rigForExport();
   const used = new Set(Object.values(rig).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
@@ -809,7 +814,27 @@ const SMOOTH = (f: number): number => f * f * (3 - 2 * f);
 function curClip(): Clip | null { return state.anim ? (state.clips[state.anim] ??= { duration: 1, keys: [] }) : null; }
 function rigSlots(): Record<string, Slot> { return state.setup ?? state.slots; } // bind-поза
 function enterClip(): void { if (!state.setup) state.setup = JSON.parse(JSON.stringify(state.slots)) as Record<string, Slot>; }
-function exitClip(): void { if (state.setup) { for (const k of Object.keys(state.slots)) Object.assign(state.slots[k], state.setup[k]); state.setup = null; } }
+// Вихід із кліпу: повертаємо лише АНІМОВНІ поля з bind-пози; СТАТИЧНІ рігові
+// (image/pivot/flip/sx/sy/cut/bendFlip) лишаємо живими — щоб правки рігу під час
+// анімації (напр. напрям згину) не губилися.
+function exitClip(): void {
+  if (!state.setup) return;
+  for (const k of Object.keys(state.slots)) {
+    const su = state.setup[k]; if (!su) continue;
+    const sl = state.slots[k];
+    sl.rot = su.rot; sl.dx = su.dx; sl.dy = su.dy; sl.scale = su.scale; sl.bend = su.bend;
+  }
+  state.setup = null;
+}
+// Слоти для збереження: анімовні поля з bind-пози (setup), статичні — з живих слотів.
+function rigForExport(): Record<string, Slot> {
+  const bind = rigSlots();
+  const out: Record<string, Slot> = {};
+  for (const k of Object.keys(state.slots)) {
+    out[k] = { ...state.slots[k], rot: bind[k].rot, dx: bind[k].dx, dy: bind[k].dy, scale: bind[k].scale, bend: bind[k].bend };
+  }
+  return out;
+}
 
 function sampleClip(clip: Clip, t: number, sel: string): KeyPose {
   const su = rigSlots()[sel];
