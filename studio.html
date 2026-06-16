@@ -13,6 +13,9 @@
       button:hover { background: #565656; }
       button.light { background: #e8e8e8; color: #1b1b1b; font-weight: 600; } /* активна / світла з темним написом */
       button:disabled { opacity: .4; cursor: default; }
+      /* ховаємо скролбари — гортання колесом (видно по руху карток) */
+      * { scrollbar-width: none; }
+      *::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
       #app { display: flex; height: 100vh; gap: 8px; padding: 8px; }
       .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
@@ -20,9 +23,9 @@
       .header { font-size: 12px; color: var(--ink); text-align: center; padding: 10px; background: var(--rail); border-radius: 11px 11px 0 0; font-weight: 600; width: 100%; border: 0; cursor: pointer; }
 
       /* ---- ліва бібліотека (ширша) ---- */
-      #library { width: 280px; flex: 0 0 auto; }
-      #libToggle { border-radius: 11px 11px 0 0; }
-      #libList { flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; align-content: start; }
+      #library { width: 280px; flex: 0 0 auto; padding: 8px; }
+      #libToggle { width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+      #libList { flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; align-items: start; }
       .libCard { position: relative; aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
       .libCard.empty { cursor: default; background: #434343; }
       .libCard:not(.empty):hover { border-color: var(--sel); }
@@ -34,11 +37,11 @@
       #center { flex: 1; min-width: 0; }
       #topTabs { display: flex; gap: 8px; }
       #topTabs button { flex: 1; padding: 11px 6px; font-size: 14px; }
-      #centerMid { flex: 1; display: flex; gap: 8px; min-height: 0; }
-      #stageWrap { flex: 1; position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      #centerMid { flex: 1; position: relative; min-height: 0; }
+      #stageWrap { position: absolute; inset: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
       #stage { display: block; width: 100%; height: 100%; }
-      /* список частин — БЕЗ обʼєднуючого фону, просто кнопки */
-      #partsList { width: 220px; flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+      /* список частин — N-панель: НАКЛАДАЄТЬСЯ на в'юпорт (не відсуває), кожна кнопка окремо, без фону */
+      #partsList { position: absolute; top: 8px; right: 8px; width: 200px; max-height: calc(100% - 16px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; z-index: 5; }
       #slotChips { display: flex; flex-direction: column; gap: 6px; }
       .chip { display: block; width: 100%; text-align: center; padding: 9px 8px; border-radius: 8px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); }
       .chip:hover { background: #565656; }
@@ -90,7 +93,7 @@
     <div id="app">
       <!-- ЛІВА БІБЛІОТЕКА -->
       <aside id="library" class="col pane">
-        <button id="libToggle" class="header light">Герої</button>
+        <button id="libToggle" class="light">Герої</button>
         <div id="libList"></div>
       </aside>
 
@@ -163,17 +166,17 @@
             </div>
             <div class="btns"><button id="toGameBtn" style="flex:1">Експорт у гру</button></div>
 
-            <details class="adv">
-              <summary>Додатково</summary>
-              <div class="row"><label>Поворот</label><input type="range" id="rot" min="-180" max="180" step="1" /><span class="val" id="rotV">0</span></div>
-              <div class="row"><label>Розмір</label><input type="range" id="scale" min="0.1" max="3" step="0.01" /><span class="val" id="scaleV">1.0</span></div>
-              <div class="row"><label>Згин</label><input type="range" id="bend" min="-150" max="150" step="1" value="0" /><span class="val" id="bendV">0</span></div>
-              <div class="btns"><button id="resetPart" style="flex:1">Скинути частину</button></div>
-              <div class="row" style="margin-top:8px"><label>Лицем</label><button id="faceBtn" style="flex:1">Перевернути арт: →</button></div>
-              <div class="row"><label>Хода</label><button id="animDirBtn" style="flex:1">Хода в бік: →</button></div>
-              <div class="btns" style="margin-top:8px"><button id="refBtn" style="flex:1">Фоновий концепт</button><button id="refClear">✕</button></div>
-              <input type="file" id="refInput" accept="image/*" style="display:none" />
-            </details>
+            <!-- приховані контролі (доступ через хоткеї/мишу та грід); концепт вантажиться кнопкою «Завантажити картинку» коли вибрано «Фоновий концепт» -->
+            <div id="adv" style="display:none">
+              <input type="range" id="rot" min="-180" max="180" step="1" /><span id="rotV"></span>
+              <input type="range" id="scale" min="0.1" max="3" step="0.01" /><span id="scaleV"></span>
+              <input type="range" id="bend" min="-150" max="150" step="1" value="0" /><span id="bendV"></span>
+              <button id="resetPart"></button>
+              <button id="faceBtn"></button>
+              <button id="animDirBtn"></button>
+              <button id="refBtn"></button><button id="refClear"></button>
+              <input type="file" id="refInput" accept="image/*" />
+            </div>
             <div id="status"></div>
           </div>
         </div>

@@ -661,9 +661,15 @@ stageEl.addEventListener('drop', (ev) => {
   if (files.length) status(`Перетягнуто ${files.length} — розкладаю по назвах…`);
 });
 
+function loadRefFile(f: File): void {
+  const img = new Image(); img.onload = () => { pushUndo(); state.ref.canvas = imageToCanvas(img); state.selected = 'ref'; refreshUI(); }; img.src = URL.createObjectURL(f);
+}
 $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
   const files = Array.from((ev.target as HTMLInputElement).files ?? []);
-  if (files.length) pushUndo();
+  if (!files.length) return;
+  // якщо вибрано «Фоновий концепт» — вантажимо як концепт, а не як частину
+  if (state.selected === 'ref') { loadRefFile(files[0]); return; }
+  pushUndo();
   files.forEach((f) => addImageFile(f, files.length === 1));
 });
 
