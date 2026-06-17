@@ -5,7 +5,7 @@ import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { buildLevelView, type LevelDoc } from '../level/LevelView';
-import { getUser, saveValue } from '../telegram';
+import { saveValue } from '../telegram';
 import { idbGet } from '../store';
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -30,8 +30,14 @@ export class GameScene extends Phaser.Scene {
   private goal!: Phaser.GameObjects.Rectangle;
   private goalLabel!: Phaser.GameObjects.Text;
 
-  private hud!: Phaser.GameObjects.Text;
   private banner!: Phaser.GameObjects.Text;
+
+  // HUD — три бари з іконками
+  private hudBars: Phaser.GameObjects.Graphics | null = null;
+  private hudFills: Phaser.GameObjects.Graphics | null = null;
+  private hudIcons: Phaser.GameObjects.Image[] = [];
+  private hudLayout: Array<{ iconKey: string; iconCx: number; barX: number; barW: number }> = [];
+  private lastHp = -1;
 
   private finished = false;
   private waveSpawned = false;
@@ -132,21 +138,10 @@ export class GameScene extends Phaser.Scene {
       .catch(() => null);
     lvP.then((doc) => { if (doc && doc.placed) this.applyLevel(doc); }).catch(() => {});
 
-    // HUD (прикріплений до екрана)
-    this.hud = this.add
-      .text(12, 12, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffffff' })
-      .setScrollFactor(0)
-      .setDepth(10000);
-    const user = getUser();
-    const name = user?.first_name ?? user?.username ?? 'Гравець';
-    this.add
-      .text(12, 38, `${name}: пробийся через село до магазину!`, {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#bdb0c8',
-      })
-      .setScrollFactor(0)
-      .setDepth(10000);
+    // HUD — три бари (серце / сонце / череп)
+    this.buildHudLayout();
+    this.createHudGraphics();
+
     this.banner = this.add
       .text(0, 0, '', { fontFamily: 'monospace', fontSize: '20px', color: '#ffd000' })
       .setOrigin(0.5)
@@ -222,10 +217,101 @@ export class GameScene extends Phaser.Scene {
     this.computeLayout();
     this.repositionWorld();
     if (this.banner) this.banner.setPosition(this.scale.width / 2, 84);
-    // Повертаємо персонажів у нову смугу
+    this.buildHudLayout();
+    this.createHudGraphics();
     this.player?.clampDepth(this.band.top, this.band.bottom);
     for (const e of this.enemies) e.clampDepth(this.band.top, this.band.bottom);
   }
+
+  // ── HUD helpers ─────────────────────────────────────────────────────────────
+
+  private buildHudLayout(): void {
+    const w = this.scale.width;
+    const margin = 10;
+    const iconD = 36;   // діаметр іконки
+    const gap = 8;      // відступ іконка → бар
+    const arrowW = 12;  // ширина стрілки на кінці
+    const barW = (w - 2 * margin - 3 * (iconD + gap + arrowW)) / 3;
+    const step = iconD + gap + barW + arrowW;
+    const keys = ['hud_heart', 'hud_sun', 'hud_skull'];
+    this.hudLayout = keys.map((iconKey, i) => ({
+      iconKey,
+      iconCx: margin + iconD / 2 + i * step,
+      barX:   margin + iconD + gap + i * step,
+      barW,
+    }));
+  }
+
+  private createHudGraphics(): void {
+    this.hudBars?.destroy();   this.hudBars  = null;
+    this.hudFills?.destroy();  this.hudFills = null;
+    this.hudIcons.forEach((img) => img.destroy());
+    this.hudIcons = [];
+
+    const barYC = 26, barH = 16, arrowW = 12;
+    const barY  = barYC - barH / 2;
+
+    // Контури барів
+    this.hudBars = this.add.graphics().setScrollFactor(0).setDepth(10001);
+    this.hudBars.lineStyle(2, 0xffffff, 0.85);
+    for (const { barX, barW } of this.hudLayout) {
+      this.hudBars.strokePoints([
+        { x: barX,             y: barY      },
+        { x: barX + barW,      y: barY      },
+        { x: barX + barW + arrowW, y: barYC },
+        { x: barX + barW,      y: barY + barH },
+        { x: barX,             y: barY + barH },
+      ], true);
+    }
+
+    // Іконки
+    for (const { iconKey, iconCx } of this.hudLayout) {
+      this.hudIcons.push(
+        this.add.image(iconCx, barYC, iconKey)
+          .setScrollFactor(0)
+          .setDepth(10002)
+          .setDisplaySize(34, 34),
+      );
+    }
+
+    // Заливки (перемальовуються при зміні HP)
+    this.hudFills = this.add.graphics().setScrollFactor(0).setDepth(10000);
+    this.lastHp = -1; // примусове перемалювання
+    this.updateHud();
+  }
+
+  private updateHud(): void {
+    if (!this.hudFills || !this.player) return;
+    const hp = this.player.hp;
+    if (hp === this.lastHp) return;
+    this.lastHp = hp;
+
+    const barYC = 26, barH = 16, arrowW = 12;
+    const barY  = barYC - barH / 2;
+    this.hudFills.clear();
+    this.hudFills.fillStyle(0xffffff, 0.85);
+
+    for (let i = 0; i < this.hudLayout.length; i++) {
+      const { barX, barW } = this.hudLayout[i];
+      const pct = i === 0 ? Math.max(0, Math.min(1, hp / PLAYER.maxHp)) : 1;
+      if (pct <= 0) continue;
+      if (pct >= 1) {
+        // Повна стрілка
+        this.hudFills.fillPoints([
+          { x: barX + 1,             y: barY + 2      },
+          { x: barX + barW - 1,      y: barY + 2      },
+          { x: barX + barW + arrowW - 2, y: barYC     },
+          { x: barX + barW - 1,      y: barY + barH - 2 },
+          { x: barX + 1,             y: barY + barH - 2 },
+        ], true);
+      } else {
+        // Частковий прямокутник
+        this.hudFills.fillRect(barX + 1, barY + 2, (barW - 2) * pct, barH - 4);
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
 
   private spawnWave(): void {
     this.waveSpawned = true;
@@ -310,7 +396,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // HUD + смерть
-    this.hud.setText('HP ' + '♥'.repeat(Math.max(0, this.player.hp)));
+    this.updateHud();
     if (this.player.hp <= 0) this.scene.restart();
   }
 
