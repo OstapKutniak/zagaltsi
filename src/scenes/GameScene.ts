@@ -42,6 +42,7 @@ export class GameScene extends Phaser.Scene {
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
+  private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
 
   constructor() {
     super('Game');
@@ -109,6 +110,7 @@ export class GameScene extends Phaser.Scene {
                 for (const [name, clip] of Object.entries(doc.clips!)) {
                   if (clip.hotkey && ev.key.toLowerCase() === clip.hotkey) {
                     this.character.setAnim(name);
+                    this.hotkeyAnimEnd = this.simTime + clip.duration * 1000;
                   }
                 }
               });
@@ -254,8 +256,10 @@ export class GameScene extends Phaser.Scene {
     // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
     if (this.character) {
       const p = this.player;
-      const anim = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? (p.running ? 'run' : 'walk') : 'idle';
-      this.character.setAnim(anim);
+      if (time >= this.hotkeyAnimEnd) {
+        const anim = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? (p.running ? 'run' : 'walk') : 'idle';
+        this.character.setAnim(anim);
+      }
       this.character.tick(dt, this.player.facing);
       this.character.setPosition(this.player.x, this.player.y - this.character.feetOffset());
       this.character.setDepth(this.player.depth + 0.1);
