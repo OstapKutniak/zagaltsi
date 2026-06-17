@@ -1059,9 +1059,9 @@ function setInterp(mode: 'linear' | 'smooth'): void {
   refreshTimeline(); status(mode === 'smooth' ? 'Звʼязано: згладжено' : 'Звʼязано: лінійно');
 }
 const FPS = 24; // кадрів на секунду (таймлайн показує НОМЕРИ КАДРІВ)
-const END_FRAME = 24; // фінальний кадр для всіх анімацій — біла відмітка-нагадування
 let framesInView = 30; // скільки кадрів у полі зору (колесо над треком змінює — як зум таймлайну)
 let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
+let endMarkEl: HTMLElement | null = null; // маркер кінця анімації (перетягуваний)
 function movePlayhead(): void {
   const frame = state.animT * FPS;
   if (playheadEl) playheadEl.style.left = (frame / framesInView * 100) + '%';
@@ -1077,7 +1077,14 @@ function refreshTimeline(): void {
     const tk = document.createElement('div'); tk.className = 'tick'; tk.style.left = (f / fiv * 100) + '%'; tk.textContent = String(f);
     track.appendChild(tk);
   }
-  if (END_FRAME <= fiv) { const m = document.createElement('div'); m.className = 'frameMark'; m.style.left = (END_FRAME / fiv * 100) + '%'; track.appendChild(m); }
+  const endFrame = clip ? Math.round(clip.duration * FPS) : 24;
+  if (endFrame <= fiv) {
+    const m = document.createElement('div'); m.className = 'frameMark';
+    m.style.cssText += `left:${(endFrame / fiv * 100)}%;width:12px;margin-left:-6px;cursor:ew-resize;z-index:5;opacity:1;background:linear-gradient(to right,transparent calc(50% - 1px),rgba(255,255,255,.6) calc(50% - 1px),rgba(255,255,255,.6) calc(50% + 1px),transparent calc(50% + 1px));`;
+    m.title = `Кінець: кадр ${endFrame}. Тягни щоб змінити тривалість.`;
+    m.addEventListener('mousedown', (e) => { e.stopPropagation(); pushUndo(); draggingEnd = true; play(false); });
+    track.appendChild(m); endMarkEl = m;
+  } else { endMarkEl = null; }
   if (clip) for (let i = 0; i < clip.keys.length; i++) {
     const k = clip.keys[i];
     const dot = document.createElement('div');
@@ -1098,15 +1105,27 @@ function refreshTimeline(): void {
 }
 // скраб: тягни по треку — вибираєш кадр
 let scrubbing = false;
+let draggingEnd = false; // тягнемо маркер кінця анімації
 function scrubTo(clientX: number): void {
   const r = $('track').getBoundingClientRect();
   let f = (clientX - r.left) / r.width * framesInView;
   f = Math.max(0, Math.min(framesInView, f));
   loadFrame(f / FPS); movePlayhead(); refreshUI();
 }
+function dragEndTo(clientX: number): void {
+  const clip = curClip(); if (!clip) return;
+  const r = $('track').getBoundingClientRect();
+  let f = Math.max(1, Math.round((clientX - r.left) / r.width * framesInView));
+  clip.duration = f / FPS;
+  if (endMarkEl) endMarkEl.style.left = (f / framesInView * 100) + '%';
+  status(`Тривалість: ${f} кадрів`);
+}
 $('track').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
-window.addEventListener('mousemove', (e) => { if (scrubbing) scrubTo((e as MouseEvent).clientX); });
-window.addEventListener('mouseup', () => { scrubbing = false; });
+window.addEventListener('mousemove', (e) => {
+  if (scrubbing) scrubTo((e as MouseEvent).clientX);
+  if (draggingEnd) dragEndTo((e as MouseEvent).clientX);
+});
+window.addEventListener('mouseup', () => { if (draggingEnd) refreshTimeline(); scrubbing = false; draggingEnd = false; });
 // колесо над треком — більше/менше кадрів у полі зору
 $('track').addEventListener('wheel', (e) => {
   e.preventDefault();
