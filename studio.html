@@ -60,19 +60,32 @@
       .tlrow select { background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; }
       .tlrow button { font-size: 12px; }
       .tltime { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: auto; }
-      /* трек анімації: номери кадрів зверху, вертикальний плейхед, ключі */
-      #track { position: relative; height: 54px; background: var(--rail); border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; cursor: pointer; overflow: visible; user-select: none; }
-      #track .tick { position: absolute; top: 2px; transform: translateX(-50%); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
-      #track .tick::after { content: ''; position: absolute; left: 50%; top: 14px; width: 1px; height: 6px; background: var(--line); }
-      .keyDot { position: absolute; bottom: 8px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); border: 1px solid #000; cursor: pointer; z-index: 3; overflow: visible; }
+      /* таймлайн — тік-рулер + per-bone треки */
+      #tlWrapper { margin-top: 2px; }
+      #tlHeaderRow { display: flex; }
+      #tlBoneSpacer { flex: 0 0 104px; background: var(--rail); border: 1px solid var(--line); border-right: none; border-radius: 8px 0 0 0; }
+      #tlTicks { flex: 1; position: relative; height: 24px; background: var(--rail); border: 1px solid var(--line); border-left: none; border-radius: 0 8px 0 0; cursor: pointer; overflow: hidden; user-select: none; }
+      #tlTicks .tick { position: absolute; top: 2px; transform: translateX(-50%); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
+      #tlTicks .tick::after { content: ''; position: absolute; left: 50%; top: 14px; width: 1px; height: 6px; background: var(--line); }
+      #tlBoneWrap { display: flex; border: 1px solid var(--line); border-top: none; border-radius: 0 0 8px 8px; max-height: 154px; overflow: hidden; }
+      #tlBoneLabels { flex: 0 0 104px; overflow-y: scroll; border-right: 1px solid var(--line); scrollbar-width: none; }
+      #tlBoneLabels::-webkit-scrollbar { display: none; }
+      #tlBoneTracks { flex: 1; overflow-y: scroll; position: relative; scrollbar-width: none; }
+      #tlBoneTracks::-webkit-scrollbar { display: none; }
+      .boneLabel { height: 22px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid rgba(74,74,74,.3); }
+      .boneLabel:hover { background: rgba(255,255,255,.04); }
+      .boneLabel.sel { color: var(--ink); background: rgba(255,154,31,.12); }
+      .boneTrack { position: relative; height: 22px; border-bottom: 1px solid rgba(74,74,74,.3); }
+      #tlBonePlayhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; z-index: 10; left: 0; }
+      .keyDot { position: absolute; bottom: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--accent); border: 1px solid #000; cursor: pointer; z-index: 3; overflow: visible; }
       .keyDot.sel { background: #fff; }
       .keyDot.smooth { border-radius: 3px; }
-      .dotLabel { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 8px; color: var(--accent); pointer-events: none; white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.85; }
+      .dotLabel { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 7px; color: var(--accent); pointer-events: none; white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.85; }
       .keyDot.sel .dotLabel { color: #fff; }
       .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; z-index: 4; }
       .frameMark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: .5; pointer-events: none; z-index: 2; }
       .phBadge { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: var(--accent); color: #1b1b1b; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 0 0 4px 4px; font-variant-numeric: tabular-nums; }
-      /* Ghost markers on timeline */
+      /* Ghost markers */
       .ghostMark { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; background: linear-gradient(to right,transparent calc(50% - 1px),rgba(255,154,31,.8) calc(50% - 1px),rgba(255,154,31,.8) calc(50% + 1px),transparent calc(50% + 1px)); cursor: ew-resize; z-index: 3; pointer-events: auto; }
       .ghostFill { position: absolute; top: 0; bottom: 0; background: rgba(255,154,31,0.12); pointer-events: none; z-index: 1; }
 
@@ -151,7 +164,16 @@
             <button id="invertBtn" title="Інвертувати напрям обертання вибраної частини між 2 виділеними ключами (Shift-клік по точках)">Інвертувати</button>
             <button id="allKeyBtn" title="Поставити загальний ключ для всіх частин тіла (те саме що K)">Загальний ключ</button>
           </div>
-          <div id="track" title="Колесо — більше/менше кадрів у полі зору"></div>
+          <div id="tlWrapper">
+            <div id="tlHeaderRow">
+              <div id="tlBoneSpacer"></div>
+              <div id="tlTicks" title="Скраб — клік/тягни · Колесо — зум кадрів"></div>
+            </div>
+            <div id="tlBoneWrap">
+              <div id="tlBoneLabels"></div>
+              <div id="tlBoneTracks"><div id="tlBonePlayhead"></div></div>
+            </div>
+          </div>
         </div>
       </section>
 

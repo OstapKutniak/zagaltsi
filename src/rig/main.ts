@@ -383,7 +383,7 @@ function draw(): void {
       const curF = state.animT * FPS;
       const cands = _activeClip.keys.filter((k) => { const df = Math.abs(k.t * FPS - curF); return df > 0.5 && (k.t * FPS < curF ? df <= ghostBefore : df <= ghostAfter); });
       cands.sort((a, b) => Math.abs(b.t - state.animT) - Math.abs(a.t - state.animT));
-      for (const k of cands) { const df = Math.abs(k.t * FPS - curF); drawGhostLayer(k.t, Math.max(0.04, 0.5 * Math.pow(0.5, Math.floor(df) - 1))); }
+      for (const k of cands) { const df = Math.abs(k.t * FPS - curF); drawGhostLayer(k.t, Math.max(0.03, 0.5 * Math.pow(0.8, Math.floor(df) - 1))); }
     }
     if (firstFrameEnabled && Math.abs(_activeClip.keys[0].t - state.animT) > 0.01) drawGhostLayer(_activeClip.keys[0].t, 0.5);
     for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; const sv = _sv[d.key]; sl.rot = sv.rot; sl.dx = sv.dx; sl.dy = sv.dy; sl.scale = sv.scale; sl.bend = sv.bend; }
@@ -660,6 +660,7 @@ function refreshUI(): void {
   $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', !!(ss && ss.bendFlip));
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
+  refreshBoneLabels();
   saveLocal();
   draw();
 }
@@ -1058,11 +1059,16 @@ function snapPose(): Record<string, KeyPose> {
 }
 function setKey(): void {
   const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
+  // Якщо вибрана конкретна кістка — ключ тільки для неї; без вибору — загальний
+  if (!state.selected || state.selected === 'ref') { setAllKey(); return; }
   pushUndo();
-  const t = state.animT; const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
-  if (i >= 0) clip.keys[i].pose = snapPose();
-  else { clip.keys.push({ t, interp: 'linear', pose: snapPose() }); clip.keys.sort((a, b) => a.t - b.t); }
-  refreshTimeline(); status('⬤ Ключ поставлено');
+  const t = state.animT; const bone = state.selected;
+  const sl = state.slots[bone];
+  const bonePose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend };
+  const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+  if (i >= 0) { clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: bonePose }; }
+  else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: bonePose } }); clip.keys.sort((a, b) => a.t - b.t); }
+  refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
 }
 function delKey(): void {
   const clip = curClip(); if (!clip) return;
@@ -1099,17 +1105,23 @@ function setInterp(mode: 'linear' | 'smooth'): void {
 const FPS = 24; // кадрів на секунду (таймлайн показує НОМЕРИ КАДРІВ)
 let framesInView = 30; // скільки кадрів у полі зору (колесо над треком змінює — як зум таймлайну)
 let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
-let endMarkEl: HTMLElement | null = null; // маркер кінця анімації (перетягуваний)
-let ghostEnabled = false; let ghostBefore = 3; let ghostAfter = 3; // привид: кадри до/після
+let bonePlayheadEl: HTMLElement | null = null; // вертикальна лінія по кістковим рядкам
+let endMarkEl: HTMLElement | null = null;
+let ghostEnabled = false; let ghostBefore = 3; let ghostAfter = 3;
 let ghostLeftEl: HTMLElement | null = null; let ghostRightEl: HTMLElement | null = null;
 let ghostFillLeftEl: HTMLElement | null = null; let ghostFillRightEl: HTMLElement | null = null;
-let firstFrameEnabled = false; // показувати перший кадр як прозорий орієнтир
-let _ghostDraw = false; // прапор: пропускати accumBounds під час ghost-рендеру
+let firstFrameEnabled = false;
+let _ghostDraw = false;
+
+function tlTicksRect(): DOMRect { return $('tlTicks').getBoundingClientRect(); }
+
 function movePlayhead(): void {
   const frame = state.animT * FPS;
   const fiv = framesInView;
-  if (playheadEl) playheadEl.style.left = (frame / fiv * 100) + '%';
+  const pct = (frame / fiv * 100) + '%';
+  if (playheadEl) playheadEl.style.left = pct;
   if (badgeEl) badgeEl.textContent = String(Math.round(frame));
+  if (bonePlayheadEl) bonePlayheadEl.style.left = pct;
   if (ghostEnabled) {
     const curF = Math.round(frame);
     if (ghostLeftEl) ghostLeftEl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
@@ -1118,90 +1130,141 @@ function movePlayhead(): void {
     if (ghostFillRightEl) { ghostFillRightEl.style.left = (curF / fiv * 100) + '%'; ghostFillRightEl.style.width = (Math.min(ghostAfter, fiv - curF) / fiv * 100) + '%'; }
   }
 }
+
+function makeDot(i: number, k: { t: number; interp: string }, fiv: number): HTMLElement {
+  const dot = document.createElement('div');
+  dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
+  dot.style.left = (k.t * FPS / fiv * 100) + '%';
+  const lbl = document.createElement('span'); lbl.className = 'dotLabel'; lbl.textContent = String(Math.round(k.t * FPS));
+  dot.appendChild(lbl);
+  dot.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    if ((e as MouseEvent).shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
+    else state.selKeys = [i];
+    play(false); loadFrame(k.t); refreshTimeline(); refreshUI();
+  });
+  return dot;
+}
+
 function refreshTimeline(): void {
   const clip = curClip();
   $<HTMLSelectElement>('anim').value = state.anim ?? '';
-  const track = $('track'); track.innerHTML = '';
   const fiv = framesInView;
+
+  // ── тік-рулер ──
+  const ticks = $('tlTicks'); ticks.innerHTML = '';
   const step = fiv <= 12 ? 1 : fiv <= 30 ? 2 : fiv <= 80 ? 5 : 10;
   for (let f = 0; f <= fiv; f += step) {
     const tk = document.createElement('div'); tk.className = 'tick'; tk.style.left = (f / fiv * 100) + '%'; tk.textContent = String(f);
-    track.appendChild(tk);
+    ticks.appendChild(tk);
   }
+  // Маркер кінця анімації
   const endFrame = clip ? Math.round(clip.duration * FPS) : 24;
   if (endFrame <= fiv) {
     const m = document.createElement('div'); m.className = 'frameMark';
     m.style.cssText += `left:${(endFrame / fiv * 100)}%;width:12px;margin-left:-6px;cursor:ew-resize;z-index:5;opacity:1;pointer-events:auto;background:linear-gradient(to right,transparent calc(50% - 1px),rgba(255,255,255,.6) calc(50% - 1px),rgba(255,255,255,.6) calc(50% + 1px),transparent calc(50% + 1px));`;
     m.title = `Кінець: кадр ${endFrame}. Тягни щоб змінити тривалість.`;
     m.addEventListener('mousedown', (e) => { e.stopPropagation(); pushUndo(); draggingEnd = true; play(false); });
-    track.appendChild(m); endMarkEl = m;
+    ticks.appendChild(m); endMarkEl = m;
   } else { endMarkEl = null; }
-  if (clip) for (let i = 0; i < clip.keys.length; i++) {
-    const k = clip.keys[i];
-    const dot = document.createElement('div');
-    dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
-    dot.style.left = (k.t * FPS / fiv * 100) + '%';
-    const lbl = document.createElement('span'); lbl.className = 'dotLabel'; lbl.textContent = String(Math.round(k.t * FPS));
-    dot.appendChild(lbl);
-    dot.addEventListener('mousedown', (e) => {
-      e.stopPropagation(); // не скрабити при кліку по ключу
-      if (e.shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
-      else state.selKeys = [i];
-      play(false); loadFrame(k.t); refreshTimeline(); refreshUI();
-    });
-    track.appendChild(dot);
+  // Ghost маркери в рулері
+  ghostLeftEl = null; ghostRightEl = null;
+  if (ghostEnabled) {
+    const curF = Math.round(state.animT * FPS);
+    const gl = document.createElement('div'); gl.className = 'ghostMark'; gl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
+    gl.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostLeft = true; play(false); });
+    ticks.appendChild(gl); ghostLeftEl = gl;
+    const gr = document.createElement('div'); gr.className = 'ghostMark'; gr.style.left = (Math.min(fiv, curF + ghostAfter) / fiv * 100) + '%';
+    gr.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostRight = true; play(false); });
+    ticks.appendChild(gr); ghostRightEl = gr;
   }
-  // Ghost range markers (before playhead so playhead is on top)
-  ghostLeftEl = null; ghostRightEl = null; ghostFillLeftEl = null; ghostFillRightEl = null;
+  // Плейхед у рулері (тільки бейдж)
+  const ph = document.createElement('div'); ph.className = 'playhead';
+  const badge = document.createElement('div'); badge.className = 'phBadge';
+  ph.appendChild(badge); ticks.appendChild(ph);
+  playheadEl = ph; badgeEl = badge;
+
+  // ── кісткові треки ──
+  const labelsEl = $('tlBoneLabels'); labelsEl.innerHTML = '';
+  const tracksEl = $('tlBoneTracks');
+  // Зберегти scrollTop і playhead, очистити решту
+  const scrollTop = tracksEl.scrollTop;
+  tracksEl.innerHTML = '';
+
+  // Ghost fills у tracks
+  ghostFillLeftEl = null; ghostFillRightEl = null;
   if (ghostEnabled) {
     const curF = Math.round(state.animT * FPS);
     const fl = document.createElement('div'); fl.className = 'ghostFill';
-    fl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
-    fl.style.width = (Math.min(ghostBefore, curF) / fiv * 100) + '%';
-    track.appendChild(fl); ghostFillLeftEl = fl;
+    fl.style.cssText = `left:${(Math.max(0, curF - ghostBefore) / fiv * 100)}%;width:${(Math.min(ghostBefore, curF) / fiv * 100)}%`;
+    tracksEl.appendChild(fl); ghostFillLeftEl = fl;
     const fr = document.createElement('div'); fr.className = 'ghostFill';
-    fr.style.left = (curF / fiv * 100) + '%';
-    fr.style.width = (Math.min(ghostAfter, fiv - curF) / fiv * 100) + '%';
-    track.appendChild(fr); ghostFillRightEl = fr;
-    const gl = document.createElement('div'); gl.className = 'ghostMark';
-    gl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
-    gl.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostLeft = true; play(false); });
-    track.appendChild(gl); ghostLeftEl = gl;
-    const gr = document.createElement('div'); gr.className = 'ghostMark';
-    gr.style.left = (Math.min(fiv, curF + ghostAfter) / fiv * 100) + '%';
-    gr.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostRight = true; play(false); });
-    track.appendChild(gr); ghostRightEl = gr;
+    fr.style.cssText = `left:${(curF / fiv * 100)}%;width:${(Math.min(ghostAfter, fiv - curF) / fiv * 100)}%`;
+    tracksEl.appendChild(fr); ghostFillRightEl = fr;
   }
-  const ph = document.createElement('div'); ph.className = 'playhead';
-  const badge = document.createElement('div'); badge.className = 'phBadge';
-  ph.appendChild(badge); track.appendChild(ph);
-  playheadEl = ph; badgeEl = badge; movePlayhead();
+
+  for (const d of SLOT_DEFS) {
+    // Лейбл зліва
+    const lb = document.createElement('div');
+    lb.className = 'boneLabel' + (state.selected === d.key ? ' sel' : '');
+    lb.textContent = d.label;
+    lb.addEventListener('click', () => { state.selected = d.key; state.pivotMode = false; state.mode = null; refreshUI(); refreshTimeline(); });
+    labelsEl.appendChild(lb);
+    // Рядок треку справа
+    const row = document.createElement('div'); row.className = 'boneTrack';
+    row.addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+    if (clip) {
+      for (let i = 0; i < clip.keys.length; i++) {
+        const k = clip.keys[i];
+        if (!(d.key in k.pose)) continue; // немає ключа для цієї кістки
+        row.appendChild(makeDot(i, k, fiv));
+      }
+    }
+    tracksEl.appendChild(row);
+  }
+
+  // Плейхед по всіх рядках
+  const bph = document.createElement('div'); bph.id = 'tlBonePlayhead';
+  tracksEl.appendChild(bph); bonePlayheadEl = bph;
+  tracksEl.scrollTop = scrollTop;
+  labelsEl.scrollTop = scrollTop;
+  movePlayhead();
 }
-// скраб: тягни по треку — вибираєш кадр
+
+function refreshBoneLabels(): void {
+  document.querySelectorAll<HTMLElement>('#tlBoneLabels .boneLabel').forEach((el, i) => {
+    if (i < SLOT_DEFS.length) el.classList.toggle('sel', SLOT_DEFS[i].key === state.selected);
+  });
+}
+
+// скраб
 let scrubbing = false;
-let draggingEnd = false; // тягнемо маркер кінця анімації
+let draggingEnd = false;
 let draggingGhostLeft = false; let draggingGhostRight = false;
 function scrubTo(clientX: number): void {
-  const r = $('track').getBoundingClientRect();
+  const r = tlTicksRect();
   let f = (clientX - r.left) / r.width * framesInView;
   f = Math.max(0, Math.min(framesInView, f));
   loadFrame(f / FPS); movePlayhead(); refreshUI();
 }
 function dragEndTo(clientX: number): void {
   const clip = curClip(); if (!clip) return;
-  const r = $('track').getBoundingClientRect();
+  const r = tlTicksRect();
   let f = Math.max(1, Math.round((clientX - r.left) / r.width * framesInView));
   clip.duration = f / FPS;
   if (endMarkEl) endMarkEl.style.left = (f / framesInView * 100) + '%';
   status(`Тривалість: ${f} кадрів`);
 }
-$('track').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+$('tlTicks').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+// Синхронізація прокручування між лейблами і треками
+$('tlBoneTracks').addEventListener('scroll', () => { $('tlBoneLabels').scrollTop = $('tlBoneTracks').scrollTop; }, { passive: true });
+$('tlBoneLabels').addEventListener('scroll', () => { $('tlBoneTracks').scrollTop = $('tlBoneLabels').scrollTop; }, { passive: true });
 window.addEventListener('mousemove', (e) => {
   const mx = (e as MouseEvent).clientX;
   if (scrubbing) scrubTo(mx);
   if (draggingEnd) dragEndTo(mx);
   if (draggingGhostLeft || draggingGhostRight) {
-    const r = $('track').getBoundingClientRect();
+    const r = tlTicksRect();
     const f = Math.round((mx - r.left) / r.width * framesInView);
     const curF = Math.round(state.animT * FPS);
     if (draggingGhostLeft) ghostBefore = Math.max(1, curF - f);
@@ -1209,14 +1272,20 @@ window.addEventListener('mousemove', (e) => {
     movePlayhead(); draw();
   }
 });
-window.addEventListener('mouseup', () => { if (draggingEnd) refreshTimeline(); if (draggingGhostLeft || draggingGhostRight) refreshTimeline(); scrubbing = false; draggingEnd = false; draggingGhostLeft = false; draggingGhostRight = false; });
-// колесо над треком — більше/менше кадрів у полі зору
-$('track').addEventListener('wheel', (e) => {
+window.addEventListener('mouseup', () => {
+  if (draggingEnd) refreshTimeline();
+  if (draggingGhostLeft || draggingGhostRight) refreshTimeline();
+  scrubbing = false; draggingEnd = false; draggingGhostLeft = false; draggingGhostRight = false;
+});
+// Зум колесом над тікрулером або треками
+const _zoomWheel = (e: Event): void => {
   e.preventDefault();
   const stepF = Math.max(2, Math.round(framesInView * 0.12));
   framesInView = Math.max(6, Math.min(120, framesInView + ((e as WheelEvent).deltaY < 0 ? -stepF : stepF)));
   refreshTimeline();
-}, { passive: false });
+};
+$('tlTicks').addEventListener('wheel', _zoomWheel, { passive: false });
+$('tlBoneTracks').addEventListener('wheel', _zoomWheel, { passive: false });
 let raf = 0;
 let lastTs = 0;
 function tick(ts: number): void {
