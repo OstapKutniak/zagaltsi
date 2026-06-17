@@ -656,14 +656,27 @@ const previewFrame = $<HTMLIFrameElement>('previewFrame');
 function reloadPreview(): void { previewFrame.src = 'index.html?t=' + Date.now(); const h = document.getElementById('previewHint'); if (h) h.style.display = 'none'; }
 reloadPreview();
 const previewBox = $('preview');
-// наведення — збільшити з півотом у правому верхньому куті, щоб лівий край майже діставав бібліотеку
-previewBox.addEventListener('mouseenter', () => {
-  const lib = $('library').getBoundingClientRect();
-  const pr = previewBox.getBoundingClientRect();
-  const scale = Math.max(1, (pr.right - (lib.right + 14)) / pr.width);
-  previewBox.style.transform = `scale(${scale})`;
-});
-previewBox.addEventListener('mouseleave', () => { previewBox.style.transform = ''; });
+// ЛКМ — розгорнути превʼю, змінивши РЕАЛЬНИЙ розмір iframe (гра перерендериться
+// більшою через Scale.FIT, без зуму-блюру). Правий верхній кут — якір; лівий край
+// майже біля бібліотеки. Esc / ✕ — згорнути.
+let previewBig = false;
+function setPreviewBig(on: boolean): void {
+  previewBig = on;
+  if (on) {
+    const lib = $('library').getBoundingClientRect();
+    const w = Math.max(360, window.innerWidth - 8 - (lib.right + 12));
+    previewBox.classList.add('big');
+    previewBox.style.width = w + 'px';
+    previewBox.style.height = Math.round((w * 9) / 20) + 'px';
+  } else {
+    previewBox.classList.remove('big');
+    previewBox.style.width = ''; previewBox.style.height = '';
+  }
+}
+$('previewClick').addEventListener('click', () => setPreviewBig(true));
+$<HTMLButtonElement>('previewClose').addEventListener('click', (e) => { e.stopPropagation(); setPreviewBig(false); });
+window.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).code === 'Escape' && previewBig) setPreviewBig(false); });
+window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
 
 // ---- Мірор (M): дзеркалити арт вибраної частини ----
 $<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); });
