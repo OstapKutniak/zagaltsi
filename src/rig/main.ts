@@ -410,7 +410,7 @@ function draw(): void {
   // маркери pivot
   const drawMark = (sel: string) => {
     const a = anchorPx(sel); const on = sel === state.selected;
-    ctx.strokeStyle = on ? '#ff9a1f' : '#9a9a9a'; ctx.fillStyle = ctx.strokeStyle;
+    ctx.strokeStyle = on ? '#ff9a1f' : 'rgba(255,154,31,0.45)'; ctx.fillStyle = ctx.strokeStyle;
     if (on) {
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(a.x - 9, a.y); ctx.lineTo(a.x + 9, a.y); ctx.moveTo(a.x, a.y - 9); ctx.lineTo(a.x, a.y + 9); ctx.stroke();
@@ -1130,8 +1130,9 @@ function setInterp(mode: 'linear' | 'smooth'): void {
 const FPS = 24; // кадрів на секунду (таймлайн показує НОМЕРИ КАДРІВ)
 let framesInView = 30; // скільки кадрів у полі зору (колесо над треком змінює — як зум таймлайну)
 let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
-let bonePlayheadEl: HTMLElement | null = null; // вертикальна лінія по кістковим рядкам
+let bonePlayheadEl: HTMLElement | null = null; // overlay-лінія плейхеда (через всі рядки)
 let endMarkEl: HTMLElement | null = null;
+let endMarkOverlayEl: HTMLElement | null = null; // overlay-лінія кінця анімації
 let ghostEnabled = false; let ghostBefore = 3; let ghostAfter = 3;
 let ghostLeftEl: HTMLElement | null = null; let ghostRightEl: HTMLElement | null = null;
 let ghostFillLeftEl: HTMLElement | null = null; let ghostFillRightEl: HTMLElement | null = null;
@@ -1248,11 +1249,20 @@ function refreshTimeline(): void {
     tracksEl.appendChild(row);
   }
 
-  // Плейхед по всіх рядках
-  const bph = document.createElement('div'); bph.id = 'tlBonePlayhead';
-  tracksEl.appendChild(bph); bonePlayheadEl = bph;
   tracksEl.scrollTop = scrollTop;
   labelsEl.scrollTop = scrollTop;
+
+  // Overlay-лінії (плейхед + кінець анімації) через весь таймлайн
+  const overlays = $('tlOverlays'); overlays.innerHTML = '';
+  const phLine = document.createElement('div'); phLine.className = 'tlOverlayLine';
+  phLine.style.cssText = 'background:var(--accent);z-index:20;';
+  overlays.appendChild(phLine); bonePlayheadEl = phLine;
+  if (endFrame <= fiv) {
+    const emLine = document.createElement('div'); emLine.className = 'tlOverlayLine';
+    emLine.style.cssText = `background:rgba(255,255,255,.4);left:${(endFrame / fiv * 100)}%;z-index:4;`;
+    overlays.appendChild(emLine); endMarkOverlayEl = emLine;
+  } else { endMarkOverlayEl = null; }
+
   movePlayhead();
 }
 
@@ -1277,7 +1287,9 @@ function dragEndTo(clientX: number): void {
   const r = tlTicksRect();
   let f = Math.max(1, Math.round((clientX - r.left) / r.width * framesInView));
   clip.duration = f / FPS;
-  if (endMarkEl) endMarkEl.style.left = (f / framesInView * 100) + '%';
+  const pct = (f / framesInView * 100) + '%';
+  if (endMarkEl) endMarkEl.style.left = pct;
+  if (endMarkOverlayEl) endMarkOverlayEl.style.left = pct;
   status(`Тривалість: ${f} кадрів`);
 }
 $('tlTicks').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
@@ -1477,6 +1489,9 @@ $<HTMLInputElement>('bwPreview').addEventListener('change', (e) => {
   $<HTMLIFrameElement>('previewFrame').style.filter = (e.target as HTMLInputElement).checked ? 'grayscale(1)' : '';
 });
 window.addEventListener('resize', () => { resize(); draw(); alignPartsList(); if (faceOpen) alignFaceList(); });
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => { resize(); draw(); }).observe(canvas);
+}
 restoreLocal();
 resize(); refreshUI();
 renderLibrary();
@@ -1485,3 +1500,5 @@ refreshAnimOptions();
 refreshTimeline();
 alignPartsList();
 status('');
+// Перерахувати розміри після того як таймлайн зайняв місце в DOM
+requestAnimationFrame(() => { resize(); draw(); });
