@@ -718,11 +718,27 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
 });
 
 // ---- верхні таби розділів (навігація між редакторами) ----
+let levelFrameLoaded = false;
 for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
   const go = b.getAttribute('data-go');
-  if (go) b.addEventListener('click', () => { window.location.href = go; });
-  else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
+  if (go === 'level.html') {
+    b.addEventListener('click', () => {
+      const frame = document.getElementById('levelFrame') as HTMLIFrameElement;
+      if (frame) {
+        if (!levelFrameLoaded) { frame.src = 'level.html'; levelFrameLoaded = true; }
+        frame.style.display = 'block';
+      }
+    });
+  } else if (go) {
+    b.addEventListener('click', () => { window.location.href = go; });
+  } else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
 }
+window.addEventListener('message', (e) => {
+  if (e.data === 'backToStudio') {
+    const frame = document.getElementById('levelFrame') as HTMLIFrameElement;
+    if (frame) frame.style.display = 'none';
+  }
+});
 
 // ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
 let partsOpen = false;

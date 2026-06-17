@@ -38,7 +38,8 @@ const state = {
   orig: null as null | { x: number; y: number; rot: number; scale: number },
   startAng: 0, startDist: 1, startWx: 0, startWy: 0,
   colliderTool: 'paint' as 'paint' | 'erase',
-  markerMode: null as null | 'spawn' | 'start' | 'end',
+  markerDrag: null as null | 'spawn' | 'start' | 'end',
+  camView: false,
   grid: 48,
   snap: true,
   showCollider: true,
@@ -91,7 +92,7 @@ function loadImg(a: Asset): void {
   state.images.set(a.id, im);
 }
 
-const setStatus = (m: string): void => { $('status').textContent = m; };
+const setStatus = (m: string): void => { $('statusBar').textContent = m; };
 
 // ---- undo (знімки рівнів JSON; смикаємо pushUndo ПЕРЕД мутацією) ----
 const undoStack: string[] = [];
@@ -143,8 +144,8 @@ function draw(): void {
     for (const cell of level().collider) {
       const [cx, cy] = cell.split(',').map(Number);
       const a = toScreen(cx * gs, cy * gs); const b = toScreen((cx + 1) * gs, (cy + 1) * gs);
-      ctx.fillStyle = 'rgba(90,255,140,0.18)'; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
-      ctx.strokeStyle = 'rgba(90,255,140,0.5)'; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.fillStyle = 'rgba(255,154,31,0.18)'; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.strokeStyle = 'rgba(255,154,31,0.6)'; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
   }
 
@@ -160,6 +161,22 @@ function draw(): void {
   ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
   ctx.fillStyle = '#ffd000'; ctx.fillRect(sp.x, sp.y - 42, 20, 13);
   ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
+
+  // Camera viewport overlay (20:9 game aspect ratio)
+  if (state.camView) {
+    const ASPECT = 20 / 9;
+    const cw = canvas.width, ch = canvas.height;
+    let vw: number, vh: number;
+    if (cw / ch > ASPECT) { vh = ch; vw = vh * ASPECT; }
+    else { vw = cw; vh = vw / ASPECT; }
+    const vx = (cw - vw) / 2, vy = (ch - vh) / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    if (vy > 0) { ctx.fillRect(0, 0, cw, vy); ctx.fillRect(0, vy + vh, cw, vy); }
+    if (vx > 0) { ctx.fillRect(0, vy, vx, vh); ctx.fillRect(vx + vw, vy, vx, vh); }
+    ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    ctx.strokeRect(vx + 1, vy + 1, vw - 2, vh - 2);
+    ctx.setLineDash([]);
+  }
 }
 
 // ---- hit test (інверсна трансформація, AABB у локалі картинки) ----
@@ -199,23 +216,16 @@ $<HTMLButtonElement>('addLevel').addEventListener('click', () => {
 });
 
 // ---- UI: бібліотека ----
-function refreshTabs(): void {
-  const box = $('catTabs'); box.innerHTML = '';
-  for (const c of CATS) {
-    const el = document.createElement('div');
-    el.className = 'tab' + (c.key === state.cat ? ' active' : '');
-    el.textContent = c.label;
-    el.onclick = () => { state.cat = c.key; refreshTabs(); refreshAssets(); };
-    box.appendChild(el);
-  }
-  $('colliderTools').style.display = state.cat === 'collider' ? '' : 'none';
-  $('assets').style.display = state.cat === 'collider' ? 'none' : '';
+function refreshCatSelect(): void {
+  $<HTMLSelectElement>('libSelect').value = state.cat;
+  $('colliderTools').style.display = state.cat === 'collider' ? 'flex' : 'none';
+  $('libGrid').style.display = state.cat === 'collider' ? 'none' : '';
 }
 function refreshAssets(): void {
-  const box = $('assets'); box.innerHTML = '';
+  const box = $('libGrid'); box.innerHTML = '';
   for (const a of state.assets.filter((x) => x.cat === state.cat)) {
-    const el = document.createElement('div'); el.className = 'asset'; el.draggable = true;
-    const img = document.createElement('img'); img.src = a.url; img.draggable = false; // інакше браузер тягне саму картинку, а не контейнер — drop без id
+    const el = document.createElement('div'); el.className = 'libCard'; el.draggable = true;
+    const img = document.createElement('img'); img.src = a.url; img.draggable = false;
     const nm = document.createElement('div'); nm.textContent = a.name;
     el.appendChild(img); el.appendChild(nm);
     el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
@@ -299,14 +309,15 @@ function paintAt(sx: number, sy: number): void {
 canvas.addEventListener('mousedown', (ev) => {
   const x = ev.offsetX, y = ev.offsetY;
   if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
-  if (state.markerMode) {
-    pushUndo();
-    const w = toWorld(x, y); const lv = level();
-    if (state.markerMode === 'spawn') lv.spawn = { x: w.x, y: w.y };
-    else if (state.markerMode === 'start') lv.start = w.x;
-    else lv.end = w.x;
-    state.markerMode = null; setStatus('Маркер поставлено'); draw(); save(); return;
-  }
+  // Draggable markers — check before asset hit test
+  const lv0 = level();
+  const MHIT = 9;
+  const startSx = toScreen(lv0.start, 0).x;
+  const endSx = toScreen(lv0.end, 0).x;
+  const spawnS = toScreen(lv0.spawn.x, lv0.spawn.y);
+  if (Math.abs(x - startSx) < MHIT) { pushUndo(); state.markerDrag = 'start'; return; }
+  if (Math.abs(x - endSx) < MHIT) { pushUndo(); state.markerDrag = 'end'; return; }
+  if (Math.abs(x - spawnS.x) < 16 && y > spawnS.y - 52 && y < spawnS.y + 8) { pushUndo(); state.markerDrag = 'spawn'; return; }
   if (state.mode) { state.mode = null; state.orig = null; save(); return; } // підтвердити
   if (state.cat === 'collider') { pushUndo(); painting = true; paintAt(x, y); return; }
   const hit = hitTest(x, y);
@@ -318,11 +329,18 @@ window.addEventListener('mousemove', (ev) => {
   const r = canvas.getBoundingClientRect();
   state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
   if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
+  if (state.markerDrag) {
+    const w = toWorld(state.mouse.x, state.mouse.y); const lv = level();
+    if (state.markerDrag === 'start') lv.start = w.x;
+    else if (state.markerDrag === 'end') lv.end = w.x;
+    else lv.spawn = { x: w.x, y: w.y };
+    draw(); return;
+  }
   if (painting) { paintAt(state.mouse.x, state.mouse.y); return; }
   if (state.mode) { applyMode(); return; }
   if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
 });
-window.addEventListener('mouseup', () => { if (drag || painting) save(); drag = null; panning = false; painting = false; });
+window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
 canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
 
@@ -356,10 +374,24 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.code === 'Escape' && state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); }
 });
 
-// ---- маркери: наступний клік по полю ставить маркер ----
-$<HTMLButtonElement>('setSpawn').addEventListener('click', () => { state.markerMode = 'spawn'; setStatus('Клікни, де спавн'); });
-$<HTMLButtonElement>('setStart').addEventListener('click', () => { state.markerMode = 'start'; setStatus('Клікни — початок рівня'); });
-$<HTMLButtonElement>('setEnd').addEventListener('click', () => { state.markerMode = 'end'; setStatus('Клікни — кінець рівня'); });
+// ---- category dropdown ----
+$<HTMLSelectElement>('libSelect').addEventListener('change', (e) => {
+  state.cat = (e.target as HTMLSelectElement).value;
+  refreshCatSelect(); refreshAssets();
+});
+
+// ---- camera view toggle ----
+$<HTMLButtonElement>('camViewBtn').addEventListener('click', () => {
+  state.camView = !state.camView;
+  $('camViewBtn').classList.toggle('on', state.camView);
+  draw();
+});
+
+// ---- back to studio ----
+$<HTMLButtonElement>('tabChar').addEventListener('click', () => {
+  if (window.self !== window.top) window.parent.postMessage('backToStudio', '*');
+  else window.location.href = 'studio.html';
+});
 
 // ---- експорт ----
 function buildLevelDoc(): unknown {
@@ -381,6 +413,6 @@ $<HTMLButtonElement>('toGame').addEventListener('click', () => {
 
 window.addEventListener('resize', () => { resize(); draw(); });
 load().then(() => {
-  resize(); refreshLevels(); refreshTabs(); refreshAssets(); refreshSel(); draw();
+  resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
   setStatus('Завантаж PNG у бібліотеку (праворуч) і тягни на доріжку.');
 });
