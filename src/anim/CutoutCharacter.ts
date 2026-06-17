@@ -11,7 +11,9 @@ const TARGET_PX = 410; // цільова висота персонажа (при
 // шари ззаду наперед; передня нога ПІД торсом
 const SLOT_DEFS = [
   { key: 'arm_back' }, { key: 'leg_back' }, { key: 'leg_front' },
-  { key: 'torso' }, { key: 'neck' }, { key: 'head' }, { key: 'arm_front' },
+  { key: 'torso' }, { key: 'neck' }, { key: 'head' },
+  { key: 'eye_back' }, { key: 'eye_front' }, { key: 'brow_back' }, { key: 'brow_front' }, { key: 'mouth' },
+  { key: 'arm_front' },
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
@@ -24,9 +26,11 @@ export interface CharDoc { proportions: { overall: number; head: number; torso: 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
 const PARENT: Record<string, string | null> = {
   torso: null, neck: 'torso', head: 'neck', arm_back: 'torso', arm_front: 'torso', leg_back: 'torso', leg_front: 'torso',
+  eye_back: 'head', eye_front: 'head', brow_back: 'head', brow_front: 'head', mouth: 'head',
 };
 function conn(sel: string, p: CharDoc['proportions']): { x: number; y: number } {
   const t = BASE.torso * p.torso;
+  const h = BASE.head * p.head;
   switch (sel) {
     case 'neck': return { x: 0, y: -t };
     case 'head': return { x: 0, y: 0 };
@@ -34,6 +38,11 @@ function conn(sel: string, p: CharDoc['proportions']): { x: number; y: number } 
     case 'arm_front': return { x: 7, y: -t + 12 };
     case 'leg_back': return { x: -9, y: -4 };
     case 'leg_front': return { x: 9, y: -4 };
+    case 'eye_back': return { x: -h * 0.13, y: -h * 0.55 };
+    case 'eye_front': return { x: h * 0.13, y: -h * 0.55 };
+    case 'brow_back': return { x: -h * 0.13, y: -h * 0.66 };
+    case 'brow_front': return { x: h * 0.13, y: -h * 0.66 };
+    case 'mouth': return { x: 0, y: -h * 0.34 };
     default: return { x: 0, y: 0 };
   }
 }

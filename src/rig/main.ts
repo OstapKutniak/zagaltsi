@@ -17,6 +17,7 @@ interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string
 interface Clip { duration: number; keys: Keyframe[] }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
+// Порядок = шари ззаду наперед. Обличчя (очі/брови/рот) — діти голови, поверх неї.
 const SLOT_DEFS = [
   { key: 'arm_back', label: 'Задня рука', len: 'arms', piv: [0.5, 0.08] },
   { key: 'leg_back', label: 'Задня нога', len: 'legs', piv: [0.5, 0.06] },
@@ -24,22 +25,32 @@ const SLOT_DEFS = [
   { key: 'torso', label: 'Торс', len: 'torso', piv: [0.5, 0.94] },
   { key: 'neck', label: 'Шия', len: 'neck', piv: [0.5, 0.9] },
   { key: 'head', label: 'Голова', len: 'head', piv: [0.5, 0.94] },
+  { key: 'eye_back', label: 'Заднє око', len: 'eye', piv: [0.5, 0.5] },
+  { key: 'eye_front', label: 'Переднє око', len: 'eye', piv: [0.5, 0.5] },
+  { key: 'brow_back', label: 'Задня брова', len: 'brow', piv: [0.5, 0.5] },
+  { key: 'brow_front', label: 'Передня брова', len: 'brow', piv: [0.5, 0.5] },
+  { key: 'mouth', label: 'Рот', len: 'mouth', piv: [0.5, 0.5] },
   { key: 'arm_front', label: 'Передня рука', len: 'arms', piv: [0.5, 0.08] },
 ] as const;
-// Порядок ВІДОБРАЖЕННЯ у списку частин (не плутати зі SLOT_DEFS = порядок шарів).
-const LIST_ORDER = ['arm_front', 'head', 'neck', 'torso', 'leg_front', 'leg_back', 'arm_back'] as const;
+// Рядки списку частин (порядок ВІДОБРАЖЕННЯ; пари — поруч). Не плутати зі SLOT_DEFS (шари).
+const LIST_ROWS: string[][] = [
+  ['arm_front'], ['brow_front', 'brow_back'], ['eye_front', 'eye_back'], ['mouth'],
+  ['head'], ['neck'], ['torso'], ['leg_front'], ['leg_back'], ['arm_back'], ['ref'],
+];
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
-const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
+const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26, eye: 16, brow: 14, mouth: 20 };
 
 // Ієрархія кісток: торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
 // Дитина обертається/рухається разом із батьком -> нічого не "відривається".
 const PARENT: Record<string, string | null> = {
   torso: null, neck: 'torso', head: 'neck', arm_back: 'torso', arm_front: 'torso', leg_back: 'torso', leg_front: 'torso',
+  eye_back: 'head', eye_front: 'head', brow_back: 'head', brow_front: 'head', mouth: 'head',
 };
 // Точка кріплення дитини в ЛОКАЛЬНІЙ системі батька (одиниці). Збережено стару
 // геометрію: при bind (усі rot=0) позиції ті самі, що були (нічого не з'їжджає).
 function conn(sel: string): { x: number; y: number } {
   const t = BASE.torso * state.prop.torso;
+  const h = BASE.head * state.prop.head; // для обличчя — відносно голови (стартові позиції, далі тягнеш G)
   switch (sel) {
     case 'neck': return { x: 0, y: -t };
     case 'head': return { x: 0, y: 0 };
@@ -47,6 +58,11 @@ function conn(sel: string): { x: number; y: number } {
     case 'arm_front': return { x: 7, y: -t + 12 };
     case 'leg_back': return { x: -9, y: -4 };
     case 'leg_front': return { x: 9, y: -4 };
+    case 'eye_back': return { x: -h * 0.13, y: -h * 0.55 };
+    case 'eye_front': return { x: h * 0.13, y: -h * 0.55 };
+    case 'brow_back': return { x: -h * 0.13, y: -h * 0.66 };
+    case 'brow_front': return { x: h * 0.13, y: -h * 0.66 };
+    case 'mouth': return { x: 0, y: -h * 0.34 };
     default: return { x: 0, y: 0 };
   }
 }
@@ -443,6 +459,9 @@ function assignImage(key: string, name: string | null): void {
 // яка частина тіла за назвою файлу
 function slotForName(name: string): string | null {
   const n = name.toLowerCase();
+  if (/brow|брів|брова|брови/.test(n)) return /back|зад/.test(n) ? 'brow_back' : 'brow_front';
+  if (/eye|око|очі|очей/.test(n)) return /back|зад/.test(n) ? 'eye_back' : 'eye_front';
+  if (/mouth|рот|губ/.test(n)) return 'mouth';
   if (/head|голов/.test(n)) return 'head';
   if (/torso|shirt|body|тор|сороч/.test(n)) return 'torso';
   if (/neck|шия|шиї/.test(n)) return 'neck';
@@ -521,15 +540,20 @@ function endMode(commit: boolean): void {
 // ---- UI ----
 function refreshChips(): void {
   const box = $('slotChips'); box.innerHTML = '';
-  const make = (key: string, label: string, empty: boolean) => {
+  const make = (key: string): HTMLElement => {
+    const isRef = key === 'ref';
+    const label = isRef ? 'Фоновий концепт' : def(key).label;
+    const empty = isRef ? !state.ref.canvas : !state.slots[key].image;
     const el = document.createElement('div');
     el.className = 'chip' + (key === state.selected ? ' sel' : '') + (empty ? ' empty' : '');
     el.textContent = label;
     el.onclick = () => { state.selected = key; state.pivotMode = false; state.mode = null; refreshUI(); };
-    box.appendChild(el);
+    return el;
   };
-  for (const key of LIST_ORDER) make(key, def(key).label, !state.slots[key].image);
-  make('ref', 'Фоновий концепт', !state.ref.canvas);
+  for (const row of LIST_ROWS) {
+    if (row.length === 1) box.appendChild(make(row[0]));
+    else { const pair = document.createElement('div'); pair.className = 'chipPair'; for (const k of row) pair.appendChild(make(k)); box.appendChild(pair); }
+  }
 }
 // Грід завантажених PNG (як бібліотека): клік = призначити вибраній частині.
 const IMG_GRID_MIN = 9; // мінімум слотів (з пустими) — щоб видно сітку/скрол
