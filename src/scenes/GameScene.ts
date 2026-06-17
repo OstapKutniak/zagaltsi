@@ -108,7 +108,7 @@ export class GameScene extends Phaser.Scene {
               this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
                 if (!this.character) return;
                 for (const [name, clip] of Object.entries(doc.clips!)) {
-                  if (clip.hotkey && ev.key.toLowerCase() === clip.hotkey) {
+                  if (clip.hotkey && ev.code === clip.hotkey) {
                     this.character.setAnim(name);
                     this.hotkeyAnimEnd = this.simTime + clip.duration * 1000;
                   }

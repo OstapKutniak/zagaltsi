@@ -598,12 +598,18 @@ function refreshImgGrid(): void {
     const e = document.createElement('div'); e.className = 'imgCell empty'; box.appendChild(e);
   }
 }
+// ev.code → читабельна назва: 'KeyR'→'R', 'Digit1'→'1', решта — як є
+function hotkeyLabel(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  return code;
+}
 function refreshHotkeyBtn(): void {
   const btn = $<HTMLButtonElement>('hotkeyBtn');
   if (!state.anim) { btn.disabled = true; btn.textContent = 'Хоткей (-)'; btn.classList.remove('light'); return; }
   btn.disabled = false;
   const hk = state.clips[state.anim]?.hotkey;
-  btn.textContent = hk ? `Хоткей (${hk.toUpperCase()})` : 'Хоткей (-)';
+  btn.textContent = hk ? `Хоткей (${hotkeyLabel(hk)})` : 'Хоткей (-)';
   btn.classList.remove('light');
 }
 function refreshUI(): void {
@@ -805,9 +811,9 @@ window.addEventListener('keydown', (ev) => {
   if (hotkeyListening) {
     ev.preventDefault();
     hotkeyListening = false;
-    if (state.anim && ev.key.length === 1) { // лише односимвольні клавіші (літери, цифри)
-      const clip = curClip(); if (clip) clip.hotkey = ev.key.toLowerCase();
-      status(`Хоткей для «${state.anim}»: ${ev.key.toUpperCase()}`);
+    if (state.anim && ev.code) { // ev.code — фізична клавіша, незалежно від розкладки
+      const clip = curClip(); if (clip) clip.hotkey = ev.code;
+      status(`Хоткей для «${state.anim}»: ${hotkeyLabel(ev.code)}`);
     }
     refreshUI(); return;
   }
@@ -877,7 +883,7 @@ function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<
     im.onload = () => { state.images.set(name, imageToCanvas(im)); if (!state.imageNames.includes(name)) state.imageNames.push(name); refreshUI(); };
     im.src = data;
   }
-  if (keepAnim) { state.anim = keepAnim; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); play(wasPlaying); }
+  if (keepAnim && state.clips[keepAnim]) { state.anim = keepAnim; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); play(wasPlaying); }
   refreshAnimOptions();
   refreshUI();
 }
