@@ -103,17 +103,22 @@ export class GameScene extends Phaser.Scene {
             this.character = c;
             this.add.existing(c);
             this.player.setVisible(false);
-            // хоткеї анімацій — призначені в студії клавіші запускають кліп
+            // хоткеї анімацій — нативний listener (ev.code = фізична клавіша, незалежно від розкладки)
             if (doc.clips) {
-              this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
+              const hotkeyHandler = (ev: KeyboardEvent): void => {
                 if (!this.character) return;
                 for (const [name, clip] of Object.entries(doc.clips!)) {
-                  if (clip.hotkey && ev.code === clip.hotkey) {
+                  if (!clip.hotkey) continue;
+                  // новий формат: 'KeyR'; старий fallback: 'r'
+                  if (ev.code === clip.hotkey || ev.key.toLowerCase() === clip.hotkey) {
                     this.character.setAnim(name);
                     this.hotkeyAnimEnd = this.simTime + clip.duration * 1000;
                   }
                 }
-              });
+              };
+              window.addEventListener('keydown', hotkeyHandler);
+              this.events.once(Phaser.Scenes.Events.SHUTDOWN,
+                () => window.removeEventListener('keydown', hotkeyHandler));
             }
           })
           .catch(() => {});
