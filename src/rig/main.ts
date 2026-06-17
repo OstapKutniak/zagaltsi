@@ -693,15 +693,18 @@ function refitPreviewGame(): void {
 }
 function setPreviewBig(on: boolean): void {
   previewBig = on;
+  const pc = $('previewClick') as HTMLElement;
   if (on) {
     const lib = $('library').getBoundingClientRect();
     const w = Math.max(360, window.innerWidth - 8 - (lib.right + 12));
     previewBox.classList.add('big');
     previewBox.style.width = w + 'px';
     previewBox.style.height = Math.round((w * 9) / 20) + 'px';
+    pc.style.pointerEvents = 'none'; // дати фокус iframe → гра отримує мишу/клаву
   } else {
     previewBox.classList.remove('big');
     previewBox.style.width = ''; previewBox.style.height = '';
+    pc.style.pointerEvents = ''; // відновити overlay → ЛКМ знову розгортає
   }
   refitPreviewGame();
 }
@@ -776,6 +779,7 @@ canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); state.zoom = Mat
 
 // ---- клавіатура (ev.code — незалежно від розкладки) ----
 window.addEventListener('keydown', (ev) => {
+  if (previewBig) return; // превью розгорнуто — хоткеї студії вимкнені, гра отримує клаву
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
