@@ -94,8 +94,28 @@ export class GameScene extends Phaser.Scene {
       ? Promise.resolve(localDoc)
       : fetch(`${import.meta.env.BASE_URL}character.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     docP
-      .then((doc) => (doc && doc.slots && doc.images ? CutoutCharacter.load(this, doc) : null))
-      .then((c) => { if (c) { this.character = c; this.add.existing(c); this.player.setVisible(false); } })
+      .then((doc) => {
+        if (!doc?.slots || !doc?.images) return;
+        CutoutCharacter.load(this, doc)
+          .then((c) => {
+            if (!c) return;
+            this.character = c;
+            this.add.existing(c);
+            this.player.setVisible(false);
+            // хоткеї анімацій — призначені в студії клавіші запускають кліп
+            if (doc.clips) {
+              this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
+                if (!this.character) return;
+                for (const [name, clip] of Object.entries(doc.clips!)) {
+                  if (clip.hotkey && ev.key.toLowerCase() === clip.hotkey) {
+                    this.character.setAnim(name);
+                  }
+                }
+              });
+            }
+          })
+          .catch(() => {});
+      })
       .catch(() => { /* нема — лишається прямокутник */ });
 
     // Рівень із редактора (IndexedDB zag_level або public/level.json)

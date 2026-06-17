@@ -20,7 +20,7 @@ const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number; cut?: number | null; bendFlip?: boolean; sx?: number; sy?: number; gscale?: number }
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
-interface Clip { duration: number; keys: Keyframe[] }
+interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
 export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }
 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.

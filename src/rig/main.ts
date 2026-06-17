@@ -14,7 +14,7 @@ interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
-interface Clip { duration: number; keys: Keyframe[] }
+interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 // Порядок = шари ззаду наперед. Обличчя (очі/брови/рот) — діти голови, поверх неї.
@@ -598,8 +598,16 @@ function refreshImgGrid(): void {
     const e = document.createElement('div'); e.className = 'imgCell empty'; box.appendChild(e);
   }
 }
+function refreshHotkeyBtn(): void {
+  const btn = $<HTMLButtonElement>('hotkeyBtn');
+  if (!state.anim) { btn.disabled = true; btn.textContent = 'Хоткей (-)'; btn.classList.remove('light'); return; }
+  btn.disabled = false;
+  const hk = state.clips[state.anim]?.hotkey;
+  btn.textContent = hk ? `Хоткей (${hk.toUpperCase()})` : 'Хоткей (-)';
+  btn.classList.remove('light');
+}
 function refreshUI(): void {
-  refreshChips(); refreshImgGrid();
+  refreshChips(); refreshImgGrid(); refreshHotkeyBtn();
   const t = tf(state.selected);
   $<HTMLInputElement>('rot').value = String(Math.round(t.rot)); $('rotV').textContent = String(Math.round(t.rot));
   $<HTMLInputElement>('scale').value = String(t.scale); $('scaleV').textContent = t.scale < 1 ? t.scale.toFixed(2) : t.scale.toFixed(1);
@@ -685,6 +693,7 @@ previewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;
 previewBackdrop.addEventListener('click', () => setPreviewBig(false));
 document.body.appendChild(previewBackdrop);
 let previewBig = false;
+let hotkeyListening = false; // очікуємо клавішу для прив'язки до поточної анімації
 // після зміни розміру вікна превʼю — змусити гру в iframe перефітитись під новий
 // контейнер. scale.resize(тим самим логічним розміром) реально перемасштабовує
 // канвас (refresh() — ні). Кілька викликів: чекаємо поки #game набуде нового розміру.
@@ -719,6 +728,13 @@ window.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).code === 'E
 window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
 
 // ---- Мірор (M): дзеркалити арт вибраної частини ----
+// ---- Хоткей анімації ----
+$<HTMLButtonElement>('hotkeyBtn').addEventListener('click', () => {
+  if (!state.anim) return;
+  hotkeyListening = true;
+  const btn = $<HTMLButtonElement>('hotkeyBtn');
+  btn.textContent = 'Натисни клавішу…'; btn.classList.add('light');
+});
 $<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); });
 // ---- Фліп (F): перемкнути напрям згину УСІХ кісток одразу ----
 function flipAllBends(): void {
@@ -785,6 +801,16 @@ canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); state.zoom = Mat
 
 // ---- клавіатура (ev.code — незалежно від розкладки) ----
 window.addEventListener('keydown', (ev) => {
+  // режим прив'язки хоткея: перша натиснута клавіша записується в поточну анімацію
+  if (hotkeyListening) {
+    ev.preventDefault();
+    hotkeyListening = false;
+    if (state.anim && ev.key.length === 1) { // лише односимвольні клавіші (літери, цифри)
+      const clip = curClip(); if (clip) clip.hotkey = ev.key.toLowerCase();
+      status(`Хоткей для «${state.anim}»: ${ev.key.toUpperCase()}`);
+    }
+    refreshUI(); return;
+  }
   if (previewBig) return; // превью розгорнуто — хоткеї студії вимкнені, гра отримує клаву
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
