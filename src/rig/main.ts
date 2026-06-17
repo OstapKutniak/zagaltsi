@@ -1080,7 +1080,7 @@ function refreshTimeline(): void {
   const endFrame = clip ? Math.round(clip.duration * FPS) : 24;
   if (endFrame <= fiv) {
     const m = document.createElement('div'); m.className = 'frameMark';
-    m.style.cssText += `left:${(endFrame / fiv * 100)}%;width:12px;margin-left:-6px;cursor:ew-resize;z-index:5;opacity:1;background:linear-gradient(to right,transparent calc(50% - 1px),rgba(255,255,255,.6) calc(50% - 1px),rgba(255,255,255,.6) calc(50% + 1px),transparent calc(50% + 1px));`;
+    m.style.cssText += `left:${(endFrame / fiv * 100)}%;width:12px;margin-left:-6px;cursor:ew-resize;z-index:5;opacity:1;pointer-events:auto;background:linear-gradient(to right,transparent calc(50% - 1px),rgba(255,255,255,.6) calc(50% - 1px),rgba(255,255,255,.6) calc(50% + 1px),transparent calc(50% + 1px));`;
     m.title = `Кінець: кадр ${endFrame}. Тягни щоб змінити тривалість.`;
     m.addEventListener('mousedown', (e) => { e.stopPropagation(); pushUndo(); draggingEnd = true; play(false); });
     track.appendChild(m); endMarkEl = m;
