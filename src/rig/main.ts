@@ -296,7 +296,7 @@ function resize(): void {
 const charBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
 // ФІКСОВАНА лінія маківки (одиниці) — орієнтир висоти базового персонажа: калібрується
 // раз під поточного персонажа (Остапа) і зберігається, щоб під неї рівняти інших.
-let headLineUY: number | null = (() => { const v = localStorage.getItem('zag_head_uy'); return v != null ? Number(v) : null; })();
+let headLineUY: number | null = (() => { const v = localStorage.getItem('zag_head_uy2'); return v != null ? Number(v) : null; })();
 function resetBounds(): void { charBB.minX = charBB.minY = Infinity; charBB.maxX = charBB.maxY = -Infinity; }
 function accumBounds(a: { x: number; y: number }, ang: number, sxv: number, syv: number, ox: number, oy: number, w: number, h: number): void {
   const cos = Math.cos(ang), sin = Math.sin(ang);
@@ -397,9 +397,9 @@ function draw(): void {
     ctx.strokeRect(x0 - pad, charBB.minY - pad, (x1 - x0) + pad * 2, (charBB.maxY - charBB.minY) + pad * 2);
     ctx.restore();
     // КАЛІБРАЦІЯ лінії маківки: раз захоплюємо верхівку поточного персонажа й заморожуємо
-    if (headLineUY == null && !state.anim && state.slots['head'].image) {
+    if (headLineUY == null && !state.anim && imgOf('head')) { // лише коли бітмап голови вже завантажений (інакше captured підборіддя)
       headLineUY = (charBB.minY - state.origin.y) / s();
-      try { localStorage.setItem('zag_head_uy', String(headLineUY)); } catch { /* ignore */ }
+      try { localStorage.setItem('zag_head_uy2', String(headLineUY)); } catch { /* ignore */ }
     }
   }
 
@@ -610,12 +610,18 @@ $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
   partsOpen = !partsOpen;
   $('partsList').style.display = partsOpen ? '' : 'none';
 });
+// вирівняти верх списку частин по верху кнопки «Частини персонажа»
+function alignPartsList(): void {
+  const cm = $('centerMid').getBoundingClientRect();
+  const pt = $('partsToggle').getBoundingClientRect();
+  $('partsList').style.top = Math.max(0, Math.round(pt.top - cm.top)) + 'px';
+}
 
 // ---- Лінія висоти: поставити на маківку поточного персонажа (фіксується) ----
 $<HTMLButtonElement>('setHeadLine').addEventListener('click', () => {
   if (!isFinite(charBB.minY)) { status('Спершу завантаж частини персонажа'); return; }
   headLineUY = (charBB.minY - state.origin.y) / s();
-  try { localStorage.setItem('zag_head_uy', String(headLineUY)); } catch { /* ignore */ }
+  try { localStorage.setItem('zag_head_uy2', String(headLineUY)); } catch { /* ignore */ }
   draw(); status('Лінію висоти встановлено на маківку');
 });
 
@@ -752,6 +758,7 @@ function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<
     im.src = data;
   }
   if (keepAnim) { state.anim = keepAnim; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); play(wasPlaying); }
+  refreshAnimOptions();
   refreshUI();
 }
 // Превʼю персонажа = його ГОЛОВА (PNG зі слота head), вписана в мініатюру.
@@ -998,6 +1005,55 @@ function play(on: boolean): void {
   if (state.playing) { lastTs = performance.now(); raf = requestAnimationFrame(tick); }
   refreshTimeline();
 }
+// ---- іменовані анімації (службові процедурні + власні з ключами) ----
+const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt'];
+function refreshAnimOptions(): void {
+  const sel = $<HTMLSelectElement>('anim'); const cur = state.anim ?? '';
+  sel.innerHTML = '<option value="">— стоп (поза) —</option>';
+  for (const b of BUILTIN) { const o = document.createElement('option'); o.value = b; o.textContent = b; sel.appendChild(o); }
+  const custom = Object.keys(state.clips).filter((n) => !BUILTIN.includes(n));
+  if (custom.length) {
+    const og = document.createElement('optgroup'); og.label = 'Мої анімації';
+    for (const n of custom) { const o = document.createElement('option'); o.value = n; o.textContent = n; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  sel.value = cur;
+}
+function selectAnim(name: string | null): void {
+  play(false);
+  if (name) { state.anim = name; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshAnimOptions(); refreshTimeline(); refreshUI(); play(true); }
+  else { state.anim = null; exitClip(); refreshAnimOptions(); refreshTimeline(); refreshUI(); }
+}
+// «Зберегти анімацію» — зберегти поточні КЛЮЧІ як НОВУ іменовану анімацію
+function saveAsNewAnim(): void {
+  const clip = curClip();
+  if (!clip || !clip.keys.length) { status('Спершу постав ключі (K)'); return; }
+  const name = (prompt('Назва нової анімації:', '') || '').trim();
+  if (!name) return;
+  if (BUILTIN.includes(name)) { status('Це службова назва — обери іншу'); return; }
+  pushUndo();
+  state.clips[name] = JSON.parse(JSON.stringify(clip)); // копія з ключами
+  state.anim = name; refreshAnimOptions(); loadFrame(0); refreshTimeline(); refreshUI();
+  status('Збережено анімацію: ' + name);
+}
+function renameAnim(): void {
+  const a = state.anim; if (!a || !state.clips[a]) { status('Вибери анімацію зі своїх'); return; }
+  const name = (prompt('Нова назва:', a) || '').trim();
+  if (!name || name === a) return;
+  if (BUILTIN.includes(name)) { status('Це службова назва — обери іншу'); return; }
+  pushUndo();
+  state.clips[name] = state.clips[a]; delete state.clips[a];
+  state.anim = name; refreshAnimOptions(); refreshTimeline(); refreshUI();
+  status('Перейменовано: ' + name);
+}
+function deleteAnim(): void {
+  const a = state.anim; if (!a) { status('Вибери анімацію'); return; }
+  if (!confirm(`Видалити анімацію «${a}»?`)) return;
+  pushUndo();
+  delete state.clips[a]; // для службової назви це повертає процедурну
+  state.anim = null; exitClip(); refreshAnimOptions(); refreshTimeline(); refreshUI();
+  status('Видалено: ' + a);
+}
 $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   const v = (e.target as HTMLSelectElement).value; // ВАЖЛИВО: зчитати ДО play(false) — play()→refreshTimeline() скидає цей select назад на state.anim (тоді ще порожній) і вибір губився
   (e.target as HTMLSelectElement).blur(); // зняти фокус, інакше Пробіл відкриває список замість плей/пауза
@@ -1009,7 +1065,9 @@ $<HTMLButtonElement>('playBtn').addEventListener('click', () => play(!state.play
 $<HTMLInputElement>('dur').addEventListener('input', (e) => { const c = curClip(); if (c) { c.duration = Math.max(0.2, Number((e.target as HTMLInputElement).value)); refreshTimeline(); } });
 $<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
 $<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
-$<HTMLButtonElement>('bakeBtn').addEventListener('click', bakeProcedural);
+$<HTMLButtonElement>('bakeBtn').addEventListener('click', saveAsNewAnim);
+$<HTMLButtonElement>('renameAnimBtn').addEventListener('click', renameAnim);
+$<HTMLButtonElement>('delAnimBtn').addEventListener('click', deleteAnim);
 // «Звʼязати» — одна кнопка: ЛКМ застосовує режим, ПКМ перемикає лінійно/згладжено (білий = згладжено)
 let linkMode: 'linear' | 'smooth' = 'linear';
 function refreshLinkBtn(): void { const b = $<HTMLButtonElement>('linkBtn'); b.textContent = 'Звʼязати: ' + (linkMode === 'linear' ? 'лінійно' : 'згладжено'); b.classList.toggle('light', linkMode === 'smooth'); }
@@ -1018,9 +1076,11 @@ $<HTMLButtonElement>('linkBtn').addEventListener('contextmenu', (e) => { e.preve
 refreshLinkBtn();
 $<HTMLButtonElement>('resetAnim').addEventListener('click', resetAnim);
 
-window.addEventListener('resize', () => { resize(); draw(); });
+window.addEventListener('resize', () => { resize(); draw(); alignPartsList(); });
 restoreLocal();
 resize(); refreshUI();
 renderLibrary();
+refreshAnimOptions();
 refreshTimeline();
+alignPartsList();
 status('');
