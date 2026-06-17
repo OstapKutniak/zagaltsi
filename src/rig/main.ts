@@ -705,6 +705,7 @@ function setPreviewBig(on: boolean): void {
     previewBox.style.height = Math.round((w * 9) / 20) + 'px';
     pc.style.pointerEvents = 'none'; // iframe отримує мишу/клаву
     previewBackdrop.style.display = 'block'; // клік поза превʼю = згорнути
+    ($('previewFrame') as HTMLIFrameElement).contentWindow?.focus();
   } else {
     previewBox.classList.remove('big');
     previewBox.style.width = ''; previewBox.style.height = '';
