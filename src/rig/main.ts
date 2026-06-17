@@ -8,7 +8,7 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const rad = (d: number): number => (d * Math.PI) / 180;
 
-interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number; sx: number; sy: number }
+interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number; sx: number; sy: number; gscale: number }
 interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number; bendFlip: boolean }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
@@ -57,7 +57,7 @@ const ctx = canvas.getContext('2d')!;
 const state = {
   images: new Map<string, HTMLCanvasElement>(),
   imageNames: [] as string[],
-  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1 } as Ref,
+  ref: { canvas: null, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1 } as Ref,
   showRef: true,
   anim: null as null | string, // активний кліп (редагується)
   animT: 0, // час на таймлайні
@@ -86,7 +86,7 @@ const state = {
   startMx: 0,
   startMy: 0,
 };
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, cut: null, bend: 0, bendFlip: false };
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
 const s = (): number => state.viewScale * state.prop.overall;
@@ -101,11 +101,13 @@ const imgOf = (sel: string): HTMLCanvasElement | null => {
 };
 const pivotOf = (sel: string): { x: number; y: number } => (sel === 'ref' ? { x: 0.5, y: 0.5 } : { x: state.slots[sel].pivotX, y: state.slots[sel].pivotY });
 // Світовий трансформ слота з урахуванням ієрархії (рекурсивно по батьках).
-function worldOf(sel: string): { x: number; y: number; rot: number } {
+// gs — накопичений МАСШТАБ (gscale) ланцюга: масштаб батька поширюється на дітей
+// (позицію кріплення й власний арт), як і обертання.
+function worldOf(sel: string): { x: number; y: number; rot: number; gs: number } {
   const t = eff(sel);
   const p = PARENT[sel];
   if (!p) {
-    return { x: state.origin.x + t.dx * s(), y: state.origin.y + t.dy * s(), rot: rad(t.rot) };
+    return { x: state.origin.x + t.dx * s(), y: state.origin.y + t.dy * s(), rot: rad(t.rot), gs: t.gscale };
   }
   const pw = worldOf(p);
   const c = conn(sel);
@@ -113,11 +115,13 @@ function worldOf(sel: string): { x: number; y: number; rot: number } {
   const ly = c.y + t.dy;
   const cos = Math.cos(pw.rot), sin = Math.sin(pw.rot);
   return {
-    x: pw.x + (lx * cos - ly * sin) * s(),
-    y: pw.y + (lx * sin + ly * cos) * s(),
+    x: pw.x + (lx * cos - ly * sin) * pw.gs * s(),
+    y: pw.y + (lx * sin + ly * cos) * pw.gs * s(),
     rot: pw.rot + rad(t.rot),
+    gs: pw.gs * t.gscale,
   };
 }
+const worldGs = (sel: string): number => (sel === 'ref' ? state.ref.gscale : worldOf(sel).gs);
 function anchorPx(sel: string): { x: number; y: number } {
   if (sel === 'ref') {
     const top = -(BASE.torso * state.prop.torso + BASE.head * state.prop.head);
@@ -140,12 +144,12 @@ const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - 
 function eff(sel: string): Tf {
   if (sel === 'ref' || !state.anim) return tf(sel);
   const clip = state.clips[state.anim];
-  if ((clip && clip.keys.length) || !state.playing) return tf(sel);
-  const su = rigSlots()[sel];
+  if (clip && clip.keys.length) return tf(sel); // авторські ключі вже в слотах (loadFrame)
+  const su = rigSlots()[sel]; // процедурна поза — семплимо за animT (і на ПАУЗІ теж, для скрабу)
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
   if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; }
-  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy };
+  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy, gscale: su.gscale };
 }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
@@ -290,6 +294,9 @@ function resize(): void {
 }
 // межі персонажа в екранних px — для габаритної рамки
 const charBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+// ФІКСОВАНА лінія маківки (одиниці) — орієнтир висоти базового персонажа: калібрується
+// раз під поточного персонажа (Остапа) і зберігається, щоб під неї рівняти інших.
+let headLineUY: number | null = (() => { const v = localStorage.getItem('zag_head_uy'); return v != null ? Number(v) : null; })();
 function resetBounds(): void { charBB.minX = charBB.minY = Infinity; charBB.maxX = charBB.maxY = -Infinity; }
 function accumBounds(a: { x: number; y: number }, ang: number, sxv: number, syv: number, ox: number, oy: number, w: number, h: number): void {
   const cos = Math.cos(ang), sin = Math.sin(ang);
@@ -310,7 +317,8 @@ function drawImageAt(sel: string, alpha: number): void {
   ctx.globalAlpha = alpha;
   ctx.translate(a.x, a.y);
   ctx.rotate(worldRot(sel)); // сумарний кут (з урахуванням батьків)
-  const scx = t.scale * t.sx * s(), scy = t.scale * t.sy * s(); // sx/sy — неоднорідний масштаб (S X / S Z)
+  const wgs = worldGs(sel); // накопичений масштаб ланцюга (скейл батька -> на дітей)
+  const scx = t.scale * t.sx * wgs * s(), scy = t.scale * t.sy * wgs * s(); // sx/sy — неоднорідний (S X / S Z)
   ctx.scale(t.flip * scx, scy); // flip<0 — дзеркало по X навколо півота
   if (sel !== 'ref') accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
 
@@ -323,7 +331,7 @@ function drawImageAt(sel: string, alpha: number): void {
     ctx.drawImage(img, ox, oy);
     ctx.restore();
     // нижня частина — обертається на bend навколо суглоба (інверсія при дзеркаленні)
-    const proc = !!(state.anim && state.playing && !(state.clips[state.anim]?.keys.length));
+    const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length)); // згин процедурно — і на паузі (скраб)
     const bendVal = (slot.bend + (proc ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * (slot.flip < 0 ? -1 : 1) * (slot.bendFlip ? -1 : 1);
     ctx.save();
     ctx.translate(jx, cutY); ctx.rotate(rad(bendVal)); ctx.translate(-jx, -cutY);
@@ -342,10 +350,8 @@ function draw(): void {
   const groundY = toPx(0, groundUY).y;
   ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
-  // лінія МАКІВКИ — орієнтир висоти базового персонажа (фіксована висота над підлогою; підкрутити BASE_CHAR_H за Остапом)
-  const BASE_CHAR_H = 470;
-  const headY = toPx(0, groundUY - BASE_CHAR_H).y;
-  ctx.beginPath(); ctx.moveTo(0, headY); ctx.lineTo(canvas.width, headY); ctx.stroke();
+  // ФІКСОВАНА лінія маківки (орієнтир висоти) — під неї рівняємо інших персонажів
+  if (headLineUY != null) { const hy = toPx(0, headLineUY).y; ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(canvas.width, hy); ctx.stroke(); }
   resetBounds(); // межі персонажа збираються під час малювання частин
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
@@ -370,7 +376,7 @@ function draw(): void {
   if (ssel && ssel.cut != null) {
     const img = imgOf(state.selected);
     if (img) {
-      const t = eff(state.selected); const a = anchorPx(state.selected); const sc = t.scale * s();
+      const t = eff(state.selected); const a = anchorPx(state.selected); const sc = t.scale * worldGs(state.selected) * s();
       const lx = (0.5 - ssel.pivotX) * img.width * t.flip;
       const ly = (ssel.cut - ssel.pivotY) * img.height;
       const cr = Math.cos(rad(t.rot)), sr = Math.sin(rad(t.rot));
@@ -390,6 +396,11 @@ function draw(): void {
     ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,154,31,0.6)'; ctx.lineWidth = 1.5;
     ctx.strokeRect(x0 - pad, charBB.minY - pad, (x1 - x0) + pad * 2, (charBB.maxY - charBB.minY) + pad * 2);
     ctx.restore();
+    // КАЛІБРАЦІЯ лінії маківки: раз захоплюємо верхівку поточного персонажа й заморожуємо
+    if (headLineUY == null && !state.anim && state.slots['head'].image) {
+      headLineUY = (charBB.minY - state.origin.y) / s();
+      try { localStorage.setItem('zag_head_uy', String(headLineUY)); } catch { /* ignore */ }
+    }
   }
 
   if (state.mode || state.pivotMode || state.cutMode) {
@@ -405,7 +416,8 @@ function curLocal(sel: string, sx: number, sy: number): { lx: number; ly: number
   const t = tf(sel); const p = pivotOf(sel); const a = anchorPx(sel);
   const ang = -worldRot(sel); const dx = sx - a.x, dy = sy - a.y;
   const rx = dx * Math.cos(ang) - dy * Math.sin(ang); const ry = dx * Math.sin(ang) + dy * Math.cos(ang);
-  const scx = t.scale * t.sx * s(), scy = t.scale * t.sy * s();
+  const wgs = worldGs(sel);
+  const scx = t.scale * t.sx * wgs * s(), scy = t.scale * t.sy * wgs * s();
   let localX = rx / scx; if (t.flip < 0) localX = -localX; // врахувати дзеркало
   return { lx: localX + p.x * img.width, ly: ry / scy + p.y * img.height, iw: img.width, ih: img.height };
 }
@@ -421,7 +433,7 @@ function assignImage(key: string, name: string | null): void {
   const slot = state.slots[key]; slot.image = name;
   if (name) {
     const img = state.images.get(name); if (img) slot.scale = lenOf(key) / img.height;
-    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.sx = 1; slot.sy = 1; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
+    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.sx = 1; slot.sy = 1; slot.gscale = 1; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
     slot.cut = null; slot.bend = 0; slot.bendFlip = false;
   }
 }
@@ -470,7 +482,7 @@ function startMode(m: 'R' | 'S' | 'G'): void {
   pushUndo();
   const t = tf(state.selected);
   state.mode = m; state.pivotMode = false; state.axis = null;
-  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy };
+  state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy, gscale: t.gscale };
   const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x);
   state.startMx = mx; state.startMy = state.mouse.y;
@@ -494,7 +506,7 @@ function applyMode(): void {
     const ratio = Math.max(0.02, Math.hypot(mx - a.x, my - a.y) / state.startDist);
     if (state.axis === 'x') t.sx = Math.max(0.02, state.orig.sx * ratio);
     else if (state.axis === 'z') t.sy = Math.max(0.02, state.orig.sy * ratio);
-    else t.scale = Math.max(0.02, state.orig.scale * ratio);
+    else t.gscale = Math.max(0.02, state.orig.gscale * ratio); // уніформний масштаб поширюється на дітей
   }
   draw();
 }
@@ -597,6 +609,14 @@ let partsOpen = true;
 $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
   partsOpen = !partsOpen;
   $('partsList').style.display = partsOpen ? '' : 'none';
+});
+
+// ---- Лінія висоти: поставити на маківку поточного персонажа (фіксується) ----
+$<HTMLButtonElement>('setHeadLine').addEventListener('click', () => {
+  if (!isFinite(charBB.minY)) { status('Спершу завантаж частини персонажа'); return; }
+  headLineUY = (charBB.minY - state.origin.y) / s();
+  try { localStorage.setItem('zag_head_uy', String(headLineUY)); } catch { /* ignore */ }
+  draw(); status('Лінію висоти встановлено на маківку');
 });
 
 // ---- Мірор (M): дзеркалити арт вибраної частини ----
@@ -719,7 +739,8 @@ function buildDoc(): { version: number; proportions: typeof state.prop; slots: R
   return { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)) };
 }
 function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }): void {
-  state.anim = null; exitClip(); // вийти з режиму анімації перед завантаженням
+  const keepAnim = state.anim; const wasPlaying = state.playing; // лишаємо ту саму вибрану анімацію після перемикання персонажа
+  state.anim = null; exitClip(); // чистий вихід із поточного кліпу
   if (typeof doc.facing === 'number') state.facing = doc.facing;
   if (typeof doc.animDir === 'number') state.animDir = doc.animDir;
   if (doc.proportions) Object.assign(state.prop, doc.proportions);
@@ -730,6 +751,7 @@ function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<
     im.onload = () => { state.images.set(name, imageToCanvas(im)); if (!state.imageNames.includes(name)) state.imageNames.push(name); refreshUI(); };
     im.src = data;
   }
+  if (keepAnim) { state.anim = keepAnim; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); play(wasPlaying); }
   refreshUI();
 }
 // Превʼю персонажа = його ГОЛОВА (PNG зі слота head), вписана в мініатюру.
@@ -978,6 +1000,7 @@ function play(on: boolean): void {
 }
 $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   const v = (e.target as HTMLSelectElement).value; // ВАЖЛИВО: зчитати ДО play(false) — play()→refreshTimeline() скидає цей select назад на state.anim (тоді ще порожній) і вибір губився
+  (e.target as HTMLSelectElement).blur(); // зняти фокус, інакше Пробіл відкриває список замість плей/пауза
   play(false);
   if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
   else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
