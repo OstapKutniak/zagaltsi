@@ -336,13 +336,13 @@ function drawImageAt(sel: string, alpha: number): void {
   const w = img.width, h = img.height;
   const ox = -p.x * w, oy = -p.y * h;
   ctx.save();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha *= alpha; // multiplicative — works with ghost outer alpha
   ctx.translate(a.x, a.y);
   ctx.rotate(worldRot(sel)); // сумарний кут (з урахуванням батьків)
   const wgs = worldGs(sel); // накопичений масштаб ланцюга (скейл батька -> на дітей)
   const scx = t.scale * t.sx * wgs * s(), scy = t.scale * t.sy * wgs * s(); // sx/sy — неоднорідний (S X / S Z)
   ctx.scale(t.flip * scx, scy); // flip<0 — дзеркало по X навколо півота
-  if (sel !== 'ref') accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
+  if (sel !== 'ref' && !_ghostDraw) accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
 
   if (slot && slot.cut != null) {
     const cutY = oy + slot.cut * h; // лінія розрізу в локальних координатах
@@ -374,6 +374,21 @@ function draw(): void {
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
   // ФІКСОВАНА лінія маківки (орієнтир висоти) — під неї рівняємо інших персонажів
   if (headLineUY != null) { const hy = toPx(0, headLineUY).y; ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(canvas.width, hy); ctx.stroke(); }
+  // Ghost / first-frame overlays (drawn before main character, no bounds accumulation)
+  const _activeClip = curClip();
+  if (_activeClip && _activeClip.keys.length && (ghostEnabled || firstFrameEnabled)) {
+    const _sv: Record<string, { rot: number; dx: number; dy: number; scale: number; bend: number }> = {};
+    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; _sv[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, bend: sl.bend }; }
+    if (ghostEnabled) {
+      const curF = state.animT * FPS;
+      const cands = _activeClip.keys.filter((k) => { const df = Math.abs(k.t * FPS - curF); return df > 0.5 && (k.t * FPS < curF ? df <= ghostBefore : df <= ghostAfter); });
+      cands.sort((a, b) => Math.abs(b.t - state.animT) - Math.abs(a.t - state.animT));
+      for (const k of cands) { const df = Math.abs(k.t * FPS - curF); drawGhostLayer(k.t, Math.max(0.04, 0.5 * Math.pow(0.5, Math.floor(df) - 1))); }
+    }
+    if (firstFrameEnabled && Math.abs(_activeClip.keys[0].t - state.animT) > 0.01) drawGhostLayer(_activeClip.keys[0].t, 0.5);
+    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; const sv = _sv[d.key]; sl.rot = sv.rot; sl.dx = sv.dx; sl.dy = sv.dy; sl.scale = sv.scale; sl.bend = sv.bend; }
+  }
+
   resetBounds(); // межі персонажа збираються під час малювання частин
   ctx.save();
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
@@ -409,27 +424,36 @@ function draw(): void {
 
   ctx.restore(); // кінець дзеркального шару (підказка нижче — нормальним текстом)
 
-  // ГАБАРИТ = реальні межі персонажа (низ ~ ноги/земля). Малюємо ПОВЕРХ, по факту арту.
-  if (isFinite(charBB.minX)) {
-    let x0 = charBB.minX, x1 = charBB.maxX;
-    if (state.facing < 0) { x0 = 2 * state.origin.x - charBB.maxX; x1 = 2 * state.origin.x - charBB.minX; }
-    const pad = 4;
-    ctx.save();
-    ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,154,31,0.6)'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(x0 - pad, charBB.minY - pad, (x1 - x0) + pad * 2, (charBB.maxY - charBB.minY) + pad * 2);
-    ctx.restore();
-    // КАЛІБРАЦІЯ лінії маківки: раз захоплюємо верхівку поточного персонажа й заморожуємо
-    if (headLineUY == null && !state.anim && imgOf('head')) { // лише коли бітмап голови вже завантажений (інакше captured підборіддя)
-      headLineUY = (charBB.minY - state.origin.y) / s();
-      try { localStorage.setItem('zag_head_uy2', String(headLineUY)); } catch { /* ignore */ }
-    }
+  // КАЛІБРАЦІЯ лінії маківки: раз захоплюємо верхівку поточного персонажа й заморожуємо
+  if (isFinite(charBB.minX) && headLineUY == null && !state.anim && imgOf('head')) {
+    headLineUY = (charBB.minY - state.origin.y) / s();
+    try { localStorage.setItem('zag_head_uy2', String(headLineUY)); } catch { /* ignore */ }
   }
 
+  // mode hint text (after ctx.restore so it's not mirrored)
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
     const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
+}
+
+// ---- ghost / first-frame overlay ----
+function applyPoseAt(t: number): void {
+  const clip = curClip(); if (!clip) return;
+  for (const d of SLOT_DEFS) { const sp = sampleClip(clip, t, d.key); const sl = state.slots[d.key]; sl.rot = sp.rot; sl.dx = sp.dx; sl.dy = sp.dy; sl.scale = sp.scale; sl.bend = sp.bend; }
+}
+function drawGhostLayer(t: number, alpha: number): void {
+  applyPoseAt(t);
+  _ghostDraw = true;
+  try {
+    ctx.save();
+    if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
+    ctx.filter = 'grayscale(1)';
+    ctx.globalAlpha = alpha;
+    for (const d of SLOT_DEFS) drawImageAt(d.key, 1);
+    ctx.restore();
+  } finally { _ghostDraw = false; }
 }
 
 // ---- координати картинки під курсором ----
@@ -1076,10 +1100,23 @@ const FPS = 24; // кадрів на секунду (таймлайн показ
 let framesInView = 30; // скільки кадрів у полі зору (колесо над треком змінює — як зум таймлайну)
 let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
 let endMarkEl: HTMLElement | null = null; // маркер кінця анімації (перетягуваний)
+let ghostEnabled = false; let ghostBefore = 3; let ghostAfter = 3; // привид: кадри до/після
+let ghostLeftEl: HTMLElement | null = null; let ghostRightEl: HTMLElement | null = null;
+let ghostFillLeftEl: HTMLElement | null = null; let ghostFillRightEl: HTMLElement | null = null;
+let firstFrameEnabled = false; // показувати перший кадр як прозорий орієнтир
+let _ghostDraw = false; // прапор: пропускати accumBounds під час ghost-рендеру
 function movePlayhead(): void {
   const frame = state.animT * FPS;
-  if (playheadEl) playheadEl.style.left = (frame / framesInView * 100) + '%';
+  const fiv = framesInView;
+  if (playheadEl) playheadEl.style.left = (frame / fiv * 100) + '%';
   if (badgeEl) badgeEl.textContent = String(Math.round(frame));
+  if (ghostEnabled) {
+    const curF = Math.round(frame);
+    if (ghostLeftEl) ghostLeftEl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
+    if (ghostRightEl) ghostRightEl.style.left = (Math.min(fiv, curF + ghostAfter) / fiv * 100) + '%';
+    if (ghostFillLeftEl) { ghostFillLeftEl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%'; ghostFillLeftEl.style.width = (Math.min(ghostBefore, curF) / fiv * 100) + '%'; }
+    if (ghostFillRightEl) { ghostFillRightEl.style.left = (curF / fiv * 100) + '%'; ghostFillRightEl.style.width = (Math.min(ghostAfter, fiv - curF) / fiv * 100) + '%'; }
+  }
 }
 function refreshTimeline(): void {
   const clip = curClip();
@@ -1104,6 +1141,8 @@ function refreshTimeline(): void {
     const dot = document.createElement('div');
     dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
     dot.style.left = (k.t * FPS / fiv * 100) + '%';
+    const lbl = document.createElement('span'); lbl.className = 'dotLabel'; lbl.textContent = String(Math.round(k.t * FPS));
+    dot.appendChild(lbl);
     dot.addEventListener('mousedown', (e) => {
       e.stopPropagation(); // не скрабити при кліку по ключу
       if (e.shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
@@ -1111,6 +1150,27 @@ function refreshTimeline(): void {
       play(false); loadFrame(k.t); refreshTimeline(); refreshUI();
     });
     track.appendChild(dot);
+  }
+  // Ghost range markers (before playhead so playhead is on top)
+  ghostLeftEl = null; ghostRightEl = null; ghostFillLeftEl = null; ghostFillRightEl = null;
+  if (ghostEnabled) {
+    const curF = Math.round(state.animT * FPS);
+    const fl = document.createElement('div'); fl.className = 'ghostFill';
+    fl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
+    fl.style.width = (Math.min(ghostBefore, curF) / fiv * 100) + '%';
+    track.appendChild(fl); ghostFillLeftEl = fl;
+    const fr = document.createElement('div'); fr.className = 'ghostFill';
+    fr.style.left = (curF / fiv * 100) + '%';
+    fr.style.width = (Math.min(ghostAfter, fiv - curF) / fiv * 100) + '%';
+    track.appendChild(fr); ghostFillRightEl = fr;
+    const gl = document.createElement('div'); gl.className = 'ghostMark';
+    gl.style.left = (Math.max(0, curF - ghostBefore) / fiv * 100) + '%';
+    gl.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostLeft = true; play(false); });
+    track.appendChild(gl); ghostLeftEl = gl;
+    const gr = document.createElement('div'); gr.className = 'ghostMark';
+    gr.style.left = (Math.min(fiv, curF + ghostAfter) / fiv * 100) + '%';
+    gr.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingGhostRight = true; play(false); });
+    track.appendChild(gr); ghostRightEl = gr;
   }
   const ph = document.createElement('div'); ph.className = 'playhead';
   const badge = document.createElement('div'); badge.className = 'phBadge';
@@ -1120,6 +1180,7 @@ function refreshTimeline(): void {
 // скраб: тягни по треку — вибираєш кадр
 let scrubbing = false;
 let draggingEnd = false; // тягнемо маркер кінця анімації
+let draggingGhostLeft = false; let draggingGhostRight = false;
 function scrubTo(clientX: number): void {
   const r = $('track').getBoundingClientRect();
   let f = (clientX - r.left) / r.width * framesInView;
@@ -1136,10 +1197,19 @@ function dragEndTo(clientX: number): void {
 }
 $('track').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
 window.addEventListener('mousemove', (e) => {
-  if (scrubbing) scrubTo((e as MouseEvent).clientX);
-  if (draggingEnd) dragEndTo((e as MouseEvent).clientX);
+  const mx = (e as MouseEvent).clientX;
+  if (scrubbing) scrubTo(mx);
+  if (draggingEnd) dragEndTo(mx);
+  if (draggingGhostLeft || draggingGhostRight) {
+    const r = $('track').getBoundingClientRect();
+    const f = Math.round((mx - r.left) / r.width * framesInView);
+    const curF = Math.round(state.animT * FPS);
+    if (draggingGhostLeft) ghostBefore = Math.max(1, curF - f);
+    else ghostAfter = Math.max(1, f - curF);
+    movePlayhead(); draw();
+  }
 });
-window.addEventListener('mouseup', () => { if (draggingEnd) refreshTimeline(); scrubbing = false; draggingEnd = false; });
+window.addEventListener('mouseup', () => { if (draggingEnd) refreshTimeline(); if (draggingGhostLeft || draggingGhostRight) refreshTimeline(); scrubbing = false; draggingEnd = false; draggingGhostLeft = false; draggingGhostRight = false; });
 // колесо над треком — більше/менше кадрів у полі зору
 $('track').addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -1168,7 +1238,7 @@ function play(on: boolean): void {
 const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt'];
 function refreshAnimOptions(): void {
   const sel = $<HTMLSelectElement>('anim'); const cur = state.anim ?? '';
-  sel.innerHTML = '<option value="">— стоп (поза) —</option>';
+  sel.innerHTML = '<option value="">base pose</option>';
   for (const b of BUILTIN) { const o = document.createElement('option'); o.value = b; o.textContent = b; sel.appendChild(o); }
   const custom = Object.keys(state.clips).filter((n) => !BUILTIN.includes(n));
   if (custom.length) {
@@ -1220,6 +1290,30 @@ $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
   else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
 });
+function setAllKey(): void {
+  const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
+  pushUndo();
+  const t = state.animT; const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+  if (i >= 0) clip.keys[i].pose = snapPose();
+  else { clip.keys.push({ t, interp: 'linear', pose: snapPose() }); clip.keys.sort((a, b) => a.t - b.t); }
+  refreshTimeline(); status('⬤ Загальний ключ поставлено');
+}
+function invertAnim(): void {
+  const clip = curClip();
+  if (!clip || state.selKeys.length !== 2) { status('Виділи 2 ключових кадри (Shift-клік по точках)'); return; }
+  if (!state.selected || state.selected === 'ref') { status('Вибери частину тіла'); return; }
+  pushUndo();
+  const sorted = [...state.selKeys].sort((a, b) => clip.keys[a].t - clip.keys[b].t);
+  const kA = clip.keys[sorted[0]], kB = clip.keys[sorted[1]];
+  const bone = state.selected;
+  const su = rigSlots()[bone];
+  const base = { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend };
+  const pA = kA.pose[bone] ?? base; const pB = kB.pose[bone] ?? base;
+  if (!kB.pose[bone]) kB.pose[bone] = { ...pB };
+  kB.pose[bone].rot = pB.rot >= pA.rot ? pB.rot - 360 : pB.rot + 360;
+  loadFrame(state.animT); refreshUI();
+  status(`↔ Інвертовано «${bone}» між кадрами ${Math.round(kA.t * FPS)}–${Math.round(kB.t * FPS)}`);
+}
 $<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
 $<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
 $<HTMLButtonElement>('bakeBtn').addEventListener('click', saveAsNewAnim);
@@ -1273,6 +1367,21 @@ $<HTMLButtonElement>('copyAnimBtn').addEventListener('click', () => {
 $<HTMLButtonElement>('copyAnimBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); pasteMode = !pasteMode; refreshCopyBtn(); });
 refreshCopyBtn();
 
+$<HTMLButtonElement>('ghostBtn').addEventListener('click', () => {
+  ghostEnabled = !ghostEnabled;
+  $<HTMLButtonElement>('ghostBtn').classList.toggle('light', ghostEnabled);
+  refreshTimeline(); draw();
+});
+$<HTMLButtonElement>('firstFrameBtn').addEventListener('click', () => {
+  firstFrameEnabled = !firstFrameEnabled;
+  $<HTMLButtonElement>('firstFrameBtn').classList.toggle('light', firstFrameEnabled);
+  draw();
+});
+$<HTMLButtonElement>('invertBtn').addEventListener('click', invertAnim);
+$<HTMLButtonElement>('allKeyBtn').addEventListener('click', setAllKey);
+$<HTMLInputElement>('bwPreview').addEventListener('change', (e) => {
+  $<HTMLIFrameElement>('previewFrame').style.filter = (e.target as HTMLInputElement).checked ? 'grayscale(1)' : '';
+});
 window.addEventListener('resize', () => { resize(); draw(); alignPartsList(); if (faceOpen) alignFaceList(); });
 restoreLocal();
 resize(); refreshUI();
