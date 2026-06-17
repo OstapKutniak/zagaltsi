@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 
 // Малює зібраного в ріг-тулзі персонажа (character.json) як контейнер спрайтів-слотів
 // і програє ті самі процедурні анімації (та сама скелетна математика, що в тулзі).
-// Примітка: розріз/згин (cut/bend) у грі поки не рендеримо — цілі кінцівки (v1).
+// Розріз/згин (cut/bend) рендериться: розрізана кінцівка = 2 кропнуті спрайти,
+// нижній гнеться навколо суглоба (як у тулзі). Також sx/sy та gscale (масштаб по ієрархії).
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 const TARGET_PX = 410; // цільова висота персонажа (при overall=1) у пікселях гри
@@ -14,7 +15,7 @@ const SLOT_DEFS = [
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
-interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number }
+interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number; cut?: number | null; bendFlip?: boolean; sx?: number; sy?: number; gscale?: number }
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
 interface Clip { duration: number; keys: Keyframe[] }
@@ -61,13 +62,15 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     return z;
   }
   if (name === 'walk' || name === 'run') {
-    const spd = name === 'run' ? 9 : 5.5, amp = name === 'run' ? 34 : 24, aArm = name === 'run' ? 32 : 20;
+    const spd = name === 'run' ? 9 : 5.5, amp = name === 'run' ? 48 : 24, aArm = name === 'run' ? 46 : 20;
     const ph = t * spd, back = Math.sin(ph), front = Math.sin(ph + Math.PI);
+    const lean = name === 'run' ? 12 : 0; // біг — нахил торса вперед (виразно відрізняється від ходьби)
     if (key === 'leg_front') return { drot: front * amp, ddx: 0, ddy: 0 };
     if (key === 'leg_back') return { drot: back * amp, ddx: 0, ddy: 0 };
     if (key === 'arm_front') return { drot: back * aArm, ddx: 0, ddy: 0 };
     if (key === 'arm_back') return { drot: front * aArm, ddx: 0, ddy: 0 };
-    if (key === 'torso') return { drot: Math.sin(ph) * 2, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: lean + Math.sin(ph) * 2, ddx: 0, ddy: 0 };
+    if (key === 'head' && name === 'run') return { drot: -lean * 0.6, ddx: 0, ddy: 0 }; // голова трохи компенсує нахил
     return z;
   }
   if (name === 'jump') {
@@ -95,6 +98,36 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
   return z;
 }
 
+// Згин у суглобі (лікоть/коліно) — як у тулзі (для розрізаних кінцівок).
+function animBend(name: string, t: number, key: string): number {
+  if (name === 'walk' || name === 'run') {
+    const spd = name === 'run' ? 9 : 5.5; const ph = t * spd;
+    const legAmp = name === 'run' ? 46 : 28, armAmp = name === 'run' ? 50 : 34;
+    if (key === 'leg_front') return -Math.max(0, Math.sin(ph + Math.PI)) * legAmp;
+    if (key === 'leg_back') return -Math.max(0, Math.sin(ph)) * legAmp;
+    if (key === 'arm_front') return -(0.4 + 0.6 * Math.abs(Math.sin(ph))) * armAmp;
+    if (key === 'arm_back') return -(0.4 + 0.6 * Math.abs(Math.sin(ph + Math.PI))) * armAmp;
+    return 0;
+  }
+  if (name === 'jump') {
+    const ph = (t % 1.6) / 1.6;
+    const crouch = ph < 0.16 ? ph / 0.16 : ph > 0.85 ? 1 - (ph - 0.85) / 0.15 : 0;
+    const air = ph >= 0.16 && ph < 0.85 ? Math.sin(((ph - 0.16) / 0.69) * Math.PI) : 0;
+    if (key.startsWith('leg')) return -(crouch * 28 + air * 50);
+    if (key.startsWith('arm')) return -air * 30;
+    return 0;
+  }
+  if (name === 'attack') {
+    const ap = (t % 0.7) / 0.7;
+    if (key === 'arm_front') return ap < 0.45 ? -(ap / 0.45) * 70 : ap < 0.6 ? -70 + ((ap - 0.45) / 0.15) * 70 : 0;
+    if (key.startsWith('leg')) return -(ap < 0.45 ? (ap / 0.45) * 18 : 18 * (1 - (ap - 0.45) / 0.55));
+    return 0;
+  }
+  if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); if (key.startsWith('arm')) return -r * 25; return 0; }
+  if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
+  return 0;
+}
+
 function loadTextures(scene: Phaser.Scene, images: Record<string, string>): Promise<unknown> {
   return Promise.all(Object.entries(images).map(([name, data]) => new Promise<void>((res) => {
     const key = 'char_' + name;
@@ -110,6 +143,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private prop: CharDoc['proportions'];
   private slots: Record<string, Slot>;
   private parts: Record<string, Phaser.GameObjects.Image> = {};
+  private lower: Record<string, Phaser.GameObjects.Image> = {}; // нижня частина розрізаної кінцівки (за суглобом)
   private anim = 'idle';
   private t = 0;
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
@@ -165,6 +199,11 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       const im = scene.add.image(0, 0, key).setOrigin(sl.pivotX, sl.pivotY);
       c.add(im);
       c.parts[d.key] = im;
+      if (sl.cut != null) { // розрізана кінцівка — окрема нижня частина (гнеться в суглобі)
+        const lo = scene.add.image(0, 0, key).setOrigin(0.5, sl.cut);
+        c.add(lo);
+        c.lower[d.key] = lo;
+      }
     }
     return c;
   }
@@ -189,30 +228,30 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     const clip = this.clips[this.anim];
     const authored = !!(clip && clip.keys.length); // є авторська анімація -> грати її
     const ct = authored ? this.t % clip!.duration : 0;
-    // локальний трансформ слота (авторський семпл АБО процедурний)
-    const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number } => {
+    // локальний трансформ слота (авторський семпл АБО процедурний) + згин
+    const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number; bend: number } => {
       const sl = this.slots[sel];
-      if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale }; }
+      if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale, bend: sp.bend }; }
       const o = animOff(this.anim, this.t, sel);
       let dx = (sl?.dx ?? 0) + o.ddx, dy = (sl?.dy ?? 0) + o.ddy;
       if (!PARENT[sel]) { const ar = animRoot(this.anim, this.t); dx += ar.ddx; dy += ar.ddy; }
-      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1 };
+      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1, bend: sl?.bend ?? 0 };
     };
-    // світовий трансформ слота в локалі контейнера (ієрархія)
-    const cache: Record<string, { x: number; y: number; rot: number }> = {};
-    const wof = (sel: string): { x: number; y: number; rot: number } => {
+    // світовий трансформ слота в локалі контейнера (ієрархія); gs — накопичений масштаб (gscale батька -> дітям)
+    const cache: Record<string, { x: number; y: number; rot: number; gs: number }> = {};
+    const wof = (sel: string): { x: number; y: number; rot: number; gs: number } => {
       if (cache[sel]) return cache[sel];
-      const lp = localOf(sel);
+      const lp = localOf(sel); const ownG = this.slots[sel]?.gscale ?? 1;
       const p = PARENT[sel];
-      let res: { x: number; y: number; rot: number };
+      let res: { x: number; y: number; rot: number; gs: number };
       if (!p) {
-        res = { x: lp.dx * us, y: lp.dy * us, rot: rad(lp.rot) };
+        res = { x: lp.dx * us, y: lp.dy * us, rot: rad(lp.rot), gs: ownG };
       } else {
         const pw = wof(p);
         const cn = conn(sel, this.prop);
         const lx = cn.x + lp.dx, ly = cn.y + lp.dy;
         const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
-        res = { x: pw.x + (lx * co - ly * si) * us, y: pw.y + (lx * si + ly * co) * us, rot: pw.rot + rad(lp.rot) };
+        res = { x: pw.x + (lx * co - ly * si) * pw.gs * us, y: pw.y + (lx * si + ly * co) * pw.gs * us, rot: pw.rot + rad(lp.rot), gs: pw.gs * ownG };
       }
       cache[sel] = res; return res;
     };
@@ -222,10 +261,29 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       const sl = this.slots[d.key];
       const wt = wof(d.key);
       const lp = localOf(d.key);
-      im.setPosition(wt.x, wt.y);
-      im.setRotation(wt.rot);
-      im.setScale(lp.scale * us * sl.flip, lp.scale * us);
-      if (hurt) im.setTint(0xff5555); else im.clearTint();
+      const flip = sl.flip ?? 1;
+      const scX = lp.scale * us * (sl.sx ?? 1) * wt.gs;
+      const scY = lp.scale * us * (sl.sy ?? 1) * wt.gs;
+      const lo = this.lower[d.key];
+      if (sl.cut != null && lo) {
+        const W = im.width, H = im.height, cutPx = sl.cut * H;
+        // верхня частина — від півота до лінії розрізу
+        im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
+        im.setCrop(0, 0, W, cutPx);
+        // згин (манульний + процедурний), знак як у тулзі
+        const procBend = authored ? 0 : animBend(this.anim, this.t, d.key) * this.animDir;
+        const bendVal = (lp.bend + procBend) * (flip < 0 ? -1 : 1) * (sl.bendFlip ? -1 : 1);
+        // світова точка суглоба (зсув від півота до (0.5, cut), масштаб, поворот)
+        const jfx = (0.5 - sl.pivotX) * W * flip * scX, jfy = (sl.cut - sl.pivotY) * H * scY;
+        const co = Math.cos(wt.rot), si = Math.sin(wt.rot);
+        const jx = wt.x + jfx * co - jfy * si, jy = wt.y + jfx * si + jfy * co;
+        lo.setOrigin(0.5, sl.cut); lo.setPosition(jx, jy); lo.setRotation(wt.rot + rad(bendVal)); lo.setScale(flip * scX, scY);
+        lo.setCrop(0, cutPx, W, H - cutPx);
+        if (hurt) { im.setTint(0xff5555); lo.setTint(0xff5555); } else { im.clearTint(); lo.clearTint(); }
+      } else {
+        im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
+        if (hurt) im.setTint(0xff5555); else im.clearTint();
+      }
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
     this.scaleY = 1;

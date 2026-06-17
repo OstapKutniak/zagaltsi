@@ -181,16 +181,18 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
   }
   if (name === 'walk' || name === 'run') {
     const spd = name === 'run' ? 9 : 5.5;
-    const amp = name === 'run' ? 34 : 24;
-    const aArm = name === 'run' ? 32 : 20;
+    const amp = name === 'run' ? 48 : 24;
+    const aArm = name === 'run' ? 46 : 20;
     const ph = t * spd;
     const back = Math.sin(ph);
     const front = Math.sin(ph + Math.PI);
+    const lean = name === 'run' ? 12 : 0; // біг — нахил торса вперед
     if (key === 'leg_front') return { drot: front * amp, ddx: 0, ddy: 0 };
     if (key === 'leg_back') return { drot: back * amp, ddx: 0, ddy: 0 };
     if (key === 'arm_front') return { drot: back * aArm, ddx: 0, ddy: 0 };
     if (key === 'arm_back') return { drot: front * aArm, ddx: 0, ddy: 0 };
-    if (key === 'torso') return { drot: Math.sin(ph) * 2, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: lean + Math.sin(ph) * 2, ddx: 0, ddy: 0 };
+    if (key === 'head' && name === 'run') return { drot: -lean * 0.6, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'jump') {
@@ -625,6 +627,20 @@ $<HTMLButtonElement>('setHeadLine').addEventListener('click', () => {
   draw(); status('Лінію висоти встановлено на маківку');
 });
 
+// ---- превʼю гри (вбудована гра в iframe; оновлюється по «Експорт у гру») ----
+const previewFrame = $<HTMLIFrameElement>('previewFrame');
+function reloadPreview(): void { previewFrame.src = 'index.html?t=' + Date.now(); const h = document.getElementById('previewHint'); if (h) h.style.display = 'none'; }
+reloadPreview();
+const previewBox = $('preview');
+// наведення — збільшити з півотом у правому верхньому куті, щоб лівий край майже діставав бібліотеку
+previewBox.addEventListener('mouseenter', () => {
+  const lib = $('library').getBoundingClientRect();
+  const pr = previewBox.getBoundingClientRect();
+  const scale = Math.max(1, (pr.right - (lib.right + 14)) / pr.width);
+  previewBox.style.transform = `scale(${scale})`;
+});
+previewBox.addEventListener('mouseleave', () => { previewBox.style.transform = ''; });
+
 // ---- Мірор (M): дзеркалити арт вибраної частини ----
 $<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); });
 // ---- Фліп (F): перемкнути напрям згину УСІХ кісток одразу ----
@@ -824,7 +840,7 @@ $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 // Export у гру: пишемо в localStorage (той самий домен, що й гра) — гра підхопить
 // при наступному відкритті. Працює на ЦЬОМУ браузері/пристрої без git і без мене.
 $<HTMLButtonElement>('toGameBtn').addEventListener('click', () => {
-  try { localStorage.setItem('zag_game_char', JSON.stringify(buildDoc())); status('✔ Відправлено в гру. Онови/відкрий вкладку гри.'); }
+  try { localStorage.setItem('zag_game_char', JSON.stringify(buildDoc())); reloadPreview(); status('✔ Оновлено у превʼю гри (праворуч).'); }
   catch { status('Не вдалося — переповнення сховища браузера'); }
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());

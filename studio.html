@@ -67,7 +67,10 @@
 
       /* ---- права панель (ширша) ---- */
       #right { width: 480px; flex: 0 0 auto; }
-      #preview { flex: 0 0 auto; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+      #preview { flex: 0 0 auto; position: relative; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; transform-origin: top right; transition: transform .16s ease; z-index: 1; }
+      #preview:hover { z-index: 60; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+      #preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+      #previewHint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; pointer-events: none; }
       #iconBar { display: flex; gap: 6px; padding: 2px; }
       .iconToggle { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 9px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; color: #fff; }
       .iconToggle input { display: none; }
@@ -142,7 +145,7 @@
 
       <!-- ПРАВА ПАНЕЛЬ -->
       <aside id="right" class="col">
-        <div id="preview">Превʼю гри 20:9</div>
+        <div id="preview"><iframe id="previewFrame" title="Превʼю гри"></iframe><div id="previewHint">Превʼю гри 20:9</div></div>
         <div id="iconBar">
           <label class="iconToggle" title="Показувати півоти"><input type="checkbox" id="showPivots" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></label>
           <label class="iconToggle" title="Показувати фоновий концепт"><input type="checkbox" id="showRef" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-4 4 3 3-3 6 5"/></svg></label>
