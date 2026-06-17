@@ -281,7 +281,9 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         im.setCrop(0, 0, W, cutPx);
         // згин (манульний + процедурний), знак як у тулзі
         const procBend = authored ? 0 : animBend(this.anim, this.t, d.key) * this.animDir;
-        const bendVal = (lp.bend + procBend) * (flip < 0 ? -1 : 1) * (sl.bendFlip ? -1 : 1);
+        // знак: НЕ множимо на flip (Phaser обертає поверх дзеркала-масштабу, на відміну
+        // від тулзи, що крутить усередині дзеркального ctx) — інакше дзеркальні кінцівки гнуться навпаки
+        const bendVal = (lp.bend + procBend) * (sl.bendFlip ? -1 : 1);
         // світова точка суглоба (зсув від півота до (0.5, cut), масштаб, поворот)
         const jfx = (0.5 - sl.pivotX) * W * flip * scX, jfy = (sl.cut - sl.pivotY) * H * scY;
         const co = Math.cos(wt.rot), si = Math.sin(wt.rot);

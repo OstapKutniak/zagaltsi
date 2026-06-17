@@ -46,8 +46,9 @@
       #stageWrap { position: absolute; inset: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
       #stage { display: block; width: 100%; height: 100%; }
       /* список частин — N-панель: НАКЛАДАЄТЬСЯ на в'юпорт (не відсуває), кожна кнопка окремо, без фону */
-      #partsList { position: absolute; top: 8px; right: 8px; width: 200px; max-height: calc(100% - 16px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; z-index: 5; }
-      #slotChips { display: flex; flex-direction: column; gap: 6px; }
+      #partsList { position: absolute; top: 8px; right: 8px; width: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; z-index: 5; }
+      #faceList { position: absolute; width: 200px; display: none; flex-direction: column; gap: 6px; z-index: 6; }
+      #slotChips, #faceChips { display: flex; flex-direction: column; gap: 6px; }
       .chip { display: block; width: 100%; text-align: center; padding: 9px 8px; border-radius: 8px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); }
       .chip:hover { background: #565656; }
       .chip.sel { background: #e8e8e8; color: #1b1b1b; border-color: #e8e8e8; font-weight: 600; }
@@ -67,6 +68,7 @@
       .keyDot.sel { background: #fff; }
       .keyDot.smooth { border-radius: 3px; }
       .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; z-index: 4; }
+      .frameMark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: .5; pointer-events: none; z-index: 2; }
       .phBadge { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: var(--accent); color: #1b1b1b; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 0 0 4px 4px; font-variant-numeric: tabular-nums; }
 
       /* ---- права панель (ширша) ---- */
@@ -76,9 +78,6 @@
       #preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
       #previewHint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; pointer-events: none; }
       #previewClick { position: absolute; inset: 0; z-index: 5; cursor: default; }
-      #preview.big #previewClick { pointer-events: none; }
-      #previewClose { position: absolute; top: 6px; left: 6px; z-index: 6; display: none; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 14px; line-height: 1; }
-      #preview.big #previewClose { display: block; }
       #iconBar { display: flex; gap: 6px; padding: 2px; }
       .iconToggle { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 9px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; color: #fff; }
       .iconToggle input { display: none; }
@@ -125,35 +124,28 @@
         <div id="centerMid">
           <div id="stageWrap"><canvas id="stage"></canvas></div>
           <div id="partsList"><div id="slotChips"></div></div>
+          <div id="faceList"><div id="faceChips"></div></div>
         </div>
         <div id="timelineBar" class="pane">
           <div class="tlrow">
-            <select id="anim">
-              <option value="">— стоп (поза) —</option>
-              <option value="idle">idle</option>
-              <option value="walk">walk</option>
-              <option value="run">run</option>
-              <option value="jump">jump</option>
-              <option value="attack">attack</option>
-              <option value="hurt">hurt</option>
-            </select>
-            <button id="playBtn">Грати</button>
+            <select id="anim"></select>
+            <select id="charSel" title="Персонаж (свій набір анімацій)"></select>
             <button id="keyBtn">Ключ (K)</button>
             <button id="delKeyBtn">Видалити ключ</button>
             <button id="linkBtn" title="ПКМ — перемкнути лінійно/згладжено">Звʼязати: лінійно</button>
-            <button id="bakeBtn">Зберегти анімацію</button>
+            <button id="bakeBtn">Зберегти</button>
+            <button id="copyAnimBtn" title="ПКМ — перемкнути на Вставити">Скопіювати</button>
             <button id="renameAnimBtn">Перейменувати</button>
-            <button id="delAnimBtn">Видалити анімацію</button>
+            <button id="delAnimBtn">Видалити</button>
             <button id="resetAnim">Скинути</button>
-            <span class="tltime">трив. <input type="number" id="dur" value="1" min="0.2" step="0.1" style="width:46px" /> с · <span id="tlTime">0.00</span></span>
           </div>
-          <div id="track"></div>
+          <div id="track" title="Колесо — більше/менше кадрів у полі зору"></div>
         </div>
       </section>
 
       <!-- ПРАВА ПАНЕЛЬ -->
       <aside id="right" class="col">
-        <div id="preview"><iframe id="previewFrame" title="Превʼю гри"></iframe><div id="previewHint">Превʼю гри 20:9</div><div id="previewClick" title="ЛКМ — розгорнути"></div><button id="previewClose" title="Згорнути">✕</button></div>
+        <div id="preview"><iframe id="previewFrame" title="Превʼю гри"></iframe><div id="previewHint">Превʼю гри 20:9</div><div id="previewClick" title="ЛКМ — розгорнути / згорнути"></div></div>
         <div id="iconBar">
           <label class="iconToggle" title="Показувати півоти"><input type="checkbox" id="showPivots" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></label>
           <label class="iconToggle" title="Показувати фоновий концепт"><input type="checkbox" id="showRef" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-4 4 3 3-3 6 5"/></svg></label>

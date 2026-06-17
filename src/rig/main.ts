@@ -33,9 +33,12 @@ const SLOT_DEFS = [
   { key: 'arm_front', label: 'Передня рука', len: 'arms', piv: [0.5, 0.08] },
 ] as const;
 // Рядки списку частин (порядок ВІДОБРАЖЕННЯ; пари — поруч). Не плутати зі SLOT_DEFS (шари).
+// Обличчя винесено в окреме підменю «Голова» (ПКМ по кнопці Голова).
 const LIST_ROWS: string[][] = [
-  ['arm_front'], ['brow_front', 'brow_back'], ['eye_front', 'eye_back'], ['mouth'],
-  ['head'], ['neck'], ['torso'], ['leg_front'], ['leg_back'], ['arm_back'], ['ref'],
+  ['arm_front'], ['head'], ['neck'], ['torso'], ['leg_front'], ['leg_back'], ['arm_back'], ['ref'],
+];
+const FACE_ROWS: string[][] = [
+  ['brow_front', 'brow_back'], ['eye_front', 'eye_back'], ['mouth'],
 ];
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26, eye: 16, brow: 14, mouth: 20 };
@@ -538,8 +541,8 @@ function endMode(commit: boolean): void {
 }
 
 // ---- UI ----
+let faceOpen = false; // підменю «Голова» (брови/очі/рот) — ПКМ по кнопці Голова
 function refreshChips(): void {
-  const box = $('slotChips'); box.innerHTML = '';
   const make = (key: string): HTMLElement => {
     const isRef = key === 'ref';
     const label = isRef ? 'Фоновий концепт' : def(key).label;
@@ -548,12 +551,31 @@ function refreshChips(): void {
     el.className = 'chip' + (key === state.selected ? ' sel' : '') + (empty ? ' empty' : '');
     el.textContent = label;
     el.onclick = () => { state.selected = key; state.pivotMode = false; state.mode = null; refreshUI(); };
+    if (key === 'head') { el.id = 'headChip'; el.title = 'ЛКМ — вибрати; ПКМ — обличчя'; el.oncontextmenu = (e) => { e.preventDefault(); faceOpen = !faceOpen; updateFacePanel(); }; }
     return el;
   };
-  for (const row of LIST_ROWS) {
-    if (row.length === 1) box.appendChild(make(row[0]));
-    else { const pair = document.createElement('div'); pair.className = 'chipPair'; for (const k of row) pair.appendChild(make(k)); box.appendChild(pair); }
-  }
+  const renderRows = (box: HTMLElement, rows: string[][]): void => {
+    box.innerHTML = '';
+    for (const row of rows) {
+      if (row.length === 1) box.appendChild(make(row[0]));
+      else { const pair = document.createElement('div'); pair.className = 'chipPair'; for (const k of row) pair.appendChild(make(k)); box.appendChild(pair); }
+    }
+  };
+  renderRows($('slotChips'), LIST_ROWS);
+  renderRows($('faceChips'), FACE_ROWS);
+  updateFacePanel();
+}
+function updateFacePanel(): void {
+  const fl = $('faceList'); fl.style.display = faceOpen ? 'flex' : 'none';
+  if (faceOpen) alignFaceList();
+}
+// підменю обличчя вирівнюється по верху кнопки «Голова», ліворуч від списку частин
+function alignFaceList(): void {
+  const cm = $('centerMid').getBoundingClientRect();
+  const hc = document.getElementById('headChip'); const pl = $('partsList').getBoundingClientRect();
+  const fl = $('faceList');
+  if (hc) fl.style.top = Math.round(hc.getBoundingClientRect().top - cm.top) + 'px';
+  fl.style.left = Math.round(pl.left - cm.left - 200 - 8) + 'px';
 }
 // Грід завантажених PNG (як бібліотека): клік = призначити вибраній частині.
 const IMG_GRID_MIN = 9; // мінімум слотів (з пустими) — щоб видно сітку/скрол
@@ -683,8 +705,7 @@ function setPreviewBig(on: boolean): void {
   }
   refitPreviewGame();
 }
-$('previewClick').addEventListener('click', () => setPreviewBig(true));
-$<HTMLButtonElement>('previewClose').addEventListener('click', (e) => { e.stopPropagation(); setPreviewBig(false); });
+$('previewClick').addEventListener('click', () => setPreviewBig(!previewBig)); // ЛКМ — розгорнути / згорнути
 window.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).code === 'Escape' && previewBig) setPreviewBig(false); });
 window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
 
@@ -858,7 +879,7 @@ function renderLibrary(): void {
     const img = document.createElement('img'); img.src = c.thumb; img.draggable = false;
     const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = c.name;
     const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕';
-    card.onclick = () => { loadCharFromDoc(c.doc); status(`Завантажено: ${c.name}`); };
+    card.onclick = () => { currentCharId = c.id; loadCharFromDoc(c.doc); refreshCharSel(); status(`Завантажено: ${c.name}`); };
     del.onclick = (e) => { e.stopPropagation(); storeLib(loadLib().filter((x) => x.id !== c.id)); renderLibrary(); };
     card.appendChild(img); card.appendChild(nm); card.appendChild(del); box.appendChild(card);
   }
@@ -872,7 +893,7 @@ function saveCharacter(): void {
   const i = lib.findIndex((x) => x.name === name && (x.cat ?? 'char') === libCat); // та сама назва В ЦІЙ вкладці -> заміна
   if (i >= 0) { item.id = lib[i].id; lib[i] = item; status(`Оновлено: ${name}`); }
   else { lib.push(item); status(`Збережено: ${name}`); }
-  storeLib(lib); renderLibrary();
+  storeLib(lib); currentCharId = item.id; renderLibrary(); refreshCharSel();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
 $<HTMLButtonElement>('libToggle').addEventListener('click', () => { libCat = libCat === 'char' ? 'enemy' : 'char'; renderLibrary(); });
@@ -1002,32 +1023,30 @@ function setInterp(mode: 'linear' | 'smooth'): void {
   refreshTimeline(); status(mode === 'smooth' ? 'Звʼязано: згладжено' : 'Звʼязано: лінійно');
 }
 const FPS = 24; // кадрів на секунду (таймлайн показує НОМЕРИ КАДРІВ)
-const frameOf = (t: number): number => Math.round(t * FPS);
+const END_FRAME = 24; // фінальний кадр для всіх анімацій — біла відмітка-нагадування
+let framesInView = 30; // скільки кадрів у полі зору (колесо над треком змінює — як зум таймлайну)
 let playheadEl: HTMLElement | null = null, badgeEl: HTMLElement | null = null;
 function movePlayhead(): void {
-  const dur = curClip()?.duration ?? 1; const pct = (Math.min(state.animT, dur) / dur) * 100;
-  if (playheadEl) playheadEl.style.left = pct + '%';
-  if (badgeEl) badgeEl.textContent = String(frameOf(state.animT));
-  $('tlTime').textContent = state.animT.toFixed(2);
+  const frame = state.animT * FPS;
+  if (playheadEl) playheadEl.style.left = (frame / framesInView * 100) + '%';
+  if (badgeEl) badgeEl.textContent = String(Math.round(frame));
 }
 function refreshTimeline(): void {
-  const clip = curClip(); const dur = clip ? clip.duration : 1;
-  $<HTMLInputElement>('dur').value = String(dur);
-  $<HTMLButtonElement>('playBtn').textContent = state.playing ? 'Пауза' : 'Грати';
-  $<HTMLButtonElement>('playBtn').classList.toggle('light', state.playing);
+  const clip = curClip();
   $<HTMLSelectElement>('anim').value = state.anim ?? '';
   const track = $('track'); track.innerHTML = '';
-  const total = Math.max(1, Math.round(dur * FPS));
-  const step = total <= 12 ? 1 : total <= 30 ? 2 : total <= 80 ? 5 : 10;
-  for (let f = 0; f <= total; f += step) {
-    const tk = document.createElement('div'); tk.className = 'tick'; tk.style.left = `${(f / total) * 100}%`; tk.textContent = String(f);
+  const fiv = framesInView;
+  const step = fiv <= 12 ? 1 : fiv <= 30 ? 2 : fiv <= 80 ? 5 : 10;
+  for (let f = 0; f <= fiv; f += step) {
+    const tk = document.createElement('div'); tk.className = 'tick'; tk.style.left = (f / fiv * 100) + '%'; tk.textContent = String(f);
     track.appendChild(tk);
   }
+  if (END_FRAME <= fiv) { const m = document.createElement('div'); m.className = 'frameMark'; m.style.left = (END_FRAME / fiv * 100) + '%'; track.appendChild(m); }
   if (clip) for (let i = 0; i < clip.keys.length; i++) {
     const k = clip.keys[i];
     const dot = document.createElement('div');
     dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
-    dot.style.left = `${(k.t / dur) * 100}%`;
+    dot.style.left = (k.t * FPS / fiv * 100) + '%';
     dot.addEventListener('mousedown', (e) => {
       e.stopPropagation(); // не скрабити при кліку по ключу
       if (e.shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
@@ -1037,20 +1056,28 @@ function refreshTimeline(): void {
     track.appendChild(dot);
   }
   const ph = document.createElement('div'); ph.className = 'playhead';
-  const badge = document.createElement('div'); badge.className = 'phBadge'; badge.textContent = String(frameOf(state.animT));
+  const badge = document.createElement('div'); badge.className = 'phBadge';
   ph.appendChild(badge); track.appendChild(ph);
   playheadEl = ph; badgeEl = badge; movePlayhead();
 }
 // скраб: тягни по треку — вибираєш кадр
 let scrubbing = false;
 function scrubTo(clientX: number): void {
-  const r = $('track').getBoundingClientRect(); const dur = curClip()?.duration ?? 1;
-  const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-  loadFrame(f * dur); movePlayhead(); refreshUI();
+  const r = $('track').getBoundingClientRect();
+  let f = (clientX - r.left) / r.width * framesInView;
+  f = Math.max(0, Math.min(framesInView, f));
+  loadFrame(f / FPS); movePlayhead(); refreshUI();
 }
 $('track').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
 window.addEventListener('mousemove', (e) => { if (scrubbing) scrubTo((e as MouseEvent).clientX); });
 window.addEventListener('mouseup', () => { scrubbing = false; });
+// колесо над треком — більше/менше кадрів у полі зору
+$('track').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const stepF = Math.max(2, Math.round(framesInView * 0.12));
+  framesInView = Math.max(6, Math.min(120, framesInView + ((e as WheelEvent).deltaY < 0 ? -stepF : stepF)));
+  refreshTimeline();
+}, { passive: false });
 let raf = 0;
 let lastTs = 0;
 function tick(ts: number): void {
@@ -1124,8 +1151,6 @@ $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
   else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
 });
-$<HTMLButtonElement>('playBtn').addEventListener('click', () => play(!state.playing));
-$<HTMLInputElement>('dur').addEventListener('input', (e) => { const c = curClip(); if (c) { c.duration = Math.max(0.2, Number((e.target as HTMLInputElement).value)); refreshTimeline(); } });
 $<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
 $<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
 $<HTMLButtonElement>('bakeBtn').addEventListener('click', saveAsNewAnim);
@@ -1139,10 +1164,46 @@ $<HTMLButtonElement>('linkBtn').addEventListener('contextmenu', (e) => { e.preve
 refreshLinkBtn();
 $<HTMLButtonElement>('resetAnim').addEventListener('click', resetAnim);
 
-window.addEventListener('resize', () => { resize(); draw(); alignPartsList(); });
+// ---- вибір персонажа (свій набір анімацій) ----
+let currentCharId: string | null = null;
+function refreshCharSel(): void {
+  const sel = $<HTMLSelectElement>('charSel'); const lib = loadLib();
+  sel.innerHTML = '';
+  if (!lib.length) { const o = document.createElement('option'); o.value = ''; o.textContent = '(нема персонажів)'; sel.appendChild(o); }
+  for (const c of lib) { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); }
+  sel.value = currentCharId ?? '';
+}
+$<HTMLSelectElement>('charSel').addEventListener('change', (e) => {
+  const id = (e.target as HTMLSelectElement).value; (e.target as HTMLSelectElement).blur();
+  const c = loadLib().find((x) => x.id === id); if (c) { currentCharId = id; loadCharFromDoc(c.doc); refreshCharSel(); status('Персонаж: ' + c.name); }
+});
+
+// ---- Скопіювати анімацію / (ПКМ) Вставити — буфер кліпів між персонажами ----
+let animClip: { name: string; clip: Clip } | null = null;
+let pasteMode = false;
+function refreshCopyBtn(): void { const b = $<HTMLButtonElement>('copyAnimBtn'); b.textContent = pasteMode ? 'Вставити' : 'Скопіювати'; b.classList.toggle('light', pasteMode); }
+$<HTMLButtonElement>('copyAnimBtn').addEventListener('click', () => {
+  if (pasteMode) {
+    if (!animClip) { status('Буфер порожній'); return; }
+    pushUndo();
+    state.clips[animClip.name] = JSON.parse(JSON.stringify(animClip.clip));
+    state.anim = animClip.name; refreshAnimOptions(); loadFrame(0); refreshTimeline(); refreshUI();
+    status('Вставлено анімацію: ' + animClip.name);
+  } else {
+    const a = state.anim; const clip = curClip();
+    if (!a || !clip || !clip.keys.length) { status('Вибери анімацію з ключами'); return; }
+    animClip = { name: a, clip: JSON.parse(JSON.stringify(clip)) };
+    status('Скопійовано: ' + a);
+  }
+});
+$<HTMLButtonElement>('copyAnimBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); pasteMode = !pasteMode; refreshCopyBtn(); });
+refreshCopyBtn();
+
+window.addEventListener('resize', () => { resize(); draw(); alignPartsList(); if (faceOpen) alignFaceList(); });
 restoreLocal();
 resize(); refreshUI();
 renderLibrary();
+refreshCharSel();
 refreshAnimOptions();
 refreshTimeline();
 alignPartsList();
