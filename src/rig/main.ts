@@ -374,19 +374,31 @@ function draw(): void {
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(canvas.width, groundY); ctx.stroke();
   // ФІКСОВАНА лінія маківки (орієнтир висоти) — під неї рівняємо інших персонажів
   if (headLineUY != null) { const hy = toPx(0, headLineUY).y; ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(canvas.width, hy); ctx.stroke(); }
-  // Ghost / first-frame overlays (drawn before main character, no bounds accumulation)
-  const _activeClip = curClip();
-  if (_activeClip && _activeClip.keys.length && (ghostEnabled || firstFrameEnabled)) {
-    const _sv: Record<string, { rot: number; dx: number; dy: number; scale: number; bend: number }> = {};
-    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; _sv[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, bend: sl.bend }; }
+  // Ghost / first-frame overlays — працює і для keyframe-, і для процедурних анімацій
+  if (state.anim && (ghostEnabled || firstFrameEnabled)) {
+    const _gc = curClip();
+    const _hasKeys = !!(_gc && _gc.keys.length);
+    const _dur = _gc?.duration ?? 2;
     if (ghostEnabled) {
-      const curF = state.animT * FPS;
-      const cands = _activeClip.keys.filter((k) => { const df = Math.abs(k.t * FPS - curF); return df > 0.5 && (k.t * FPS < curF ? df <= ghostBefore : df <= ghostAfter); });
-      cands.sort((a, b) => Math.abs(b.t - state.animT) - Math.abs(a.t - state.animT));
-      for (const k of cands) { const df = Math.abs(k.t * FPS - curF); drawGhostLayer(k.t, Math.max(0.03, 0.5 * Math.pow(0.8, Math.floor(df) - 1))); }
+      if (_hasKeys) {
+        // Keyframe: показуємо ключі поблизу поточного кадру
+        const curF = state.animT * FPS;
+        const cands = _gc!.keys.filter((k) => { const df = Math.abs(k.t * FPS - curF); return df > 0.5 && (k.t * FPS < curF ? df <= ghostBefore : df <= ghostAfter); });
+        cands.sort((a, b) => Math.abs(b.t - state.animT) - Math.abs(a.t - state.animT));
+        for (const k of cands) { const df = Math.abs(k.t * FPS - curF); drawGhostLayer(k.t, Math.max(0.03, 0.5 * Math.pow(0.8, Math.floor(df) - 1))); }
+      } else {
+        // Процедурна: показуємо кадри ±N від поточного, від далеких до ближніх
+        const maxD = Math.max(ghostBefore, ghostAfter);
+        for (let df = maxD; df >= 1; df--) {
+          if (df <= ghostBefore) { const t = ((state.animT - df / FPS) % _dur + _dur) % _dur; drawGhostLayer(t, Math.max(0.03, 0.5 * Math.pow(0.8, df - 1))); }
+          if (df <= ghostAfter)  { const t = (state.animT + df / FPS) % _dur; drawGhostLayer(t, Math.max(0.03, 0.5 * Math.pow(0.8, df - 1))); }
+        }
+      }
     }
-    if (firstFrameEnabled && Math.abs(_activeClip.keys[0].t - state.animT) > 0.01) drawGhostLayer(_activeClip.keys[0].t, 0.5);
-    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; const sv = _sv[d.key]; sl.rot = sv.rot; sl.dx = sv.dx; sl.dy = sv.dy; sl.scale = sv.scale; sl.bend = sv.bend; }
+    if (firstFrameEnabled) {
+      const firstT = _hasKeys ? _gc!.keys[0].t : 0;
+      if (Math.abs(firstT - state.animT) > 0.01) drawGhostLayer(firstT, 0.5);
+    }
   }
 
   resetBounds(); // межі персонажа збираються під час малювання частин
@@ -439,12 +451,21 @@ function draw(): void {
 }
 
 // ---- ghost / first-frame overlay ----
-function applyPoseAt(t: number): void {
-  const clip = curClip(); if (!clip) return;
-  for (const d of SLOT_DEFS) { const sp = sampleClip(clip, t, d.key); const sl = state.slots[d.key]; sl.rot = sp.rot; sl.dx = sp.dx; sl.dy = sp.dy; sl.scale = sp.scale; sl.bend = sp.bend; }
-}
+// Малює персонажа в позі часу t, ЧБ, з потрібною прозорістю.
+// Для keyframe-кліпів тимчасово оновлює state.slots через sampleClip.
+// Для процедурних — достатньо змінити state.animT (eff() читає його напряму).
 function drawGhostLayer(t: number, alpha: number): void {
-  applyPoseAt(t);
+  const clip = curClip();
+  const hasKeys = !!(clip && clip.keys.length);
+  const savedAnimT = state.animT;
+  // Зберігаємо слоти тільки для keyframe-режиму
+  const savedSlots: Record<string, { rot: number; dx: number; dy: number; scale: number; bend: number }> | null = hasKeys ? {} : null;
+  if (hasKeys && savedSlots) {
+    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; savedSlots[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, bend: sl.bend }; }
+    // Заповнюємо слоти позою в момент t
+    for (const d of SLOT_DEFS) { const sp = sampleClip(clip!, t, d.key); const sl = state.slots[d.key]; sl.rot = sp.rot; sl.dx = sp.dx; sl.dy = sp.dy; sl.scale = sp.scale; sl.bend = sp.bend; }
+  }
+  state.animT = t; // для процедурних eff() → animOff/animRoot читає animT
   _ghostDraw = true;
   try {
     ctx.save();
@@ -454,6 +475,10 @@ function drawGhostLayer(t: number, alpha: number): void {
     for (const d of SLOT_DEFS) drawImageAt(d.key, 1);
     ctx.restore();
   } finally { _ghostDraw = false; }
+  state.animT = savedAnimT;
+  if (hasKeys && savedSlots) {
+    for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; const sv = savedSlots[d.key]; sl.rot = sv.rot; sl.dx = sv.dx; sl.dy = sv.dy; sl.scale = sv.scale; sl.bend = sv.bend; }
+  }
 }
 
 // ---- координати картинки під курсором ----
