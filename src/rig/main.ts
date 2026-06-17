@@ -660,6 +660,15 @@ const previewBox = $('preview');
 // більшою через Scale.FIT, без зуму-блюру). Правий верхній кут — якір; лівий край
 // майже біля бібліотеки. Esc / ✕ — згорнути.
 let previewBig = false;
+// після зміни розміру вікна превʼю — змусити гру в iframe перефітитись під новий
+// контейнер. scale.resize(тим самим логічним розміром) реально перемасштабовує
+// канвас (refresh() — ні). Кілька викликів: чекаємо поки #game набуде нового розміру.
+function refitPreviewGame(): void {
+  const fire = (): void => {
+    try { (previewFrame.contentWindow as unknown as { __zagRefit?: () => void })?.__zagRefit?.(); } catch { /* ignore */ }
+  };
+  requestAnimationFrame(fire); setTimeout(fire, 120); setTimeout(fire, 320);
+}
 function setPreviewBig(on: boolean): void {
   previewBig = on;
   if (on) {
@@ -672,6 +681,7 @@ function setPreviewBig(on: boolean): void {
     previewBox.classList.remove('big');
     previewBox.style.width = ''; previewBox.style.height = '';
   }
+  refitPreviewGame();
 }
 $('previewClick').addEventListener('click', () => setPreviewBig(true));
 $<HTMLButtonElement>('previewClose').addEventListener('click', (e) => { e.stopPropagation(); setPreviewBig(false); });
