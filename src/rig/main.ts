@@ -38,7 +38,7 @@ const LIST_ROWS: string[][] = [
   ['arm_front'], ['head'], ['neck'], ['torso'], ['leg_front'], ['leg_back'], ['arm_back'], ['ref'],
 ];
 const FACE_ROWS: string[][] = [
-  ['brow_front', 'brow_back'], ['eye_front', 'eye_back'], ['mouth'],
+  ['brow_front'], ['brow_back'], ['eye_front'], ['eye_back'], ['mouth'],
 ];
 const def = (key: string) => SLOT_DEFS.find((d) => d.key === key)!;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26, eye: 16, brow: 14, mouth: 20 };
@@ -678,9 +678,12 @@ const previewFrame = $<HTMLIFrameElement>('previewFrame');
 function reloadPreview(): void { previewFrame.src = 'index.html?t=' + Date.now(); const h = document.getElementById('previewHint'); if (h) h.style.display = 'none'; }
 reloadPreview();
 const previewBox = $('preview');
-// ЛКМ — розгорнути превʼю, змінивши РЕАЛЬНИЙ розмір iframe (гра перерендериться
-// більшою через Scale.FIT, без зуму-блюру). Правий верхній кут — якір; лівий край
-// майже біля бібліотеки. Esc / ✕ — згорнути.
+// backdrop — прозорий шар позаду великого превʼю (z:99 < preview z:100).
+// Клік по backdrop (тобто за межами превʼю) = згорнути.
+const previewBackdrop = document.createElement('div');
+previewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
+previewBackdrop.addEventListener('click', () => setPreviewBig(false));
+document.body.appendChild(previewBackdrop);
 let previewBig = false;
 // після зміни розміру вікна превʼю — змусити гру в iframe перефітитись під новий
 // контейнер. scale.resize(тим самим логічним розміром) реально перемасштабовує
@@ -700,11 +703,13 @@ function setPreviewBig(on: boolean): void {
     previewBox.classList.add('big');
     previewBox.style.width = w + 'px';
     previewBox.style.height = Math.round((w * 9) / 20) + 'px';
-    pc.style.pointerEvents = 'none'; // дати фокус iframe → гра отримує мишу/клаву
+    pc.style.pointerEvents = 'none'; // iframe отримує мишу/клаву
+    previewBackdrop.style.display = 'block'; // клік поза превʼю = згорнути
   } else {
     previewBox.classList.remove('big');
     previewBox.style.width = ''; previewBox.style.height = '';
-    pc.style.pointerEvents = ''; // відновити overlay → ЛКМ знову розгортає
+    pc.style.pointerEvents = ''; // overlay знову ловить ЛКМ для розгортання
+    previewBackdrop.style.display = 'none';
   }
   refitPreviewGame();
 }
