@@ -427,7 +427,7 @@ function draw(): void {
 
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
-    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (Z): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
@@ -632,7 +632,7 @@ function refreshUI(): void {
   $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
   $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? 'Прибрати розріз (D)' : 'Розріз (D)';
   $<HTMLButtonElement>('cutBtn').classList.toggle('light', !!(ss && ss.cut != null));
-  $<HTMLButtonElement>('bendFlipBtn').textContent = 'Напрям (B)';
+  $<HTMLButtonElement>('bendFlipBtn').textContent = 'Напрям (F)';
   $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', !!(ss && ss.bendFlip));
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
@@ -836,10 +836,9 @@ window.addEventListener('keydown', (ev) => {
   }
   if (ev.code === 'Space') { ev.preventDefault(); if (state.anim) play(!state.playing); return; } // пробіл — плей/пауза
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
-  else if (ev.code === 'KeyZ') { ev.preventDefault(); startMode('B'); } // Z — zgyn (bend)
+  else if (ev.code === 'KeyB') { ev.preventDefault(); startMode('B'); } // B — bend interactive
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
-  else if (ev.code === 'KeyB') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } }
-  else if (ev.code === 'KeyF') { ev.preventDefault(); flipAllBends(); }
+  else if (ev.code === 'KeyF') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } } // F — bendFlip (напрям)
   else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
   else if (ev.code === 'KeyK') { ev.preventDefault(); if (state.anim) setKey(); }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
