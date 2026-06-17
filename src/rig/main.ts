@@ -1235,6 +1235,11 @@ function refreshCharSel(): void {
   sel.value = currentCharId ?? '';
 }
 $<HTMLSelectElement>('charSel').addEventListener('change', (e) => {
+  // зберегти поточного персонажа в бібліотеку перед перемиканням
+  if (currentCharId) {
+    const lib = loadLib(); const idx = lib.findIndex((x) => x.id === currentCharId);
+    if (idx >= 0) { lib[idx].doc = buildDoc(); storeLib(lib); }
+  }
   const id = (e.target as HTMLSelectElement).value; (e.target as HTMLSelectElement).blur();
   const c = loadLib().find((x) => x.id === id); if (c) { currentCharId = id; loadCharFromDoc(c.doc); refreshCharSel(); status('Персонаж: ' + c.name); }
 });
@@ -1252,9 +1257,9 @@ $<HTMLButtonElement>('copyAnimBtn').addEventListener('click', () => {
     status('Вставлено анімацію: ' + animClip.name);
   } else {
     const a = state.anim; const clip = curClip();
-    if (!a || !clip || !clip.keys.length) { status('Вибери анімацію з ключами'); return; }
+    if (!a || !clip) { status('Вибери анімацію'); return; }
     animClip = { name: a, clip: JSON.parse(JSON.stringify(clip)) };
-    status('Скопійовано: ' + a);
+    status('Скопійовано: ' + a + (clip.keys.length ? '' : ' (без ключів — процедурна)'));
   }
 });
 $<HTMLButtonElement>('copyAnimBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); pasteMode = !pasteMode; refreshCopyBtn(); });
