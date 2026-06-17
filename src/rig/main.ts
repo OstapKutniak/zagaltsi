@@ -97,9 +97,10 @@ const state = {
   origin: { x: 0, y: 0 },
   viewScale: 1,
   mouse: { x: 0, y: 0 },
-  mode: null as null | 'R' | 'S' | 'G',
+  mode: null as null | 'R' | 'S' | 'G' | 'B',
   axis: null as null | 'x' | 'z', // обмеження осі (X/Z) під час G/S, як у Blender
   orig: null as null | Tf,
+  origBend: 0, // збережений bend перед режимом B
   startAng: 0,
   startDist: 1,
   startMx: 0,
@@ -426,7 +427,7 @@ function draw(): void {
 
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
-    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (Z): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
@@ -502,11 +503,13 @@ function addImageFile(file: File, fallbackToSelected: boolean): void {
 }
 
 // ---- режими R/S/G ----
-function startMode(m: 'R' | 'S' | 'G'): void {
+function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
+  if (m === 'B' && state.selected === 'ref') return; // ref не має bend
   pushUndo();
   const t = tf(state.selected);
   state.mode = m; state.pivotMode = false; state.axis = null;
   state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy, gscale: t.gscale };
+  if (m === 'B') state.origBend = state.slots[state.selected]?.bend ?? 0;
   const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x);
   state.startMx = mx; state.startMy = state.mouse.y;
@@ -531,12 +534,17 @@ function applyMode(): void {
     if (state.axis === 'x') t.sx = Math.max(0.02, state.orig.sx * ratio);
     else if (state.axis === 'z') t.sy = Math.max(0.02, state.orig.sy * ratio);
     else t.gscale = Math.max(0.02, state.orig.gscale * ratio); // уніформний масштаб поширюється на дітей
+  } else if (state.mode === 'B') {
+    const sl = state.slots[state.selected]; if (sl) sl.bend = Math.max(-150, Math.min(150, state.origBend + (mx - state.startMx) * 0.8));
   }
   draw();
 }
 function endMode(commit: boolean): void {
   if (!state.mode) return;
-  if (!commit && state.orig) Object.assign(tf(state.selected), state.orig);
+  if (!commit) {
+    if (state.orig) Object.assign(tf(state.selected), state.orig);
+    if (state.mode === 'B') { const sl = state.slots[state.selected]; if (sl) sl.bend = state.origBend; }
+  }
   state.mode = null; state.orig = null; state.axis = null; refreshUI();
 }
 
@@ -822,12 +830,13 @@ window.addEventListener('keydown', (ev) => {
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
   // обмеження осі під час G/S (Blender: X — гориз., Z — верт.; повторне натискання знімає)
-  if (state.mode && (ev.code === 'KeyX' || ev.code === 'KeyZ')) {
+  if (state.mode && state.mode !== 'B' && (ev.code === 'KeyX' || ev.code === 'KeyZ')) {
     ev.preventDefault(); const ax = ev.code === 'KeyX' ? 'x' : 'z';
     state.axis = state.axis === ax ? null : ax; applyMode(); return;
   }
   if (ev.code === 'Space') { ev.preventDefault(); if (state.anim) play(!state.playing); return; } // пробіл — плей/пауза
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+  else if (ev.code === 'KeyZ') { ev.preventDefault(); startMode('B'); } // Z — zgyn (bend)
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyB') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } }
   else if (ev.code === 'KeyF') { ev.preventDefault(); flipAllBends(); }
