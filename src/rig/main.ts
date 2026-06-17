@@ -410,7 +410,7 @@ function draw(): void {
   // маркери pivot
   const drawMark = (sel: string) => {
     const a = anchorPx(sel); const on = sel === state.selected;
-    ctx.strokeStyle = on ? '#ff9a1f' : 'rgba(255,154,31,0.45)'; ctx.fillStyle = ctx.strokeStyle;
+    ctx.strokeStyle = on ? '#ff9a1f' : 'rgba(255,255,255,0.5)'; ctx.fillStyle = ctx.strokeStyle;
     if (on) {
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(a.x - 9, a.y); ctx.lineTo(a.x + 9, a.y); ctx.moveTo(a.x, a.y - 9); ctx.lineTo(a.x, a.y + 9); ctx.stroke();
@@ -725,7 +725,7 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
 }
 
 // ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
-let partsOpen = true;
+let partsOpen = false;
 $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
   partsOpen = !partsOpen;
   $('partsList').style.display = partsOpen ? '' : 'none';
