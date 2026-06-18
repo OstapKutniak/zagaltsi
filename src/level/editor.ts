@@ -243,7 +243,8 @@ export function initLevelEditor(prefix: string): void {
       const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e);
     }
   }
-  // Convert imported image to WebP (max 1024px) — reduces storage 50-70% vs raw PNG
+  const CAT_MAX_PX: Record<string, number> = { sky: 2048, bg: 2048, map: 2048 }; // решта — 1024
+  // Convert imported image to WebP — reduces storage 5-10x vs raw PNG
   function toWebP(file: File, maxPx = 1024, quality = 0.85): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
@@ -267,7 +268,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
     const files = Array.from((ev.target as HTMLInputElement).files ?? []);
     for (const f of files) {
-      toWebP(f).then((url) => {
+      toWebP(f, CAT_MAX_PX[state.cat] ?? 1024).then((url) => {
         if (!url) return;
         const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url };
         state.assets.push(a); loadImg(a); refreshAssets(); save();
