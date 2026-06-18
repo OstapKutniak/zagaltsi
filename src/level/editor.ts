@@ -157,18 +157,19 @@ export function initLevelEditor(prefix: string): void {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
         let p1, p2, p3, p4;
-        // Афінна ґратка: боки вертикальні (gs), верх/низ нахилені на s.
-        // Підлога = дзеркало стіни по горизонталі (нахил у протилежний бік).
+        // Афінні ґратки (тайлять без щілин/шахматки):
+        // Підлога — плитка на землі: верх/низ ГОРИЗОНТАЛЬНІ, боки нахилені в глибину.
+        // Стіна — вертикальна площина: боки ВЕРТИКАЛЬНІ, верх/низ нахилені.
         const s = gs / 2;
         const x0 = cx * gs, x1 = (cx + 1) * gs;
         if (type === 'h') {
-          // Підлога: верх/низ нахилені вниз-вліво
-          p1 = toScreen(x0, cy * gs       - cx * s);
-          p2 = toScreen(x1, cy * gs       - (cx + 1) * s);
-          p3 = toScreen(x1, (cy + 1) * gs - (cx + 1) * s);
-          p4 = toScreen(x0, (cy + 1) * gs - cx * s);
+          // Підлога: зсув по X залежить від ряду (cy) — боки нахилені вниз-вправо
+          p1 = toScreen(x0 + cy * s,       cy * gs);
+          p2 = toScreen(x1 + cy * s,       cy * gs);
+          p3 = toScreen(x1 + (cy + 1) * s, (cy + 1) * gs);
+          p4 = toScreen(x0 + (cy + 1) * s, (cy + 1) * gs);
         } else {
-          // Стіна: верх/низ нахилені вниз-вправо
+          // Стіна: зсув по Y залежить від колонки (cx) — верх/низ нахилені вниз-вправо
           p1 = toScreen(x0, cy * gs       + cx * s);
           p2 = toScreen(x1, cy * gs       + (cx + 1) * s);
           p3 = toScreen(x1, (cy + 1) * gs + (cx + 1) * s);
