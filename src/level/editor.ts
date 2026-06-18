@@ -205,7 +205,7 @@ export function initLevelEditor(prefix: string): void {
       if (cx0 > 0) ctx.fillRect(0, cy0, cx0, cy1 - cy0);
       if (cx1 < cw) ctx.fillRect(cx1, cy0, cw - cx1, cy1 - cy0);
       ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-      ctx.strokeRect(Math.max(1, vx), Math.max(1, vy), Math.min(cw - 2, vw) - Math.max(0, -vx), Math.min(ch - 2, vh) - Math.max(0, -vy));
+      ctx.strokeRect(vx, vy, vw, vh); // справжній кадр 20:9 (canvas обріже зайве, пропорції не псуються)
       ctx.setLineDash([]);
     }
   }
@@ -511,18 +511,26 @@ export function initLevelEditor(prefix: string): void {
     refreshCatSelect(); refreshAssets();
   });
 
+  function snapCamView(): void {
+    // Вписуємо ВЕСЬ кадр 1280×576 у canvas (letterbox) — щоб зберегти 20:9,
+    // а не обрізати по ширині (тоді рамка здавалась квадратною).
+    const GAME_W = 1280, GAME_H = 576, FLOOR_M = 26, margin = 0.96;
+    const vs = state.viewScale;
+    state.zoom = Math.min(canvas.width / (GAME_W * vs), canvas.height / (GAME_H * vs)) * margin;
+    const s = vs * state.zoom;
+    const vw = GAME_W * s, vh = GAME_H * s;
+    const frameLeft = (canvas.width - vw) / 2;
+    const frameTop = (canvas.height - vh) / 2;
+    // Підлога редактора (Y=0) → де реально підлога гри: (GAME_H-FLOOR_M)/GAME_H від верху кадру.
+    state.pan.y = frameTop + (GAME_H - FLOOR_M) * s - canvas.height * 0.6;
+    // Лівий край кадру = початок рівня (camera bound left).
+    state.pan.x = frameLeft - canvas.width * 0.35 - level().start * s;
+    applyOrigin();
+  }
   $<HTMLButtonElement>('camViewBtn').addEventListener('click', () => {
     state.camView = !state.camView;
     $('camViewBtn').classList.toggle('on', state.camView);
-    if (state.camView) {
-      const GAME_H = 576, FLOOR_M = 26;
-      state.zoom = canvas.height / (GAME_H * state.viewScale);
-      // Align floor line (editor Y=0) to where the game floor actually is (550/576 from top)
-      state.pan.y = canvas.height * ((GAME_H - FLOOR_M) / GAME_H - 0.6);
-      state.pan.x = 0; applyOrigin();
-      const startSx = toScreen(level().start, 0).x;
-      state.pan.x = canvas.width * 0.1 - startSx; applyOrigin();
-    }
+    if (state.camView) snapCamView();
     draw();
   });
 
@@ -641,8 +649,8 @@ export function initLevelEditor(prefix: string): void {
   }
 
   // Re-render when tab becomes visible
-  window.addEventListener('levelTabActivated', () => { resize(); draw(); syncToolbarHeight(); });
-  window.addEventListener('resize', () => { resize(); draw(); syncToolbarHeight(); });
+  window.addEventListener('levelTabActivated', () => { resize(); if (state.camView) snapCamView(); draw(); syncToolbarHeight(); });
+  window.addEventListener('resize', () => { resize(); if (state.camView) snapCamView(); draw(); syncToolbarHeight(); });
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
