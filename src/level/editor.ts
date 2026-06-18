@@ -157,23 +157,17 @@ export function initLevelEditor(prefix: string): void {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
         let p1, p2, p3, p4;
-        // Афінні ґратки (тайлять без щілин/шахматки):
-        // Підлога — плитка на землі: верх/низ ГОРИЗОНТАЛЬНІ, боки нахилені в глибину.
-        // Стіна — вертикальна площина: боки ВЕРТИКАЛЬНІ, верх/низ нахилені.
-        const s = gs / 2;
-        const x0 = cx * gs, x1 = (cx + 1) * gs;
+        // «Розкрита книжка»: дві перпендикулярні площини, спільне ребро під 45°.
+        // Кути лише 90°/45°, усі сторони = gs (k=gs/√2 — катет 45°-ребра, довжина gs).
+        const k = gs * Math.SQRT1_2;
         if (type === 'h') {
-          // Підлога: зсув по X залежить від ряду (cy) — боки нахилені вниз-вправо
-          p1 = toScreen(x0 + cy * s,       cy * gs);
-          p2 = toScreen(x1 + cy * s,       cy * gs);
-          p3 = toScreen(x1 + (cy + 1) * s, (cy + 1) * gs);
-          p4 = toScreen(x0 + (cy + 1) * s, (cy + 1) * gs);
+          // Підлога: верх/низ ГОРИЗОНТАЛЬНІ (gs,0); боки 45° вниз-вліво (-k,k)
+          const P = (ix: number, iy: number) => toScreen(ix * gs - iy * k, iy * k);
+          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
         } else {
-          // Стіна: зсув по Y залежить від колонки (cx) — верх/низ нахилені вниз-вправо
-          p1 = toScreen(x0, cy * gs       + cx * s);
-          p2 = toScreen(x1, cy * gs       + (cx + 1) * s);
-          p3 = toScreen(x1, (cy + 1) * gs + (cx + 1) * s);
-          p4 = toScreen(x0, (cy + 1) * gs + cx * s);
+          // Стіна: боки ВЕРТИКАЛЬНІ (0,gs); верх/низ 45° вгору-вправо (k,-k)
+          const P = (ix: number, iy: number) => toScreen(ix * k, -ix * k + iy * gs);
+          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
         }
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
@@ -395,21 +389,24 @@ export function initLevelEditor(prefix: string): void {
   let painting = false;
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
-    const w = toWorld(sx, sy); const gs = state.grid;
-    const cy = Math.floor(w.y / gs);
+    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
+    // Інвертуємо ту саму ґратку, що й у draw() — клітинка під курсором.
+    // Підлога: x=cx*gs-cy*k, y=cy*k → cx=(x+y)/gs, cy=y/k
+    const fl = { cx: Math.floor((w.x + w.y) / gs), cy: Math.floor(w.y / k) };
+    // Стіна: x=cx*k, y=-cx*k+cy*gs → cx=x/k, cy=(x+y)/gs
+    const wl = { cx: Math.floor(w.x / k), cy: Math.floor((w.x + w.y) / gs) };
     if (state.pathTool === 'erase') {
-      const cx = Math.floor(w.x / gs);
       level().collider = level().collider.filter((c) => {
-        const p = c.split(',');
-        return !(Number(p[0]) === cx && Number(p[1]) === cy);
+        const p = c.split(','); const t = p[2] ?? 'h'; const cell = t === 'h' ? fl : wl;
+        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy);
       });
     } else {
-      const cx = Math.floor(w.x / gs);
+      const cell = state.pathTool === 'h' ? fl : wl;
       level().collider = level().collider.filter((c) => {
         const p = c.split(',');
-        return !(Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === state.pathTool);
+        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy && (p[2] ?? 'h') === state.pathTool);
       });
-      level().collider.push(`${cx},${cy},${state.pathTool}`);
+      level().collider.push(`${cell.cx},${cell.cy},${state.pathTool}`);
     }
     draw();
   }
@@ -625,13 +622,22 @@ export function initLevelEditor(prefix: string): void {
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
-  let cachedTlH = 0;
+  function measureTimeline(): number {
+    const tl = document.getElementById('timelineBar') as HTMLElement | null;
+    if (!tl) return 0;
+    if (tl.offsetHeight > 0) return tl.offsetHeight;
+    // У режимі рівнів таймлайн display:none → міряємо поза потоком (inline > CSS-клас).
+    const o = { d: tl.style.display, p: tl.style.position, v: tl.style.visibility };
+    tl.style.display = 'flex'; tl.style.position = 'absolute'; tl.style.visibility = 'hidden';
+    const h = tl.offsetHeight;
+    tl.style.display = o.d; tl.style.position = o.p; tl.style.visibility = o.v;
+    return h;
+  }
   function syncToolbarHeight(): void {
-    const tl = document.getElementById('timelineBar');
     const lt = document.getElementById(prefix + 'levelToolbar');
     if (!lt) return;
-    if (tl && tl.offsetHeight > 0) cachedTlH = tl.offsetHeight;
-    if (cachedTlH > 0) lt.style.height = cachedTlH + 'px';
+    const h = measureTimeline();
+    lt.style.height = h > 0 ? h + 'px' : ''; // 0 → фолбек на CSS min-height
   }
 
   // Re-render when tab becomes visible
