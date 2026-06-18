@@ -157,20 +157,22 @@ export function initLevelEditor(prefix: string): void {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
         let p1, p2, p3, p4;
+        // Афінна ґратка: боки вертикальні (gs), верх/низ нахилені на s.
+        // Підлога = дзеркало стіни по горизонталі (нахил у протилежний бік).
+        const s = gs / 2;
+        const x0 = cx * gs, x1 = (cx + 1) * gs;
         if (type === 'h') {
-          // Горизонтальний: 2x ширший (cx у gs*2 одиницях), нахил = gs → перспектива підлоги
-          const w2 = gs * 2;
-          p1 = toScreen(cx * w2,           (cy + 1) * gs);
-          p2 = toScreen((cx + 1) * w2,     (cy + 1) * gs);
-          p3 = toScreen((cx + 1) * w2 + gs, cy * gs);
-          p4 = toScreen(cx * w2 + gs,       cy * gs);
+          // Підлога: верх/низ нахилені вниз-вліво
+          p1 = toScreen(x0, cy * gs       - cx * s);
+          p2 = toScreen(x1, cy * gs       - (cx + 1) * s);
+          p3 = toScreen(x1, (cy + 1) * gs - (cx + 1) * s);
+          p4 = toScreen(x0, (cy + 1) * gs - cx * s);
         } else {
-          // Вертикальний: лів/прав вертикальні, верх/низ під 45° (ширина = gs/2)
-          const s = gs / 2;
-          p1 = toScreen(cx * gs,     cy * gs);
-          p2 = toScreen(cx * gs,     (cy + 1) * gs);
-          p3 = toScreen(cx * gs + s, (cy + 1) * gs + s);
-          p4 = toScreen(cx * gs + s, cy * gs + s);
+          // Стіна: верх/низ нахилені вниз-вправо
+          p1 = toScreen(x0, cy * gs       + cx * s);
+          p2 = toScreen(x1, cy * gs       + (cx + 1) * s);
+          p3 = toScreen(x1, (cy + 1) * gs + (cx + 1) * s);
+          p4 = toScreen(x0, (cy + 1) * gs + cx * s);
         }
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
@@ -395,14 +397,13 @@ export function initLevelEditor(prefix: string): void {
     const w = toWorld(sx, sy); const gs = state.grid;
     const cy = Math.floor(w.y / gs);
     if (state.pathTool === 'erase') {
-      const cxH = Math.floor(w.x / (gs * 2));
-      const cxV = Math.floor(w.x / gs);
+      const cx = Math.floor(w.x / gs);
       level().collider = level().collider.filter((c) => {
-        const p = c.split(','); const t = p[2] ?? 'h';
-        return !(Number(p[1]) === cy && ((t === 'h' && Number(p[0]) === cxH) || (t === 'v' && Number(p[0]) === cxV)));
+        const p = c.split(',');
+        return !(Number(p[0]) === cx && Number(p[1]) === cy);
       });
     } else {
-      const cx = state.pathTool === 'h' ? Math.floor(w.x / (gs * 2)) : Math.floor(w.x / gs);
+      const cx = Math.floor(w.x / gs);
       level().collider = level().collider.filter((c) => {
         const p = c.split(',');
         return !(Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === state.pathTool);
@@ -548,15 +549,19 @@ export function initLevelEditor(prefix: string): void {
     lvPreviewBig = on;
     const pc = $<HTMLElement>('previewClick');
     if (on && lvPreviewBox) {
-      const stageEl = document.getElementById(prefix + 'stageWrap') ?? document.getElementById(prefix + 'stage');
-      const r = stageEl?.getBoundingClientRect();
-      const w = r ? r.width : Math.max(360, window.innerWidth - 100);
-      lvPreviewBox.style.cssText += ';position:fixed;z-index:100;left:' + (r?.left ?? 0) + 'px;top:' + (r?.top ?? 0) + 'px;width:' + w + 'px;height:' + Math.round(w * 9 / 20) + 'px;border-radius:12px;';
+      // Розгортання відносно правого верхнього кута (клас .big: position:fixed; top:8px; right:8px).
+      // Ширина = від правого краю бібліотеки до правого краю вікна (як у редакторі персонажів).
+      const lib = $<HTMLElement>('library').getBoundingClientRect();
+      const w = Math.max(360, window.innerWidth - 8 - (lib.right + 12));
+      lvPreviewBox.classList.add('big');
+      lvPreviewBox.style.width = w + 'px';
+      lvPreviewBox.style.height = Math.round((w * 9) / 20) + 'px';
       if (pc) pc.style.pointerEvents = 'none';
       lvPreviewBackdrop.style.display = 'block';
       lvPreviewFrame?.contentWindow?.focus();
     } else if (lvPreviewBox) {
-      lvPreviewBox.style.position = ''; lvPreviewBox.style.zIndex = ''; lvPreviewBox.style.left = ''; lvPreviewBox.style.top = ''; lvPreviewBox.style.width = ''; lvPreviewBox.style.height = '';
+      lvPreviewBox.classList.remove('big');
+      lvPreviewBox.style.width = ''; lvPreviewBox.style.height = '';
       if (pc) pc.style.pointerEvents = '';
       lvPreviewBackdrop.style.display = 'none';
     }

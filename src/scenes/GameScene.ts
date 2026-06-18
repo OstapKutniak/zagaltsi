@@ -63,7 +63,7 @@ export class GameScene extends Phaser.Scene {
   private getBandAtX(worldX: number): { top: number; bottom: number } {
     if (!this.levelMode || !this.colliderCells.length) return this.band;
     const gs = this.colliderGrid;
-    const cx = Math.floor(worldX / (gs * 2)); // h-cells indexed in 2*gs units
+    const cx = Math.floor(worldX / gs);
     const cys: number[] = [];
     for (const c of this.colliderCells) {
       const p = c.split(',');
