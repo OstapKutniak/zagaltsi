@@ -243,17 +243,37 @@ export function initLevelEditor(prefix: string): void {
       const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e);
     }
   }
+  // Convert imported image to WebP (max 1024px) — reduces storage 50-70% vs raw PNG
+  function toWebP(file: File, maxPx = 1024, quality = 0.85): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const blobUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * scale);
+        const h = Math.round(img.naturalHeight * scale);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(blobUrl);
+        const out = c.toDataURL('image/webp', quality);
+        resolve(out.startsWith('data:image/webp') ? out : c.toDataURL('image/png'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(''); };
+      img.src = blobUrl;
+    });
+  }
+
   $<HTMLButtonElement>('loadAsset').addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
   $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
     const files = Array.from((ev.target as HTMLInputElement).files ?? []);
     for (const f of files) {
-      const r = new FileReader();
-      r.onload = () => {
-        const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url: String(r.result) };
+      toWebP(f).then((url) => {
+        if (!url) return;
+        const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url };
         state.assets.push(a); loadImg(a); refreshAssets(); save();
-      };
-      r.readAsDataURL(f);
+      });
     }
+    (ev.target as HTMLInputElement).value = '';
   });
 
   canvas.addEventListener('dragover', (e) => e.preventDefault());

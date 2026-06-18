@@ -21,20 +21,12 @@ function mergeById<T extends { id: string }>(local: T[], remote: T[]): { merged:
 }
 
 // ---- Character library ----
-
-export async function pullCharLib(libKey: string): Promise<number> {
-  const remote = await fetchJson<Array<{ id: string }>>('char-library.json');
-  if (!remote || !Array.isArray(remote) || remote.length === 0) return 0;
-  try {
-    const local: Array<{ id: string }> = JSON.parse(localStorage.getItem(libKey) || '[]');
-    const { merged, added } = mergeById(local, remote);
-    if (added > 0) localStorage.setItem(libKey, JSON.stringify(merged));
-    return added;
-  } catch { return 0; }
-}
-
-export function charLibForPush(libKey: string): string {
-  return localStorage.getItem(libKey) ?? '[]';
+// Takes current in-memory lib, returns merged result (or same array if nothing new).
+export async function pullCharLib<T extends { id: string }>(current: T[]): Promise<{ lib: T[]; added: number }> {
+  const remote = await fetchJson<T[]>('char-library.json');
+  if (!remote || !Array.isArray(remote) || remote.length === 0) return { lib: current, added: 0 };
+  const { merged, added } = mergeById(current, remote);
+  return { lib: merged as T[], added };
 }
 
 // ---- Level assets & layouts ----
@@ -53,6 +45,6 @@ export async function pullLevelData(): Promise<{ assets: SyncAsset[]; layouts: S
   };
 }
 
-export function mergeLevelAssets(local: SyncAsset[], remote: SyncAsset[]): { merged: SyncAsset[]; added: number } {
+export function mergeLevelAssets<T extends { id: string }>(local: T[], remote: T[]): { merged: T[]; added: number } {
   return mergeById(local, remote);
 }

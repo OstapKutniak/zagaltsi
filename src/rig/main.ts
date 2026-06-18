@@ -1,8 +1,8 @@
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
-import { idbGet } from '../store';
+import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
-import { pullCharLib, charLibForPush } from '../sync';
+import { pullCharLib } from '../sync';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -982,12 +982,16 @@ function composeThumb(w: number, h: number): string {
   return c.toDataURL('image/png');
 }
 
-// ---- бібліотека персонажів (localStorage) ----
+// ---- бібліотека персонажів (IndexedDB — необмежений обсяг) ----
 interface LibItem { id: string; name: string; cat: 'char' | 'enemy'; doc: ReturnType<typeof buildDoc>; thumb: string }
-const LIB_KEY = 'ostap_library';
-let libCat: 'char' | 'enemy' = 'char'; // активна вкладка бібліотеки
-const loadLib = (): LibItem[] => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); } catch { return []; } };
-const storeLib = (lib: LibItem[]): void => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { status('Не вдалося зберегти — переповнення сховища браузера'); } };
+const LIB_KEY = 'zag_char_lib'; // IDB key (нова назва, щоб не плутати зі старим localStorage)
+let _lib: LibItem[] = [];
+let libCat: 'char' | 'enemy' = 'char';
+const loadLib = (): LibItem[] => _lib;
+const storeLib = (lib: LibItem[]): void => {
+  _lib = lib;
+  idbSet(LIB_KEY, lib).catch(() => status('Не вдалося зберегти бібліотеку'));
+};
 const LIB_MIN = 18; // мінімум слотів (з пустими) — щоб видно сітку/скрол
 function renderLibrary(): void {
   // одна кнопка-тогл: показує поточний розділ; Герої = світла, Вороги = темна
@@ -1037,7 +1041,7 @@ async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => vo
     const level = await idbGet<unknown>('zag_level');
     const files: Record<string, string> = {
       'public/character.json': JSON.stringify(character),
-      'public/studio-data/char-library.json': charLibForPush(LIB_KEY),
+      'public/studio-data/char-library.json': JSON.stringify(loadLib()),
     };
     if (level) files['public/level.json'] = JSON.stringify(level);
     await ghCommit(files, 'studio: publish to game');
@@ -1536,9 +1540,26 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 restoreLocal();
 resize(); refreshUI();
-renderLibrary();
-// Pull char library from GitHub in background — merges new items, re-renders if changed
-pullCharLib(LIB_KEY).then((added) => { if (added > 0) { renderLibrary(); status(`Синхронізовано: +${added} з GitHub`); } }).catch(() => {});
+renderLibrary(); // спочатку порожня — заповниться після async load
+// Завантаження бібліотеки: IDB → міграція з localStorage → pull з GitHub
+idbGet<LibItem[]>(LIB_KEY)
+  .then(items => {
+    if (items?.length) {
+      _lib = items;
+    } else {
+      // Одноразова міграція зі старого localStorage
+      try {
+        const old = localStorage.getItem('ostap_library');
+        if (old) { _lib = JSON.parse(old) as LibItem[]; idbSet(LIB_KEY, _lib).catch(() => {}); localStorage.removeItem('ostap_library'); }
+      } catch { /* ignore */ }
+    }
+    renderLibrary();
+    return pullCharLib(_lib);
+  })
+  .then(({ lib, added }) => {
+    if (added > 0) { _lib = lib as LibItem[]; idbSet(LIB_KEY, _lib).catch(() => {}); renderLibrary(); status(`Синхронізовано: +${added} з GitHub`); }
+  })
+  .catch(() => {});
 refreshCharSel();
 refreshAnimOptions();
 refreshTimeline();
