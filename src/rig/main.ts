@@ -801,6 +801,14 @@ function setPreviewBig(on: boolean): void {
   refitPreviewGame();
 }
 $('previewClick').addEventListener('click', () => setPreviewBig(!previewBig)); // ЛКМ — розгорнути / згорнути
+$('previewClick').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  ($('previewFrame') as HTMLIFrameElement).contentWindow?.focus();
+  const box = $('preview') as HTMLElement;
+  box.style.boxShadow = '0 0 0 2px var(--accent)';
+  const restore = (): void => { box.style.boxShadow = ''; window.removeEventListener('focus', restore); };
+  window.addEventListener('focus', restore);
+}); // ПКМ — передати хоткеї без розгортання
 window.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).code === 'Escape' && previewBig) setPreviewBig(false); });
 window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
 

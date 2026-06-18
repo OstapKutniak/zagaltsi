@@ -376,7 +376,17 @@ export function initLevelEditor(prefix: string): void {
     else window.location.href = 'studio.html';
   });
 
-  $('previewClick')?.addEventListener('click', () => { ($('previewClick') as HTMLElement).style.display = 'none'; });
+  $('previewClick')?.addEventListener('click', () => { ($('previewClick') as HTMLElement).style.display = 'none'; }); // ЛКМ — активувати (прибрати overlay)
+  $('previewClick')?.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    $<HTMLIFrameElement>('previewFrame')?.contentWindow?.focus();
+    const box = $<HTMLElement>('preview');
+    if (box) {
+      box.style.boxShadow = '0 0 0 2px var(--accent)';
+      const restore = (): void => { box.style.boxShadow = ''; window.removeEventListener('focus', restore); };
+      window.addEventListener('focus', restore);
+    }
+  }); // ПКМ — передати хоткеї без розгортання
 
   const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
   showColliderBtn?.addEventListener('click', () => {
