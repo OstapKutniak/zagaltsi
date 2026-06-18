@@ -63,8 +63,7 @@ export class GameScene extends Phaser.Scene {
   private getBandAtX(worldX: number): { top: number; bottom: number } {
     if (!this.levelMode || !this.colliderCells.length) return this.band;
     const gs = this.colliderGrid;
-    const cx = Math.floor(worldX / gs);
-    // Collect h-type cells in this column and adjacent (for smooth transitions)
+    const cx = Math.floor(worldX / (gs * 2)); // h-cells indexed in 2*gs units
     const cys: number[] = [];
     for (const c of this.colliderCells) {
       const p = c.split(',');
@@ -72,7 +71,7 @@ export class GameScene extends Phaser.Scene {
       const ccx = Number(p[0]);
       if (ccx === cx || ccx === cx - 1 || ccx === cx + 1) cys.push(Number(p[1]));
     }
-    if (!cys.length) return this.band; // no cells near player — use global fallback
+    if (!cys.length) return this.band;
     const minCy = Math.min(...cys);
     const maxCy = Math.max(...cys);
     const depth = (maxCy + 1 - minCy) * gs;

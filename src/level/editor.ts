@@ -158,11 +158,12 @@ export function initLevelEditor(prefix: string): void {
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
         let p1, p2, p3, p4;
         if (type === 'h') {
-          // Горизонтальний: повна висота клітини, нахил = gs → 45°, без проміжків між рядами
-          p1 = toScreen(cx * gs,           (cy + 1) * gs); // нижній-лівий
-          p2 = toScreen((cx + 1) * gs,     (cy + 1) * gs); // нижній-правий
-          p3 = toScreen((cx + 1) * gs + gs, cy * gs);       // верхній-правий
-          p4 = toScreen(cx * gs + gs,       cy * gs);       // верхній-лівий
+          // Горизонтальний: 2x ширший (cx у gs*2 одиницях), нахил = gs → перспектива підлоги
+          const w2 = gs * 2;
+          p1 = toScreen(cx * w2,           (cy + 1) * gs);
+          p2 = toScreen((cx + 1) * w2,     (cy + 1) * gs);
+          p3 = toScreen((cx + 1) * w2 + gs, cy * gs);
+          p4 = toScreen(cx * w2 + gs,       cy * gs);
         } else {
           // Вертикальний: лів/прав вертикальні, верх/низ під 45° (ширина = gs/2)
           const s = gs / 2;
@@ -193,14 +194,21 @@ export function initLevelEditor(prefix: string): void {
     ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
 
     if (state.camView) {
-      const vw = 1280 * sc(); const vh = 576 * sc();
+      // Game view: 1280×576, floor (Y=0 in editor) at 550/576 from top of game screen
+      const GAME_H = 576, FLOOR_M = 26;
+      const vw = 1280 * sc(); const vh = GAME_H * sc();
+      const vx = toScreen(level().start, 0).x;
+      const vy = state.origin.y - (GAME_H - FLOOR_M) * sc(); // top of game screen in canvas coords
       const cw = canvas.width; const ch = canvas.height;
-      const vx = (cw - vw) / 2; const vy = (ch - vh) / 2;
+      const cx0 = Math.max(0, vx), cy0 = Math.max(0, vy);
+      const cx1 = Math.min(cw, vx + vw), cy1 = Math.min(ch, vy + vh);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      if (vy > 0) { ctx.fillRect(0, 0, cw, vy); ctx.fillRect(0, vy + vh, cw, ch - vy - vh); }
-      if (vx > 0) { ctx.fillRect(0, vy, vx, vh); ctx.fillRect(vx + vw, vy, cw - vx - vw, vh); }
+      if (cy0 > 0) ctx.fillRect(0, 0, cw, cy0);
+      if (cy1 < ch) ctx.fillRect(0, cy1, cw, ch - cy1);
+      if (cx0 > 0) ctx.fillRect(0, cy0, cx0, cy1 - cy0);
+      if (cx1 < cw) ctx.fillRect(cx1, cy0, cw - cx1, cy1 - cy0);
       ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-      ctx.strokeRect(vx + 1, vy + 1, vw - 2, vh - 2);
+      ctx.strokeRect(Math.max(1, vx), Math.max(1, vy), Math.min(cw - 2, vw) - Math.max(0, -vx), Math.min(ch - 2, vh) - Math.max(0, -vy));
       ctx.setLineDash([]);
     }
   }
@@ -244,7 +252,6 @@ export function initLevelEditor(prefix: string): void {
     const ct = $('colliderTools'); if (ct) ct.style.display = 'none'; // path tools moved to bottom toolbar
     $('libGrid').style.display = 'flex';
   }
-  const LIB_MIN = 10;
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
@@ -252,11 +259,20 @@ export function initLevelEditor(prefix: string): void {
       const el = document.createElement('div'); el.className = 'libCard'; el.draggable = true;
       const img = document.createElement('img'); img.src = a.url; img.draggable = false;
       const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
-      el.appendChild(img); el.appendChild(nm);
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '×';
+      del.addEventListener('click', (ev) => {
+        ev.stopPropagation(); ev.preventDefault();
+        state.assets = state.assets.filter((x) => x.id !== a.id);
+        for (const lv of state.levels) lv.placed = lv.placed.filter((p) => p.asset !== a.id);
+        if (state.selected && !level().placed.find((p) => p.id === state.selected)) state.selected = null;
+        refreshAssets(); refreshSel(); draw(); save();
+      });
+      el.appendChild(img); el.appendChild(nm); el.appendChild(del);
       el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
       box.appendChild(el);
     }
-    for (let i = cats.length; i < LIB_MIN; i++) {
+    const empties = Math.max(6, 30 - cats.length);
+    for (let i = 0; i < empties; i++) {
       const e = document.createElement('div'); e.className = 'libCard empty';
       e.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
       e.addEventListener('dragover', (ev) => { ev.preventDefault(); ev.dataTransfer!.dropEffect = 'copy'; e.style.borderColor = 'var(--accent)'; });
@@ -377,11 +393,23 @@ export function initLevelEditor(prefix: string): void {
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
     const w = toWorld(sx, sy); const gs = state.grid;
-    const cx = Math.floor(w.x / gs); const cy = Math.floor(w.y / gs);
-    const base = `${cx},${cy}`;
-    let cells = level().collider.filter((c) => { const p = c.split(','); return !(p[0] === String(cx) && p[1] === String(cy)); });
-    if (state.pathTool !== 'erase') cells = [...cells, `${base},${state.pathTool}`];
-    level().collider = cells; draw();
+    const cy = Math.floor(w.y / gs);
+    if (state.pathTool === 'erase') {
+      const cxH = Math.floor(w.x / (gs * 2));
+      const cxV = Math.floor(w.x / gs);
+      level().collider = level().collider.filter((c) => {
+        const p = c.split(','); const t = p[2] ?? 'h';
+        return !(Number(p[1]) === cy && ((t === 'h' && Number(p[0]) === cxH) || (t === 'v' && Number(p[0]) === cxV)));
+      });
+    } else {
+      const cx = state.pathTool === 'h' ? Math.floor(w.x / (gs * 2)) : Math.floor(w.x / gs);
+      level().collider = level().collider.filter((c) => {
+        const p = c.split(',');
+        return !(Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === state.pathTool);
+      });
+      level().collider.push(`${cx},${cy},${state.pathTool}`);
+    }
+    draw();
   }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
@@ -488,8 +516,11 @@ export function initLevelEditor(prefix: string): void {
     state.camView = !state.camView;
     $('camViewBtn').classList.toggle('on', state.camView);
     if (state.camView) {
-      state.zoom = canvas.height / (576 * state.viewScale);
-      state.pan.y = 0; state.pan.x = 0; applyOrigin();
+      const GAME_H = 576, FLOOR_M = 26;
+      state.zoom = canvas.height / (GAME_H * state.viewScale);
+      // Align floor line (editor Y=0) to where the game floor actually is (550/576 from top)
+      state.pan.y = canvas.height * ((GAME_H - FLOOR_M) / GAME_H - 0.6);
+      state.pan.x = 0; applyOrigin();
       const startSx = toScreen(level().start, 0).x;
       state.pan.x = canvas.width * 0.1 - startSx; applyOrigin();
     }
@@ -502,17 +533,48 @@ export function initLevelEditor(prefix: string): void {
     else window.location.href = 'studio.html';
   });
 
-  $('previewClick')?.addEventListener('click', () => { ($('previewClick') as HTMLElement).style.display = 'none'; }); // ЛКМ — активувати (прибрати overlay)
+  // Preview expand/collapse — same behaviour as char editor
+  const lvPreviewBox = $<HTMLElement>('preview');
+  const lvPreviewFrame = $<HTMLIFrameElement>('previewFrame');
+  const lvPreviewBackdrop = document.createElement('div');
+  lvPreviewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
+  document.body.appendChild(lvPreviewBackdrop);
+  let lvPreviewBig = false;
+  function refitLvGame(): void {
+    const fire = (): void => { try { (lvPreviewFrame?.contentWindow as unknown as { __zagRefit?: () => void })?.__zagRefit?.(); } catch { /* */ } };
+    requestAnimationFrame(fire); setTimeout(fire, 120); setTimeout(fire, 320);
+  }
+  function setLvPreviewBig(on: boolean): void {
+    lvPreviewBig = on;
+    const pc = $<HTMLElement>('previewClick');
+    if (on && lvPreviewBox) {
+      const stageEl = document.getElementById(prefix + 'stageWrap') ?? document.getElementById(prefix + 'stage');
+      const r = stageEl?.getBoundingClientRect();
+      const w = r ? r.width : Math.max(360, window.innerWidth - 100);
+      lvPreviewBox.style.cssText += ';position:fixed;z-index:100;left:' + (r?.left ?? 0) + 'px;top:' + (r?.top ?? 0) + 'px;width:' + w + 'px;height:' + Math.round(w * 9 / 20) + 'px;border-radius:12px;';
+      if (pc) pc.style.pointerEvents = 'none';
+      lvPreviewBackdrop.style.display = 'block';
+      lvPreviewFrame?.contentWindow?.focus();
+    } else if (lvPreviewBox) {
+      lvPreviewBox.style.position = ''; lvPreviewBox.style.zIndex = ''; lvPreviewBox.style.left = ''; lvPreviewBox.style.top = ''; lvPreviewBox.style.width = ''; lvPreviewBox.style.height = '';
+      if (pc) pc.style.pointerEvents = '';
+      lvPreviewBackdrop.style.display = 'none';
+    }
+    refitLvGame();
+  }
+  lvPreviewBackdrop.addEventListener('click', () => setLvPreviewBig(false));
+  $('previewClick')?.addEventListener('click', () => setLvPreviewBig(!lvPreviewBig));
   $('previewClick')?.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    $<HTMLIFrameElement>('previewFrame')?.contentWindow?.focus();
-    const box = $<HTMLElement>('preview');
-    if (box) {
-      box.style.boxShadow = '0 0 0 2px var(--accent)';
-      const restore = (): void => { box.style.boxShadow = ''; window.removeEventListener('focus', restore); };
+    lvPreviewFrame?.contentWindow?.focus();
+    if (lvPreviewBox) {
+      lvPreviewBox.style.boxShadow = '0 0 0 2px var(--accent)';
+      const restore = (): void => { if (lvPreviewBox) lvPreviewBox.style.boxShadow = ''; window.removeEventListener('focus', restore); };
       window.addEventListener('focus', restore);
     }
-  }); // ПКМ — передати хоткеї без розгортання
+  }); // ПКМ — активувати без розгортання
+  window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && lvPreviewBig) setLvPreviewBig(false); });
+  window.addEventListener('resize', () => { if (lvPreviewBig) setLvPreviewBig(true); });
 
   const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
   showColliderBtn?.addEventListener('click', () => {
