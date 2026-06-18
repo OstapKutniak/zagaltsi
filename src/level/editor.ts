@@ -208,15 +208,20 @@ export function initLevelEditor(prefix: string): void {
     $('colliderTools').style.display = isCollider ? 'flex' : 'none';
     $('libGrid').style.display = isCollider ? 'none' : 'flex';
   }
+  const LIB_MIN = 10;
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
-    for (const a of state.assets.filter((x) => x.cat === state.cat)) {
+    const cats = state.assets.filter((x) => x.cat === state.cat);
+    for (const a of cats) {
       const el = document.createElement('div'); el.className = 'libCard'; el.draggable = true;
       const img = document.createElement('img'); img.src = a.url; img.draggable = false;
       const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
       el.appendChild(img); el.appendChild(nm);
       el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
       box.appendChild(el);
+    }
+    for (let i = cats.length; i < LIB_MIN; i++) {
+      const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e);
     }
   }
   $<HTMLButtonElement>('loadAsset').addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
