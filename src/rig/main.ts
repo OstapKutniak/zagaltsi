@@ -912,7 +912,17 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyF') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } } // F — bendFlip (напрям)
   else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
-  else if (ev.code === 'KeyK') { ev.preventDefault(); if (state.anim) setKey(); }
+  else if (ev.code === 'KeyK') {
+    ev.preventDefault();
+    if (state.anim) {
+      if (tlHoverFrame !== null) setKeyAt(tlHoverFrame / FPS, tlHoverBone);
+      else setKey();
+    }
+  }
+  else if (ev.code === 'Delete') {
+    ev.preventDefault();
+    if (tlHoverFrame !== null && state.anim) delKeyAt(tlHoverFrame / FPS);
+  }
   else if (ev.code === 'KeyQ') { ev.preventDefault(); if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } }
   else if (ev.code === 'Escape') endMode(false);
   else if (ev.code === 'Enter') endMode(true);
@@ -1146,6 +1156,27 @@ function delKey(): void {
   pushUndo(); clip.keys = clip.keys.filter((k) => Math.abs(k.t - state.animT) >= 0.02);
   state.selKeys = []; refreshTimeline();
 }
+function setKeyAt(t: number, bone: string | null): void {
+  const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
+  if (!bone || bone === 'ref') return;
+  pushUndo();
+  const sl = state.slots[bone]; if (!sl) return;
+  const pose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend ?? 0 };
+  const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+  if (i >= 0) clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: pose };
+  else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: pose } }); clip.keys.sort((a, b) => a.t - b.t); }
+  refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
+}
+function delKeyAt(t: number): void {
+  const clip = curClip(); if (!clip) return;
+  const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 1 / FPS);
+  if (i < 0) return;
+  pushUndo();
+  const f = Math.round(clip.keys[i].t * FPS);
+  clip.keys.splice(i, 1);
+  state.selKeys = state.selKeys.filter((x) => x !== i).map((x) => (x > i ? x - 1 : x));
+  refreshTimeline(); status(`✕ Ключ кадр ${f} видалено`);
+}
 function resetAnim(): void {
   const clip = curClip(); if (!clip) return;
   pushUndo(); clip.keys = []; state.selKeys = [];
@@ -1285,6 +1316,11 @@ function refreshTimeline(): void {
     // Рядок треку справа
     const row = document.createElement('div'); row.className = 'boneTrack';
     row.addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+    row.addEventListener('mousemove', (e) => {
+      tlHoverBone = d.key;
+      const r = tracksEl.getBoundingClientRect();
+      tlHoverFrame = Math.round((e.clientX - r.left) / r.width * framesInView);
+    });
     if (clip) {
       for (let i = 0; i < clip.keys.length; i++) {
         const k = clip.keys[i];
@@ -1318,6 +1354,10 @@ function refreshBoneLabels(): void {
   });
 }
 
+// hover над таймлайном — для K i Delete по позиції курсора
+let tlHoverFrame: number | null = null;
+let tlHoverBone: string | null = null;
+
 // скраб
 let scrubbing = false;
 let draggingEnd = false;
@@ -1340,6 +1380,7 @@ function dragEndTo(clientX: number): void {
 }
 $('tlTicks').addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
 // Синхронізація прокручування між лейблами і треками
+$('tlBoneTracks').addEventListener('mouseleave', () => { tlHoverFrame = null; tlHoverBone = null; });
 $('tlBoneTracks').addEventListener('scroll', () => { $('tlBoneLabels').scrollTop = $('tlBoneTracks').scrollTop; }, { passive: true });
 $('tlBoneLabels').addEventListener('scroll', () => { $('tlBoneTracks').scrollTop = $('tlBoneLabels').scrollTop; }, { passive: true });
 window.addEventListener('mousemove', (e) => {
