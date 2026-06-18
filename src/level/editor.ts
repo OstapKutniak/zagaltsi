@@ -402,9 +402,25 @@ export function initLevelEditor(prefix: string): void {
     setStatus(`Експортовано ${level().name}`);
   });
   $<HTMLButtonElement>('toGame').addEventListener('click', () => {
-    idbSet('zag_level', buildLevelDoc())
-      .then(() => setStatus('✔ Рівень у грі. Онови вкладку гри.'))
-      .catch(() => setStatus('Не вдалося зберегти рівень'));
+    const btn = $<HTMLButtonElement>('toGame');
+    const level = buildLevelDoc();
+    btn.disabled = true;
+    const orig = btn.textContent!;
+    btn.textContent = 'Публікую...';
+    idbSet('zag_level', level).catch(() => {});
+    const character: unknown = (() => { try { const s = localStorage.getItem('zag_game_char'); return s ? JSON.parse(s) : null; } catch { return null; } })();
+    fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ character, level }),
+    })
+      .then((r) => r.json() as Promise<{ ok: boolean; error?: string }>)
+      .then((d) => {
+        btn.textContent = d.ok ? 'Оновлено!' : 'Помилка';
+        setStatus(d.ok ? '✔ Оновлено! Telegram підтягне за ~1 хв.' : '✗ ' + (d.error ?? 'Помилка'));
+      })
+      .catch((e) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 50)); })
+      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
   // Re-render when tab becomes visible

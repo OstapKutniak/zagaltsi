@@ -1017,11 +1017,31 @@ $<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();
   status(`Експортовано character.json (частин: ${Object.keys(doc.images).length}) — кинь у гру`);
 });
-// Export у гру: пишемо в localStorage (той самий домен, що й гра) — гра підхопить
-// при наступному відкритті. Працює на ЦЬОМУ браузері/пристрої без git і без мене.
+async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {
+  btn.disabled = true;
+  const orig = btn.textContent!;
+  btn.textContent = 'Публікую...';
+  try {
+    const character = buildDoc();
+    try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
+    const level = await idbGet<unknown>('zag_level');
+    const res = await fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ character, level }),
+    });
+    const data = await res.json() as { ok: boolean; error?: string };
+    if (data.ok) { statusFn('✔ Оновлено! Telegram підтягне за ~1 хв.'); btn.textContent = 'Оновлено!'; }
+    else { statusFn('✗ ' + (data.error ?? 'Помилка')); btn.textContent = 'Помилка'; }
+  } catch (e) {
+    statusFn('✗ ' + String(e).slice(0, 50));
+    btn.textContent = 'Помилка';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000);
+}
 $<HTMLButtonElement>('toGameBtn').addEventListener('click', () => {
-  try { localStorage.setItem('zag_game_char', JSON.stringify(buildDoc())); reloadPreview(); status('✔ Оновлено у превʼю гри (праворуч).'); }
-  catch { status('Не вдалося — переповнення сховища браузера'); }
+  reloadPreview();
+  void publishToGame($<HTMLButtonElement>('toGameBtn'), status);
 });
 $<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
 $<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
@@ -1515,27 +1535,3 @@ status('');
 // Перерахувати розміри після того як таймлайн зайняв місце в DOM
 requestAnimationFrame(() => { resize(); draw(); });
 
-// ---- Publish to game (studio mode) ----
-const publishBtn = document.getElementById('publishBtn') as HTMLButtonElement | null;
-if (publishBtn) {
-  publishBtn.addEventListener('click', async () => {
-    publishBtn.disabled = true;
-    const orig = publishBtn.textContent!;
-    publishBtn.textContent = '⏳ Публікую...';
-    try {
-      const character = buildDoc();
-      try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
-      const level = await idbGet<unknown>('zag_level');
-      const res = await fetch('/api/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ character, level }),
-      });
-      const data = await res.json() as { ok: boolean; error?: string };
-      publishBtn.textContent = data.ok ? '✔ Опубліковано!' : '✗ ' + (data.error ?? 'Помилка');
-    } catch (e) {
-      publishBtn.textContent = '✗ ' + String(e).slice(0, 40);
-    }
-    setTimeout(() => { publishBtn.disabled = false; publishBtn.textContent = orig; }, 4000);
-  });
-}
