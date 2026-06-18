@@ -1,5 +1,6 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
+import { ghCommit } from '../github';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -409,17 +410,11 @@ export function initLevelEditor(prefix: string): void {
     btn.textContent = 'Публікую...';
     idbSet('zag_level', level).catch(() => {});
     const character: unknown = (() => { try { const s = localStorage.getItem('zag_game_char'); return s ? JSON.parse(s) : null; } catch { return null; } })();
-    fetch('/api/publish', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ character, level }),
-    })
-      .then((r) => r.json() as Promise<{ ok: boolean; error?: string }>)
-      .then((d) => {
-        btn.textContent = d.ok ? 'Оновлено!' : 'Помилка';
-        setStatus(d.ok ? '✔ Оновлено! Telegram підтягне за ~1 хв.' : '✗ ' + (d.error ?? 'Помилка'));
-      })
-      .catch((e) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 50)); })
+    const files: Record<string, string> = { 'public/level.json': JSON.stringify(level) };
+    if (character) files['public/character.json'] = JSON.stringify(character);
+    ghCommit(files, 'studio: publish to game')
+      .then(() => { btn.textContent = 'Оновлено!'; setStatus('✔ Оновлено! Telegram підтягне за ~1 хв.'); })
+      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 

@@ -1,6 +1,7 @@
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
 import { idbGet } from '../store';
+import { ghCommit } from '../github';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -1025,16 +1026,13 @@ async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => vo
     const character = buildDoc();
     try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
     const level = await idbGet<unknown>('zag_level');
-    const res = await fetch('/api/publish', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ character, level }),
-    });
-    const data = await res.json() as { ok: boolean; error?: string };
-    if (data.ok) { statusFn('✔ Оновлено! Telegram підтягне за ~1 хв.'); btn.textContent = 'Оновлено!'; }
-    else { statusFn('✗ ' + (data.error ?? 'Помилка')); btn.textContent = 'Помилка'; }
+    const files: Record<string, string> = { 'public/character.json': JSON.stringify(character) };
+    if (level) files['public/level.json'] = JSON.stringify(level);
+    await ghCommit(files, 'studio: publish to game');
+    statusFn('✔ Оновлено! Telegram підтягне за ~1 хв.');
+    btn.textContent = 'Оновлено!';
   } catch (e) {
-    statusFn('✗ ' + String(e).slice(0, 50));
+    statusFn('✗ ' + String(e).slice(0, 60));
     btn.textContent = 'Помилка';
   }
   setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000);
