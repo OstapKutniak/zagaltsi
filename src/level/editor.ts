@@ -17,7 +17,7 @@ const CATS = [
 const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interactive: 4, trap: 5 };
 
 interface Asset { id: string; cat: string; name: string; url: string }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
 interface Level { name: string; placed: Placed[]; collider: string[]; spawn: { x: number; y: number }; start: number; end: number }
 
 export function initLevelEditor(prefix: string): void {
@@ -35,8 +35,10 @@ export function initLevelEditor(prefix: string): void {
     cat: 'map',
     selected: null as string | null,
     mode: null as null | 'G' | 'R' | 'S',
-    orig: null as null | { x: number; y: number; rot: number; scale: number },
+    orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
+    pathTool: null as null | 'h' | 'v' | 'erase',
+    axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
     camView: false,
@@ -139,8 +141,8 @@ export function initLevelEditor(prefix: string): void {
       ctx.save();
       ctx.translate(s2.x, s2.y);
       ctx.rotate(rad(p.rot));
-      const k = p.scale * sc();
-      ctx.scale(p.flip * k, k);
+      const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+      ctx.scale(p.flip * kx, ky);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
       ctx.restore();
       if (p.id === state.selected) {
@@ -150,13 +152,17 @@ export function initLevelEditor(prefix: string): void {
     }
 
     if (state.showCollider) {
-      const gs = state.grid;
-      ctx.lineWidth = 1;
+      const gs = state.grid; ctx.lineWidth = 1;
       for (const cell of level().collider) {
-        const [cx, cy] = cell.split(',').map(Number);
-        const a = toScreen(cx * gs, cy * gs); const b = toScreen((cx + 1) * gs, (cy + 1) * gs);
-        ctx.fillStyle = 'rgba(255,154,31,0.18)'; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
-        ctx.strokeStyle = 'rgba(255,154,31,0.6)'; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+        const parts = cell.split(',');
+        const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
+        const cxw = cx * gs + gs / 2; const cyw = cy * gs + gs / 2; const hw = gs / 2;
+        const top = toScreen(cxw, cyw - hw); const right = toScreen(cxw + hw, cyw);
+        const bottom = toScreen(cxw, cyw + hw); const left = toScreen(cxw - hw, cyw);
+        ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(right.x, right.y);
+        ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(left.x, left.y); ctx.closePath();
+        ctx.fillStyle = type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)'; ctx.fill();
+        ctx.strokeStyle = type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)'; ctx.stroke();
       }
     }
 
@@ -173,14 +179,12 @@ export function initLevelEditor(prefix: string): void {
     ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
 
     if (state.camView) {
-      const ASPECT = 20 / 9;
-      const cw = canvas.width, ch = canvas.height;
-      let vw: number, vh: number;
-      if (cw / ch > ASPECT) { vh = ch; vw = vh * ASPECT; } else { vw = cw; vh = vw / ASPECT; }
-      const vx = (cw - vw) / 2, vy = (ch - vh) / 2;
+      const vw = 1280 * sc(); const vh = 576 * sc();
+      const cw = canvas.width; const ch = canvas.height;
+      const vx = (cw - vw) / 2; const vy = (ch - vh) / 2;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      if (vy > 0) { ctx.fillRect(0, 0, cw, vy); ctx.fillRect(0, vy + vh, cw, vy); }
-      if (vx > 0) { ctx.fillRect(0, vy, vx, vh); ctx.fillRect(vx + vw, vy, vx, vh); }
+      if (vy > 0) { ctx.fillRect(0, 0, cw, vy); ctx.fillRect(0, vy + vh, cw, ch - vy - vh); }
+      if (vx > 0) { ctx.fillRect(0, vy, vx, vh); ctx.fillRect(vx + vw, vy, cw - vx - vw, vh); }
       ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
       ctx.strokeRect(vx + 1, vy + 1, vw - 2, vh - 2);
       ctx.setLineDash([]);
@@ -223,9 +227,8 @@ export function initLevelEditor(prefix: string): void {
 
   function refreshCatSelect(): void {
     $<HTMLSelectElement>('libSelect').value = state.cat;
-    const isCollider = state.cat === 'collider';
-    $('colliderTools').style.display = isCollider ? 'flex' : 'none';
-    $('libGrid').style.display = isCollider ? 'none' : 'flex';
+    const ct = $('colliderTools'); if (ct) ct.style.display = 'none'; // path tools moved to bottom toolbar
+    $('libGrid').style.display = 'flex';
   }
   const LIB_MIN = 10;
   function refreshAssets(): void {
@@ -301,9 +304,18 @@ export function initLevelEditor(prefix: string): void {
 
   $<HTMLInputElement>('snap').addEventListener('change', (e) => { state.snap = (e.target as HTMLInputElement).checked; });
   $<HTMLInputElement>('grid').addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); $('gridV').textContent = (e.target as HTMLInputElement).value; draw(); });
-  $<HTMLButtonElement>('paintBtn').addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('eraseBtn').addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider').addEventListener('click', () => { level().collider = []; draw(); save(); });
+  $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
+  $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; draw(); save(); });
+  const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
+  const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
+  for (const id of pathBtnIds) {
+    $<HTMLButtonElement>(id)?.addEventListener('click', () => {
+      const tool = pathBtnTools[id];
+      state.pathTool = state.pathTool === tool ? null : tool;
+      updatePathBtns();
+    });
+  }
 
   function snapToEdge(): void {
     const p = sel(); const img = imgOf(p as Placed); if (!p || !img) return;
@@ -321,15 +333,22 @@ export function initLevelEditor(prefix: string): void {
     void h;
   }
 
+  function updatePathBtns(): void {
+    $('pathHBtn')?.classList.toggle('on', state.pathTool === 'h');
+    $('pathVBtn')?.classList.toggle('on', state.pathTool === 'v');
+    $('erasePathBtn')?.classList.toggle('on', state.pathTool === 'erase');
+  }
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
   function paintAt(sx: number, sy: number): void {
+    if (!state.pathTool) return;
     const w = toWorld(sx, sy); const gs = state.grid;
-    const cell = `${Math.floor(w.x / gs)},${Math.floor(w.y / gs)}`;
-    const set = new Set(level().collider);
-    if (state.colliderTool === 'erase') set.delete(cell); else set.add(cell);
-    level().collider = [...set]; draw();
+    const cx = Math.floor(w.x / gs); const cy = Math.floor(w.y / gs);
+    const base = `${cx},${cy}`;
+    let cells = level().collider.filter((c) => { const p = c.split(','); return !(p[0] === String(cx) && p[1] === String(cy)); });
+    if (state.pathTool !== 'erase') cells = [...cells, `${base},${state.pathTool}`];
+    level().collider = cells; draw();
   }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
@@ -343,7 +362,7 @@ export function initLevelEditor(prefix: string): void {
     if (Math.abs(x - endSx) < MHIT) { pushUndo(); state.markerDrag = 'end'; return; }
     if (Math.abs(x - spawnS.x) < 16 && y > spawnS.y - 52 && y < spawnS.y + 8) { pushUndo(); state.markerDrag = 'spawn'; return; }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
-    if (state.cat === 'collider') { pushUndo(); painting = true; paintAt(x, y); return; }
+    if (state.pathTool) { pushUndo(); painting = true; paintAt(x, y); return; }
     const hit = hitTest(x, y);
     state.selected = hit;
     if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
@@ -352,7 +371,7 @@ export function initLevelEditor(prefix: string): void {
   window.addEventListener('mousemove', (ev) => {
     const r = canvas.getBoundingClientRect();
     state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-    if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
+    if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); if (!state.camView) state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
     if (state.markerDrag) {
       const w = toWorld(state.mouse.x, state.mouse.y); const lv = level();
       if (state.markerDrag === 'start') lv.start = w.x;
@@ -366,12 +385,12 @@ export function initLevelEditor(prefix: string): void {
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (!state.camView) { state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); } draw(); }, { passive: false });
 
   function startMode(m: 'G' | 'R' | 'S'): void {
     const p = sel(); if (!p) return;
-    pushUndo();
-    state.mode = m; state.orig = { x: p.x, y: p.y, rot: p.rot, scale: p.scale };
+    pushUndo(); state.axisLock = null;
+    state.mode = m; state.orig = { x: p.x, y: p.y, rot: p.rot, scale: p.scale, scaleW: p.scaleW ?? 1, scaleH: p.scaleH ?? 1 };
     const o = toScreen(p.x, p.y);
     state.startWx = state.mouse.x; state.startWy = state.mouse.y;
     state.startAng = Math.atan2(state.mouse.y - o.y, state.mouse.x - o.x);
@@ -380,9 +399,19 @@ export function initLevelEditor(prefix: string): void {
   function applyMode(): void {
     const p = sel(); if (!p || !state.orig) return;
     const o = toScreen(p.x, p.y);
-    if (state.mode === 'G') { p.x = state.orig.x + (state.mouse.x - state.startWx) / sc(); p.y = state.orig.y + (state.mouse.y - state.startWy) / sc(); }
+    if (state.mode === 'G') {
+      const dx = (state.mouse.x - state.startWx) / sc(); const dy = (state.mouse.y - state.startWy) / sc();
+      if (state.axisLock === 'x') { p.x = state.orig.x + dx; p.y = state.orig.y; }
+      else if (state.axisLock === 'z') { p.x = state.orig.x; p.y = state.orig.y + dy; }
+      else { p.x = state.orig.x + dx; p.y = state.orig.y + dy; }
+    }
     else if (state.mode === 'R') { const a = Math.atan2(state.mouse.y - o.y, state.mouse.x - o.x); p.rot = state.orig.rot + ((a - state.startAng) * 180) / Math.PI; }
-    else if (state.mode === 'S') { const d = Math.hypot(state.mouse.x - o.x, state.mouse.y - o.y); p.scale = Math.max(0.05, state.orig.scale * (d / state.startDist)); }
+    else if (state.mode === 'S') {
+      const d = Math.hypot(state.mouse.x - o.x, state.mouse.y - o.y); const ratio = d / state.startDist;
+      if (state.axisLock === 'x') { p.scaleW = Math.max(0.05, state.orig.scaleW * ratio); }
+      else if (state.axisLock === 'z') { p.scaleH = Math.max(0.05, state.orig.scaleH * ratio); }
+      else { p.scale = Math.max(0.05, state.orig.scale * ratio); }
+    }
     refreshSel(); draw();
   }
 
@@ -391,11 +420,17 @@ export function initLevelEditor(prefix: string): void {
     const tag = (document.activeElement?.tagName ?? '').toUpperCase();
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
     if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
+    if ((ev.code === 'KeyX' || ev.code === 'KeyZ') && (state.mode === 'G' || state.mode === 'S')) {
+      ev.preventDefault(); state.axisLock = ev.code === 'KeyX' ? 'x' : 'z'; return;
+    }
     if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
     else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
-    else if (ev.code === 'Escape' && state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); }
+    else if (ev.code === 'Escape') {
+      if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
+      else if (state.pathTool) { state.pathTool = null; updatePathBtns(); }
+    }
   });
 
   $<HTMLSelectElement>('libSelect').addEventListener('change', (e) => {
@@ -406,6 +441,12 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('camViewBtn').addEventListener('click', () => {
     state.camView = !state.camView;
     $('camViewBtn').classList.toggle('on', state.camView);
+    if (state.camView) {
+      state.zoom = canvas.height / (576 * state.viewScale);
+      state.pan.y = 0; state.pan.x = 0; applyOrigin();
+      const startSx = toScreen(level().start, 0).x;
+      state.pan.x = canvas.width * 0.1 - startSx; applyOrigin();
+    }
     draw();
   });
 
