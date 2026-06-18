@@ -2,6 +2,7 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
 import { idbGet } from '../store';
 import { ghCommit } from '../github';
+import { pullCharLib, charLibForPush } from '../sync';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -1034,7 +1035,10 @@ async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => vo
     const character = buildDoc();
     try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
     const level = await idbGet<unknown>('zag_level');
-    const files: Record<string, string> = { 'public/character.json': JSON.stringify(character) };
+    const files: Record<string, string> = {
+      'public/character.json': JSON.stringify(character),
+      'public/studio-data/char-library.json': charLibForPush(LIB_KEY),
+    };
     if (level) files['public/level.json'] = JSON.stringify(level);
     await ghCommit(files, 'studio: publish to game');
     statusFn('✔ Оновлено! Telegram підтягне за ~1 хв.');
@@ -1533,6 +1537,8 @@ if (typeof ResizeObserver !== 'undefined') {
 restoreLocal();
 resize(); refreshUI();
 renderLibrary();
+// Pull char library from GitHub in background — merges new items, re-renders if changed
+pullCharLib(LIB_KEY).then((added) => { if (added > 0) { renderLibrary(); status(`Синхронізовано: +${added} з GitHub`); } }).catch(() => {});
 refreshCharSel();
 refreshAnimOptions();
 refreshTimeline();

@@ -1,6 +1,7 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
+import { pullLevelData, mergeLevelAssets } from '../sync';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -73,6 +74,23 @@ export function initLevelEditor(prefix: string): void {
       if (l && l.levels?.length) { state.levels = l.levels; state.cur = l.cur || 0; }
       try { localStorage.removeItem('zag_assets'); localStorage.removeItem('zag_levels'); } catch { /* ignore */ }
     } catch { /* ignore */ }
+    // Pull from GitHub in background — merge new assets, update layouts if remote has data
+    pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
+      const { merged, added } = mergeLevelAssets(state.assets, remoteAssets);
+      if (added > 0) {
+        state.assets = merged;
+        for (const as of merged.slice(-added)) loadImg(as as Asset);
+        idbSet('zag_assets', state.assets).catch(() => {});
+        refreshAssets();
+        setStatus(`Синхронізовано: +${added} ассетів з GitHub`);
+      }
+      if (remoteLayouts?.levels?.length && !state.levels.length) {
+        state.levels = remoteLayouts.levels as Level[];
+        state.cur = remoteLayouts.cur || 0;
+        idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
+        refreshLevels();
+      }
+    }).catch(() => {});
     if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
     for (const lv of state.levels) {
       if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
@@ -420,7 +438,11 @@ export function initLevelEditor(prefix: string): void {
     btn.textContent = 'Публікую...';
     idbSet('zag_level', level).catch(() => {});
     const character: unknown = (() => { try { const s = localStorage.getItem('zag_game_char'); return s ? JSON.parse(s) : null; } catch { return null; } })();
-    const files: Record<string, string> = { 'public/level.json': JSON.stringify(level) };
+    const files: Record<string, string> = {
+      'public/level.json': JSON.stringify(level),
+      'public/studio-data/level-assets.json': JSON.stringify(state.assets),
+      'public/studio-data/level-layouts.json': JSON.stringify({ levels: state.levels, cur: state.cur }),
+    };
     if (character) files['public/character.json'] = JSON.stringify(character);
     ghCommit(files, 'studio: publish to game')
       .then(() => { btn.textContent = 'Оновлено!'; setStatus('✔ Оновлено! Telegram підтягне за ~1 хв.'); })
