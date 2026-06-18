@@ -226,7 +226,7 @@ function refreshAssets(): void {
   for (const a of state.assets.filter((x) => x.cat === state.cat)) {
     const el = document.createElement('div'); el.className = 'libCard'; el.draggable = true;
     const img = document.createElement('img'); img.src = a.url; img.draggable = false;
-    const nm = document.createElement('div'); nm.textContent = a.name;
+    const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
     el.appendChild(img); el.appendChild(nm);
     el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
     box.appendChild(el);
@@ -271,7 +271,6 @@ function deleteSel(): void { const p = sel(); if (!p) return; pushUndo(); level(
 
 // ---- налаштування ----
 $<HTMLInputElement>('snap').addEventListener('change', (e) => { state.snap = (e.target as HTMLInputElement).checked; });
-$<HTMLInputElement>('showCollider').addEventListener('change', (e) => { state.showCollider = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('grid').addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); $('gridV').textContent = (e.target as HTMLInputElement).value; draw(); });
 $<HTMLButtonElement>('paintBtn').addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
 $<HTMLButtonElement>('eraseBtn').addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
@@ -393,6 +392,23 @@ $<HTMLButtonElement>('tabChar').addEventListener('click', () => {
   else window.location.href = 'studio.html';
 });
 
+// ---- preview click-to-activate overlay ----
+$('previewClick')?.addEventListener('click', () => { ($('previewClick') as HTMLElement).style.display = 'none'; });
+
+// ---- showCollider icon button (syncs with the checkbox) ----
+const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
+showColliderBtn?.addEventListener('click', () => {
+  state.showCollider = !state.showCollider;
+  ($<HTMLInputElement>('showCollider')).checked = state.showCollider;
+  showColliderBtn.classList.toggle('on', state.showCollider);
+  draw();
+});
+$<HTMLInputElement>('showCollider').addEventListener('change', (e) => {
+  state.showCollider = (e.target as HTMLInputElement).checked;
+  showColliderBtn?.classList.toggle('on', state.showCollider);
+  draw();
+});
+
 // ---- експорт ----
 function buildLevelDoc(): unknown {
   const lv = level();
@@ -414,5 +430,7 @@ $<HTMLButtonElement>('toGame').addEventListener('click', () => {
 window.addEventListener('resize', () => { resize(); draw(); });
 load().then(() => {
   resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
+  // sync icon button states with defaults
+  showColliderBtn?.classList.toggle('on', state.showCollider);
   setStatus('Завантаж PNG у бібліотеку (праворуч) і тягни на доріжку.');
 });
