@@ -141,8 +141,11 @@
           <button class="iconToggle" id="camViewBtn" title="Накласти вид камери 20:9">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg>
           </button>
-          <button class="iconToggle" id="showColliderBtn" title="Показати/сховати колайдери" style="outline: none;">
+          <button class="iconToggle" id="showColliderBtn" title="Показати/сховати колайдери">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+          </button>
+          <button class="iconToggle on" id="snapBtn" title="Снеп до краю (J)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15h12M12 9l-3 3 3 3M12 9v6"/><path d="M3 4v4M21 4v4M3 6h3M18 6h3"/></svg>
           </button>
         </div>
         <div id="tools" class="pane">
@@ -152,20 +155,6 @@
             <div class="sec-label">Рівні</div>
             <button id="addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
             <div id="levelList"></div>
-
-            <hr />
-            <div class="sec-label">Налаштування</div>
-            <label class="check"><input type="checkbox" id="snap" checked /> Снеп до краю (J)</label>
-            <label class="check"><input type="checkbox" id="showCollider" checked /> Показ. колайдери</label>
-            <div class="row">
-              <label>Клітина</label>
-              <input type="range" id="grid" min="20" max="120" step="4" value="48" />
-              <span class="val" id="gridV">48</span>
-            </div>
-
-            <hr />
-            <div class="sec-label">Маркери</div>
-            <p style="font-size:12px;color:var(--muted);line-height:1.5">Тягни зелену/червону лінію або жовтий прапор прямо на полотні</p>
 
             <hr />
             <div class="sec-label">Вибраний обʼєкт</div>

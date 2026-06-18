@@ -286,6 +286,7 @@
         <div style="display:flex;gap:6px;padding:2px">
           <button class="iconToggle" id="lv-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
           <button class="iconToggle" id="lv-showColliderBtn" title="Показати/сховати колайдери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
+          <button class="iconToggle on" id="lv-snapBtn" title="Снеп до краю (J)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15h12M12 9l-3 3 3 3M12 9v6"/><path d="M3 4v4M21 4v4M3 6h3M18 6h3"/></svg></button>
         </div>
         <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
           <button class="header" style="cursor:default">Рівні та налаштування</button>
@@ -293,18 +294,6 @@
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Рівні</div>
             <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
             <div id="lv-levelList" style="display:flex;flex-direction:column;gap:4px"></div>
-            <hr style="border:0;border-top:1px solid var(--line)" />
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Налаштування</div>
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="lv-snap" checked style="accent-color:var(--accent)" /> Снеп до краю (J)</label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="lv-showCollider" checked style="accent-color:var(--accent)" /> Показ. колайдери</label>
-            <div style="display:flex;align-items:center;gap:8px;font-size:13px">
-              <label style="flex:0 0 64px;color:var(--muted)">Клітина</label>
-              <input type="range" id="lv-grid" min="20" max="120" step="4" value="48" style="flex:1;accent-color:var(--sel)" />
-              <span id="lv-gridV" style="flex:0 0 36px;text-align:right;color:var(--muted)">48</span>
-            </div>
-            <hr style="border:0;border-top:1px solid var(--line)" />
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Маркери</div>
-            <p style="font-size:12px;color:var(--muted);line-height:1.5">Тягни зелену/червону лінію або жовтий прапор прямо на полотні</p>
             <hr style="border:0;border-top:1px solid var(--line)" />
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Вибраний обʼєкт</div>
             <div style="display:flex;align-items:center;gap:8px;font-size:13px">

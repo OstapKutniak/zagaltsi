@@ -316,8 +316,12 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('delBtn').addEventListener('click', deleteSel);
   function deleteSel(): void { const p = sel(); if (!p) return; pushUndo(); level().placed = level().placed.filter((x) => x !== p); state.selected = null; refreshSel(); draw(); save(); }
 
-  $<HTMLInputElement>('snap').addEventListener('change', (e) => { state.snap = (e.target as HTMLInputElement).checked; });
-  $<HTMLInputElement>('grid').addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); $('gridV').textContent = (e.target as HTMLInputElement).value; draw(); });
+  const snapBtn = $<HTMLButtonElement>('snapBtn');
+  snapBtn?.addEventListener('click', () => {
+    state.snap = !state.snap;
+    snapBtn.classList.toggle('on', state.snap);
+  });
+  $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
   $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; draw(); save(); });
@@ -485,13 +489,7 @@ export function initLevelEditor(prefix: string): void {
   const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
   showColliderBtn?.addEventListener('click', () => {
     state.showCollider = !state.showCollider;
-    ($<HTMLInputElement>('showCollider')).checked = state.showCollider;
     showColliderBtn.classList.toggle('on', state.showCollider);
-    draw();
-  });
-  $<HTMLInputElement>('showCollider').addEventListener('change', (e) => {
-    state.showCollider = (e.target as HTMLInputElement).checked;
-    showColliderBtn?.classList.toggle('on', state.showCollider);
     draw();
   });
 
@@ -539,6 +537,7 @@ export function initLevelEditor(prefix: string): void {
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
     showColliderBtn?.classList.toggle('on', state.showCollider);
+    snapBtn?.classList.toggle('on', state.snap);
     syncToolbarHeight();
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });

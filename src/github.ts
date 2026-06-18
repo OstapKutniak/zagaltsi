@@ -86,10 +86,26 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   if (!newCommitRes.ok) throw new Error('GitHub: помилка commit');
   const { sha: newCommit } = await newCommitRes.json() as { sha: string };
 
-  // 6. update ref
-  const updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
+  // 6. update ref (retry once — GitHub Actions may push between our read and write)
+  let updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
     method: 'PATCH', headers: h,
     body: JSON.stringify({ sha: newCommit }),
   });
-  if (!updRes.ok) throw new Error('GitHub: помилка update ref');
+  if (!updRes.ok) {
+    // Branch moved forward; rebase our commit on top of the new HEAD and retry
+    const ref2 = await fetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { headers: h });
+    if (!ref2.ok) throw new Error('GitHub: помилка update ref');
+    const { object: { sha: newHead } } = await ref2.json() as { object: { sha: string } };
+    const retry = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits`, {
+      method: 'POST', headers: h,
+      body: JSON.stringify({ message, tree: newTree, parents: [newHead] }),
+    });
+    if (!retry.ok) throw new Error('GitHub: помилка retry commit');
+    const { sha: retryCommit } = await retry.json() as { sha: string };
+    updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
+      method: 'PATCH', headers: h,
+      body: JSON.stringify({ sha: retryCommit }),
+    });
+    if (!updRes.ok) throw new Error('GitHub: помилка update ref (retry)');
+  }
 }
