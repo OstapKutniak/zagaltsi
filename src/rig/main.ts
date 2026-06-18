@@ -1199,6 +1199,28 @@ function bakeProcedural(): void {
   }
   loadFrame(state.animT); refreshTimeline(); refreshUI(); status('⚙ Запечено базову — далі редагуй ключі');
 }
+function convertToKeys(): void {
+  const clip = curClip(); if (!clip || !state.anim) { status('Вибери анімацію'); return; }
+  pushUndo();
+  const dur = clip.duration;
+  const total = Math.round(dur * FPS);
+  clip.keys = [];
+  // Семплюємо кожен 3-й кадр: 0, 3, 6, 9 … → редагована «ключова анімація»
+  for (let f = 0; f <= total; f += 3) {
+    const t = f / FPS;
+    const pose: Record<string, KeyPose> = {};
+    for (const d of SLOT_DEFS) {
+      const sl = rigSlots()[d.key];
+      const o = animOff(state.anim, t, d.key);
+      let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
+      if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: (sl.bend ?? 0) + animBend(state.anim, t, d.key) * state.animDir };
+    }
+    clip.keys.push({ t, interp: 'smooth', pose });
+  }
+  loadFrame(state.animT); refreshTimeline(); refreshUI();
+  status(`⚙ Конвертовано: ${clip.keys.length} ключів (кадри 0,3,6…) зі згладженням`);
+}
 function setInterp(mode: 'linear' | 'smooth'): void {
   const clip = curClip(); if (!clip || !state.selKeys.length) { status('Виділи ключі (Shift-клік по точках)'); return; }
   pushUndo(); for (const i of state.selKeys) if (clip.keys[i]) clip.keys[i].interp = mode;
@@ -1510,6 +1532,7 @@ function invertAnim(): void {
 $<HTMLButtonElement>('keyBtn').addEventListener('click', setKey);
 $<HTMLButtonElement>('delKeyBtn').addEventListener('click', delKey);
 $<HTMLButtonElement>('bakeBtn').addEventListener('click', saveAsNewAnim);
+$<HTMLButtonElement>('convertToKeysBtn').addEventListener('click', convertToKeys);
 $<HTMLButtonElement>('renameAnimBtn').addEventListener('click', renameAnim);
 $<HTMLButtonElement>('delAnimBtn').addEventListener('click', deleteAnim);
 // «Звʼязати» — одна кнопка: ЛКМ застосовує режим, ПКМ перемикає лінійно/згладжено (білий = згладжено)
