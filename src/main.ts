@@ -3,8 +3,10 @@ import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
 import { initTelegram } from './telegram';
 import { setupViewport } from './viewport';
+import { initLobbyUI } from './multiplayer/lobbyUI';
 
 initTelegram();
+initLobbyUI();
 
 // Камера ФІКСОВАНА 20:9: логічний кадр завжди 1280×576 (Scale.NONE — без
 // авто-масштабування Phaser, бо його FIT нестабільно перефітує при resize).

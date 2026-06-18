@@ -69,6 +69,29 @@
       /* На десктопі з мишею кнопки приглушуємо — там грають з клавіатури */
       @media (pointer: fine) { #touch { opacity: 0.25; } }
 
+      /* ---- лобі overlay ---- */
+      #lobby {
+        position: fixed; inset: 0; background: rgba(0,0,0,.92);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 16px; z-index: 8000;
+        font-family: system-ui, sans-serif; color: #e8e8e8;
+      }
+      #lobby.hidden { display: none; }
+      #lobby h2 { font-size: 20px; font-weight: 700; letter-spacing: 1px; margin: 0; }
+      #lobby .code { font-size: 42px; font-weight: 900; letter-spacing: 10px; color: #ff9a1f; }
+      #lobby .hint { font-size: 13px; color: #9a9a9a; text-align: center; max-width: 280px; line-height: 1.5; }
+      #lobby .players { display: flex; flex-direction: column; gap: 6px; width: 260px; }
+      #lobby .player-row { background: #232323; border-radius: 8px; padding: 9px 14px; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+      #lobby .player-row .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff9a1f; flex-shrink: 0; }
+      #lobby button { padding: 12px 28px; border: 0; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; width: 260px; }
+      #lobby .btn-primary { background: #ff9a1f; color: #1b1b1b; }
+      #lobby .btn-secondary { background: #3b3b3b; color: #e8e8e8; }
+      #lobby .btn-danger { background: #3b3b3b; color: #e8e8e8; font-weight: 400; font-size: 13px; padding: 8px; }
+      #lobby input { width: 260px; padding: 12px 14px; border-radius: 10px; border: 1px solid #4a4a4a; background: #232323; color: #e8e8e8; font-size: 22px; font-weight: 700; letter-spacing: 8px; text-align: center; text-transform: uppercase; outline: none; }
+      #lobby input:focus { border-color: #ff9a1f; }
+      #lobby .err { color: #ff6b6b; font-size: 13px; min-height: 16px; }
+
       /* ---- екран завантаження ---- */
       #loadScreen {
         position: fixed; inset: 0; background: #000;
@@ -96,6 +119,36 @@
   </head>
   <body>
     <div id="loadScreen"><p id="loadLabel">Завантаження</p><div id="loadTrack"><div id="loadFill"></div></div></div>
+
+    <!-- Lobby overlay — hidden until user picks co-op -->
+    <div id="lobby" class="hidden">
+      <!-- screen: main menu -->
+      <div id="lb-menu">
+        <h2>Хоругва</h2>
+        <button class="btn-primary" id="lb-solo">Грати соло</button>
+        <button class="btn-secondary" id="lb-create">Створити лобі</button>
+        <button class="btn-secondary" id="lb-join-btn">Приєднатись</button>
+      </div>
+      <!-- screen: join — enter code -->
+      <div id="lb-join" style="display:none;flex-direction:column;align-items:center;gap:16px">
+        <h2>Введи код лобі</h2>
+        <input id="lb-code-input" maxlength="4" placeholder="XXXX" autocomplete="off" />
+        <p class="err" id="lb-join-err"></p>
+        <button class="btn-primary" id="lb-join-confirm">Приєднатись</button>
+        <button class="btn-danger" id="lb-join-back">Назад</button>
+      </div>
+      <!-- screen: waiting room -->
+      <div id="lb-room" style="display:none;flex-direction:column;align-items:center;gap:16px">
+        <h2>Очікування гравців</h2>
+        <p class="hint">Надішли друзям цей код:</p>
+        <div class="code" id="lb-room-code">----</div>
+        <div class="players" id="lb-players"></div>
+        <p class="err" id="lb-room-err"></p>
+        <button class="btn-primary" id="lb-start" style="display:none">Почати гру</button>
+        <button class="btn-danger" id="lb-leave">Вийти з лобі</button>
+      </div>
+    </div>
+
     <div id="stage">
       <div id="game"></div>
       <div id="touch">
