@@ -13,6 +13,21 @@
       /* нейтральна сіра палітра (saturation 0), без синього; помаранчевий — лише активне */
       :root { --bg:#3b3b3b; --panel:#2d2d2d; --rail:#232323; --line:#4a4a4a; --ink:#e8e8e8; --muted:#9a9a9a; --accent:#ff9a1f; --sel:#c2c2c2; }
       html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); overflow: hidden; }
+
+      /* ---- Tab mode switching ---- */
+      /* Level editor panels: hidden by default (char mode) */
+      #lv-library, #lv-right { display: none; }
+      #lv-stageWrap { display: none; }
+      /* When level mode: show level panels, hide char panels */
+      .mode-level #lv-library { display: flex; }
+      .mode-level #lv-right { display: flex; }
+      .mode-level #lv-stageWrap { display: block; }
+      .mode-level #library { display: none; }
+      .mode-level #right { display: none; }
+      .mode-level #timelineBar { display: none; }
+      .mode-level #stageWrap { display: none; }
+      .mode-level #partsList { display: none !important; }
+      .mode-level #faceList { display: none !important; }
       button { background: #4a4a4a; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
       button:hover { background: #565656; }
       button.light { background: #e8e8e8; color: #1b1b1b; font-weight: 600; } /* активна / світла з темним написом */
@@ -101,7 +116,11 @@
       .iconToggle { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 9px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; color: #fff; }
       .iconToggle input { display: none; }
       .iconToggle svg { width: 20px; height: 20px; }
-      .iconToggle:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #1b1b1b; }
+      .iconToggle:has(input:checked), .iconToggle.on { background: var(--accent); border-color: var(--accent); color: #1b1b1b; }
+      /* level editor list items */
+      .item { padding: 6px 9px; border-radius: 8px; background: var(--rail); border: 1px solid var(--line); cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+      .item.sel { background: var(--accent); color: #1b1b1b; font-weight: 600; border-color: var(--accent); }
+      .item .x { opacity: .5; padding: 0 4px; font-size: 11px; }
       #tools { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
       #tools .body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
       .btns { display: flex; gap: 6px; }
@@ -124,24 +143,48 @@
     </style>
   </head>
   <body>
-    <div id="app">
-      <!-- ЛІВА БІБЛІОТЕКА -->
+    <div id="app" class="mode-char">
+      <!-- ЛІВА БІБЛІОТЕКА — редактор персонажів -->
       <aside id="library" class="col pane">
         <button id="libToggle" class="light">Герої</button>
         <div id="libList"></div>
+      </aside>
+
+      <!-- ЛІВА БІБЛІОТЕКА — редактор рівнів -->
+      <aside id="lv-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px">
+        <select id="lv-libSelect" style="width:100%;padding:10px;border-radius:8px;font-size:13px;font-weight:600;background:#4a4a4a;color:var(--ink);border:0;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23e8e8e8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 10px center;padding-right:30px">
+          <option value="sky">Небо</option>
+          <option value="bg">Фон</option>
+          <option value="map" selected>Карта</option>
+          <option value="decor">Декор</option>
+          <option value="collider">Колайдер</option>
+          <option value="interactive">Інтерактив</option>
+          <option value="trap">Пастки</option>
+        </select>
+        <button id="lv-loadAsset" style="width:100%">＋ Завантажити PNG</button>
+        <input type="file" id="lv-fileInput" accept="image/png,image/*" multiple style="display:none" />
+        <div id="lv-colliderTools" style="display:none;flex-direction:column;gap:6px">
+          <div style="display:flex;gap:6px">
+            <button id="lv-paintBtn" class="on" style="flex:1;font-size:12px;padding:7px 4px">🟧 Малювати</button>
+            <button id="lv-eraseBtn" style="flex:1;font-size:12px;padding:7px 4px">🧽 Стирати</button>
+          </div>
+          <button id="lv-clearCollider" style="width:100%">Очистити все</button>
+        </div>
+        <div id="lv-libGrid" style="flex:1;overflow-y:auto;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start"></div>
       </aside>
 
       <!-- ЦЕНТР -->
       <section id="center" class="col">
         <div id="topTabs">
           <button class="light" data-tab="char">Редактор Персонажів</button>
-          <button data-go="level.html">Редактор Рівнів</button>
+          <button data-tab="level">Редактор Рівнів</button>
           <button data-soon>Редактор Інтерфейсу</button>
           <button data-soon>Редактор Звуку</button>
           <button data-soon>Редактор Історії</button>
         </div>
         <div id="centerMid">
           <div id="stageWrap"><canvas id="stage"></canvas></div>
+          <div id="lv-stageWrap" style="position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="lv-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни ассет з бібліотеки · <b>G/R/S/M</b> · <b>J</b> снеп · <b>Del</b> · <b>Ctrl+Z</b> · колесо — зум · тягни маркери за лінії</div></div>
           <div id="partsList" style="display:none"><div id="slotChips"></div></div>
           <div id="faceList"><div id="faceChips"></div></div>
         </div>
@@ -226,8 +269,59 @@
           </div>
         </div>
       </aside>
+
+      <!-- ПРАВА ПАНЕЛЬ — редактор рівнів -->
+      <aside id="lv-right" class="col" style="width:480px;flex:0 0 auto">
+        <div id="lv-preview" style="flex:0 0 auto;position:relative;aspect-ratio:20/9;background:var(--rail);border:1px solid var(--line);border-radius:12px;overflow:hidden;z-index:1">
+          <iframe src="index.html" title="Превʼю гри" style="position:absolute;inset:0;width:100%;height:100%;border:0;display:block"></iframe>
+          <div id="lv-previewHint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Превʼю гри 20:9</div>
+          <div id="lv-previewClick" style="position:absolute;inset:0;z-index:5;cursor:default" title="Клік — активувати"></div>
+        </div>
+        <div style="display:flex;gap:6px;padding:2px">
+          <button class="iconToggle" id="lv-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
+          <button class="iconToggle" id="lv-showColliderBtn" title="Показати/сховати колайдери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
+        </div>
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
+          <button class="header" style="cursor:default">Рівні та налаштування</button>
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Рівні</div>
+            <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
+            <div id="lv-levelList" style="display:flex;flex-direction:column;gap:4px"></div>
+            <hr style="border:0;border-top:1px solid var(--line)" />
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Налаштування</div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="lv-snap" checked style="accent-color:var(--accent)" /> Снеп до краю (J)</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="lv-showCollider" checked style="accent-color:var(--accent)" /> Показ. колайдери</label>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+              <label style="flex:0 0 64px;color:var(--muted)">Клітина</label>
+              <input type="range" id="lv-grid" min="20" max="120" step="4" value="48" style="flex:1;accent-color:var(--sel)" />
+              <span id="lv-gridV" style="flex:0 0 36px;text-align:right;color:var(--muted)">48</span>
+            </div>
+            <hr style="border:0;border-top:1px solid var(--line)" />
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Маркери</div>
+            <p style="font-size:12px;color:var(--muted);line-height:1.5">Тягни зелену/червону лінію або жовтий прапор прямо на полотні</p>
+            <hr style="border:0;border-top:1px solid var(--line)" />
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Вибраний обʼєкт</div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+              <label style="flex:0 0 64px;color:var(--muted)">Розмір</label>
+              <input type="range" id="lv-scale" min="0.1" max="4" step="0.01" value="1" style="flex:1;accent-color:var(--sel)" />
+              <span id="lv-scaleV" style="flex:0 0 36px;text-align:right;color:var(--muted)">1.0</span>
+            </div>
+            <div class="btns">
+              <button id="lv-mirrorBtn" style="flex:1;font-size:12px;padding:8px 4px">🔄 Мірор (M)</button>
+              <button id="lv-delBtn" style="flex:1;font-size:12px;padding:8px 4px">🗑 Видалити</button>
+            </div>
+            <hr style="border:0;border-top:1px solid var(--line)" />
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Файл</div>
+            <div class="btns">
+              <button id="lv-toGame" style="flex:1;font-size:12px;padding:8px 4px;background:var(--accent);color:#1b1b1b;font-weight:600">🎮 У гру</button>
+              <button id="lv-exportLevel" style="flex:1;font-size:12px;padding:8px 4px">⬇ Файл</button>
+            </div>
+            <div id="lv-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
+          </div>
+        </div>
+      </aside>
+
     </div>
     <script type="module" src="/src/rig/main.ts"></script>
-    <iframe id="levelFrame" src="about:blank" style="position:fixed;inset:0;width:100%;height:100%;border:0;display:none;z-index:999;"></iframe>
   </body>
 </html>

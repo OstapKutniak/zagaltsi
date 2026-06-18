@@ -1,4 +1,5 @@
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
+import { initLevelEditor } from '../level/editor';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -717,28 +718,22 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
   const img = new Image(); img.onload = () => { state.ref.canvas = imageToCanvas(img); state.selected = 'ref'; refreshUI(); }; img.src = URL.createObjectURL(f);
 });
 
-// ---- верхні таби розділів (навігація між редакторами) ----
-let levelFrameLoaded = false;
-for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
-  const go = b.getAttribute('data-go');
-  if (go === 'level.html') {
-    b.addEventListener('click', () => {
-      const frame = document.getElementById('levelFrame') as HTMLIFrameElement;
-      if (frame) {
-        if (!levelFrameLoaded) { frame.src = 'level.html'; levelFrameLoaded = true; }
-        frame.style.display = 'block';
-      }
-    });
-  } else if (go) {
-    b.addEventListener('click', () => { window.location.href = go; });
-  } else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
+// ---- верхні таби розділів — перемикання панелей всередині однієї сторінки ----
+const appEl = document.getElementById('app')!;
+function setMode(mode: string): void {
+  appEl.className = 'mode-' + mode;
+  document.querySelectorAll<HTMLButtonElement>('#topTabs button[data-tab]').forEach(b => {
+    b.classList.toggle('light', b.getAttribute('data-tab') === mode);
+  });
+  if (mode === 'level') window.dispatchEvent(new CustomEvent('levelTabActivated'));
 }
-window.addEventListener('message', (e) => {
-  if (e.data === 'backToStudio') {
-    const frame = document.getElementById('levelFrame') as HTMLIFrameElement;
-    if (frame) frame.style.display = 'none';
-  }
-});
+for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
+  const tab = b.getAttribute('data-tab');
+  if (tab) { b.addEventListener('click', () => setMode(tab)); }
+  else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
+}
+// Initialize level editor (panels are hidden by default via CSS)
+initLevelEditor('lv-');
 
 // ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
 let partsOpen = false;
