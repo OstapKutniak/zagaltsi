@@ -259,6 +259,19 @@ export function initLevelEditor(prefix: string): void {
     for (let i = cats.length; i < LIB_MIN; i++) {
       const e = document.createElement('div'); e.className = 'libCard empty';
       e.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
+      e.addEventListener('dragover', (ev) => { ev.preventDefault(); ev.dataTransfer!.dropEffect = 'copy'; e.style.borderColor = 'var(--accent)'; });
+      e.addEventListener('dragleave', () => { e.style.borderColor = ''; });
+      e.addEventListener('drop', (ev) => {
+        ev.preventDefault(); e.style.borderColor = '';
+        const files = Array.from(ev.dataTransfer?.files ?? []);
+        for (const f of files) {
+          toWebP(f, CAT_MAX_PX[state.cat] ?? 1024).then((url) => {
+            if (!url) return;
+            const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url };
+            state.assets.push(a); loadImg(a); refreshAssets(); save();
+          });
+        }
+      });
       box.appendChild(e);
     }
   }
@@ -314,8 +327,8 @@ export function initLevelEditor(prefix: string): void {
   }
   $<HTMLInputElement>('scale').addEventListener('pointerdown', () => { if (sel()) pushUndo(); });
   $<HTMLInputElement>('scale').addEventListener('input', (e) => { const p = sel(); if (p) { p.scale = Number((e.target as HTMLInputElement).value); $('scaleV').textContent = p.scale.toFixed(2); draw(); save(); } });
-  $<HTMLButtonElement>('mirrorBtn').addEventListener('click', () => { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } });
-  $<HTMLButtonElement>('delBtn').addEventListener('click', deleteSel);
+  $<HTMLButtonElement>('mirrorBtn')?.addEventListener('click', () => { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } });
+  $<HTMLButtonElement>('delBtn')?.addEventListener('click', deleteSel);
   function deleteSel(): void { const p = sel(); if (!p) return; pushUndo(); level().placed = level().placed.filter((x) => x !== p); state.selected = null; refreshSel(); draw(); save(); }
 
   const snapBtn = $<HTMLButtonElement>('snapBtn');
@@ -444,6 +457,19 @@ export function initLevelEditor(prefix: string): void {
       ev.preventDefault(); state.axisLock = ev.code === 'KeyX' ? 'x' : 'z'; return;
     }
     if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+    else if (ev.code === 'KeyD' && ev.shiftKey) {
+      ev.preventDefault();
+      const p = sel();
+      if (p) {
+        pushUndo();
+        const copy: Placed = { ...p, id: 'p' + Date.now() + Math.round(performance.now()) };
+        level().placed.push(copy); state.selected = copy.id;
+        refreshSel(); draw(); save(); startMode('G');
+      }
+    }
+    else if (ev.code === 'KeyH') { ev.preventDefault(); state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns(); }
+    else if (ev.code === 'KeyV') { ev.preventDefault(); state.pathTool = state.pathTool === 'v' ? null : 'v'; updatePathBtns(); }
+    else if (ev.code === 'KeyY') { ev.preventDefault(); state.pathTool = state.pathTool === 'erase' ? null : 'erase'; updatePathBtns(); }
     else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
@@ -500,6 +526,11 @@ export function initLevelEditor(prefix: string): void {
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
     return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawn, start: lv.start, end: lv.end, assets: used };
   }
+  $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
+    idbSet('zag_level', buildLevelDoc())
+      .then(() => setStatus('✔ Рівень збережено в гру'))
+      .catch(() => setStatus('✗ Помилка збереження'));
+  });
   $<HTMLButtonElement>('exportLevel')?.addEventListener('click', () => {
     const doc = buildLevelDoc();
     const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });

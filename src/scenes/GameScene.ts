@@ -46,6 +46,8 @@ export class GameScene extends Phaser.Scene {
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
+  private colliderCells: string[] = [];
+  private colliderGrid = 48;
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
@@ -56,6 +58,25 @@ export class GameScene extends Phaser.Scene {
 
   private get band(): { top: number; bottom: number } {
     return this.levelBand ?? { top: this.bandTop, bottom: this.bandBottom };
+  }
+
+  private getBandAtX(worldX: number): { top: number; bottom: number } {
+    if (!this.levelMode || !this.colliderCells.length) return this.band;
+    const gs = this.colliderGrid;
+    const cx = Math.floor(worldX / gs);
+    // Collect h-type cells in this column and adjacent (for smooth transitions)
+    const cys: number[] = [];
+    for (const c of this.colliderCells) {
+      const p = c.split(',');
+      if ((p[2] ?? 'h') !== 'h') continue;
+      const ccx = Number(p[0]);
+      if (ccx === cx || ccx === cx - 1 || ccx === cx + 1) cys.push(Number(p[1]));
+    }
+    if (!cys.length) return this.band; // no cells near player — use global fallback
+    const minCy = Math.min(...cys);
+    const maxCy = Math.max(...cys);
+    const depth = (maxCy + 1 - minCy) * gs;
+    return { top: this.bandBottom - depth, bottom: this.bandBottom };
   }
 
   create(): void {
@@ -194,12 +215,14 @@ export class GameScene extends Phaser.Scene {
     // тягнеться вгору по екрану. Це тримає всю зону у видимій частині (редактор
     // має «землю» на 60% висоти, а гра — біля самого низу, тож пряме перенесення
     // редакторного Y затягувало б персонажа за нижній край екрана).
+    this.colliderCells = doc.collider ?? [];
+    this.colliderGrid = doc.grid ?? 48;
+    // Compute global fallback band from all cells (used when no cells at player's X)
     this.levelBand = null;
-    const cells = doc.collider ?? [];
-    if (cells.length) {
-      const gs = doc.grid ?? 48;
+    if (this.colliderCells.length) {
+      const gs = this.colliderGrid;
       let minCy = Infinity, maxCy = -Infinity;
-      for (const c of cells) { const cy = Number(c.split(',')[1]); if (Number.isFinite(cy)) { if (cy < minCy) minCy = cy; if (cy > maxCy) maxCy = cy; } }
+      for (const c of this.colliderCells) { const cy = Number(c.split(',')[1]); if (Number.isFinite(cy)) { if (cy < minCy) minCy = cy; if (cy > maxCy) maxCy = cy; } }
       if (minCy !== Infinity) {
         const depth = (maxCy + 1 - minCy) * gs;
         this.levelBand = { top: this.bandBottom - depth, bottom: this.bandBottom };
@@ -350,7 +373,7 @@ export class GameScene extends Phaser.Scene {
   private step(dt: number): void {
     this.simTime += dt * 1000;
     const time = this.simTime;
-    const band = this.band;
+    const band = this.getBandAtX(this.player.floorX);
 
     const cmd = this.controls.sample();
     this.player.update(cmd, time, dt, band);
