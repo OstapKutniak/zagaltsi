@@ -160,14 +160,21 @@ export function initLevelEditor(prefix: string): void {
         // «Розкрита книжка»: дві перпендикулярні площини, спільне ребро під 45°.
         // Кути лише 90°/45°, усі сторони = gs (k=gs/√2 — катет 45°-ребра, довжина gs).
         const k = gs * Math.SQRT1_2;
+        // Прив'язано до простої сітки (cx*gs, cy*gs) — клітинка під курсором,
+        // координати = ті, що читає гра. Ізометричний вигляд — локальний нахил на k.
+        const x0 = cx * gs, x1 = (cx + 1) * gs, y0 = cy * gs, y1 = (cy + 1) * gs;
         if (type === 'h') {
-          // Підлога: верх/низ ГОРИЗОНТАЛЬНІ (gs,0); боки 45° вниз-вправо (k,k)
-          const P = (ix: number, iy: number) => toScreen(ix * gs + iy * k, iy * k);
-          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
+          // Підлога: верх/низ горизонтальні, боки нахилені вниз-вправо на k
+          p1 = toScreen(x0,     y0);
+          p2 = toScreen(x1,     y0);
+          p3 = toScreen(x1 + k, y1);
+          p4 = toScreen(x0 + k, y1);
         } else {
-          // Стіна: боки ВЕРТИКАЛЬНІ (0,gs); верх/низ 45° вниз-вправо (k,k)
-          const P = (ix: number, iy: number) => toScreen(ix * k, ix * k + iy * gs);
-          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
+          // Стіна: боки вертикальні, верх/низ нахилені вниз-вправо на k
+          p1 = toScreen(x0, y0);
+          p2 = toScreen(x1, y0 + k);
+          p3 = toScreen(x1, y1 + k);
+          p4 = toScreen(x0, y1);
         }
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
@@ -191,11 +198,12 @@ export function initLevelEditor(prefix: string): void {
     ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
 
     if (state.camView) {
-      // Game view: 1280×576, floor (Y=0 in editor) at 550/576 from top of game screen
+      // Game view: 1280×576, floor (Y=0 in editor) at 550/576 from top of game screen.
+      // Рамка ЗАВЖДИ по центру по горизонталі — панаруєш світ, бачиш кадр уздовж усього рівня.
       const GAME_H = 576, FLOOR_M = 26;
       const vw = 1280 * sc(); const vh = GAME_H * sc();
-      const vx = toScreen(level().start, 0).x;
-      const vy = state.origin.y - (GAME_H - FLOOR_M) * sc(); // top of game screen in canvas coords
+      const vx = (canvas.width - vw) / 2;
+      const vy = state.origin.y - (GAME_H - FLOOR_M) * sc(); // підлога кадру = лінія підлоги редактора
       const cw = canvas.width; const ch = canvas.height;
       const cx0 = Math.max(0, vx), cy0 = Math.max(0, vy);
       const cx1 = Math.min(cw, vx + vw), cy1 = Math.min(ch, vy + vh);
@@ -389,24 +397,21 @@ export function initLevelEditor(prefix: string): void {
   let painting = false;
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
-    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
-    // Інвертуємо ту саму ґратку, що й у draw() — клітинка під курсором.
-    // Підлога: x=cx*gs+cy*k, y=cy*k → cx=(x-y)/gs, cy=y/k
-    const fl = { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
-    // Стіна: x=cx*k, y=cx*k+cy*gs → cx=x/k, cy=(y-x)/gs
-    const wl = { cx: Math.floor(w.x / k), cy: Math.floor((w.y - w.x) / gs) };
+    const w = toWorld(sx, sy); const gs = state.grid;
+    // Проста світова сітка: cx=колонка X, cy=рядок глибини. Ті самі координати,
+    // що читає гра (gameY = bandBottom + editorY), тож хідьба = намальоване.
+    const cx = Math.floor(w.x / gs), cy = Math.floor(w.y / gs);
     if (state.pathTool === 'erase') {
       level().collider = level().collider.filter((c) => {
-        const p = c.split(','); const t = p[2] ?? 'h'; const cell = t === 'h' ? fl : wl;
-        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy);
+        const p = c.split(',');
+        return !(Number(p[0]) === cx && Number(p[1]) === cy);
       });
     } else {
-      const cell = state.pathTool === 'h' ? fl : wl;
       level().collider = level().collider.filter((c) => {
         const p = c.split(',');
-        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy && (p[2] ?? 'h') === state.pathTool);
+        return !(Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === state.pathTool);
       });
-      level().collider.push(`${cell.cx},${cell.cy},${state.pathTool}`);
+      level().collider.push(`${cx},${cy},${state.pathTool}`);
     }
     draw();
   }
@@ -431,7 +436,7 @@ export function initLevelEditor(prefix: string): void {
   window.addEventListener('mousemove', (ev) => {
     const r = canvas.getBoundingClientRect();
     state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-    if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); if (!state.camView) state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
+    if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
     if (state.markerDrag) {
       const w = toWorld(state.mouse.x, state.mouse.y); const lv = level();
       if (state.markerDrag === 'start') lv.start = w.x;
@@ -445,7 +450,7 @@ export function initLevelEditor(prefix: string): void {
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (!state.camView) { state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); } draw(); }, { passive: false });
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
 
   function startMode(m: 'G' | 'R' | 'S'): void {
     const p = sel(); if (!p) return;
@@ -649,8 +654,8 @@ export function initLevelEditor(prefix: string): void {
   }
 
   // Re-render when tab becomes visible
-  window.addEventListener('levelTabActivated', () => { resize(); if (state.camView) snapCamView(); draw(); syncToolbarHeight(); });
-  window.addEventListener('resize', () => { resize(); if (state.camView) snapCamView(); draw(); syncToolbarHeight(); });
+  window.addEventListener('levelTabActivated', () => { resize(); draw(); syncToolbarHeight(); });
+  window.addEventListener('resize', () => { resize(); draw(); syncToolbarHeight(); });
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
