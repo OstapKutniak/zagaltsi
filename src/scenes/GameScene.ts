@@ -84,6 +84,17 @@ export class GameScene extends Phaser.Scene {
     });
     this.repositionWorld();
 
+    // Сховати екран завантаження — фон готовий, різкого мигання не буде
+    const loadScreen = document.getElementById('loadScreen');
+    if (loadScreen) {
+      const fill = document.getElementById('loadFill');
+      if (fill) fill.style.width = '100%';
+      setTimeout(() => {
+        loadScreen.classList.add('hide');
+        setTimeout(() => loadScreen.remove(), 500);
+      }, 150);
+    }
+
     // Герой
     this.player = new Player(this, 90, this.bandBottom - 10);
     this.player.maxX = GATE_X - 30;
