@@ -204,8 +204,9 @@ export function initLevelEditor(prefix: string): void {
 
   function refreshCatSelect(): void {
     $<HTMLSelectElement>('libSelect').value = state.cat;
-    $('colliderTools').style.display = state.cat === 'collider' ? 'flex' : 'none';
-    $('libGrid').style.display = state.cat === 'collider' ? 'none' : '';
+    const isCollider = state.cat === 'collider';
+    $('colliderTools').style.display = isCollider ? 'flex' : 'none';
+    $('libGrid').style.display = isCollider ? 'none' : 'flex';
   }
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
