@@ -152,15 +152,29 @@ export function initLevelEditor(prefix: string): void {
     }
 
     if (state.showCollider) {
-      const gs = state.grid; ctx.lineWidth = 1;
+      const gs = state.grid; const s = gs / 2; ctx.lineWidth = 1;
       for (const cell of level().collider) {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
-        const cxw = cx * gs + gs / 2; const cyw = cy * gs + gs / 2; const hw = gs / 2;
-        const top = toScreen(cxw, cyw - hw); const right = toScreen(cxw + hw, cyw);
-        const bottom = toScreen(cxw, cyw + hw); const left = toScreen(cxw - hw, cyw);
-        ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(right.x, right.y);
-        ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(left.x, left.y); ctx.closePath();
+        let p1, p2, p3, p4;
+        if (type === 'h') {
+          // Горизонтальний: низ/верх горизонтальні, бічні сторони під 45° (right-lean parallelogram)
+          p1 = toScreen(cx * gs,           (cy + 1) * gs);      // нижній-лівий
+          p2 = toScreen((cx + 1) * gs,     (cy + 1) * gs);      // нижній-правий
+          p3 = toScreen((cx + 1) * gs + s, cy * gs + s);        // верхній-правий (зміщений вправо+вгору)
+          p4 = toScreen(cx * gs + s,       cy * gs + s);        // верхній-лівий (зміщений вправо+вгору)
+        } else {
+          // Вертикальний: лів/прав вертикальні (x=cx*gs та x=cx*gs+s), верх/низ під 45°
+          // Ширина = s = gs/2, щоб кут сторін дорівнював 45° (run = rise = s)
+          p1 = toScreen(cx * gs,       cy * gs);            // верхній-лівий
+          p2 = toScreen(cx * gs,       (cy + 1) * gs);     // нижній-лівий
+          p3 = toScreen(cx * gs + s,   (cy + 1) * gs + s); // нижній-правий (вправо+вниз на s)
+          p4 = toScreen(cx * gs + s,   cy * gs + s);       // верхній-правий (вправо+вниз на s)
+        }
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
+        ctx.closePath();
         ctx.fillStyle = type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)'; ctx.fill();
         ctx.strokeStyle = type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)'; ctx.stroke();
       }
@@ -512,13 +526,20 @@ export function initLevelEditor(prefix: string): void {
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
+  function syncToolbarHeight(): void {
+    const tl = document.getElementById('timelineBar');
+    const lt = document.getElementById(prefix + 'levelToolbar');
+    if (tl && lt) lt.style.height = tl.offsetHeight + 'px';
+  }
+
   // Re-render when tab becomes visible
-  window.addEventListener('levelTabActivated', () => { resize(); draw(); });
-  window.addEventListener('resize', () => { resize(); draw(); });
+  window.addEventListener('levelTabActivated', () => { resize(); draw(); syncToolbarHeight(); });
+  window.addEventListener('resize', () => { resize(); draw(); syncToolbarHeight(); });
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
     showColliderBtn?.classList.toggle('on', state.showCollider);
+    syncToolbarHeight();
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });
 }
