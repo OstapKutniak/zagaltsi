@@ -1,5 +1,6 @@
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
+import { idbGet } from '../store';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -1513,3 +1514,28 @@ alignPartsList();
 status('');
 // Перерахувати розміри після того як таймлайн зайняв місце в DOM
 requestAnimationFrame(() => { resize(); draw(); });
+
+// ---- Publish to game (studio mode) ----
+const publishBtn = document.getElementById('publishBtn') as HTMLButtonElement | null;
+if (publishBtn) {
+  publishBtn.addEventListener('click', async () => {
+    publishBtn.disabled = true;
+    const orig = publishBtn.textContent!;
+    publishBtn.textContent = '⏳ Публікую...';
+    try {
+      const character = buildDoc();
+      try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
+      const level = await idbGet<unknown>('zag_level');
+      const res = await fetch('/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ character, level }),
+      });
+      const data = await res.json() as { ok: boolean; error?: string };
+      publishBtn.textContent = data.ok ? '✔ Опубліковано!' : '✗ ' + (data.error ?? 'Помилка');
+    } catch (e) {
+      publishBtn.textContent = '✗ ' + String(e).slice(0, 40);
+    }
+    setTimeout(() => { publishBtn.disabled = false; publishBtn.textContent = orig; }, 4000);
+  });
+}
