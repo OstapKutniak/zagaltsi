@@ -29,10 +29,7 @@
       #libSelect {
         width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
         background: #4a4a4a; color: var(--ink); border: 0; cursor: pointer;
-        appearance: none; -webkit-appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23e8e8e8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-position: right 10px center;
-        padding-right: 30px;
+        text-align: center;
       }
       #libSelect:hover { background-color: #565656; }
       #libSelect option { background: #2d2d2d; }
@@ -90,7 +87,7 @@
 
       <!-- ЛІВА БІБЛІОТЕКА (280px, identical to studio) -->
       <aside id="library" class="col pane">
-        <select id="libSelect">
+        <select id="libSelect" style="text-align:center">
           <option value="sky">Небо</option>
           <option value="bg">Фон</option>
           <option value="map" selected>Карта</option>
@@ -99,7 +96,6 @@
           <option value="interactive">Інтерактив</option>
           <option value="trap">Пастки</option>
         </select>
-        <button id="loadAsset">＋ Завантажити PNG</button>
         <input type="file" id="fileInput" accept="image/png,image/*" multiple style="display:none" />
         <div id="colliderTools" style="display:none"></div>
         <div id="libGrid"></div>
@@ -164,16 +160,12 @@
               <span class="val" id="scaleV">1.0</span>
             </div>
             <div class="btns">
-              <button id="mirrorBtn">🔄 Мірор (M)</button>
-              <button id="delBtn">🗑 Видалити</button>
+              <button id="mirrorBtn">Мірор (M)</button>
+              <button id="delBtn">Видалити</button>
             </div>
 
             <hr />
-            <div class="sec-label">Файл</div>
-            <div class="btns">
-              <button id="toGame" style="background:var(--accent);color:#1b1b1b;font-weight:600">🎮 У гру</button>
-              <button id="exportLevel">⬇ Файл</button>
-            </div>
+            <button id="toGame" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button>
             <div id="statusBar"></div>
 
           </div>

@@ -152,24 +152,24 @@ export function initLevelEditor(prefix: string): void {
     }
 
     if (state.showCollider) {
-      const gs = state.grid; const s = gs / 2; ctx.lineWidth = 1;
+      const gs = state.grid; ctx.lineWidth = 1;
       for (const cell of level().collider) {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
         let p1, p2, p3, p4;
         if (type === 'h') {
-          // Горизонтальний: низ/верх горизонтальні, бічні сторони під 45° (right-lean parallelogram)
-          p1 = toScreen(cx * gs,           (cy + 1) * gs);      // нижній-лівий
-          p2 = toScreen((cx + 1) * gs,     (cy + 1) * gs);      // нижній-правий
-          p3 = toScreen((cx + 1) * gs + s, cy * gs + s);        // верхній-правий (зміщений вправо+вгору)
-          p4 = toScreen(cx * gs + s,       cy * gs + s);        // верхній-лівий (зміщений вправо+вгору)
+          // Горизонтальний: повна висота клітини, нахил = gs → 45°, без проміжків між рядами
+          p1 = toScreen(cx * gs,           (cy + 1) * gs); // нижній-лівий
+          p2 = toScreen((cx + 1) * gs,     (cy + 1) * gs); // нижній-правий
+          p3 = toScreen((cx + 1) * gs + gs, cy * gs);       // верхній-правий
+          p4 = toScreen(cx * gs + gs,       cy * gs);       // верхній-лівий
         } else {
-          // Вертикальний: лів/прав вертикальні (x=cx*gs та x=cx*gs+s), верх/низ під 45°
-          // Ширина = s = gs/2, щоб кут сторін дорівнював 45° (run = rise = s)
-          p1 = toScreen(cx * gs,       cy * gs);            // верхній-лівий
-          p2 = toScreen(cx * gs,       (cy + 1) * gs);     // нижній-лівий
-          p3 = toScreen(cx * gs + s,   (cy + 1) * gs + s); // нижній-правий (вправо+вниз на s)
-          p4 = toScreen(cx * gs + s,   cy * gs + s);       // верхній-правий (вправо+вниз на s)
+          // Вертикальний: лів/прав вертикальні, верх/низ під 45° (ширина = gs/2)
+          const s = gs / 2;
+          p1 = toScreen(cx * gs,     cy * gs);
+          p2 = toScreen(cx * gs,     (cy + 1) * gs);
+          p3 = toScreen(cx * gs + s, (cy + 1) * gs + s);
+          p4 = toScreen(cx * gs + s, cy * gs + s);
         }
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
@@ -257,7 +257,9 @@ export function initLevelEditor(prefix: string): void {
       box.appendChild(el);
     }
     for (let i = cats.length; i < LIB_MIN; i++) {
-      const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e);
+      const e = document.createElement('div'); e.className = 'libCard empty';
+      e.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
+      box.appendChild(e);
     }
   }
   const CAT_MAX_PX: Record<string, number> = { sky: 2048, bg: 2048, map: 2048 }; // решта — 1024
@@ -281,7 +283,7 @@ export function initLevelEditor(prefix: string): void {
     });
   }
 
-  $<HTMLButtonElement>('loadAsset').addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
+  $<HTMLButtonElement>('loadAsset')?.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
   $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
     const files = Array.from((ev.target as HTMLInputElement).files ?? []);
     for (const f of files) {
@@ -498,7 +500,7 @@ export function initLevelEditor(prefix: string): void {
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
     return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawn, start: lv.start, end: lv.end, assets: used };
   }
-  $<HTMLButtonElement>('exportLevel').addEventListener('click', () => {
+  $<HTMLButtonElement>('exportLevel')?.addEventListener('click', () => {
     const doc = buildLevelDoc();
     const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
     const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = `${level().name}.json`; aEl.click();
@@ -524,10 +526,13 @@ export function initLevelEditor(prefix: string): void {
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
+  let cachedTlH = 0;
   function syncToolbarHeight(): void {
     const tl = document.getElementById('timelineBar');
     const lt = document.getElementById(prefix + 'levelToolbar');
-    if (tl && lt) lt.style.height = tl.offsetHeight + 'px';
+    if (!lt) return;
+    if (tl && tl.offsetHeight > 0) cachedTlH = tl.offsetHeight;
+    if (cachedTlH > 0) lt.style.height = cachedTlH + 'px';
   }
 
   // Re-render when tab becomes visible
@@ -538,7 +543,8 @@ export function initLevelEditor(prefix: string): void {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
     showColliderBtn?.classList.toggle('on', state.showCollider);
     snapBtn?.classList.toggle('on', state.snap);
-    syncToolbarHeight();
+    // rAF ensures timeline is painted and offsetHeight is non-zero
+    requestAnimationFrame(syncToolbarHeight);
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });
 }
