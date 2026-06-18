@@ -161,12 +161,12 @@ export function initLevelEditor(prefix: string): void {
         // Кути лише 90°/45°, усі сторони = gs (k=gs/√2 — катет 45°-ребра, довжина gs).
         const k = gs * Math.SQRT1_2;
         if (type === 'h') {
-          // Підлога: верх/низ ГОРИЗОНТАЛЬНІ (gs,0); боки 45° вниз-вліво (-k,k)
-          const P = (ix: number, iy: number) => toScreen(ix * gs - iy * k, iy * k);
+          // Підлога: верх/низ ГОРИЗОНТАЛЬНІ (gs,0); боки 45° вниз-вправо (k,k)
+          const P = (ix: number, iy: number) => toScreen(ix * gs + iy * k, iy * k);
           p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
         } else {
-          // Стіна: боки ВЕРТИКАЛЬНІ (0,gs); верх/низ 45° вгору-вправо (k,-k)
-          const P = (ix: number, iy: number) => toScreen(ix * k, -ix * k + iy * gs);
+          // Стіна: боки ВЕРТИКАЛЬНІ (0,gs); верх/низ 45° вниз-вправо (k,k)
+          const P = (ix: number, iy: number) => toScreen(ix * k, ix * k + iy * gs);
           p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
         }
         ctx.beginPath();
@@ -391,10 +391,10 @@ export function initLevelEditor(prefix: string): void {
     if (!state.pathTool) return;
     const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
     // Інвертуємо ту саму ґратку, що й у draw() — клітинка під курсором.
-    // Підлога: x=cx*gs-cy*k, y=cy*k → cx=(x+y)/gs, cy=y/k
-    const fl = { cx: Math.floor((w.x + w.y) / gs), cy: Math.floor(w.y / k) };
-    // Стіна: x=cx*k, y=-cx*k+cy*gs → cx=x/k, cy=(x+y)/gs
-    const wl = { cx: Math.floor(w.x / k), cy: Math.floor((w.x + w.y) / gs) };
+    // Підлога: x=cx*gs+cy*k, y=cy*k → cx=(x-y)/gs, cy=y/k
+    const fl = { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
+    // Стіна: x=cx*k, y=cx*k+cy*gs → cx=x/k, cy=(y-x)/gs
+    const wl = { cx: Math.floor(w.x / k), cy: Math.floor((w.y - w.x) / gs) };
     if (state.pathTool === 'erase') {
       level().collider = level().collider.filter((c) => {
         const p = c.split(','); const t = p[2] ?? 'h'; const cell = t === 'h' ? fl : wl;

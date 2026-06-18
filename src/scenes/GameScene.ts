@@ -60,21 +60,34 @@ export class GameScene extends Phaser.Scene {
     return this.levelBand ?? { top: this.bandTop, bottom: this.bandBottom };
   }
 
+  private depthAtColumn(cx: number): number {
+    const gs = this.colliderGrid;
+    let minCy = Infinity, maxCy = -Infinity;
+    for (const c of this.colliderCells) {
+      const p = c.split(',');
+      if ((p[2] ?? 'h') !== 'h' || Number(p[0]) !== cx) continue;
+      const cy = Number(p[1]);
+      if (cy < minCy) minCy = cy;
+      if (cy > maxCy) maxCy = cy;
+    }
+    return maxCy < minCy ? 0 : (maxCy + 1 - minCy) * gs;
+  }
+
   private getBandAtX(worldX: number): { top: number; bottom: number } {
     if (!this.levelMode || !this.colliderCells.length) return this.band;
     const gs = this.colliderGrid;
-    const cx = Math.floor(worldX / gs);
-    const cys: number[] = [];
-    for (const c of this.colliderCells) {
-      const p = c.split(',');
-      if ((p[2] ?? 'h') !== 'h') continue;
-      const ccx = Number(p[0]);
-      if (ccx === cx || ccx === cx - 1 || ccx === cx + 1) cys.push(Number(p[1]));
-    }
-    if (!cys.length) return this.band;
-    const minCy = Math.min(...cys);
-    const maxCy = Math.max(...cys);
-    const depth = (maxCy + 1 - minCy) * gs;
+    // Інтерполюємо глибину між сусідніми колонками → край йде діагонально,
+    // гравець плавно з'їжджає, а не стрибає на сусідній рядок.
+    const fx = worldX / gs;
+    const c0 = Math.floor(fx);
+    const frac = fx - c0;
+    const d0 = this.depthAtColumn(c0);
+    const d1 = this.depthAtColumn(c0 + 1);
+    let depth: number;
+    if (d0 > 0 && d1 > 0) depth = d0 + (d1 - d0) * frac;
+    else if (d0 > 0) depth = d0;
+    else if (d1 > 0) depth = d1;
+    else return this.band;
     return { top: this.bandBottom - depth, bottom: this.bandBottom };
   }
 
