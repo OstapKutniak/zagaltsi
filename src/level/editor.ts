@@ -46,6 +46,7 @@ export function initLevelEditor(prefix: string): void {
     snap: true,
     showCollider: true,
     showMarkers: true,
+    hiddenCats: new Set<string>(),
     zoom: 0.6,
     pan: { x: 0, y: 0 },
     origin: { x: 0, y: 0 },
@@ -132,7 +133,9 @@ export function initLevelEditor(prefix: string): void {
     state.viewScale = Math.min(canvas.width, canvas.height) / 700;
   }
   function placedSorted(): Placed[] {
-    return [...level().placed].sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
+    return level().placed
+      .filter((p) => !state.hiddenCats.has(p.cat)) // «Наповнення» — приховані категорії не малюються/не клікаються
+      .sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
   }
   function draw(): void {
     if (!canvas.width) return;
@@ -631,6 +634,64 @@ export function initLevelEditor(prefix: string): void {
     linesBtn.classList.toggle('on', state.showMarkers);
     draw();
   });
+
+  // ── Наповнення: flyout категорій у вьюпорті; клік ховає/вертає об'єкти категорії ──
+  const fillMenu = $<HTMLElement>('fillMenu');
+  let fillOpen = false;
+  function buildFillMenu(): void {
+    if (!fillMenu) return;
+    fillMenu.innerHTML = '';
+    for (const c of CATS) {
+      const b = document.createElement('button');
+      b.className = 'fillBtn' + (state.hiddenCats.has(c.key) ? ' off' : '');
+      b.textContent = c.label;
+      b.onclick = () => {
+        if (state.hiddenCats.has(c.key)) state.hiddenCats.delete(c.key); else state.hiddenCats.add(c.key);
+        b.classList.toggle('off', state.hiddenCats.has(c.key));
+        draw();
+      };
+      fillMenu.appendChild(b);
+    }
+  }
+  $<HTMLButtonElement>('fillBtn')?.addEventListener('click', () => {
+    fillOpen = !fillOpen;
+    if (fillMenu) { if (fillOpen) buildFillMenu(); fillMenu.style.display = fillOpen ? 'flex' : 'none'; }
+    $('fillBtn')?.classList.toggle('on', fillOpen);
+  });
+
+  // ── Плановість: перемикач Фонова / Ігрова ──
+  function setPlanMode(mode: 'bg' | 'game'): void {
+    $('planBgBtn')?.classList.toggle('on', mode === 'bg');
+    $('planGameBtn')?.classList.toggle('on', mode === 'game');
+    const bg = $('planBg'), gm = $('planGame');
+    if (bg) bg.style.display = mode === 'bg' ? 'flex' : 'none';
+    if (gm) gm.style.display = mode === 'game' ? 'flex' : 'none';
+  }
+  $('planBgBtn')?.addEventListener('click', () => setPlanMode('bg'));
+  $('planGameBtn')?.addEventListener('click', () => setPlanMode('game'));
+
+  // z-порядок вибраного об'єкта у межах його категорії (Фонова плановість)
+  function reorderSel(kind: 'forward' | 'back' | 'front' | 'bottom'): void {
+    const p = sel(); if (!p) return;
+    const arr = level().placed;
+    const group = arr.filter((x) => x.cat === p.cat); // у порядку малювання
+    const k = group.indexOf(p);
+    let nk = k;
+    if (kind === 'forward') nk = Math.min(group.length - 1, k + 1);
+    else if (kind === 'back') nk = Math.max(0, k - 1);
+    else if (kind === 'front') nk = group.length - 1;
+    else nk = 0;
+    if (nk === k) return;
+    pushUndo();
+    group.splice(k, 1); group.splice(nk, 0, p);
+    let gi = 0;
+    for (let i = 0; i < arr.length; i++) if (arr[i].cat === p.cat) arr[i] = group[gi++];
+    draw(); save();
+  }
+  $('zForward')?.addEventListener('click', () => reorderSel('forward'));
+  $('zBack')?.addEventListener('click', () => reorderSel('back'));
+  $('zFront')?.addEventListener('click', () => reorderSel('front'));
+  $('zBottom')?.addEventListener('click', () => reorderSel('bottom'));
 
   function buildLevelDoc(): unknown {
     const lv = level();

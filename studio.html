@@ -141,6 +141,16 @@
       .lvCard.empty { opacity: .45; }
       .lvCard.empty:hover { opacity: 1; }
       .lvDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+      .planPanel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .planHead { display: flex; }
+      .planHead button { flex: 1; border-radius: 0; font-size: 12px; padding: 7px 4px; }
+      .planHead button.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
+      .planBody { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+      .planBody button { flex: 1 1 calc(50% - 3px); font-size: 12px; padding: 7px 4px; }
+      #lv-fillMenu { position: absolute; left: 8px; bottom: 8px; flex-direction: column-reverse; gap: 6px; z-index: 6; width: 180px; }
+      .fillBtn { display: block; width: 100%; text-align: center; padding: 9px 8px; border-radius: 8px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); }
+      .fillBtn:hover { background: #565656; }
+      .fillBtn.off { opacity: .45; text-decoration: line-through; }
       .imgCell::before { content: ''; display: block; padding-top: 100%; } /* квадрат */
       .imgCell.empty { cursor: default; background: #434343; }
       .imgCell.sel { border-color: var(--accent); }
@@ -194,6 +204,7 @@
           <div id="lv-stageWrap" style="position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="lv-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни ассет · <b>G/R/S/M</b> · <b>Shift+D</b> дублювати · <b>H/V</b> шлях · <b>Y</b> стерти шлях · <b>J</b> снеп · <b>Del</b> · <b>Ctrl+Z</b> · колесо — зум</div></div>
           <div id="partsList" style="display:none"><div id="slotChips"></div></div>
           <div id="faceList"><div id="faceChips"></div></div>
+          <div id="lv-fillMenu" style="display:none"></div>
         </div>
         <div id="timelineBar" class="pane">
           <div class="tlrow">
@@ -305,6 +316,23 @@
             <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
             <div id="lv-levelList"></div>
             <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
+            <button id="lv-fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
+            <div class="planPanel">
+              <div class="planHead">
+                <button id="lv-planBgBtn" class="on">Фонова</button>
+                <button id="lv-planGameBtn">Ігрова</button>
+              </div>
+              <div id="lv-planBg" class="planBody">
+                <button id="lv-zForward">Ближче</button>
+                <button id="lv-zBack">Дальше</button>
+                <button id="lv-zFront">Найближче</button>
+                <button id="lv-zBottom">Найдальше</button>
+              </div>
+              <div id="lv-planGame" class="planBody" style="display:none">
+                <button disabled>—</button>
+                <button disabled>—</button>
+              </div>
+            </div>
             <!-- слайдер розміру схований (керування через S), але лишається для логіки -->
             <div style="display:none;align-items:center;gap:8px;font-size:13px">
               <label style="flex:0 0 64px;color:var(--muted)">Розмір</label>
