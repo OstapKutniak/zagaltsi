@@ -18,11 +18,13 @@ const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interac
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; spawn: { x: number; y: number }; start: number; end: number }
+interface Level { name: string; placed: Placed[]; collider: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number }
+
+const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], spawn: { x: 120, y: 0 }, start: 0, end: 2400 });
+  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400 });
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -41,6 +43,7 @@ export function initLevelEditor(prefix: string): void {
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
+    spawnSel: 0, // який зі спавнів зараз вибраний/тягнеться
     camView: false,
     grid: 48,
     snap: true,
@@ -103,6 +106,7 @@ export function initLevelEditor(prefix: string): void {
     if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
     for (const lv of state.levels) {
       if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
+      if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // міграція: один спавн -> масив
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
     }
@@ -196,10 +200,15 @@ export function initLevelEditor(prefix: string): void {
       ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
       ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
       ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
-      const sp = toScreen(lv.spawn.x, lv.spawn.y);
-      ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
-      ctx.fillStyle = '#ffd000'; ctx.fillRect(sp.x, sp.y - 42, 20, 13);
-      ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
+      lv.spawns.forEach((s, i) => {
+        const sp = toScreen(s.x, s.y);
+        const col = SPAWN_COLORS[i % SPAWN_COLORS.length];
+        ctx.strokeStyle = col; ctx.lineWidth = i === state.spawnSel ? 3 : 2;
+        ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
+        ctx.fillStyle = col; ctx.fillRect(sp.x, sp.y - 42, 20, 14);
+        ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000'; ctx.font = 'bold 11px monospace'; ctx.fillText(String(i + 1), sp.x + 6, sp.y - 31);
+      });
     }
 
     if (state.camView) {
@@ -445,10 +454,12 @@ export function initLevelEditor(prefix: string): void {
     const MHIT = 9;
     const startSx = toScreen(lv0.start, 0).x;
     const endSx = toScreen(lv0.end, 0).x;
-    const spawnS = toScreen(lv0.spawn.x, lv0.spawn.y);
     if (Math.abs(x - startSx) < MHIT) { pushUndo(); state.markerDrag = 'start'; return; }
     if (Math.abs(x - endSx) < MHIT) { pushUndo(); state.markerDrag = 'end'; return; }
-    if (Math.abs(x - spawnS.x) < 16 && y > spawnS.y - 52 && y < spawnS.y + 8) { pushUndo(); state.markerDrag = 'spawn'; return; }
+    for (let i = 0; i < lv0.spawns.length; i++) {
+      const sp = toScreen(lv0.spawns[i].x, lv0.spawns[i].y);
+      if (Math.abs(x - sp.x) < 16 && y > sp.y - 52 && y < sp.y + 8) { pushUndo(); state.markerDrag = 'spawn'; state.spawnSel = i; refreshSpawnUI(); return; }
+    }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
     if (state.pathTool) { pushUndo(); painting = true; paintAt(x, y); return; }
     const hit = hitTest(x, y);
@@ -464,7 +475,7 @@ export function initLevelEditor(prefix: string): void {
       const w = toWorld(state.mouse.x, state.mouse.y); const lv = level();
       if (state.markerDrag === 'start') lv.start = w.x;
       else if (state.markerDrag === 'end') lv.end = w.x;
-      else lv.spawn = { x: w.x, y: w.y };
+      else { lv.spawns[state.spawnSel] = { x: w.x, y: w.y }; lv.spawn = lv.spawns[0]; }
       draw(); return;
     }
     if (painting) { paintAt(state.mouse.x, state.mouse.y); return; }
@@ -693,10 +704,40 @@ export function initLevelEditor(prefix: string): void {
   $('zFront')?.addEventListener('click', () => reorderSel('front'));
   $('zBottom')?.addEventListener('click', () => reorderSel('bottom'));
 
+  // ── керування точками спавна (до 5, різнокольорові) ──
+  function refreshSpawnUI(): void {
+    const info = document.getElementById(prefix + 'spawnInfo');
+    if (info) { const n = state.spawnSel + 1, tot = level().spawns.length; info.textContent = `спавн ${n}/${tot}`; (info as HTMLElement).style.color = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length]; }
+  }
+  function buildSpawnControls(): void {
+    const host = canvas.parentElement; if (!host || document.getElementById(prefix + 'spawnCtl')) return;
+    const wrap = document.createElement('div');
+    wrap.id = prefix + 'spawnCtl';
+    wrap.style.cssText = 'position:absolute;top:8px;left:8px;z-index:6;display:flex;gap:6px;align-items:center;background:rgba(0,0,0,.45);padding:5px 7px;border-radius:8px;';
+    const mk = (txt: string): HTMLButtonElement => { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'font-size:12px;padding:5px 8px;'; return b; };
+    const add = mk('＋ Спавн'), del = mk('－ Спавн');
+    const info = document.createElement('span'); info.id = prefix + 'spawnInfo'; info.style.cssText = 'font-size:12px;';
+    add.onclick = () => {
+      const lv = level(); if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
+      pushUndo(); const w = toWorld(canvas.width / 2, state.origin.y);
+      lv.spawns.push({ x: Math.round(w.x), y: 0 }); lv.spawn = lv.spawns[0];
+      state.spawnSel = lv.spawns.length - 1; save(); refreshSpawnUI(); draw();
+    };
+    del.onclick = () => {
+      const lv = level(); if (lv.spawns.length <= 1) { setStatus('Має лишитись хоча б 1 спавн'); return; }
+      pushUndo(); lv.spawns.splice(state.spawnSel, 1);
+      state.spawnSel = Math.min(state.spawnSel, lv.spawns.length - 1); lv.spawn = lv.spawns[0];
+      save(); refreshSpawnUI(); draw();
+    };
+    wrap.appendChild(add); wrap.appendChild(del); wrap.appendChild(info);
+    host.appendChild(wrap);
+    refreshSpawnUI();
+  }
+
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawn, start: lv.start, end: lv.end, assets: used };
+    return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, assets: used };
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
     idbSet('zag_level', buildLevelDoc())
@@ -753,6 +794,7 @@ export function initLevelEditor(prefix: string): void {
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
+    buildSpawnControls();
     showColliderBtn?.classList.toggle('on', state.showCollider);
     snapBtn?.classList.toggle('on', state.snap);
     // rAF ensures timeline is painted and offsetHeight is non-zero

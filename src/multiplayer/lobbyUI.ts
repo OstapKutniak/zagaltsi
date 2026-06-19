@@ -1,13 +1,37 @@
 // Lobby UI controller — manages screens: menu → join/create → waiting room → game
 import {
   createLobby, joinLobby, leaveLobby, startGame, watchLobby,
-  getPlayerId, type LobbyState,
+  getPlayerId, getChosenChar, setChosenChar, setLobbyChar, type LobbyState,
 } from './lobby';
+import { loadCharLibrary } from '../charlib';
 
 const $ = (id: string) => document.getElementById(id)!;
 
 let currentCode = '';
 let unwatch: (() => void) | null = null;
+
+// ── вибір персонажа з бібліотеки ──
+async function renderCharPicker(): Promise<void> {
+  const box = document.getElementById('lb-chars');
+  if (!box) return;
+  const lib = (await loadCharLibrary()).filter((c) => (c.cat ?? 'char') === 'char');
+  if (!lib.length) { box.innerHTML = '<span class="lb-label">Бібліотека порожня — збери персонажа в Studio</span>'; return; }
+  // якщо нічого не обрано або обране зникло — беремо перший
+  if (!getChosenChar() || !lib.some((c) => c.id === getChosenChar())) setChosenChar(lib[0].id);
+  box.innerHTML = '';
+  for (const c of lib) {
+    const el = document.createElement('div');
+    el.className = 'lb-char' + (c.id === getChosenChar() ? ' sel' : '');
+    el.innerHTML = `<img src="${c.thumb}" alt=""><div class="nm">${c.name}</div>`;
+    el.onclick = () => {
+      setChosenChar(c.id);
+      if (currentCode) setLobbyChar(currentCode, c.id);
+      for (const n of Array.from(box.children)) n.classList.remove('sel');
+      el.classList.add('sel');
+    };
+    box.appendChild(el);
+  }
+}
 
 function showScreen(name: 'menu' | 'join' | 'room'): void {
   ($('lb-menu')).style.display = name === 'menu' ? 'flex' : 'none';
@@ -80,6 +104,7 @@ export function hideLobby(lobbyCode?: string): void {
 
 export function initLobbyUI(): void {
   showLobby();
+  void renderCharPicker();
 
   // Solo — skip lobby
   $('lb-solo').addEventListener('click', () => hideLobby(undefined));

@@ -137,9 +137,9 @@ function animBend(name: string, t: number, key: string): number {
   return 0;
 }
 
-function loadTextures(scene: Phaser.Scene, images: Record<string, string>): Promise<unknown> {
+function loadTextures(scene: Phaser.Scene, images: Record<string, string>, prefix: string): Promise<unknown> {
   return Promise.all(Object.entries(images).map(([name, data]) => new Promise<void>((res) => {
-    const key = 'char_' + name;
+    const key = prefix + name;
     if (scene.textures.exists(key)) { res(); return; }
     const img = new Image();
     img.onload = () => { if (!scene.textures.exists(key)) scene.textures.addImage(key, img); res(); };
@@ -197,13 +197,15 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     return (TARGET_PX / hBase) * p.overall;
   }
 
-  static async load(scene: Phaser.Scene, doc: CharDoc): Promise<CutoutCharacter> {
-    await loadTextures(scene, doc.images);
+  // keyPrefix дозволяє кільком різним персонажам жити поруч (кооп) без колізій
+  // текстур, навіть якщо в них однакові назви файлів.
+  static async load(scene: Phaser.Scene, doc: CharDoc, keyPrefix = 'char_'): Promise<CutoutCharacter> {
+    await loadTextures(scene, doc.images, keyPrefix);
     const c = new CutoutCharacter(scene, doc);
     for (const d of SLOT_DEFS) {
       const sl = c.slots[d.key];
       if (!sl || !sl.image) continue;
-      const key = 'char_' + sl.image;
+      const key = keyPrefix + sl.image;
       if (!scene.textures.exists(key)) continue;
       const im = scene.add.image(0, 0, key).setOrigin(sl.pivotX, sl.pivotY);
       c.add(im);

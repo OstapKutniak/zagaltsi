@@ -13,7 +13,12 @@ export interface LobbyPlayer {
   name: string;
   ready: boolean;
   joinedAt: number;
+  charId?: string; // обраний персонаж із бібліотеки (id LibItem)
 }
+
+// Обраний персонаж зберігається локально (на цьому браузері) між сесіями.
+export function getChosenChar(): string | null { return localStorage.getItem('zag_chosen_char'); }
+export function setChosenChar(id: string): void { localStorage.setItem('zag_chosen_char', id); }
 
 export interface LobbyState {
   host: string;
@@ -46,7 +51,7 @@ export async function createLobby(): Promise<string> {
   const playerId = getPlayerId();
   const code = randomCode();
   const lobbyRef = ref(db, `lobbies/${code}`);
-  const player: LobbyPlayer = { id: playerId, name: getPlayerName(), ready: true, joinedAt: Date.now() };
+  const player: LobbyPlayer = { id: playerId, name: getPlayerName(), ready: true, joinedAt: Date.now(), charId: getChosenChar() ?? '' };
   const lobby: LobbyState = {
     host: playerId,
     status: 'waiting',
@@ -73,9 +78,22 @@ export async function joinLobby(code: string): Promise<void> {
   if (count >= 5) throw new Error('Лобі повне (макс. 5 гравців)');
 
   const playerId = getPlayerId();
-  const player: LobbyPlayer = { id: playerId, name: getPlayerName(), ready: true, joinedAt: Date.now() };
+  const player: LobbyPlayer = { id: playerId, name: getPlayerName(), ready: true, joinedAt: Date.now(), charId: getChosenChar() ?? '' };
   await set(ref(db, `lobbies/${upper}/players/${playerId}`), player);
   onDisconnect(ref(db, `lobbies/${upper}/players/${playerId}`)).remove();
+}
+
+// Оновити обраного персонажа у своєму слоті лобі (поки чекаємо в кімнаті).
+export function setLobbyChar(code: string, charId: string): void {
+  const playerId = getPlayerId();
+  set(ref(db, `lobbies/${code.toUpperCase()}/players/${playerId}/charId`), charId).catch(() => {});
+}
+
+// Прочитати гравців лобі один раз (для порядку спавну й персонажів на старті гри).
+export async function getLobbyPlayers(code: string): Promise<LobbyPlayer[]> {
+  const snap = await get(ref(db, `lobbies/${code.toUpperCase()}/players`));
+  if (!snap.exists()) return [];
+  return Object.values(snap.val() as Record<string, LobbyPlayer>).sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
 // Subscribe to lobby state changes
@@ -102,6 +120,7 @@ export interface PlayerState {
   x: number; y: number;
   hp: number; maxHp: number;
   anim: string; facing: number;
+  charId: string; name: string;
   t: number; // timestamp
 }
 

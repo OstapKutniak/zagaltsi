@@ -9,6 +9,7 @@ export interface LevelDoc {
   placed: LevelPlaced[];
   assets: { id: string; url: string }[];
   spawn: { x: number; y: number };
+  spawns?: { x: number; y: number }[]; // до 5 точок спавна (кооп); spawn = spawns[0] для сумісності
   start: number;
   end: number;
   collider?: string[];

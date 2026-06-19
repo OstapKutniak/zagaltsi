@@ -7,6 +7,20 @@ import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { buildLevelView, type LevelDoc } from '../level/LevelView';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
+import {
+  pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
+  getPlayerId, getPlayerName, type PlayerState,
+} from '../multiplayer/lobby';
+import { loadCharLibrary, docById, type LibItem } from '../charlib';
+
+interface Remote {
+  container: CutoutCharacter | null;
+  loading: boolean;
+  charId: string;
+  rx: number; ry: number;      // згладжена екранна позиція
+  tx: number; ty: number;      // ціль із мережі
+  anim: string; facing: number;
+}
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
 const GATE_X = 1150; // поки арена не зачищена, далі не пройти
@@ -52,6 +66,23 @@ export class GameScene extends Phaser.Scene {
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
+
+  // ── мультиплеєр / вибір персонажа / точки спавна ──
+  private spawns: { x: number; y: number }[] = [];
+  private lib: LibItem[] = [];
+  private libReady: Promise<void> | null = null;
+  private levelReady!: Promise<void>;
+  private resolveLevelReady!: () => void;
+  private lobbyCode = '';
+  private isMulti = false;
+  private myId = '';
+  private myCharId = '';
+  private curAnim = 'idle';
+  private lastNetPush = 0;
+  private netStates: Record<string, PlayerState> = {};
+  private remotes: Record<string, Remote> = {};
+  private unwatchState: (() => void) | null = null;
+  private started = false;
 
   constructor() {
     super('Game');
@@ -104,6 +135,10 @@ export class GameScene extends Phaser.Scene {
     this.cleared = false;
     this.accumulator = 0;
     this.simTime = 0;
+    this.started = false;
+    this.remotes = {};
+    this.netStates = {};
+    this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
     this.cameras.main.setBackgroundColor('#2a2233');
     this.computeLayout();
@@ -140,53 +175,32 @@ export class GameScene extends Phaser.Scene {
     this.controls = new InputController(this);
     this.cameras.main.startFollow(this.player, true, 0.08, 0);
 
-    // Якщо є зібраний персонаж із ріг-тулзи (public/character.json) — малюємо його
-    // замість прямокутника. Немає файлу -> лишається прямокутник-плейсхолдер.
+    // Персонаж завантажується НЕ тут, а коли лобі дасть старт (подія 'lobbyStart'):
+    // соло (порожній код) → свій персонаж; кооп → обраний у лобі + інші гравці.
     this.character = null;
-    // 1) спершу беремо персонажа, відправленого з тулзи (Export у гру, той самий домен);
-    // 2) інакше — закомічений public/character.json.
-    let localDoc: CharDoc | null = null;
-    try { const s = localStorage.getItem('zag_game_char'); if (s) localDoc = JSON.parse(s) as CharDoc; } catch { /* ignore */ }
-    const docP: Promise<CharDoc | null> = localDoc
-      ? Promise.resolve(localDoc)
-      : fetch(`${import.meta.env.BASE_URL}character.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    docP
-      .then((doc) => {
-        if (!doc?.slots || !doc?.images) return;
-        CutoutCharacter.load(this, doc)
-          .then((c) => {
-            if (!c) return;
-            this.character = c;
-            this.add.existing(c);
-            this.player.setVisible(false);
-            // хоткеї анімацій — нативний listener (ev.code = фізична клавіша, незалежно від розкладки)
-            if (doc.clips) {
-              const hotkeyHandler = (ev: KeyboardEvent): void => {
-                if (!this.character) return;
-                for (const [name, clip] of Object.entries(doc.clips!)) {
-                  if (!clip.hotkey) continue;
-                  // новий формат: 'KeyR'; старий fallback: 'r'
-                  if (ev.code === clip.hotkey || ev.key.toLowerCase() === clip.hotkey) {
-                    this.character.setAnim(name);
-                    this.hotkeyAnimEnd = this.simTime + clip.duration * 1000;
-                  }
-                }
-              };
-              window.addEventListener('keydown', hotkeyHandler);
-              this.events.once(Phaser.Scenes.Events.SHUTDOWN,
-                () => window.removeEventListener('keydown', hotkeyHandler));
-            }
-          })
-          .catch(() => {});
-      })
-      .catch(() => { /* нема — лишається прямокутник */ });
+    this.myId = getPlayerId();
+    this.libReady = loadCharLibrary().then((l) => { this.lib = l; });
+
+    const onStart = (ev: Event): void => {
+      const code = (ev as CustomEvent<{ code?: string }>).detail?.code ?? '';
+      void this.beginPlay(code);
+    };
+    window.addEventListener('lobbyStart', onStart);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('lobbyStart', onStart);
+      this.unwatchState?.();
+    });
+    // Якщо лобі немає (вбудований прев'ю студії) — одразу соло, щоб персонаж зʼявився.
+    const lobbyEl = document.getElementById('lobby');
+    if (!lobbyEl || lobbyEl.classList.contains('hidden')) void this.beginPlay('');
 
     // Рівень із редактора (IndexedDB zag_level або public/level.json)
     this.levelMode = false;
     const lvP: Promise<LevelDoc | null> = idbGet<LevelDoc>('zag_level')
       .then((stored) => stored ?? fetch(`${import.meta.env.BASE_URL}level.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null))
       .catch(() => null);
-    lvP.then((doc) => { if (doc && doc.placed) this.applyLevel(doc); }).catch(() => {});
+    lvP.then((doc) => { if (doc && doc.placed) this.applyLevel(doc); this.resolveLevelReady(); })
+      .catch(() => this.resolveLevelReady());
 
     // HUD — три бари (серце / сонце / череп)
     this.buildHudLayout();
@@ -252,12 +266,129 @@ export class GameScene extends Phaser.Scene {
       if (minY !== Infinity) this.levelBand = { top: this.bandBottom + minY, bottom: this.bandBottom + maxY };
     }
 
-    const spawnX = doc.spawn?.x ?? this.levelStart + 60;
-    const b = this.band;
-    this.player.spawnAt(spawnX, (b.top + b.bottom) / 2); // спавн у середині прохідної смуги
+    // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
+    this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
     this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
     void buildLevelView(this, doc, this.bandBottom);
     this.banner.setText('');
+  }
+
+  // Точка спавна гравця за слотом (індексом у лобі). Y — центр прохідної смуги в тому X.
+  private spawnPoint(slot: number): { x: number; y: number } {
+    const list = this.spawns.length ? this.spawns : [{ x: this.levelStart + 60, y: 0 }];
+    const sp = list[slot % list.length];
+    const b = this.getBandAtX(sp.x);
+    return { x: sp.x, y: (b.top + b.bottom) / 2 };
+  }
+
+  // Старт гри після лобі. code === '' → соло; інакше кооп (синхронізація через Firebase).
+  private async beginPlay(code: string): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    this.lobbyCode = code;
+    this.isMulti = !!code;
+    await Promise.all([this.levelReady, this.libReady ?? Promise.resolve()]);
+
+    // Який персонаж у мене: обраний у лобі (кооп) -> з бібліотеки; інакше zag_game_char / public.
+    this.myCharId = getChosenChar() ?? '';
+    let myDoc = docById(this.lib, this.myCharId);
+    if (!myDoc) myDoc = await this.resolveSoloDoc();
+    if (myDoc) await this.buildLocalCharacter(myDoc, 'me_');
+
+    // Слот спавна: соло -> 0; кооп -> позиція в лобі за порядком приєднання.
+    let slot = 0;
+    if (this.isMulti) {
+      try {
+        const players = await getLobbyPlayers(code);
+        const i = players.findIndex((p) => p.id === this.myId);
+        slot = i >= 0 ? i : 0;
+      } catch { slot = 0; }
+    }
+    const sp = this.spawnPoint(slot);
+    this.player.spawnAt(sp.x, sp.y);
+
+    if (this.isMulti) {
+      this.unwatchState = watchGameState(code, (states) => { this.netStates = states; });
+    }
+  }
+
+  private async resolveSoloDoc(): Promise<CharDoc | null> {
+    try { const s = localStorage.getItem('zag_game_char'); if (s) return JSON.parse(s) as CharDoc; } catch { /* ignore */ }
+    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) return await r.json() as CharDoc; } catch { /* ignore */ }
+    return null;
+  }
+
+  // Будує локального персонажа + вішає хоткеї анімацій (як було, але для будь-якого doc).
+  private async buildLocalCharacter(doc: CharDoc, prefix: string): Promise<void> {
+    if (!doc.slots || !doc.images) return;
+    const c = await CutoutCharacter.load(this, doc, prefix).catch(() => null);
+    if (!c) return;
+    this.character = c;
+    this.add.existing(c);
+    this.player.setVisible(false);
+    if (doc.clips) {
+      const hotkeyHandler = (ev: KeyboardEvent): void => {
+        if (!this.character) return;
+        for (const [name, clip] of Object.entries(doc.clips!)) {
+          if (!clip.hotkey) continue;
+          if (ev.code === clip.hotkey || ev.key.toLowerCase() === clip.hotkey) {
+            this.character.setAnim(name);
+            this.hotkeyAnimEnd = this.simTime + clip.duration * 1000;
+          }
+        }
+      };
+      window.addEventListener('keydown', hotkeyHandler);
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => window.removeEventListener('keydown', hotkeyHandler));
+    }
+  }
+
+  // ── Синхронізація гравців у кооп-режимі ──
+  private pushMyState(time: number): void {
+    if (time - this.lastNetPush < 80) return; // ~12 апдейтів/сек — щадимо Firebase
+    this.lastNetPush = time;
+    const p = this.player;
+    pushPlayerState(this.lobbyCode, {
+      x: p.floorX, y: p.floorY, hp: p.hp, maxHp: PLAYER.maxHp,
+      anim: this.curAnim, facing: p.facing, charId: this.myCharId, name: getPlayerName(), t: time,
+    });
+  }
+
+  private syncRemotes(dt: number): void {
+    const seen = new Set<string>();
+    for (const [id, st] of Object.entries(this.netStates)) {
+      if (id === this.myId) continue;
+      seen.add(id);
+      let r = this.remotes[id];
+      if (!r) {
+        r = { container: null, loading: false, charId: st.charId, rx: st.x, ry: st.y, tx: st.x, ty: st.y, anim: st.anim, facing: st.facing };
+        this.remotes[id] = r;
+      }
+      r.tx = st.x; r.ty = st.y; r.anim = st.anim; r.facing = st.facing;
+      // лінива загрузка персонажа цього гравця
+      if (!r.container && !r.loading) {
+        const doc = docById(this.lib, st.charId);
+        if (doc) {
+          r.loading = true;
+          CutoutCharacter.load(this, doc, 'r_' + id + '_').then((c) => {
+            if (this.remotes[id] === r) { r.container = c; this.add.existing(c); }
+            else c.destroy();
+          }).catch(() => { r.loading = false; });
+        }
+      }
+      // згладжування позиції + рендер
+      r.rx += (r.tx - r.rx) * Math.min(1, dt * 12);
+      r.ry += (r.ty - r.ry) * Math.min(1, dt * 12);
+      if (r.container) {
+        r.container.setAnim(r.anim);
+        r.container.tick(dt, r.facing);
+        r.container.setPosition(r.rx, r.ry - r.container.feetOffset());
+        r.container.setDepth(r.ry + 0.1);
+      }
+    }
+    // прибрати тих, хто вийшов
+    for (const id of Object.keys(this.remotes)) {
+      if (!seen.has(id)) { this.remotes[id].container?.destroy(); delete this.remotes[id]; }
+    }
   }
 
   private repositionWorld(): void {
@@ -404,14 +535,15 @@ export class GameScene extends Phaser.Scene {
     // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
     if (this.character) {
       const p = this.player;
-      if (time >= this.hotkeyAnimEnd) {
-        const anim = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? (p.running ? 'run' : 'walk') : 'idle';
-        this.character.setAnim(anim);
-      }
+      const natural = !p.grounded ? 'jump' : p.isHurt(time) ? 'hurt' : p.isInAttack(time) ? 'attack' : p.moving ? (p.running ? 'run' : 'walk') : 'idle';
+      if (time >= this.hotkeyAnimEnd) { this.curAnim = natural; this.character.setAnim(natural); }
       this.character.tick(dt, this.player.facing);
       this.character.setPosition(this.player.x, this.player.y - this.character.feetOffset());
       this.character.setDepth(this.player.depth + 0.1);
     }
+
+    // Кооп: шлемо свою позицію й малюємо інших гравців
+    if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); }
 
     // Тригер хвилі (демо-арена; у режимі рівня вимкнено)
     if (!this.levelMode && !this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();
