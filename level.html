@@ -89,6 +89,16 @@
       .lvDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       .planPanel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
       #planToggle.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
+      .secToggle { text-align: left; }
+      .secToggle::before { content: '▸ '; opacity: .8; }
+      .secToggle.open::before { content: '▾ '; }
+      .secBody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+      #npcList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 230px; overflow-y: auto; align-content: flex-start; }
+      .npcCard { position: relative; width: calc(33.333% - 4px); aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: grab; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      .npcCard:active { cursor: grabbing; }
+      .npcCard img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+      .npcCard .npcName { position: absolute; bottom: 2px; left: 2px; right: 2px; font-size: 10px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }
+      .npcEmpty { font-size: 12px; color: var(--muted); padding: 8px 2px; }
       .planHead { display: flex; }
       .planHead button { flex: 1; border-radius: 0; font-size: 12px; padding: 7px 4px; }
       .planHead button.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
@@ -174,13 +184,17 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg>
           </button>
         </div>
-        <div id="tools" class="pane">
-          <button class="header" style="cursor:default">Рівні та налаштування</button>
-          <div class="body">
-
+        <div id="tools" class="pane" style="display:flex;flex-direction:column">
+          <!-- Секція: Рівні -->
+          <button id="secLevels" class="header secToggle open">Рівні</button>
+          <div id="bodyLevels" class="secBody">
             <button id="addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
             <div id="levelList"></div>
             <button id="saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
+          </div>
+          <!-- Секція: Налаштування -->
+          <button id="secSettings" class="header secToggle">Налаштування</button>
+          <div id="bodySettings" class="secBody" style="display:none">
             <button id="fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
             <button id="planToggle" style="width:100%;font-size:12px;padding:8px 4px">Плановість</button>
             <div class="planPanel" id="planPanel">
@@ -205,11 +219,21 @@
               <input type="range" id="scale" min="0.1" max="4" step="0.01" value="1" />
               <span class="val" id="scaleV">1.0</span>
             </div>
-
+          </div>
+          <!-- Секція: Неігрові персонажі -->
+          <button id="secNpc" class="header secToggle">Неігрові персонажі</button>
+          <div id="bodyNpc" class="secBody" style="display:none">
+            <select id="npcCat">
+              <option value="enemy">Вороги</option>
+              <option value="neutral">Нейтрали</option>
+            </select>
+            <div id="npcList"></div>
+          </div>
+          <!-- Футер -->
+          <div class="body" style="margin-top:auto">
             <hr />
             <button id="toGame" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button>
             <div id="statusBar"></div>
-
           </div>
         </div>
       </aside>

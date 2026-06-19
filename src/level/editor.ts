@@ -3,6 +3,7 @@ import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullLevelData, mergeLevelAssets } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
+import { loadCharLibrary, type LibItem } from '../charlib';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -57,6 +58,10 @@ export function initLevelEditor(prefix: string): void {
     viewScale: 1,
     mouse: { x: 0, y: 0 },
   };
+
+  // Неігрові персонажі (вороги) з бібліотеки персонажів + кеш червоних тонованих мініатюр.
+  let npcLib: LibItem[] = [];
+  const npcTinted = new Map<string, HTMLCanvasElement>();
 
   const level = (): Level => state.levels[state.cur];
   const sc = (): number => state.viewScale * state.zoom;
@@ -196,14 +201,23 @@ export function initLevelEditor(prefix: string): void {
       const k2 = gs * Math.SQRT1_2;
       const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
       for (const z of level().enemySpawns) {
-        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); const enemyId = p[2];
         if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
         const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
         ctx.fillStyle = 'rgba(255,40,40,0.20)'; ctx.fill();
         ctx.strokeStyle = 'rgba(255,40,40,0.9)'; ctx.lineWidth = 2; ctx.stroke();
         const ctr = Pf(acx + 1.5, acy + 1.5);
-        ctx.fillStyle = 'rgba(255,40,40,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
+        const tint = enemyId ? npcTinted.get(enemyId) : null;
+        if (tint) { // напівпрозоре червоне зображення виставленого ворога, прив'язане до зони
+          const zh = Math.abs(d.y - a.y) * 1.3 || 64;
+          const zw = zh * (tint.width / tint.height);
+          ctx.globalAlpha = 0.72;
+          ctx.drawImage(tint, ctr.x - zw / 2, ctr.y - zh * 0.78, zw, zh);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = 'rgba(255,40,40,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
+        }
       }
     }
 
@@ -714,8 +728,99 @@ export function initLevelEditor(prefix: string): void {
   }
   $<HTMLButtonElement>('fillBtn')?.addEventListener('click', () => {
     fillOpen = !fillOpen;
-    if (fillMenu) { if (fillOpen) buildFillMenu(); fillMenu.style.display = fillOpen ? 'flex' : 'none'; }
+    if (fillMenu) {
+      if (fillOpen) { buildFillMenu(); positionFillMenu(); }
+      fillMenu.style.display = fillOpen ? 'flex' : 'none';
+    }
     $('fillBtn')?.classList.toggle('on', fillOpen);
+  });
+  // Список «Наповнення» — у правій частині вьюпорта: ширина як таб «Історія» (B5),
+  // верх врівень з кнопкою «＋ Новий рівень».
+  function positionFillMenu(): void {
+    if (!fillMenu) return;
+    const b5 = document.querySelectorAll('#topTabs button')[4] as HTMLElement | undefined;
+    const d2 = $('addLevel');
+    const stage = canvas.getBoundingClientRect();
+    const w = b5?.offsetWidth || 170;
+    fillMenu.style.position = 'fixed';
+    fillMenu.style.left = (stage.right - w - 16) + 'px';
+    fillMenu.style.right = 'auto';
+    fillMenu.style.bottom = 'auto';
+    fillMenu.style.top = (d2 ? d2.getBoundingClientRect().top : stage.top + 16) + 'px';
+    fillMenu.style.width = w + 'px';
+    fillMenu.style.flexDirection = 'column';
+  }
+
+  // ── Згортувані секції правої панелі ──
+  function wireSection(headId: string, bodyId: string): void {
+    const h = $(headId), b = $<HTMLElement>(bodyId);
+    if (!h || !b) return;
+    h.addEventListener('click', () => {
+      const open = b.style.display === 'none';
+      b.style.display = open ? '' : 'none';
+      h.classList.toggle('open', open);
+    });
+  }
+  wireSection('secLevels', 'bodyLevels');
+  wireSection('secSettings', 'bodySettings');
+  wireSection('secNpc', 'bodyNpc');
+
+  // ── Неігрові персонажі: бібліотека ворогів (drag → зона спавна) ──
+  const npcCat = $<HTMLSelectElement>('npcCat');
+  const npcList = $<HTMLElement>('npcList');
+  function buildNpcTint(item: LibItem): void { // червона тонована мініатюра для оверлея на зоні
+    if (!item.thumb || npcTinted.has(item.id)) return;
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+      const c = cv.getContext('2d'); if (!c) return;
+      c.drawImage(img, 0, 0);
+      c.globalCompositeOperation = 'source-atop'; // тонувати лише непрозорі пікселі
+      c.fillStyle = 'rgba(220,30,30,0.72)'; c.fillRect(0, 0, cv.width, cv.height);
+      npcTinted.set(item.id, cv); draw();
+    };
+    img.src = item.thumb;
+  }
+  function renderNpc(): void {
+    if (!npcList) return;
+    npcList.innerHTML = '';
+    if ((npcCat?.value ?? 'enemy') === 'neutral') {
+      const e = document.createElement('div'); e.className = 'npcEmpty'; e.textContent = 'Нейтрали — поки заглушка'; npcList.appendChild(e); return;
+    }
+    const enemies = npcLib.filter((x) => x.cat === 'enemy');
+    if (!enemies.length) {
+      const e = document.createElement('div'); e.className = 'npcEmpty';
+      e.textContent = 'Немає ворогів. Створи персонажа з категорією «Ворог» у редакторі персонажів.';
+      npcList.appendChild(e); return;
+    }
+    for (const it of enemies) {
+      buildNpcTint(it);
+      const card = document.createElement('div'); card.className = 'npcCard'; card.title = it.name; card.draggable = true;
+      if (it.thumb) { const im = document.createElement('img'); im.src = it.thumb; card.appendChild(im); }
+      const nm = document.createElement('div'); nm.className = 'npcName'; nm.textContent = it.name; card.appendChild(nm);
+      card.addEventListener('dragstart', (e) => { (e as DragEvent).dataTransfer?.setData('text/enemy-id', it.id); });
+      npcList.appendChild(card);
+    }
+  }
+  npcCat?.addEventListener('change', renderNpc);
+  loadCharLibrary().then((lib) => { npcLib = lib; renderNpc(); }).catch(() => {});
+
+  // Drag ворога з бібліотеки → призначити зоні спавна під курсором.
+  canvas.addEventListener('dragover', (e) => e.preventDefault());
+  canvas.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const id = (e as DragEvent).dataTransfer?.getData('text/enemy-id');
+    if (!id) return;
+    const w = toWorld((e as DragEvent).offsetX, (e as DragEvent).offsetY);
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+    const lv = level();
+    const idx = lv.enemySpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
+    if (idx < 0) { setStatus('Кинь на червону зону спавна'); return; }
+    pushUndo();
+    const p = lv.enemySpawns[idx].split(',');
+    lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${id}`;
+    save(); draw(); setStatus('Ворога призначено зоні');
   });
 
   // ── Плановість: перемикач Фонова / Ігрова ──

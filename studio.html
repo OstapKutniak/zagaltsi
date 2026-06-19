@@ -152,6 +152,18 @@
       .fillBtn { display: block; width: 100%; text-align: center; padding: 9px 8px; border-radius: 8px; background: #4a4a4a; border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); }
       .fillBtn:hover { background: #565656; }
       .fillBtn.off { opacity: .45; text-decoration: line-through; }
+      /* згортувані секції правої панелі */
+      .secToggle { text-align: left; }
+      .secToggle::before { content: '▸ '; opacity: .8; }
+      .secToggle.open::before { content: '▾ '; }
+      .secBody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+      /* картки неігрових персонажів (drag → зона спавна) */
+      #lv-npcList, #npcList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 230px; overflow-y: auto; align-content: flex-start; }
+      .npcCard { position: relative; width: calc(33.333% - 4px); aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: grab; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      .npcCard:active { cursor: grabbing; }
+      .npcCard img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+      .npcCard .npcName { position: absolute; bottom: 2px; left: 2px; right: 2px; font-size: 10px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }
+      .npcEmpty { font-size: 12px; color: var(--muted); padding: 8px 2px; }
       .imgCell::before { content: ''; display: block; padding-top: 100%; } /* квадрат */
       .imgCell.empty { cursor: default; background: #434343; }
       .imgCell.sel { border-color: var(--accent); }
@@ -319,11 +331,16 @@
           <button class="iconToggle" id="lv-constructorBtn" title="Конструктор — коди елементів UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg></button>
         </div>
         <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
-          <button class="header" style="cursor:default">Рівні та налаштування</button>
-          <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
+          <!-- Секція: Рівні -->
+          <button id="lv-secLevels" class="header secToggle open">Рівні</button>
+          <div id="lv-bodyLevels" class="secBody">
             <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
             <div id="lv-levelList"></div>
             <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
+          </div>
+          <!-- Секція: Налаштування -->
+          <button id="lv-secSettings" class="header secToggle">Налаштування</button>
+          <div id="lv-bodySettings" class="secBody" style="display:none">
             <button id="lv-fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
             <button id="lv-planToggle" style="width:100%;font-size:12px;padding:8px 4px">Плановість</button>
             <div class="planPanel" id="lv-planPanel">
@@ -348,6 +365,18 @@
               <input type="range" id="lv-scale" min="0.1" max="4" step="0.01" value="1" style="flex:1;accent-color:var(--sel)" />
               <span id="lv-scaleV" style="flex:0 0 36px;text-align:right;color:var(--muted)">1.0</span>
             </div>
+          </div>
+          <!-- Секція: Неігрові персонажі -->
+          <button id="lv-secNpc" class="header secToggle">Неігрові персонажі</button>
+          <div id="lv-bodyNpc" class="secBody" style="display:none">
+            <select id="lv-npcCat">
+              <option value="enemy">Вороги</option>
+              <option value="neutral">Нейтрали</option>
+            </select>
+            <div id="lv-npcList"></div>
+          </div>
+          <!-- Футер -->
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)" />
             <button id="lv-toGame" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button>
             <div id="lv-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
