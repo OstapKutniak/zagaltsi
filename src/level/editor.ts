@@ -20,13 +20,13 @@ const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interac
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number }
+interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400 });
+  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32 });
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -105,6 +105,8 @@ export function initLevelEditor(prefix: string): void {
       if (remoteLayouts?.levels?.length && !state.levels.length) {
         state.levels = remoteLayouts.levels as Level[];
         state.cur = remoteLayouts.cur || 0;
+        for (const lv of state.levels) if (typeof lv.grid !== 'number') lv.grid = 48;
+        state.grid = level().grid;
         idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
         refreshLevels();
       }
@@ -116,7 +118,9 @@ export function initLevelEditor(prefix: string): void {
       if (!lv.enemySpawns) lv.enemySpawns = []; // міграція: зони спавна ворогів
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
+      if (typeof lv.grid !== 'number') lv.grid = 48; // міграція: старі рівні мали gs=48
     }
+    state.grid = level().grid;
   }
   function loadImg(a: Asset): void {
     const im = new Image();
@@ -132,7 +136,7 @@ export function initLevelEditor(prefix: string): void {
   function undo(): void {
     const s0 = undoStack.pop(); if (!s0) { setStatus('Нема що відміняти'); return; }
     const o = JSON.parse(s0) as { levels: Level[]; cur: number };
-    state.levels = o.levels; state.cur = Math.min(o.cur, o.levels.length - 1); state.selected = null;
+    state.levels = o.levels; state.cur = Math.min(o.cur, o.levels.length - 1); state.grid = level().grid; state.selected = null;
     refreshLevels(); refreshSel(); draw(); save(); setStatus('↩ Відмінено');
   }
 
@@ -279,7 +283,7 @@ export function initLevelEditor(prefix: string): void {
   function addLevel(): void {
     pushUndo();
     state.levels.push(newLevel(`Рівень ${state.levels.length + 1}`));
-    state.cur = state.levels.length - 1; state.selected = null; refreshLevels(); draw(); save();
+    state.cur = state.levels.length - 1; state.grid = level().grid; state.selected = null; refreshLevels(); draw(); save();
   }
   function refreshLevels(): void {
     const box = $('levelList'); box.innerHTML = '';
@@ -287,14 +291,14 @@ export function initLevelEditor(prefix: string): void {
       const el = document.createElement('div');
       el.className = 'lvCard' + (i === state.cur ? ' sel' : '');
       const nm = document.createElement('div'); nm.textContent = lv.name; el.appendChild(nm);
-      el.onclick = () => { state.cur = i; state.selected = null; refreshLevels(); draw(); save(); };
+      el.onclick = () => { state.cur = i; state.grid = state.levels[i].grid; state.selected = null; refreshLevels(); draw(); save(); };
       el.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; refreshLevels(); save(); } };
       if (state.levels.length > 1) {
         const x = document.createElement('button'); x.className = 'lvDel'; x.textContent = '×';
         x.onclick = (e) => {
           e.stopPropagation(); pushUndo(); state.levels.splice(i, 1);
           if (state.cur >= state.levels.length) state.cur = state.levels.length - 1;
-          state.selected = null; refreshLevels(); draw(); save();
+          state.grid = level().grid; state.selected = null; refreshLevels(); draw(); save();
         };
         el.appendChild(x);
       }
