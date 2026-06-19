@@ -48,6 +48,7 @@ export class GameScene extends Phaser.Scene {
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
   private colliderCells: string[] = [];
   private colliderGrid = 48;
+  private floorSet = new Set<string>(); // "cx,cy" намальованих підлогових (h) клітинок — для поклітинкової прохідності
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
@@ -80,6 +81,20 @@ export class GameScene extends Phaser.Scene {
     }
     if (minY === Infinity) return this.band;
     return { top: this.bandBottom + minY, bottom: this.bandBottom + maxY };
+  }
+
+  // Поклітинкова прохідність: точка (gameX, gameY) лежить на намальованій підлозі?
+  // Інверсія тієї ж ізо-ґратки, що в редакторі (editorY = gameY - bandBottom).
+  private walkableAt(gameX: number, gameY: number): boolean {
+    if (!this.levelMode || !this.floorSet.size) {
+      const b = this.band;
+      return gameY >= b.top && gameY <= b.bottom;
+    }
+    const gs = this.colliderGrid; const k = gs * Math.SQRT1_2;
+    const editorY = gameY - this.bandBottom;
+    const cx = Math.floor((gameX - editorY) / gs);
+    const cy = Math.floor(editorY / k);
+    return this.floorSet.has(cx + ',' + cy);
   }
 
   create(): void {
@@ -220,6 +235,8 @@ export class GameScene extends Phaser.Scene {
     // редакторного Y затягувало б персонажа за нижній край екрана).
     this.colliderCells = doc.collider ?? [];
     this.colliderGrid = doc.grid ?? 48;
+    // Набір підлогових клітинок для поклітинкової прохідності (отвори блокують).
+    this.floorSet.clear();
     // Compute global fallback band from all cells (used when no cells at player's X)
     this.levelBand = null;
     if (this.colliderCells.length) {
@@ -228,6 +245,7 @@ export class GameScene extends Phaser.Scene {
       for (const c of this.colliderCells) {
         const p = c.split(','); if ((p[2] ?? 'h') !== 'h') continue;
         const cy = Number(p[1]); if (!Number.isFinite(cy)) continue;
+        this.floorSet.add(p[0] + ',' + p[1]);
         const y0 = cy * k, y1 = (cy + 1) * k;
         if (y0 < minY) minY = y0; if (y1 > maxY) maxY = y1;
       }
@@ -381,7 +399,7 @@ export class GameScene extends Phaser.Scene {
     const band = this.getBandAtX(this.player.floorX);
 
     const cmd = this.controls.sample();
-    this.player.update(cmd, time, dt, band);
+    this.player.update(cmd, time, dt, (x, y) => this.walkableAt(x, y));
 
     // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
     if (this.character) {

@@ -3,10 +3,8 @@ import { Actor } from './Actor';
 import { PLAYER, JUMP, WORLD_WIDTH } from '../config';
 import type { InputCommand } from '../core/input';
 
-interface Band {
-  top: number;
-  bottom: number;
-}
+// Чи прохідна точка (gameX, gameY) — поклітинкова перевірка підлоги (з GameScene).
+type Walkable = (x: number, y: number) => boolean;
 
 // Герой. Уся поведінка керується командами вводу (cmd) — це "симуляція,
 // відокремлена від керування", фундамент під майбутній кооп.
@@ -26,7 +24,7 @@ export class Player extends Actor {
     super(scene, x, y, 'player', PLAYER.maxHp);
   }
 
-  update(cmd: InputCommand, time: number, dt: number, band: Band): void {
+  update(cmd: InputCommand, time: number, dt: number, walkable: Walkable): void {
     this.moving = false;
     this.running = false;
     // Під час удару герой "вкопаний" — не ходить.
@@ -43,10 +41,17 @@ export class Player extends Actor {
 
       const len = Math.hypot(vx, vy) || 1; // нормалізація діагоналі
       const spd = PLAYER.speed * (cmd.run ? 1.7 : 1);
-      this.fx += (vx / len) * spd * dt;
-      this.fy += (vy / len) * spd * dt;
-      this.fx = Phaser.Math.Clamp(this.fx, this.minX, this.maxX);
-      this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
+      const dx = (vx / len) * spd * dt;
+      const dy = (vy / len) * spd * dt;
+      const ox = this.fx, oy = this.fy;
+      const curOk = walkable(ox, oy); // стоїмо на підлозі?
+      // Рух по осях ОКРЕМО — ковзання вздовж краю/отвору, симетрично в обидва боки.
+      let nx = Phaser.Math.Clamp(ox + dx, this.minX, this.maxX);
+      if (curOk && dx !== 0 && !walkable(nx, oy)) nx = ox; // вперлись по X
+      let ny = oy + dy;
+      if (curOk && dy !== 0 && !walkable(nx, ny)) ny = oy; // вперлись по глибині
+      this.fx = nx;
+      this.fy = ny;
 
       if (cmd.jump) this.jump(JUMP.power);
       if (cmd.attack) this.tryAttack(time);
