@@ -314,6 +314,7 @@ function applyOrigin(): void {
   state.origin.y = canvas.height * 0.55 + state.pan.y; // стегно ~центр -> скелет по центру
 }
 function resize(): void {
+  if (!canvas.offsetWidth) return; // прихований (інший розділ) — не чіпати, інакше canvas 0×0 і viewScale 0
   canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
   applyOrigin();
   state.viewScale = (Math.min(canvas.width, canvas.height) / 470) * state.zoom; // ввесь персонаж влазить
@@ -729,6 +730,7 @@ function setMode(mode: string): void {
     b.classList.toggle('light', b.getAttribute('data-tab') === mode);
   });
   if (mode === 'level') window.dispatchEvent(new CustomEvent('levelTabActivated'));
+  else if (mode === 'char') requestAnimationFrame(() => { resize(); draw(); }); // канвас знову видимий → перецентрувати
 }
 for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
   const tab = b.getAttribute('data-tab');
