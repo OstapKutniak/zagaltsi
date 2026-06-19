@@ -261,7 +261,6 @@
           <button id="lv-delSpawn" title="Прибрати вибрану точку спавна">－ Спавн</button>
           <button id="lv-enemySpawnBtn" title="Намалювати зону спавна ворогів (червоний 3×3). Ворог зʼявиться у випадковій точці зони.">Спавн ворогів</button>
           <button id="lv-enemyEraseBtn" title="Прибрати зону спавна ворогів під курсором">Прибрати спавн ворогів</button>
-          <span id="lv-spawnInfo" style="font-size:12px;align-self:center"></span>
           <button id="lv-clearCollider" style="margin-left:auto" title="Очистити всі шляхи">Очистити все</button>
         </div>
       </section>
@@ -369,10 +368,10 @@
           <!-- Секція: Неігрові персонажі -->
           <button id="lv-secNpc" class="header secToggle">Неігрові персонажі</button>
           <div id="lv-bodyNpc" class="secBody" style="display:none">
-            <select id="lv-npcCat">
-              <option value="enemy">Вороги</option>
-              <option value="neutral">Нейтрали</option>
-            </select>
+            <div class="planHead">
+              <button id="lv-npcEnemyBtn" class="on">Вороги</button>
+              <button id="lv-npcNeutralBtn">Нейтрали</button>
+            </div>
             <div id="lv-npcList"></div>
           </div>
           <!-- Футер -->

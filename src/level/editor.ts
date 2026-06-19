@@ -766,7 +766,9 @@ export function initLevelEditor(prefix: string): void {
   wireSection('secNpc', 'bodyNpc');
 
   // ── Неігрові персонажі: бібліотека ворогів (drag → зона спавна) ──
-  const npcCat = $<HTMLSelectElement>('npcCat');
+  let npcCatVal: 'enemy' | 'neutral' = 'enemy';
+  const npcEnemyBtn = $<HTMLButtonElement>('npcEnemyBtn');
+  const npcNeutralBtn = $<HTMLButtonElement>('npcNeutralBtn');
   const npcList = $<HTMLElement>('npcList');
   function buildNpcTint(item: LibItem): void { // червона тонована мініатюра для оверлея на зоні
     if (!item.thumb || npcTinted.has(item.id)) return;
@@ -781,10 +783,19 @@ export function initLevelEditor(prefix: string): void {
     };
     img.src = item.thumb;
   }
+  function setNpcCat(cat: 'enemy' | 'neutral'): void {
+    npcCatVal = cat;
+    npcEnemyBtn?.classList.toggle('on', cat === 'enemy');
+    npcNeutralBtn?.classList.toggle('on', cat === 'neutral');
+    renderNpc();
+  }
+  npcEnemyBtn?.addEventListener('click', () => setNpcCat('enemy'));
+  npcNeutralBtn?.addEventListener('click', () => setNpcCat('neutral'));
+
   function renderNpc(): void {
     if (!npcList) return;
     npcList.innerHTML = '';
-    if ((npcCat?.value ?? 'enemy') === 'neutral') {
+    if (npcCatVal === 'neutral') {
       const e = document.createElement('div'); e.className = 'npcEmpty'; e.textContent = 'Нейтрали — поки заглушка'; npcList.appendChild(e); return;
     }
     const enemies = npcLib.filter((x) => x.cat === 'enemy');
@@ -802,7 +813,6 @@ export function initLevelEditor(prefix: string): void {
       npcList.appendChild(card);
     }
   }
-  npcCat?.addEventListener('change', renderNpc);
   loadCharLibrary().then((lib) => { npcLib = lib; renderNpc(); }).catch(() => {});
 
   // Drag ворога з бібліотеки → призначити зоні спавна під курсором.

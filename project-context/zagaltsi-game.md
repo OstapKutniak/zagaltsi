@@ -71,3 +71,64 @@ metadata:
 **TODO незначне:** workflow юзає actions на Node 20 (deprecation попередження, не блокує) — за бажанням бампнути версії пізніше.
 
 **Середовище:** Windows. Node v24.16 LTS (поставлено через winget), npm 11.13, Git 2.54. PATH у нових PowerShell-сесіях може не містити node — за потреби: `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
+
+---
+
+## ОНОВЛЕННЯ (2026-06)
+
+### Таймлайн: редагування ключів (src/rig/main.ts)
+
+- **Drag ключів по часовій осі:** `makeDot()` приймає `Keyframe`; `beginKeyDrag(clientX, primary)` захоплює `{k, t0}` для всіх виділених ключів; глобальний `mousemove` зрушує час, `mouseup` ресортує `clip.keys` і ремапить `selKeys` за об'єктною ідентичністю.
+- **Box-selection:** кліп на порожньому місці треку → малюється `boxEl` (fixed-div); `selectKeysInBox(x1,y1,x2,y2)` читає `dataset.ki` у `.keyDot` і виділяє ключі.
+- **Clipboard (Ctrl+C/V):** `keyClipboard: Keyframe[]`; паст вставляє відносно `tlHoverFrame` (курсор над таймлайном); Ctrl+C/V спрацьовують лише якщо `tlHoverFrame !== null`.
+
+### Конструктор (src/ui-constructor.ts) — різні схеми кодів
+
+Редактор рівнів і редактор персонажів більше не перетинаються:
+- **Рівні:** блок = літера (`A`, `B`, …), кнопка = літера+цифра (`A1`, `B3`).
+- **Персонажі:** блок = цифра (`1`, `2`, …), кнопка = цифра+літера (`1A`, `2C`).
+Детектується за видимістю `#lv-levelToolbar | #levelToolbar`.
+
+### Редактор рівнів — зони спавна ворогів
+
+**Toolbar C (bottom):** кнопки `enemySpawnBtn` / `enemyEraseBtn` (ids з prefix).
+- Клік «Спавн ворогів» → `state.pathTool = 'enemy'` → `enemyAt(sx,sy)` записує зону у `Level.enemySpawns: string[]` як `"cx,cy"` (підлогова ізо-ґратка 3×3, кут = клітинка - 1).
+- Клік «Прибрати спавн ворогів» → `pathTool = 'enemyErase'` → фільтрує зони під курсором.
+- **Зона → гра:** `GameScene` читає `doc.enemySpawns`, для кожної зони спавнить `Enemy` у детерміновано-випадковій точці (синусний хеш `rnd(a,b)=frac(sin(a·127.1+b·311.7)·43758.5453)` — однакові результати у всіх кооп-клієнтів без синхронізації).
+- **Формат:** `"cx,cy"` або `"cx,cy,enemyId"` (3-й сегмент — id ворога з бібліотеки персонажів). Порожня зона = крапка, зона з ворогом = тонована червона мініатюра.
+- `clearCollider` тепер очищує також `enemySpawns`.
+- Захист від виродженого канвасу: `if (!Number.isFinite(fcx) || !Number.isFinite(fcy)) return` у `enemyAt()`.
+
+### Редактор рівнів — ізо-ґратка колайдерів (ВАЖЛИВО для консистентності)
+
+Та сама формула у draw, paintAt (інверсія), GameScene (walkableAt), зонах ворогів:
+- `k = gs * Math.SQRT1_2`
+- Підлога: `P(cx,cy) = toScreen(cx*gs + cy*k, cy*k)` ; інверсія: `fcx = floor((wx-wy)/gs), fcy = floor(wy/k)`
+- Стіна: `P(cx,cy) = toScreen(cx*k, cx*k + cy*gs)`
+- **НЕ** міняти цю формулу — будь-яка зміна ламає сумісність між draw/editor/game.
+
+### Редактор рівнів — права панель (src/level/editor.ts + studio.html + level.html)
+
+Три **zgортувані секції** (клас `secToggle` / `secBody`, `wireSection(headId, bodyId)`):
+1. **Рівні** (`secLevels` / `bodyLevels`) — розгорнуто при старті. Містить: `＋ Новий рівень`, grid карток рівнів, `Зберегти рівень`.
+2. **Налаштування** (`secSettings` / `bodySettings`) — закрито. Містить: `Наповнення` (fillBtn), `Плановість` (planToggle → згортає/розгортає planPanel).
+3. **Неігрові персонажі** (`secNpc` / `bodyNpc`) — закрито. Містить: дві кнопки-перемикачі `npcEnemyBtn` / `npcNeutralBtn` (Вороги / Нейтрали) + `npcList` (grid карток).
+
+**«Наповнення» flyout** — список категорій у правій частині вьюпорта (fixed position): ширина як таб B5 («Редактор Історії»), верх врівень з `addLevel` (`＋ Новий рівень`). `positionFillMenu()` ставить `fixed; left = stage.right - w - 16; top = addLevel.getBoundingClientRect().top`.
+
+**«Плановість»** — кнопка-заголовок `planToggle`; натиск згортає/розгортає `planPanel` (Фонова / Ігрова перемикачі). Ігрова плановість — два `<button disabled>` заглушки, контент визначить пізніше.
+
+**Неігрові персонажі:**
+- `npcEnemyBtn` / `npcNeutralBtn` — дві кнопки-тогл (замість select), клас `on` на активній. `setNpcCat(cat)` оновлює `npcCatVal: 'enemy'|'neutral'` і перемальовує список.
+- `renderNpc()` — якщо `npcCatVal === 'neutral'` → «Нейтрали — поки заглушка»; якщо `enemy` → картки (`npcCard`) з бібліотеки персонажів (filter `cat === 'enemy'`), `draggable=true`.
+- Drag ворога з бібліотеки → `dragstart` пише `text/enemy-id`; `canvas drop` знаходить зону під курсором, записує `"cx,cy,id"`, зберігає в IDB, перемальовує.
+- **Тонована мініатюра** (`buildNpcTint`): `source-atop` compositing → `rgba(220,30,30,0.72)` поверх непрозорих пікселів → кеш у `npcTinted: Map<id, HTMLCanvasElement>`. Малюється у `draw()` на центрі зони.
+- `loadCharLibrary()` — `src/charlib.ts` (merges remote `studio-data/char-library.json` + local IDB `ostap_library`). `LibItem { id, name, cat:'char'|'enemy', doc, thumb }`.
+
+**Toolbar C (studio.html):** `lv-spawnInfo` span прибрано (зайвий лічильник спавнів). В level.html його ніколи не було.
+
+### Відкладено / чекає вводу
+
+- **Колайдери в грі** (ходьба): асиметрія ліво/право, мінора розбіжність editor↔game. Відкладено, вернутись після поточного списку.
+- **Ігрова плановість** (зміст двох кнопок у `planGame`): формулювання прийдуть після колайдерів.
+- **Рендер ворога по id у грі**: `enemySpawns` зберігає `enemyId`, але `GameScene` поки спавнить узагальненого `Enemy(red rect)`, не читаючи конкретного персонажа. Наступний великий шматок.
