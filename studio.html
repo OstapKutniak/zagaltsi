@@ -142,6 +142,7 @@
       .lvCard.empty:hover { opacity: 1; }
       .lvDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       .planPanel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      #lv-planToggle.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
       .planHead { display: flex; }
       .planHead button { flex: 1; border-radius: 0; font-size: 12px; padding: 7px 4px; }
       .planHead button.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
@@ -246,6 +247,8 @@
           <button id="lv-erasePathBtn" title="Видалити клітинку шляху">Видалити шлях</button>
           <button id="lv-addSpawn" title="Додати стартову локацію (точку спавна, до 5)">＋ Спавн</button>
           <button id="lv-delSpawn" title="Прибрати вибрану точку спавна">－ Спавн</button>
+          <button id="lv-enemySpawnBtn" title="Намалювати зону спавна ворогів (червоний 3×3). Ворог зʼявиться у випадковій точці зони.">Спавн ворогів</button>
+          <button id="lv-enemyEraseBtn" title="Прибрати зону спавна ворогів під курсором">Прибрати спавн ворогів</button>
           <span id="lv-spawnInfo" style="font-size:12px;align-self:center"></span>
           <button id="lv-clearCollider" style="margin-left:auto" title="Очистити всі шляхи">Очистити все</button>
         </div>
@@ -322,7 +325,8 @@
             <div id="lv-levelList"></div>
             <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
             <button id="lv-fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
-            <div class="planPanel">
+            <button id="lv-planToggle" style="width:100%;font-size:12px;padding:8px 4px">Плановість</button>
+            <div class="planPanel" id="lv-planPanel">
               <div class="planHead">
                 <button id="lv-planBgBtn" class="on">Фонова</button>
                 <button id="lv-planGameBtn">Ігрова</button>

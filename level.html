@@ -88,6 +88,7 @@
       .lvCard.empty:hover { opacity: 1; }
       .lvDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       .planPanel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      #planToggle.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
       .planHead { display: flex; }
       .planHead button { flex: 1; border-radius: 0; font-size: 12px; padding: 7px 4px; }
       .planHead button.on { background: var(--accent); color: #1b1b1b; font-weight: 600; }
@@ -140,6 +141,8 @@
           <button id="pathHBtn" title="Намалювати горизонтальний шлях (земля)">Горизонтальний шлях</button>
           <button id="pathVBtn" title="Намалювати вертикальний шлях (стіна)">Вертикальний шлях</button>
           <button id="erasePathBtn" title="Видалити клітинку шляху">Видалити шлях</button>
+          <button id="enemySpawnBtn" title="Намалювати зону спавна ворогів (червоний 3×3). Ворог зʼявиться у випадковій точці зони.">Спавн ворогів</button>
+          <button id="enemyEraseBtn" title="Прибрати зону спавна ворогів під курсором">Прибрати спавн ворогів</button>
           <button id="clearCollider" style="margin-left:auto" title="Очистити всі шляхи">Очистити все</button>
         </div>
       </section>
@@ -179,7 +182,8 @@
             <div id="levelList"></div>
             <button id="saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
             <button id="fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
-            <div class="planPanel">
+            <button id="planToggle" style="width:100%;font-size:12px;padding:8px 4px">Плановість</button>
+            <div class="planPanel" id="planPanel">
               <div class="planHead">
                 <button id="planBgBtn" class="on">Фонова</button>
                 <button id="planGameBtn">Ігрова</button>

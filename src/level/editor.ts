@@ -19,13 +19,13 @@ const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interac
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number }
+interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400 });
+  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400 });
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -40,7 +40,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -108,6 +108,7 @@ export function initLevelEditor(prefix: string): void {
     for (const lv of state.levels) {
       if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
       if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // міграція: один спавн -> масив
+      if (!lv.enemySpawns) lv.enemySpawns = []; // міграція: зони спавна ворогів
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
     }
@@ -190,6 +191,19 @@ export function initLevelEditor(prefix: string): void {
         ctx.closePath();
         ctx.fillStyle = type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)'; ctx.fill();
         ctx.strokeStyle = type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)'; ctx.stroke();
+      }
+      // Зони спавна ворогів — червоний 3×3 (підлогова ґратка) + точка-центр.
+      const k2 = gs * Math.SQRT1_2;
+      const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
+      for (const z of level().enemySpawns) {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+        ctx.fillStyle = 'rgba(255,40,40,0.20)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,40,40,0.9)'; ctx.lineWidth = 2; ctx.stroke();
+        const ctr = Pf(acx + 1.5, acy + 1.5);
+        ctx.fillStyle = 'rgba(255,40,40,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
       }
     }
 
@@ -390,14 +404,25 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; draw(); save(); });
-  const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
-  const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; draw(); save(); });
+  const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn', 'enemySpawnBtn', 'enemyEraseBtn'] as const;
+  const pathBtnTools: Record<string, 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase', enemySpawnBtn: 'enemy', enemyEraseBtn: 'enemyErase' };
   for (const id of pathBtnIds) {
     $<HTMLButtonElement>(id)?.addEventListener('click', () => {
       const tool = pathBtnTools[id];
       state.pathTool = state.pathTool === tool ? null : tool;
       updatePathBtns();
+    });
+  }
+  // «Плановість» — заголовок, що згортає/розгортає тогл Фонова/Ігрова
+  const planToggle = $<HTMLButtonElement>('planToggle');
+  const planPanel = $<HTMLElement>('planPanel');
+  if (planToggle && planPanel) {
+    planToggle.classList.add('on');
+    planToggle.addEventListener('click', () => {
+      const open = planPanel.style.display === 'none';
+      planPanel.style.display = open ? '' : 'none';
+      planToggle.classList.toggle('on', open);
     });
   }
 
@@ -421,6 +446,8 @@ export function initLevelEditor(prefix: string): void {
     $('pathHBtn')?.classList.toggle('on', state.pathTool === 'h');
     $('pathVBtn')?.classList.toggle('on', state.pathTool === 'v');
     $('erasePathBtn')?.classList.toggle('on', state.pathTool === 'erase');
+    $('enemySpawnBtn')?.classList.toggle('on', state.pathTool === 'enemy');
+    $('enemyEraseBtn')?.classList.toggle('on', state.pathTool === 'enemyErase');
   }
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
@@ -448,6 +475,23 @@ export function initLevelEditor(prefix: string): void {
     }
     draw();
   }
+  // Зона спавна ворогів — 3×3 підлогових клітинки, центровані на клітинці під курсором.
+  function enemyAt(sx: number, sy: number): void {
+    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
+    const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k); // підлогова клітинка під курсором
+    if (!Number.isFinite(fcx) || !Number.isFinite(fcy)) return; // вироджений канвас — не писати биті анкери
+    const lv = level();
+    if (state.pathTool === 'enemyErase') {
+      lv.enemySpawns = lv.enemySpawns.filter((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+      });
+    } else {
+      const key = (fcx - 1) + ',' + (fcy - 1); // 3×3 з центром на клітинці курсора
+      if (!lv.enemySpawns.includes(key)) lv.enemySpawns.push(key);
+    }
+    draw();
+  }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
@@ -462,6 +506,7 @@ export function initLevelEditor(prefix: string): void {
       if (Math.abs(x - sp.x) < 16 && y > sp.y - 52 && y < sp.y + 8) { pushUndo(); state.markerDrag = 'spawn'; state.spawnSel = i; refreshSpawnUI(); return; }
     }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
+    if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
     if (state.pathTool) { pushUndo(); painting = true; paintAt(x, y); return; }
     const hit = hitTest(x, y);
     state.selected = hit;
@@ -734,7 +779,7 @@ export function initLevelEditor(prefix: string): void {
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    return { name: lv.name, placed: lv.placed, collider: lv.collider, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, assets: used };
+    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, assets: used };
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
     idbSet('zag_level', buildLevelDoc())

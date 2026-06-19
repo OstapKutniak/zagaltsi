@@ -13,6 +13,7 @@ export interface LevelDoc {
   start: number;
   end: number;
   collider?: string[];
+  enemySpawns?: string[]; // зони спавна ворогів: "cx,cy" — кут 3×3 підлогових клітинок
   grid?: number;
 }
 

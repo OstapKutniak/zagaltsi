@@ -266,6 +266,20 @@ export class GameScene extends Phaser.Scene {
       if (minY !== Infinity) this.levelBand = { top: this.bandBottom + minY, bottom: this.bandBottom + maxY };
     }
 
+    // Вороги з намальованих зон 3×3: позиція в межах зони — детермінована (однакова
+    // на всіх клієнтах коопу й між перезаходами), щоб не було розсинхрону.
+    if (doc.enemySpawns && doc.enemySpawns.length) {
+      const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
+      const rnd = (a: number, b: number): number => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+      for (const z of doc.enemySpawns) {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const rcx = acx + rnd(acx, acy) * 3, rcy = acy + rnd(acy, acx) * 3;
+        const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
+        this.enemies.push(new Enemy(this, gx, gy));
+      }
+    }
+
     // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
     this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
