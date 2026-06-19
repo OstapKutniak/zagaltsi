@@ -3,6 +3,7 @@ import { initLevelEditor } from '../level/editor';
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
+import { toggleConstructor } from '../ui-constructor';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -1597,6 +1598,9 @@ $<HTMLButtonElement>('firstFrameBtn').addEventListener('click', () => {
 });
 $<HTMLButtonElement>('invertBtn').addEventListener('click', invertAnim);
 $<HTMLButtonElement>('allKeyBtn').addEventListener('click', setAllKey);
+$<HTMLButtonElement>('constructorBtn')?.addEventListener('click', () => {
+  $('constructorBtn').classList.toggle('on', toggleConstructor());
+});
 $<HTMLInputElement>('bwPreview').addEventListener('change', (e) => {
   $<HTMLIFrameElement>('previewFrame').style.filter = (e.target as HTMLInputElement).checked ? 'grayscale(1)' : '';
 });

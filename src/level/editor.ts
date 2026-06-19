@@ -2,6 +2,7 @@
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullLevelData, mergeLevelAssets } from '../sync';
+import { toggleConstructor } from '../ui-constructor';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -645,6 +646,8 @@ export function initLevelEditor(prefix: string): void {
     linesBtn.classList.toggle('on', state.showMarkers);
     draw();
   });
+  const constructorBtn = $<HTMLButtonElement>('constructorBtn');
+  constructorBtn?.addEventListener('click', () => constructorBtn.classList.toggle('on', toggleConstructor()));
 
   // ── Наповнення: flyout категорій у вьюпорті; клік ховає/вертає об'єкти категорії ──
   const fillMenu = $<HTMLElement>('fillMenu');
