@@ -17,8 +17,8 @@ interface Remote {
   container: CutoutCharacter | null;
   loading: boolean;
   charId: string;
-  rx: number; ry: number;      // згладжена екранна позиція
-  tx: number; ty: number;      // ціль із мережі
+  rx: number; ry: number; rz: number;  // згладжена позиція (+ висота підскоку)
+  tx: number; ty: number; tz: number;  // ціль із мережі
   anim: string; facing: number;
 }
 
@@ -348,7 +348,7 @@ export class GameScene extends Phaser.Scene {
     this.lastNetPush = time;
     const p = this.player;
     pushPlayerState(this.lobbyCode, {
-      x: p.floorX, y: p.floorY, hp: p.hp, maxHp: PLAYER.maxHp,
+      x: p.floorX, y: p.floorY, z: p.airHeight, hp: p.hp, maxHp: PLAYER.maxHp,
       anim: this.curAnim, facing: p.facing, charId: this.myCharId, name: getPlayerName(), t: time,
     });
   }
@@ -360,10 +360,10 @@ export class GameScene extends Phaser.Scene {
       seen.add(id);
       let r = this.remotes[id];
       if (!r) {
-        r = { container: null, loading: false, charId: st.charId, rx: st.x, ry: st.y, tx: st.x, ty: st.y, anim: st.anim, facing: st.facing };
+        r = { container: null, loading: false, charId: st.charId, rx: st.x, ry: st.y, rz: st.z ?? 0, tx: st.x, ty: st.y, tz: st.z ?? 0, anim: st.anim, facing: st.facing };
         this.remotes[id] = r;
       }
-      r.tx = st.x; r.ty = st.y; r.anim = st.anim; r.facing = st.facing;
+      r.tx = st.x; r.ty = st.y; r.tz = st.z ?? 0; r.anim = st.anim; r.facing = st.facing;
       // лінива загрузка персонажа цього гравця
       if (!r.container && !r.loading) {
         const doc = docById(this.lib, st.charId);
@@ -375,14 +375,15 @@ export class GameScene extends Phaser.Scene {
           }).catch(() => { r.loading = false; });
         }
       }
-      // згладжування позиції + рендер
+      // згладжування позиції + рендер (rz — висота підскоку, піднімає над землею)
       r.rx += (r.tx - r.rx) * Math.min(1, dt * 12);
       r.ry += (r.ty - r.ry) * Math.min(1, dt * 12);
+      r.rz += (r.tz - r.rz) * Math.min(1, dt * 18); // стрибок реагує трохи швидше
       if (r.container) {
         r.container.setAnim(r.anim);
         r.container.tick(dt, r.facing);
-        r.container.setPosition(r.rx, r.ry - r.container.feetOffset());
-        r.container.setDepth(r.ry + 0.1);
+        r.container.setPosition(r.rx, r.ry - r.container.feetOffset() - r.rz);
+        r.container.setDepth(r.ry + 0.1); // глибина за підлогою, не за висотою
       }
     }
     // прибрати тих, хто вийшов

@@ -117,7 +117,7 @@ export async function leaveLobby(code: string): Promise<void> {
 // ---- In-game player state sync ----
 
 export interface PlayerState {
-  x: number; y: number;
+  x: number; y: number; z: number; // z — висота підскоку (стрибок)
   hp: number; maxHp: number;
   anim: string; facing: number;
   charId: string; name: string;

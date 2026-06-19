@@ -35,6 +35,9 @@ export class Actor extends Phaser.GameObjects.Sprite {
   get grounded(): boolean {
     return this.airZ <= 0;
   }
+  get airHeight(): number {
+    return this.airZ; // висота підскоку (для синхронізації стрибка в кооп)
+  }
 
   // Затиснути позицію в смугу підлоги (після зміни розміру екрана).
   clampDepth(top: number, bottom: number): void {
