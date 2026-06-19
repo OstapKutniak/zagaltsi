@@ -32,12 +32,21 @@ function build(): HTMLDivElement {
     'position:fixed;inset:0;z-index:9000;background:rgba(255,255,255,0.5);pointer-events:none;';
   // Блоки — видимі панелі (.pane), iconBar-и та верхні таби.
   const panes = Array.from(document.querySelectorAll('.pane, #iconBar, #topTabs')).filter(isVisible);
+  // Дві схеми кодів, щоб редактори не плутались:
+  //   рівні      — блок літерою (A), кнопка літера+цифра (A1)
+  //   персонажі  — блок цифрою (1), кнопка цифра+літера (1A)
+  const lvBar = document.querySelector('#lv-levelToolbar, #levelToolbar');
+  const isLevel = !!(lvBar && isVisible(lvBar));
   let li = 0;
   for (const pane of panes) {
-    const letter = String.fromCharCode(65 + li++);
-    addBox(root, pane.getBoundingClientRect(), letter, true);
+    const block = isLevel ? String.fromCharCode(65 + li) : String(li + 1);
+    li++;
+    addBox(root, pane.getBoundingClientRect(), block, true);
     const ctrls = Array.from(pane.querySelectorAll('button, select, input[type=range]')).filter(isVisible);
-    ctrls.forEach((c, i) => addBox(root, c.getBoundingClientRect(), letter + (i + 1), false));
+    ctrls.forEach((c, i) => {
+      const code = isLevel ? block + (i + 1) : block + String.fromCharCode(65 + i);
+      addBox(root, c.getBoundingClientRect(), code, false);
+    });
   }
   return root;
 }
