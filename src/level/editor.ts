@@ -45,6 +45,7 @@ export function initLevelEditor(prefix: string): void {
     grid: 48,
     snap: true,
     showCollider: true,
+    showMarkers: true,
     zoom: 0.6,
     pan: { x: 0, y: 0 },
     origin: { x: 0, y: 0 },
@@ -58,6 +59,9 @@ export function initLevelEditor(prefix: string): void {
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
 
+  // Надгробки: id видалених ассетів, щоб синк із GitHub не повертав їх назад.
+  const deletedIds = new Set<string>();
+  function rememberDeleted(id: string): void { deletedIds.add(id); idbSet('zag_deleted_assets', [...deletedIds]).catch(() => {}); }
   let saveTimer = 0;
   function save(): void {
     clearTimeout(saveTimer);
@@ -70,6 +74,7 @@ export function initLevelEditor(prefix: string): void {
     try {
       let a = await idbGet<Asset[]>('zag_assets');
       let l = await idbGet<{ levels: Level[]; cur: number }>('zag_levels');
+      const d = await idbGet<string[]>('zag_deleted_assets'); if (d) for (const id of d) deletedIds.add(id);
       if (!a) { try { const s = localStorage.getItem('zag_assets'); if (s) { a = JSON.parse(s) as Asset[]; await idbSet('zag_assets', a); } } catch { /* ignore */ } }
       if (!l) { try { const s = localStorage.getItem('zag_levels'); if (s) { l = JSON.parse(s); await idbSet('zag_levels', l); } } catch { /* ignore */ } }
       if (a) { state.assets = a; for (const as of a) loadImg(as); }
@@ -78,7 +83,8 @@ export function initLevelEditor(prefix: string): void {
     } catch { /* ignore */ }
     // Pull from GitHub in background — merge new assets, update layouts if remote has data
     pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
-      const { merged, added } = mergeLevelAssets(state.assets, remoteAssets);
+      const remoteFiltered = (remoteAssets ?? []).filter((r) => !deletedIds.has((r as Asset).id));
+      const { merged, added } = mergeLevelAssets(state.assets, remoteFiltered);
       if (added > 0) {
         state.assets = merged;
         for (const as of merged.slice(-added)) loadImg(as as Asset);
@@ -186,16 +192,18 @@ export function initLevelEditor(prefix: string): void {
     }
 
     const lv = level();
-    const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#5aff8f'; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
-    ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
-    ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
-    ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
-    const sp = toScreen(lv.spawn.x, lv.spawn.y);
-    ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
-    ctx.fillStyle = '#ffd000'; ctx.fillRect(sp.x, sp.y - 42, 20, 13);
-    ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
+    if (state.showMarkers) {
+      const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#5aff8f'; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
+      ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
+      ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
+      ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
+      const sp = toScreen(lv.spawn.x, lv.spawn.y);
+      ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
+      ctx.fillStyle = '#ffd000'; ctx.fillRect(sp.x, sp.y - 42, 20, 13);
+      ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
+    }
 
     if (state.camView) {
       // Game view: 1280×576, floor (Y=0 in editor) at 550/576 from top of game screen.
@@ -267,6 +275,7 @@ export function initLevelEditor(prefix: string): void {
       const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '×';
       del.addEventListener('click', (ev) => {
         ev.stopPropagation(); ev.preventDefault();
+        rememberDeleted(a.id);
         state.assets = state.assets.filter((x) => x.id !== a.id);
         for (const lv of state.levels) lv.placed = lv.placed.filter((p) => p.asset !== a.id);
         if (state.selected && !level().placed.find((p) => p.id === state.selected)) state.selected = null;
@@ -596,6 +605,19 @@ export function initLevelEditor(prefix: string): void {
   showColliderBtn?.addEventListener('click', () => {
     state.showCollider = !state.showCollider;
     showColliderBtn.classList.toggle('on', state.showCollider);
+    draw();
+  });
+  const bwBtn = $<HTMLButtonElement>('bwBtn');
+  let bwOn = false;
+  bwBtn?.addEventListener('click', () => {
+    bwOn = !bwOn;
+    bwBtn.classList.toggle('on', bwOn);
+    if (lvPreviewFrame) lvPreviewFrame.style.filter = bwOn ? 'grayscale(1)' : '';
+  });
+  const linesBtn = $<HTMLButtonElement>('linesBtn');
+  linesBtn?.addEventListener('click', () => {
+    state.showMarkers = !state.showMarkers;
+    linesBtn.classList.toggle('on', state.showMarkers);
     draw();
   });
 
