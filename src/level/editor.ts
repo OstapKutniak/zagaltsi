@@ -118,7 +118,7 @@ export function initLevelEditor(prefix: string): void {
       if (!lv.enemySpawns) lv.enemySpawns = []; // міграція: зони спавна ворогів
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
-      if (typeof lv.grid !== 'number') lv.grid = 48; // міграція: старі рівні мали gs=48
+      if (typeof lv.grid !== 'number') lv.grid = 32; // міграція: всі рівні на gs=32
     }
     state.grid = level().grid;
   }
