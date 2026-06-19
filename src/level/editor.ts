@@ -704,33 +704,27 @@ export function initLevelEditor(prefix: string): void {
   $('zFront')?.addEventListener('click', () => reorderSel('front'));
   $('zBottom')?.addEventListener('click', () => reorderSel('bottom'));
 
-  // ── керування точками спавна (до 5, різнокольорові) ──
+  // ── керування точками спавна (до 5, різнокольорові) — кнопки в нижній панелі ──
   function refreshSpawnUI(): void {
+    const lv = level();
+    state.spawnSel = Math.max(0, Math.min(state.spawnSel, lv.spawns.length - 1));
     const info = document.getElementById(prefix + 'spawnInfo');
-    if (info) { const n = state.spawnSel + 1, tot = level().spawns.length; info.textContent = `спавн ${n}/${tot}`; (info as HTMLElement).style.color = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length]; }
+    if (info) { info.textContent = `спавн ${state.spawnSel + 1}/${lv.spawns.length}`; (info as HTMLElement).style.color = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length]; }
   }
-  function buildSpawnControls(): void {
-    const host = canvas.parentElement; if (!host || document.getElementById(prefix + 'spawnCtl')) return;
-    const wrap = document.createElement('div');
-    wrap.id = prefix + 'spawnCtl';
-    wrap.style.cssText = 'position:absolute;top:8px;left:8px;z-index:6;display:flex;gap:6px;align-items:center;background:rgba(0,0,0,.45);padding:5px 7px;border-radius:8px;';
-    const mk = (txt: string): HTMLButtonElement => { const b = document.createElement('button'); b.textContent = txt; b.style.cssText = 'font-size:12px;padding:5px 8px;'; return b; };
-    const add = mk('＋ Спавн'), del = mk('－ Спавн');
-    const info = document.createElement('span'); info.id = prefix + 'spawnInfo'; info.style.cssText = 'font-size:12px;';
-    add.onclick = () => {
+  function wireSpawnControls(): void {
+    $('addSpawn')?.addEventListener('click', () => {
       const lv = level(); if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
       pushUndo(); const w = toWorld(canvas.width / 2, state.origin.y);
       lv.spawns.push({ x: Math.round(w.x), y: 0 }); lv.spawn = lv.spawns[0];
       state.spawnSel = lv.spawns.length - 1; save(); refreshSpawnUI(); draw();
-    };
-    del.onclick = () => {
+      setStatus('Додано точку спавна — перетягни прапорець, куди треба');
+    });
+    $('delSpawn')?.addEventListener('click', () => {
       const lv = level(); if (lv.spawns.length <= 1) { setStatus('Має лишитись хоча б 1 спавн'); return; }
       pushUndo(); lv.spawns.splice(state.spawnSel, 1);
       state.spawnSel = Math.min(state.spawnSel, lv.spawns.length - 1); lv.spawn = lv.spawns[0];
       save(); refreshSpawnUI(); draw();
-    };
-    wrap.appendChild(add); wrap.appendChild(del); wrap.appendChild(info);
-    host.appendChild(wrap);
+    });
     refreshSpawnUI();
   }
 
@@ -794,7 +788,7 @@ export function initLevelEditor(prefix: string): void {
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
-    buildSpawnControls();
+    wireSpawnControls();
     showColliderBtn?.classList.toggle('on', state.showCollider);
     snapBtn?.classList.toggle('on', state.snap);
     // rAF ensures timeline is painted and offsetHeight is non-zero
