@@ -134,6 +134,13 @@
       .btns.oneRow button { flex: 1; font-size: 12px; padding: 8px 4px; }
       #imgGrid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 224px; overflow-y: auto; align-content: flex-start; }
       .imgCell { position: relative; width: calc(33.333% - 4px); background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; }
+      #lv-levelList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 230px; overflow-y: auto; align-content: flex-start; }
+      .lvCard { position: relative; width: calc(33.333% - 4px); aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; color: var(--ink); padding: 6px; overflow: hidden; }
+      .lvCard:hover { border-color: var(--sel); }
+      .lvCard.sel { border-color: var(--accent); background: rgba(255,154,31,.16); color: #fff; font-weight: 600; }
+      .lvCard.empty { opacity: .45; }
+      .lvCard.empty:hover { opacity: 1; }
+      .lvDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
       .imgCell::before { content: ''; display: block; padding-top: 100%; } /* квадрат */
       .imgCell.empty { cursor: default; background: #434343; }
       .imgCell.sel { border-color: var(--accent); }
@@ -295,18 +302,14 @@
         <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
           <button class="header" style="cursor:default">Рівні та налаштування</button>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Рівні</div>
             <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
-            <div id="lv-levelList" style="display:flex;flex-direction:column;gap:4px"></div>
-            <hr style="border:0;border-top:1px solid var(--line)" />
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600">Вибраний обʼєкт</div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <div id="lv-levelList"></div>
+            <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
+            <!-- слайдер розміру схований (керування через S), але лишається для логіки -->
+            <div style="display:none;align-items:center;gap:8px;font-size:13px">
               <label style="flex:0 0 64px;color:var(--muted)">Розмір</label>
               <input type="range" id="lv-scale" min="0.1" max="4" step="0.01" value="1" style="flex:1;accent-color:var(--sel)" />
               <span id="lv-scaleV" style="flex:0 0 36px;text-align:right;color:var(--muted)">1.0</span>
-            </div>
-            <div class="btns">
-              <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
             </div>
             <hr style="border:0;border-top:1px solid var(--line)" />
             <button id="lv-toGame" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button>

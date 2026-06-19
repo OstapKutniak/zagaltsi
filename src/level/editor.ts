@@ -241,24 +241,38 @@ export function initLevelEditor(prefix: string): void {
   }
   const sel = (): Placed | undefined => level().placed.find((p) => p.id === state.selected);
 
+  function addLevel(): void {
+    pushUndo();
+    state.levels.push(newLevel(`Рівень ${state.levels.length + 1}`));
+    state.cur = state.levels.length - 1; state.selected = null; refreshLevels(); draw(); save();
+  }
   function refreshLevels(): void {
     const box = $('levelList'); box.innerHTML = '';
     state.levels.forEach((lv, i) => {
       const el = document.createElement('div');
-      el.className = 'item' + (i === state.cur ? ' sel' : '');
-      const nm = document.createElement('span'); nm.textContent = lv.name;
-      nm.onclick = () => { state.cur = i; state.selected = null; refreshLevels(); draw(); save(); };
-      nm.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; refreshLevels(); save(); } };
-      const x = document.createElement('span'); x.className = 'x'; x.textContent = '✕';
-      x.onclick = (e) => { e.stopPropagation(); if (state.levels.length > 1) { pushUndo(); state.levels.splice(i, 1); state.cur = Math.max(0, state.cur - 1); refreshLevels(); draw(); save(); } };
-      el.appendChild(nm); el.appendChild(x); box.appendChild(el);
+      el.className = 'lvCard' + (i === state.cur ? ' sel' : '');
+      const nm = document.createElement('div'); nm.textContent = lv.name; el.appendChild(nm);
+      el.onclick = () => { state.cur = i; state.selected = null; refreshLevels(); draw(); save(); };
+      el.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; refreshLevels(); save(); } };
+      if (state.levels.length > 1) {
+        const x = document.createElement('button'); x.className = 'lvDel'; x.textContent = '×';
+        x.onclick = (e) => {
+          e.stopPropagation(); pushUndo(); state.levels.splice(i, 1);
+          if (state.cur >= state.levels.length) state.cur = state.levels.length - 1;
+          state.selected = null; refreshLevels(); draw(); save();
+        };
+        el.appendChild(x);
+      }
+      box.appendChild(el);
     });
+    const empties = Math.max(0, 9 - state.levels.length);
+    for (let i = 0; i < empties; i++) {
+      const e = document.createElement('div'); e.className = 'lvCard empty';
+      e.onclick = () => addLevel();
+      box.appendChild(e);
+    }
   }
-  $<HTMLButtonElement>('addLevel').addEventListener('click', () => {
-    pushUndo();
-    state.levels.push(newLevel(`Рівень ${state.levels.length + 1}`));
-    state.cur = state.levels.length - 1; state.selected = null; refreshLevels(); draw(); save();
-  });
+  $<HTMLButtonElement>('addLevel').addEventListener('click', addLevel);
 
   function refreshCatSelect(): void {
     $<HTMLSelectElement>('libSelect').value = state.cat;
