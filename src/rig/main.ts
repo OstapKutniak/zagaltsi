@@ -904,6 +904,10 @@ window.addEventListener('keydown', (ev) => {
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
+  if (ev.ctrlKey && (ev.code === 'KeyC' || ev.code === 'KeyV')) { // копі/паст ключів — лише при наведенні на таймлайн
+    if (state.anim && tlHoverFrame !== null) { ev.preventDefault(); if (ev.code === 'KeyC') copyKeys(); else pasteKeys(); }
+    return;
+  }
   // обмеження осі під час G/S (Blender: X — гориз., Z — верт.; повторне натискання знімає)
   if (state.mode && state.mode !== 'B' && (ev.code === 'KeyX' || ev.code === 'KeyZ')) {
     ev.preventDefault(); const ax = ev.code === 'KeyX' ? 'x' : 'z';
@@ -1259,17 +1263,24 @@ function movePlayhead(): void {
   }
 }
 
-function makeDot(i: number, k: { t: number; interp: string }, fiv: number): HTMLElement {
+function makeDot(i: number, k: Keyframe, fiv: number): HTMLElement {
   const dot = document.createElement('div');
   dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
   dot.style.left = (k.t * FPS / fiv * 100) + '%';
+  dot.dataset.ki = String(i);
   const lbl = document.createElement('span'); lbl.className = 'dotLabel'; lbl.textContent = String(Math.round(k.t * FPS));
   dot.appendChild(lbl);
   dot.addEventListener('mousedown', (e) => {
+    const me = e as MouseEvent;
+    if (me.button !== 0) return;
     e.stopPropagation();
-    if ((e as MouseEvent).shiftKey) { const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i); }
-    else state.selKeys = [i];
-    play(false); loadFrame(k.t); refreshTimeline(); refreshUI();
+    if (me.shiftKey) { // shift — додати/прибрати з виділення (без драгу)
+      const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i);
+      refreshTimeline(); return;
+    }
+    // клік по невиділеному — виділяємо лише його; по виділеному — лишаємо групу (драг рухає всю)
+    if (!state.selKeys.includes(i)) state.selKeys = [i];
+    beginKeyDrag(me.clientX, k);
   });
   return dot;
 }
@@ -1340,7 +1351,10 @@ function refreshTimeline(): void {
     labelsEl.appendChild(lb);
     // Рядок треку справа
     const row = document.createElement('div'); row.className = 'boneTrack';
-    row.addEventListener('mousedown', (e) => { if ((e as MouseEvent).button !== 0) return; scrubbing = true; play(false); scrubTo((e as MouseEvent).clientX); });
+    row.addEventListener('mousedown', (e) => { // драг по порожньому місцю — рамка; клік без руху — скраб
+      const me = e as MouseEvent; if (me.button !== 0) return;
+      boxPending = true; boxing = false; boxStartX = me.clientX; boxStartY = me.clientY;
+    });
     row.addEventListener('mousemove', (e) => {
       tlHoverBone = d.key;
       const r = tracksEl.getBoundingClientRect();
@@ -1387,6 +1401,68 @@ let tlHoverBone: string | null = null;
 let scrubbing = false;
 let draggingEnd = false;
 let draggingGhostLeft = false; let draggingGhostRight = false;
+
+// ── перетягування ключів кадрами ──
+let draggingKeys = false, keyDragMoved = false, keyDragPushed = false;
+let keyDragStartX = 0;
+let keyDragRefs: { k: Keyframe; t0: number }[] = [];
+let keyDragPrimary: Keyframe | null = null;
+function beginKeyDrag(clientX: number, primary: Keyframe): void {
+  const clip = curClip(); if (!clip) return;
+  draggingKeys = true; keyDragMoved = false; keyDragPushed = false;
+  keyDragStartX = clientX; keyDragPrimary = primary;
+  const refs = new Set<Keyframe>(state.selKeys.map((i) => clip.keys[i]).filter(Boolean));
+  refs.add(primary);
+  keyDragRefs = Array.from(refs).map((k) => ({ k, t0: k.t }));
+}
+
+// ── рамка-виділення ключів ──
+let boxPending = false, boxing = false;
+let boxStartX = 0, boxStartY = 0;
+let boxEl: HTMLDivElement | null = null;
+function selectKeysInBox(x1: number, y1: number, x2: number, y2: number): void {
+  const sel = new Set<number>();
+  document.querySelectorAll<HTMLElement>('#tlBoneTracks .keyDot').forEach((d) => {
+    const r = d.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const hit = cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2;
+    d.classList.toggle('sel', hit);
+    if (hit) { const ki = Number(d.dataset.ki); if (!Number.isNaN(ki)) sel.add(ki); }
+  });
+  state.selKeys = Array.from(sel);
+}
+
+// ── буфер ключів (Ctrl+C / Ctrl+V над таймлайном) ──
+let keyClipboard: Keyframe[] = [];
+function cloneKey(k: Keyframe): Keyframe {
+  const pose: Record<string, KeyPose> = {};
+  for (const b in k.pose) pose[b] = { ...k.pose[b] };
+  return { t: k.t, interp: k.interp, pose };
+}
+function copyKeys(): void {
+  const clip = curClip(); if (!clip || !state.selKeys.length) { status('Виділи ключі для копіювання'); return; }
+  keyClipboard = state.selKeys.map((i) => clip.keys[i]).filter(Boolean).map(cloneKey);
+  status(`Скопійовано ключів: ${keyClipboard.length}`);
+}
+function pasteKeys(): void {
+  const clip = curClip(); if (!clip || !keyClipboard.length) return;
+  pushUndo();
+  const base = Math.min(...keyClipboard.map((k) => k.t));
+  const anchor = tlHoverFrame !== null ? tlHoverFrame / FPS : state.animT; // вставка від курсора або плейхеда
+  const durF = Math.round(clip.duration * FPS);
+  const pasted: Keyframe[] = [];
+  for (const src of keyClipboard) {
+    const f = Math.max(0, Math.min(durF, Math.round((anchor + (src.t - base)) * FPS)));
+    const t = f / FPS;
+    const ex = clip.keys.find((k) => Math.abs(k.t - t) < 0.02);
+    if (ex) { const c = cloneKey(src); ex.pose = { ...ex.pose, ...c.pose }; ex.interp = src.interp; pasted.push(ex); }
+    else { const nk = cloneKey(src); nk.t = t; clip.keys.push(nk); pasted.push(nk); }
+  }
+  clip.keys.sort((a, b) => a.t - b.t);
+  state.selKeys = pasted.map((k) => clip.keys.indexOf(k)).filter((i) => i >= 0);
+  loadFrame(state.animT); refreshTimeline(); refreshUI();
+  status(`Вставлено ключів: ${pasted.length}`);
+}
 function scrubTo(clientX: number): void {
   const r = tlTicksRect();
   let f = (clientX - r.left) / r.width * framesInView;
@@ -1409,9 +1485,38 @@ $('tlBoneTracks').addEventListener('mouseleave', () => { tlHoverFrame = null; tl
 $('tlBoneTracks').addEventListener('scroll', () => { $('tlBoneLabels').scrollTop = $('tlBoneTracks').scrollTop; }, { passive: true });
 $('tlBoneLabels').addEventListener('scroll', () => { $('tlBoneTracks').scrollTop = $('tlBoneLabels').scrollTop; }, { passive: true });
 window.addEventListener('mousemove', (e) => {
-  const mx = (e as MouseEvent).clientX;
+  const mx = (e as MouseEvent).clientX, my = (e as MouseEvent).clientY;
   if (scrubbing) scrubTo(mx);
   if (draggingEnd) dragEndTo(mx);
+  if (draggingKeys) {
+    const clip = curClip();
+    if (clip) {
+      const r = tlTicksRect();
+      const df = Math.round((mx - keyDragStartX) / r.width * framesInView);
+      if (df !== 0) keyDragMoved = true;
+      if (keyDragMoved && !keyDragPushed) { pushUndo(); keyDragPushed = true; }
+      const durF = Math.round(clip.duration * FPS);
+      for (const ref of keyDragRefs) {
+        const nf = Math.max(0, Math.min(durF, Math.round(ref.t0 * FPS) + df));
+        ref.k.t = nf / FPS;
+      }
+      if (keyDragPrimary) loadFrame(keyDragPrimary.t);
+      refreshTimeline(); refreshUI();
+    }
+  }
+  if (boxPending) {
+    if (!boxing && Math.abs(mx - boxStartX) + Math.abs(my - boxStartY) > 4) {
+      boxing = true; play(false);
+      boxEl = document.createElement('div');
+      boxEl.style.cssText = 'position:fixed;border:1px solid var(--accent);background:rgba(255,154,31,.15);z-index:9001;pointer-events:none;';
+      document.body.appendChild(boxEl);
+    }
+    if (boxing && boxEl) {
+      const l = Math.min(mx, boxStartX), t = Math.min(my, boxStartY), w = Math.abs(mx - boxStartX), h = Math.abs(my - boxStartY);
+      boxEl.style.left = l + 'px'; boxEl.style.top = t + 'px'; boxEl.style.width = w + 'px'; boxEl.style.height = h + 'px';
+      selectKeysInBox(l, t, l + w, t + h);
+    }
+  }
   if (draggingGhostLeft || draggingGhostRight) {
     const r = tlTicksRect();
     const f = Math.round((mx - r.left) / r.width * framesInView);
@@ -1424,6 +1529,26 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => {
   if (draggingEnd) refreshTimeline();
   if (draggingGhostLeft || draggingGhostRight) refreshTimeline();
+  if (draggingKeys) {
+    const clip = curClip();
+    if (clip) {
+      if (keyDragMoved) { // відсортувати, відновити виділення за посиланнями на об'єкти
+        const selObjs = state.selKeys.map((i) => clip.keys[i]).filter(Boolean);
+        clip.keys.sort((a, b) => a.t - b.t);
+        state.selKeys = selObjs.map((k) => clip.keys.indexOf(k)).filter((i) => i >= 0);
+        refreshTimeline(); refreshUI(); status('Ключі переміщено');
+      } else if (keyDragPrimary) { // не рухали — поведінка кліку: перейти на ключ
+        play(false); loadFrame(keyDragPrimary.t); refreshTimeline(); refreshUI();
+      }
+    }
+    draggingKeys = false; keyDragRefs = []; keyDragPrimary = null;
+  }
+  if (boxPending) {
+    if (boxing) { refreshTimeline(); refreshUI(); status(state.selKeys.length ? `Виділено ключів: ${state.selKeys.length}` : 'Нічого не виділено'); }
+    else { scrubbing = true; play(false); scrubTo(boxStartX); scrubbing = false; } // клік без руху — скраб
+    if (boxEl) { boxEl.remove(); boxEl = null; }
+    boxPending = false; boxing = false;
+  }
   scrubbing = false; draggingEnd = false; draggingGhostLeft = false; draggingGhostRight = false;
 });
 // Зум колесом над тікрулером або треками
