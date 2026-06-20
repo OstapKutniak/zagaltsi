@@ -76,8 +76,19 @@ const PARALLAX_FALLBACK = { bg: 0.5, sky: 0.8 };
 ---
 
 ## Спавн ворогів
-- Зони спавна: `enemySpawns: string[]` — рядки `"cx,cy"` (кут 3×3 клітинок)
+- Зони спавна: `enemySpawns: string[]` — рядки `"cx,cy"` або `"cx,cy,enemyId"` (кут 3×3 клітинок)
 - Кнопка «Прибрати спавн ворогів» у тулбарі
+- `npcLib: LibItem[]` — завантажується з бібліотеки персонажів, фільтр `cat === 'enemy'`
+- `npcTinted: Map<string, HTMLCanvasElement>` — кеш червоних тонованих мініатюр для оверлея зони
+- `npcImages: Map<string, HTMLImageElement>` — кеш зображень для ghost при виставленні
+
+### Режим виставлення ворога (pendingEnemy)
+- `state.pendingEnemy: string | null` — id ворога що виставляється
+- ЛКМ на картці NPC → `pendingEnemy = id`, картка обводиться помаранчевим (`.npcCard.pending`)
+- Білий силует (80px * sc()) слідує за курсором
+- При наведенні на зону спавна — яскравіша підсвітка (`rgba(255,40,40,0.55)`, рамка 3px)
+- ЛКМ на зоні → записує `"cx,cy,enemyId"`, режим залишається (можна ставити далі)
+- ЛКМ поза зоною або ESC → скасовує режим
 
 ---
 
@@ -113,6 +124,17 @@ const PARALLAX_FALLBACK = { bg: 0.5, sky: 0.8 };
 ## Deploy
 GitHub Pages через Vite build.  
 При пуші на `main` → автодеплой.
+
+---
+
+## AI генерація (в розробці)
+- `.env` в корені проєкту (не в git): `VITE_FAL_KEY`, `VITE_LEONARDO_KEY`, `VITE_OPENAI_KEY`
+- Доступ в коді: `import.meta.env.VITE_FAL_KEY`
+- **Редактор персонажів** (`#library`): `#aiPanel` (220px) — textarea промпту + drop zone для рефу + кнопка «Створити»
+- **Редактор рівнів** (`#lv-library`): `#lv-aiPanel` (220px) — textarea «Опис декорації» + drop zone + кнопка «Створити»
+- Drop zone: `.ai-drop-zone` клас, hover/drag-over підсвітка; ПКМ очищає реф
+- Кнопка «Створити» — поки заглушка, логіка виклику Fal API ще не підключена
+- Обговорюється стилістичний промпт під козацький стиль гри перед підключенням API
 
 ---
 
