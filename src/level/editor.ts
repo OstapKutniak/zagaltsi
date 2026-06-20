@@ -743,14 +743,14 @@ export function initLevelEditor(prefix: string): void {
   function positionFillMenu(): void {
     if (!fillMenu) return;
     const b5 = document.querySelectorAll('#topTabs button')[4] as HTMLElement | undefined;
-    const d2 = $('addLevel');
+    const d1 = $('secLevels');
     const stage = canvas.getBoundingClientRect();
     const w = b5?.offsetWidth || 170;
     fillMenu.style.position = 'fixed';
     fillMenu.style.left = (stage.right - w - 16) + 'px';
     fillMenu.style.right = 'auto';
     fillMenu.style.bottom = 'auto';
-    fillMenu.style.top = (d2 ? d2.getBoundingClientRect().top : stage.top + 16) + 'px';
+    fillMenu.style.top = (d1 ? d1.getBoundingClientRect().top : stage.top + 16) + 'px';
     fillMenu.style.width = w + 'px';
     fillMenu.style.flexDirection = 'column';
   }
