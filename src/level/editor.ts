@@ -57,6 +57,7 @@ export function initLevelEditor(prefix: string): void {
     origin: { x: 0, y: 0 },
     viewScale: 1,
     mouse: { x: 0, y: 0 },
+    pendingAsset: null as string | null,
   };
 
   // Неігрові персонажі (вороги) з бібліотеки персонажів + кеш червоних тонованих мініатюр.
@@ -486,6 +487,15 @@ export function initLevelEditor(prefix: string): void {
       });
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
       el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
+      el.addEventListener('touchend', (ev) => {
+        ev.preventDefault();
+        const prev = state.pendingAsset;
+        state.pendingAsset = (prev === a.id) ? null : a.id;
+        // Update highlight on all libCards in the grid
+        const grid = $('libGrid');
+        grid.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+        if (state.pendingAsset) el.classList.add('pending');
+      }, { passive: false });
       box.appendChild(el);
     }
     const empties = Math.max(6, 30 - cats.length);
@@ -734,6 +744,97 @@ export function initLevelEditor(prefix: string): void {
     else if (state.pathTool) draw(); // оновити прев'ю інструмента під курсором
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
+
+  // Touch support: 1 finger = draw/interact, 2 fingers = pan + pinch-zoom
+  {
+    let touchPanActive = false;
+    let touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
+    let pinchDist = 0;
+    let singleTouchDown = false;
+    const cpos = (t: Touch): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect();
+      return { x: t.clientX - r.left, y: t.clientY - r.top };
+    };
+    canvas.addEventListener('touchstart', (ev) => {
+      ev.preventDefault();
+      if (ev.touches.length === 1) {
+        singleTouchDown = true; touchPanActive = false;
+        const { x, y } = cpos(ev.touches[0]);
+        state.mouse = { x, y };
+        const lv0 = level();
+        const MHIT = 18;
+        if (Math.abs(x - toScreen(lv0.start, 0).x) < MHIT) { pushUndo(); state.markerDrag = 'start'; return; }
+        if (Math.abs(x - toScreen(lv0.end, 0).x) < MHIT) { pushUndo(); state.markerDrag = 'end'; return; }
+        if (!state.pathTool && !state.mode && state.pendingAsset) {
+          const a = state.assets.find(a => a.id === state.pendingAsset);
+          if (a) {
+            pushUndo();
+            const w = toWorld(x, y);
+            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: 0, scale: 1, flip: 1 };
+            level().placed.push(p); state.selected = p.id;
+            refreshSel(); draw(); save(); return;
+          }
+        }
+        if (state.mode) { state.mode = null; state.orig = null; save(); return; }
+        if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
+        if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
+        if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
+        const hit = hitTest(x, y);
+        state.selected = hit;
+        if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
+        refreshSel(); draw();
+      } else if (ev.touches.length === 2) {
+        singleTouchDown = false;
+        if (drag || painting || state.markerDrag) save();
+        drag = null; painting = false; state.markerDrag = null;
+        const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
+        pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        touchPanActive = true;
+        touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (ev) => {
+      ev.preventDefault();
+      if (ev.touches.length === 1 && singleTouchDown && !touchPanActive) {
+        const { x, y } = cpos(ev.touches[0]);
+        state.mouse = { x, y };
+        if (state.markerDrag) {
+          const w = toWorld(x, y); const lv = level();
+          if (state.markerDrag === 'start') lv.start = w.x;
+          else if (state.markerDrag === 'end') lv.end = w.x;
+          else { lv.spawns[state.spawnSel] = { x: w.x, y: w.y }; lv.spawn = lv.spawns[0]; }
+          draw(); return;
+        }
+        if (painting) { paintAt(x, y); return; }
+        if (drag) { const p = sel(); if (p) { p.x = drag.ox + (x - drag.x) / sc(); p.y = drag.oy + (y - drag.y) / sc(); draw(); } return; }
+        if (state.pathTool) draw();
+      } else if (ev.touches.length === 2 && touchPanActive) {
+        const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
+        const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        state.pan.x = touchPanStart.px + (mx - touchPanStart.mx);
+        state.pan.y = touchPanStart.py + (my - touchPanStart.my);
+        if (pinchDist > 0) state.zoom = Math.min(3, Math.max(0.15, state.zoom * dist / pinchDist));
+        pinchDist = dist;
+        touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
+        applyOrigin(); resize(); draw();
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchend', (ev) => {
+      ev.preventDefault();
+      if (ev.touches.length === 0) {
+        if (singleTouchDown && (drag || painting || state.markerDrag)) save();
+        drag = null; painting = false; state.markerDrag = null;
+        singleTouchDown = false; touchPanActive = false; pinchDist = 0;
+      } else if (ev.touches.length === 1 && touchPanActive) {
+        touchPanActive = false; pinchDist = 0; singleTouchDown = true;
+        const { x, y } = cpos(ev.touches[0]);
+        state.mouse = { x, y };
+      }
+    }, { passive: false });
+  }
+
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); state.zoom = Math.min(3, Math.max(0.15, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
 
@@ -1126,6 +1227,8 @@ export function initLevelEditor(prefix: string): void {
       .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
+  $<HTMLButtonElement>('mobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveLevelBtn')?.click());
+  $<HTMLButtonElement>('mobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGame')?.click());
 
   function measureTimeline(): number {
     const tl = document.getElementById('timelineBar') as HTMLElement | null;
