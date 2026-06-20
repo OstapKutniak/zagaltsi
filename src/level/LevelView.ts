@@ -16,13 +16,21 @@ export interface LevelDoc {
   collider?: string[];
   enemySpawns?: string[]; // зони спавна ворогів: "cx,cy" — кут 3×3 підлогових клітинок
   grid?: number;
-  parallax?: { bg: number; sky: number }; // «Дальність» 0..1: 0 = разом з картою, 1 = нерухоме
+  parallax?: Record<string, number>; // «Дальність» 0..1 per-шар
 }
 
-// шари: небо/фон/карта — позаду персонажа; декор/інтерактив/пастки — теж позаду (поки)
-const LAYER: Record<string, number> = { sky: -1200, bg: -1100, map: -1000, decor: -300, interactive: -250, trap: -250 };
-// Дефолтна дальність паралакса, якщо рівень її не задає: фон повільніше карти, небо ще повільніше.
-const PARALLAX_FALLBACK: Record<string, number> = { bg: 0.5, sky: 0.8 };
+// Шари (depth) ззаду→наперед. Небо/хмари/задній фон/перед.фон/карта — позаду персонажа;
+// ассети (decor/...) — біля карти; передній план — поверх усього (але під HUD ~10000).
+const LAYER: Record<string, number> = {
+  sky: -1400, clouds: -1300, bg: -1200, frontbg: -1100, map: -1000,
+  decor: -300, collider: -300, interactive: -250, trap: -250, foreground: 5000,
+};
+// Дефолтна «дальність» паралакса, якщо рівень її не задає.
+const PARALLAX_FALLBACK: Record<string, number> = { sky: 0.85, clouds: 0.7, bg: 0.5, frontbg: 0.25, foreground: 0.35 };
+// scrollFactor шару: фонові повільніше карти (1−дальність), передній план швидше (1+дальність).
+function layerScrollFactor(cat: string, dist: number): number {
+  return cat === 'foreground' ? 1 + dist : Math.max(0, 1 - dist);
+}
 
 function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
   return new Promise((res) => {
@@ -48,17 +56,18 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
     const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);
     im.setRotation((p.rot * Math.PI) / 180);
     im.setScale(p.scale * p.flip, p.scale);
+    const isBackdrop = p.cat === 'sky' || p.cat === 'clouds' || p.cat === 'bg' || p.cat === 'frontbg' || p.cat === 'map';
     let depth = LAYER[p.cat] ?? -500;
     const fpp = fpMap.get(p.asset);
-    if (fpp && p.cat !== 'sky' && p.cat !== 'bg' && p.cat !== 'map') {
+    if (fpp && !isBackdrop) { // футпринт-глибина лише для ассетів (декор тощо), не для фонів/карти
       const cells = footprintWorldCells(fpp, { x: p.x, y: p.y, scale: p.scale, flip: p.flip, rot: p.rot }, p.x, p.y, gs);
       if (cells.length) depth = floorY + footprintFrontEditorY(cells, gs); // = gameY переднього краю
     }
     im.setDepth(depth);
-    // Паралакс лише для неба й фону: scrollFactor < 1 → шар скролиться повільніше за камеру.
-    if (p.cat === 'bg' || p.cat === 'sky') {
+    // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
+    if (p.cat in PARALLAX_FALLBACK) {
       const dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
-      im.setScrollFactor(Math.max(0, 1 - dist), 1);
+      im.setScrollFactor(layerScrollFactor(p.cat, dist), 1);
     }
   }
 }
