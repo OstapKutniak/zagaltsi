@@ -726,19 +726,18 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
 
 // ---- верхні таби розділів — перемикання панелей всередині однієї сторінки ----
 const appEl = document.getElementById('app')!;
-function syncLevelToolbarHeight(): void {
+// ЄДИНИЙ писар висоти панелей. Таймлайн (редактор персонажів) — еталон: його висота
+// йде у CSS-змінну --panel-h, з якої беруть висоту і нижній тулбар рівнів, і обидві
+// AI-панелі. Міряємо offsetHeight ЛИШЕ поки таймлайн видимий (режим персонажів), інакше
+// беремо останнє надійне значення — у режимі рівнів таймлайн display:none і дав би 0.
+let lastPanelH = 0;
+function syncPanelHeights(): void {
   const tl = document.getElementById('timelineBar');
-  const h = tl ? tl.clientHeight : 0;
-  if (h <= 0) return;
-  const lvTl = document.getElementById('lv-levelToolbar');
-  const aiPanel = document.getElementById('aiPanel');
-  const lvAiPanel = document.getElementById('lv-aiPanel');
-  if (lvTl) { lvTl.style.minHeight = ''; lvTl.style.height = h + 'px'; }
-  if (aiPanel) aiPanel.style.height = h + 'px';
-  if (lvAiPanel) lvAiPanel.style.height = h + 'px';
+  if (tl && tl.offsetHeight > 0) lastPanelH = tl.offsetHeight;
+  if (lastPanelH > 0) document.documentElement.style.setProperty('--panel-h', lastPanelH + 'px');
 }
 function setMode(mode: string): void {
-  if (mode === 'level') syncLevelToolbarHeight(); // зчитати висоту поки timelineBar ще видимий
+  if (mode === 'level') syncPanelHeights(); // зміряти поки timelineBar ще видимий
   appEl.className = 'mode-' + mode;
   document.querySelectorAll<HTMLButtonElement>('#topTabs button[data-tab]').forEach(b => {
     b.classList.toggle('light', b.getAttribute('data-tab') === mode);
@@ -1807,7 +1806,13 @@ function wireAiDrop(dropId: string, inputId: string, imgId: string) {
 // Перерахувати розміри після того як таймлайн зайняв місце в DOM
 requestAnimationFrame(() => { resize(); draw(); });
 
-// Синхронізувати висоту lv-levelToolbar з timelineBar після того як кістки завантажились
-setTimeout(syncLevelToolbarHeight, 300);
-window.addEventListener('resize', syncLevelToolbarHeight);
+// Синхронізувати --panel-h з таймлайном. Стартуємо в режимі персонажів → таймлайн видимий,
+// тож вимір надійний. ResizeObserver ловить зміну висоти при завантаженні кісток/ресайзі.
+requestAnimationFrame(syncPanelHeights);
+setTimeout(syncPanelHeights, 300);
+window.addEventListener('resize', syncPanelHeights);
+{
+  const tl = document.getElementById('timelineBar');
+  if (tl) new ResizeObserver(syncPanelHeights).observe(tl);
+}
 

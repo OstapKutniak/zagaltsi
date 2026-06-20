@@ -1670,37 +1670,17 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('mobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveLevelBtn')?.click());
   $<HTMLButtonElement>('mobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGame')?.click());
 
-  function measureTimeline(): number {
-    const tl = document.getElementById('timelineBar') as HTMLElement | null;
-    if (!tl) return 0;
-    if (tl.offsetHeight > 0) return tl.offsetHeight;
-    // У режимі рівнів таймлайн display:none → міряємо поза потоком (inline > CSS-клас).
-    const o = { d: tl.style.display, p: tl.style.position, v: tl.style.visibility };
-    tl.style.display = 'flex'; tl.style.position = 'absolute'; tl.style.visibility = 'hidden';
-    const h = tl.offsetHeight;
-    tl.style.display = o.d; tl.style.position = o.p; tl.style.visibility = o.v;
-    return h;
-  }
-  function syncToolbarHeight(): void {
-    const lt = document.getElementById(prefix + 'levelToolbar');
-    if (!lt) return;
-    const h = measureTimeline();
-    lt.style.height = h > 0 ? h + 'px' : '';
-    const lvAi = document.getElementById(prefix + 'aiPanel');
-    if (lvAi && h > 0) lvAi.style.height = h + 'px';
-  }
-
-  // Re-render when tab becomes visible
-  window.addEventListener('levelTabActivated', () => { resize(); draw(); syncToolbarHeight(); });
-  window.addEventListener('resize', () => { resize(); draw(); syncToolbarHeight(); });
+  // Висоту тулбару/AI-панелей задає ЄДИНИЙ писар у rig/main.ts через CSS-змінну
+  // --panel-h (вимірює видимий таймлайн і застосовує до всіх панелей). Тут лише
+  // ре-рендер канви при зміні видимості/розміру.
+  window.addEventListener('levelTabActivated', () => { resize(); draw(); });
+  window.addEventListener('resize', () => { resize(); draw(); });
 
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
     wireSpawnControls();
     showColliderBtn?.classList.toggle('on', state.showCollider);
     snapBtn?.classList.toggle('on', state.snap);
-    // rAF ensures timeline is painted and offsetHeight is non-zero
-    requestAnimationFrame(syncToolbarHeight);
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });
 

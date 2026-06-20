@@ -26,8 +26,10 @@
       .mode-level #right { display: none; }
       .mode-level #timelineBar { display: none; }
       .mode-level #stageWrap { display: none; }
-      #lv-levelToolbar { display: none; flex: 0 0 auto; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: flex-start; }
+      #lv-levelToolbar { display: none; flex: 0 0 auto; height: var(--panel-h, 56px); min-height: 56px; padding: 6px 8px; gap: 6px; align-items: flex-start; }
       .mode-level #lv-levelToolbar { display: flex; }
+      /* AI-панелі (опис персонажа / декорації) тієї ж висоти, що й таймлайн — спільне --panel-h */
+      #aiPanel, #lv-aiPanel { height: var(--panel-h, 220px); }
       .mode-level #partsList { display: none !important; }
       .mode-level #faceList { display: none !important; }
       button { background: #4a4a4a; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
