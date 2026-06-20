@@ -1160,18 +1160,49 @@ export function initLevelEditor(prefix: string): void {
       b.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         state.soloFillCat = state.soloFillCat === c.key ? null : c.key;
-        buildFillMenu(); draw();
+        buildFillMenu(); buildFillLayersPanel(); draw();
       });
       fillMenu.appendChild(b);
     }
   }
+  function buildFillLayersPanel(): void {
+    const fl = $<HTMLElement>('fillLayers');
+    if (!fl) return;
+    fl.innerHTML = '';
+    for (const c of CATS) {
+      const b = document.createElement('button');
+      const isSolo = state.soloFillCat === c.key;
+      const isBlocked = state.soloFillCat !== null && !isSolo;
+      b.className = 'fillBtn' + (state.hiddenCats.has(c.key) ? ' off' : '') + (isSolo ? ' solo' : '') + (isBlocked ? ' blocked' : '');
+      b.textContent = c.label;
+      b.onclick = () => {
+        if (state.hiddenCats.has(c.key)) state.hiddenCats.delete(c.key); else state.hiddenCats.add(c.key);
+        b.classList.toggle('off', state.hiddenCats.has(c.key));
+        draw();
+      };
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        state.soloFillCat = state.soloFillCat === c.key ? null : c.key;
+        buildFillLayersPanel(); buildFillMenu(); draw();
+      });
+      fl.appendChild(b);
+    }
+  }
   $<HTMLButtonElement>('fillBtn')?.addEventListener('click', () => {
+    const fl = $<HTMLElement>('fillLayers');
+    if (!fl) return;
+    const open = fl.style.display === 'none';
+    fl.style.display = open ? 'flex' : 'none';
+    if (open) buildFillLayersPanel();
+    $('fillBtn')?.classList.toggle('on', open);
+  });
+  $<HTMLButtonElement>('fillBtn')?.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
     fillOpen = !fillOpen;
     if (fillMenu) {
       if (fillOpen) { buildFillMenu(); positionFillMenu(); }
       fillMenu.style.display = fillOpen ? 'flex' : 'none';
     }
-    $('fillBtn')?.classList.toggle('on', fillOpen);
   });
   window.addEventListener('levelTabDeactivated', () => {
     if (fillOpen && fillMenu) { fillOpen = false; fillMenu.style.display = 'none'; $('fillBtn')?.classList.remove('on'); }
@@ -1204,26 +1235,7 @@ export function initLevelEditor(prefix: string): void {
     });
   }
   wireSection('secLevels', 'bodyLevels');
-  // D8 «Налаштування»: ЛКМ = кнопки знизу блоку D; ПКМ = inline-секція
-  {
-    const hd = $<HTMLButtonElement>('secSettings');
-    const body = $<HTMLElement>('bodySettings');
-    const bottom = $<HTMLElement>('settingsBottom');
-    if (hd && body) {
-      hd.addEventListener('click', () => {
-        if (!bottom) return;
-        const open = bottom.style.display === 'none';
-        bottom.style.display = open ? '' : 'none';
-        hd.classList.toggle('open', open);
-      });
-      hd.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const open = body.style.display === 'none';
-        body.style.display = open ? '' : 'none';
-        hd.classList.toggle('open', open);
-      });
-    }
-  }
+  wireSection('secSettings', 'bodySettings');
   wireSection('secNpc', 'bodyNpc');
 
   // ── Неігрові персонажі: бібліотека ворогів (drag → зона спавна) ──
@@ -1336,35 +1348,6 @@ export function initLevelEditor(prefix: string): void {
   $('zFront')?.addEventListener('click', () => reorderSel('front'));
   $('zBottom')?.addEventListener('click', () => reorderSel('bottom'));
 
-  // ── B-суфіксні дублікати в settingsBottom ──
-  $('fillBtnB')?.addEventListener('click', () => $<HTMLButtonElement>('fillBtn')?.click());
-
-  {
-    const togB = $<HTMLButtonElement>('planToggleB');
-    const panelB = $<HTMLElement>('planPanelB');
-    if (togB && panelB) {
-      togB.addEventListener('click', () => {
-        const open = panelB.style.display === 'none';
-        panelB.style.display = open ? '' : 'none';
-        togB.classList.toggle('on', open);
-      });
-    }
-  }
-
-  function setPlanModeB(mode: 'bg' | 'game'): void {
-    $('planBgBtnB')?.classList.toggle('on', mode === 'bg');
-    $('planGameBtnB')?.classList.toggle('on', mode === 'game');
-    const bg = $('planBgB'), gm = $('planGameB');
-    if (bg) bg.style.display = mode === 'bg' ? 'flex' : 'none';
-    if (gm) gm.style.display = mode === 'game' ? 'flex' : 'none';
-  }
-  $('planBgBtnB')?.addEventListener('click', () => setPlanModeB('bg'));
-  $('planGameBtnB')?.addEventListener('click', () => setPlanModeB('game'));
-
-  $('zForwardB')?.addEventListener('click', () => reorderSel('forward'));
-  $('zBackB')?.addEventListener('click', () => reorderSel('back'));
-  $('zFrontB')?.addEventListener('click', () => reorderSel('front'));
-  $('zBottomB')?.addEventListener('click', () => reorderSel('bottom'));
 
   // ── керування точками спавна (до 5, різнокольорові) — кнопки в нижній панелі ──
   function refreshSpawnUI(): void {
