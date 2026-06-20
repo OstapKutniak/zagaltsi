@@ -47,9 +47,22 @@ export class Player extends Actor {
       const curOk = walkable(ox, oy); // стоїмо на підлозі?
       // Рух по осях ОКРЕМО — ковзання вздовж краю/отвору, симетрично в обидва боки.
       let nx = Phaser.Math.Clamp(ox + dx, this.minX, this.maxX);
-      if (curOk && dx !== 0 && !walkable(nx, oy)) nx = ox; // вперлись по X
-      let ny = oy + dy;
-      if (curOk && dy !== 0 && !walkable(nx, ny)) ny = oy; // вперлись по глибині
+      let ny = oy;
+      if (curOk && dx !== 0 && !walkable(nx, oy)) {
+        // Вперлись у отвір/край по X — замість різкої зупинки плавно з'їжджаємо
+        // на найближчу сусідню лінію глибини (заокруглений перехід між рядами).
+        const dir = this.slipDepthDir(walkable, nx, oy);
+        const ng = oy + dir * spd * dt;
+        if (dir !== 0 && (walkable(ox, ng) || walkable(nx, ng))) {
+          ny = ng;
+          if (!walkable(nx, ny)) nx = ox; // поки не доїхали до відкритої лінії — не йдемо вперед
+        } else {
+          nx = ox;
+        }
+      }
+      let ty = ny + dy;
+      if (curOk && dy !== 0 && !walkable(nx, ty)) ty = ny; // вперлись по глибині
+      ny = ty;
       this.fx = nx;
       this.fy = ny;
 
@@ -61,6 +74,17 @@ export class Player extends Actor {
     const flashing = time < this.invulnUntil && Math.floor(time / 70) % 2 === 0;
     this.setAlpha(flashing ? 0.4 : 1);
     this.sync();
+  }
+
+  // Шукає напрямок по глибині (1 = вглиб/вниз, -1 = ближче/вгору) до найближчої
+  // прохідної точки в колонці X, у межах SLIP_RANGE. 0 — нема куди з'їхати.
+  private slipDepthDir(walkable: Walkable, x: number, y: number): number {
+    const STEP = 4, SLIP_RANGE = 72;
+    for (let s = STEP; s <= SLIP_RANGE; s += STEP) {
+      if (walkable(x, y + s)) return 1;
+      if (walkable(x, y - s)) return -1;
+    }
+    return 0;
   }
 
   private tryAttack(time: number): void {
