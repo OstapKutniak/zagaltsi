@@ -88,12 +88,13 @@ export function initLevelEditor(prefix: string): void {
     const w = toWorld(sx, sy), gs = state.grid, k = gs * Math.SQRT1_2;
     return { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
   };
-  // Куди ляже вертикальний колайдер: снеп до ПРАВОЇ (45°) грані підлогової клітинки під курсором.
+  // Куди ляже вертикальний колайдер: стіна стає БОРТОМ на ПРАВУ (45°) грань підлогової
+  // клітинки під курсором і піднімається ВГОРУ. Координати дробові (точний снеп без
+  // зсуву): нижня грань стіни p4-p3 збігається з правою гранню підлоги. Виведено з
+  // рівності wallPts(cx,cy)[3]=правий-нижній кут підлоги (множник √2 між ґратками).
   const wallSnapCell = (sx: number, sy: number): { cx: number; cy: number } => {
-    const gs = state.grid, k = gs * Math.SQRT1_2;
     const fc = floorCellAt(sx, sy);
-    const ax = (fc.cx + 1) * gs + fc.cy * k, ay = fc.cy * k; // початок правої грані у світі
-    return { cx: Math.round(ax / k), cy: Math.round((ay - ax) / gs) };
+    return { cx: (fc.cx + 1) * Math.SQRT2 + fc.cy, cy: -(fc.cx + 2) };
   };
   // Дві екранні точки правої (45°) грані підлогової клітинки — для білої лінії-снепа.
   const floorRightEdge = (cx: number, cy: number): [Pt, Pt] => {
