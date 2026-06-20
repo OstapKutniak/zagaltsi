@@ -271,12 +271,23 @@ export class GameScene extends Phaser.Scene {
     if (doc.enemySpawns && doc.enemySpawns.length) {
       const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
       const rnd = (a: number, b: number): number => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+      const toAttach: Array<{ enemy: Enemy; charId: string }> = [];
       for (const z of doc.enemySpawns) {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
         if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
         const rcx = acx + rnd(acx, acy) * 3, rcy = acy + rnd(acy, acx) * 3;
         const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
-        this.enemies.push(new Enemy(this, gx, gy));
+        const enemy = new Enemy(this, gx, gy);
+        this.enemies.push(enemy);
+        if (p[2]) toAttach.push({ enemy, charId: p[2] });
+      }
+      if (toAttach.length) {
+        void (this.libReady ?? Promise.resolve()).then(() => {
+          toAttach.forEach(({ enemy, charId }, i) => {
+            const d = docById(this.lib, charId);
+            if (d) void enemy.attachChar(d, `npc_${i}_`);
+          });
+        });
       }
     }
 
