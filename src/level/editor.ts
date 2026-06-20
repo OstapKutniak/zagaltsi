@@ -77,16 +77,28 @@ export function initLevelEditor(prefix: string): void {
     const P = (ix: number, iy: number): Pt => toScreen(ix * gs + iy * k, iy * k);
     return [P(cx, cy), P(cx + w, cy), P(cx + w, cy + h), P(cx, cy + h)];
   };
-  // Вертикальна стіна, що піднімається із задньої грані підлогової клітинки (cx,cy).
+  // Вертикальна стіна (v) — ОРИГІНАЛЬНА ізо-ґратка стіни: боки вертикальні (0,gs), верх/низ 45° (k,k).
   const wallPts = (cx: number, cy: number): Pt[] => {
     const gs = state.grid, k = gs * Math.SQRT1_2;
-    const ax = cx * gs + cy * k, bx = (cx + 1) * gs + cy * k, ay = cy * k;
-    return [toScreen(ax, ay - gs), toScreen(bx, ay - gs), toScreen(bx, ay), toScreen(ax, ay)];
+    const P = (ix: number, iy: number): Pt => toScreen(ix * k, ix * k + iy * gs);
+    return [P(cx, cy), P(cx + 1, cy), P(cx + 1, cy + 1), P(cx, cy + 1)];
   };
   // Підлогова клітинка під екранною точкою (інверсія підлогової ґратки).
   const floorCellAt = (sx: number, sy: number): { cx: number; cy: number } => {
     const w = toWorld(sx, sy), gs = state.grid, k = gs * Math.SQRT1_2;
     return { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
+  };
+  // Куди ляже вертикальний колайдер: снеп до ПРАВОЇ (45°) грані підлогової клітинки під курсором.
+  const wallSnapCell = (sx: number, sy: number): { cx: number; cy: number } => {
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const fc = floorCellAt(sx, sy);
+    const ax = (fc.cx + 1) * gs + fc.cy * k, ay = fc.cy * k; // початок правої грані у світі
+    return { cx: Math.round(ax / k), cy: Math.round((ay - ax) / gs) };
+  };
+  // Дві екранні точки правої (45°) грані підлогової клітинки — для білої лінії-снепа.
+  const floorRightEdge = (cx: number, cy: number): [Pt, Pt] => {
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    return [toScreen((cx + 1) * gs + cy * k, cy * k), toScreen((cx + 1) * gs + (cy + 1) * k, (cy + 1) * k)];
   };
   const fillStroke = (pts: Pt[], fill: string | null, stroke: string | null, lw = 1.5): void => {
     ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
@@ -204,8 +216,7 @@ export function initLevelEditor(prefix: string): void {
 
     if (state.showCollider) {
       const gs = state.grid;
-      // Підлога (h) — нахилена площина; стіна (v) — піднімається із задньої грані
-      // тієї ж підлогової клітинки (тож завжди прив'язана до підлоги в просторі).
+      // Підлога (h) — нахилена площина; стіна (v) — оригінальна стінова ізо-ґратка.
       for (const cell of level().collider) {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
@@ -279,12 +290,15 @@ export function initLevelEditor(prefix: string): void {
       if (state.pathTool === 'h') {
         fillStroke(floorPts(c.cx, c.cy), 'rgba(255,154,31,0.25)', 'rgba(255,154,31,0.95)', 2);
       } else if (state.pathTool === 'v') {
-        fillStroke(floorPts(c.cx, c.cy), 'rgba(255,255,255,0.12)', 'rgba(255,255,255,0.95)', 2); // біла лінія підлогового колайдера-цілі (снеп)
-        fillStroke(wallPts(c.cx, c.cy), 'rgba(64,160,255,0.30)', 'rgba(64,160,255,0.95)', 2);    // де ляже вертикальний
+        const w = wallSnapCell(state.mouse.x, state.mouse.y);
+        const [ea, eb] = floorRightEdge(c.cx, c.cy); // біла лінія = права грань підлогової клітинки (снеп)
+        ctx.beginPath(); ctx.moveTo(ea.x, ea.y); ctx.lineTo(eb.x, eb.y); ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3; ctx.stroke();
+        fillStroke(wallPts(w.cx, w.cy), 'rgba(64,160,255,0.30)', 'rgba(64,160,255,0.95)', 2); // де ляже вертикальний
       } else if (state.pathTool === 'erase') {
-        const h = colAt(c.cx, c.cy, 'h'), v = colAt(c.cx, c.cy, 'v');
+        const w = wallSnapCell(state.mouse.x, state.mouse.y);
+        const h = colAt(c.cx, c.cy, 'h'), v = colAt(w.cx, w.cy, 'v');
         if (h) fillStroke(floorPts(c.cx, c.cy), 'rgba(255,60,60,0.30)', 'rgba(255,60,60,0.95)', 2);
-        if (v) fillStroke(wallPts(c.cx, c.cy), 'rgba(255,60,60,0.30)', 'rgba(255,60,60,0.95)', 2);
+        if (v) fillStroke(wallPts(w.cx, w.cy), 'rgba(255,60,60,0.30)', 'rgba(255,60,60,0.95)', 2);
         if (!h && !v) fillStroke(floorPts(c.cx, c.cy), null, 'rgba(255,60,60,0.5)', 1.5);
       } else if (state.pathTool === 'spawn') {
         const col = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length];
@@ -549,16 +563,20 @@ export function initLevelEditor(prefix: string): void {
   let painting = false;
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
-    // І підлога (h), і стіна (v) тепер прив'язані до ОДНІЄЇ підлогової клітинки під
-    // курсором — стіна піднімається з її задньої грані, тож вертикальний колайдер
-    // завжди «знає» де він у просторі (снеп до горизонтального).
-    const c = floorCellAt(sx, sy);
+    // Підлога (h) — клітинка під курсором; стіна (v) — снеп до правої грані тієї клітинки.
+    const fl = floorCellAt(sx, sy);
+    const wl = wallSnapCell(sx, sy);
     const lv = level();
+    const matchH = (p: string[]): boolean => Number(p[0]) === fl.cx && Number(p[1]) === fl.cy && (p[2] ?? 'h') === 'h';
+    const matchV = (p: string[]): boolean => Number(p[0]) === wl.cx && Number(p[1]) === wl.cy && p[2] === 'v';
     if (state.pathTool === 'erase') {
-      lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(Number(p[0]) === c.cx && Number(p[1]) === c.cy); });
-    } else if (state.pathTool === 'h' || state.pathTool === 'v') {
-      lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(Number(p[0]) === c.cx && Number(p[1]) === c.cy && (p[2] ?? 'h') === state.pathTool); });
-      lv.collider.push(`${c.cx},${c.cy},${state.pathTool}`);
+      lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(matchH(p) || matchV(p)); });
+    } else if (state.pathTool === 'h') {
+      lv.collider = lv.collider.filter((z) => !matchH(z.split(',')));
+      lv.collider.push(`${fl.cx},${fl.cy},h`);
+    } else if (state.pathTool === 'v') {
+      lv.collider = lv.collider.filter((z) => !matchV(z.split(',')));
+      lv.collider.push(`${wl.cx},${wl.cy},v`);
     }
     draw();
   }
