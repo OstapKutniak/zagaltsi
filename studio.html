@@ -33,6 +33,7 @@
       button { background: #4a4a4a; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
       button:hover { background: #565656; }
       button.light { background: #e8e8e8; color: #1b1b1b; font-weight: 600; } /* активна / світла з темним написом */
+      button.light:hover { background: #cfcfcf; color: #1b1b1b; }
       .btn-accent { background: var(--accent); color: #1b1b1b; font-weight: 600; }
       .btn-accent:hover { background: #fff; color: #1b1b1b; }
       button:disabled { opacity: .4; cursor: default; }
@@ -128,6 +129,8 @@
       .iconToggle:has(input:checked), .iconToggle.on { background: var(--accent); border-color: var(--accent); color: #1b1b1b; }
       .iconToggle:hover { background: #5c5c5c; }
       .iconToggle.on:hover, .iconToggle:has(input:checked):hover { background: #ffb040; }
+      .planHead button.on:hover { background: #ffb040; color: #1b1b1b; }
+      #lv-planToggle.on:hover { background: #ffb040; }
       /* level editor library grid */
       #lv-libGrid { flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
       /* level editor list items */
@@ -166,12 +169,14 @@
       /* картки неігрових персонажів (drag → зона спавна) */
       #lv-npcList, #npcList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 230px; overflow-y: auto; align-content: flex-start; }
       .npcCard { position: relative; width: calc(33.333% - 4px); aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: grab; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      .npcCard:hover { border-color: var(--sel); }
       .npcCard:active { cursor: grabbing; }
       .npcCard img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
       .npcCard .npcName { position: absolute; bottom: 2px; left: 2px; right: 2px; font-size: 10px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }
       .npcEmpty { font-size: 12px; color: var(--muted); padding: 8px 2px; }
       .imgCell::before { content: ''; display: block; padding-top: 100%; } /* квадрат */
-      .imgCell.empty { cursor: default; background: #434343; }
+      .imgCell.empty { background: #434343; cursor: pointer; }
+      .imgCell.empty:hover { border-color: var(--sel); opacity: 0.8; }
       .imgCell.sel { border-color: var(--accent); }
       .imgCell:not(.empty):hover { border-color: var(--sel); }
       .imgCell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
@@ -331,9 +336,9 @@
         <div style="display:flex;gap:6px;padding:2px">
           <button class="iconToggle" id="lv-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
           <button class="iconToggle" id="lv-showColliderBtn" title="Показати/сховати колайдери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
+          <button class="iconToggle on" id="lv-linesBtn" title="Показати/сховати лінії початку і кінця рівня"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3v18M18 3v18"/></svg></button>
           <button class="iconToggle on" id="lv-snapBtn" title="Снеп до краю (J)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15h12M12 9l-3 3 3 3M12 9v6"/><path d="M3 4v4M21 4v4M3 6h3M18 6h3"/></svg></button>
           <button class="iconToggle" id="lv-bwBtn" title="Чорно-біле превʼю (тон без кольору)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3z" fill="currentColor" stroke="none"/></svg></button>
-          <button class="iconToggle on" id="lv-linesBtn" title="Показати/сховати лінії початку і кінця рівня"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3v18M18 3v18"/></svg></button>
           <button class="iconToggle" id="lv-constructorBtn" title="Конструктор — коди елементів UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg></button>
         </div>
         <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">

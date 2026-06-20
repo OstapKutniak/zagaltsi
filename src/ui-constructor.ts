@@ -60,3 +60,13 @@ export function toggleConstructor(): boolean {
   document.body.appendChild(overlay);
   return true;
 }
+
+// Tab — глобальний шорткат для конструктора (працює в обох редакторах).
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  const tag = (document.activeElement?.tagName ?? '').toUpperCase();
+  if (e.code !== 'Tab' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  e.preventDefault();
+  const on = toggleConstructor();
+  document.getElementById('constructorBtn')?.classList.toggle('on', on);
+  document.getElementById('lv-constructorBtn')?.classList.toggle('on', on);
+});
