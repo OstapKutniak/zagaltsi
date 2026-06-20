@@ -402,9 +402,13 @@
         </div>
         <!-- LEVEL EDITOR TOOLBAR — same height as #timelineBar, visible in mode-level -->
         <div id="lv-levelToolbar" class="pane">
-          <button id="lv-pathHBtn" title="Намалювати горизонтальний шлях (земля)">Горизонтальний шлях</button>
+          <!-- Іконки: малювати шлях / підняти / опустити / вирівняти / стерти -->
+          <button id="lv-pathHBtn" title="Малювати підлогу (H)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 5L20 10v1L12 16 4 11v-1z"/><path d="M4 11l8 5 8-5"/></svg></button>
           <button id="lv-pathVBtn" title="Намалювати вертикальний шлях (стіна)">Вертикальний шлях</button>
-          <button id="lv-erasePathBtn" title="Видалити клітинку шляху">Видалити шлях</button>
+          <button id="lv-raiseBtn" title="Підняти клітинку (1)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 16V8M9 11l3-3 3 3"/><rect x="4" y="18" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
+          <button id="lv-lowerBtn" title="Опустити клітинку (2)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v8M9 13l3 3 3-3"/><rect x="4" y="18" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
+          <button id="lv-flatBtn" title="Вирівняти клітинку (3)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 9h14M5 15h14"/><rect x="4" y="19" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
+          <button id="lv-erasePathBtn" title="Стерти клітинку шляху (Y)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 20H8L3 15l11-11 7 7-2 3z"/><path d="M7.5 17.5l4-4"/></svg></button>
           <button id="lv-addSpawn" title="Додати стартову локацію (точку спавна, до 5)">＋ Спавн</button>
           <button id="lv-delSpawn" title="Прибрати вибрану точку спавна">－ Спавн</button>
           <button id="lv-enemySpawnBtn" title="Намалювати зону спавна ворогів (червоний 3×3). Ворог зʼявиться у випадковій точці зони.">Спавн ворогів</button>

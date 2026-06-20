@@ -174,6 +174,7 @@ export function initLevelEditor(prefix: string): void {
       if (l && l.levels?.length) { state.levels = l.levels; state.cur = l.cur || 0; }
       try { localStorage.removeItem('zag_assets'); localStorage.removeItem('zag_levels'); } catch { /* ignore */ }
     } catch { /* ignore */ }
+    const hadLocalLevels = state.levels.length > 0; // capture before async pull (line below adds default)
     // Pull from GitHub in background — merge new assets, update layouts if remote has data
     pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
       const remoteFiltered = (remoteAssets ?? []).filter((r) => !deletedIds.has((r as Asset).id));
@@ -185,7 +186,7 @@ export function initLevelEditor(prefix: string): void {
         refreshAssets();
         setStatus(`Синхронізовано: +${added} ассетів з GitHub`);
       }
-      if (remoteLayouts?.levels?.length && !state.levels.length) {
+      if (remoteLayouts?.levels?.length && !hadLocalLevels) {
         state.levels = remoteLayouts.levels as Level[];
         state.cur = remoteLayouts.cur || 0;
         for (const lv of state.levels) if (typeof lv.grid !== 'number') lv.grid = 48;
@@ -634,10 +635,16 @@ export function initLevelEditor(prefix: string): void {
     $('pathHBtn')?.classList.toggle('on', state.pathTool === 'h');
     $('pathVBtn')?.classList.toggle('on', state.pathTool === 'v');
     $('erasePathBtn')?.classList.toggle('on', state.pathTool === 'erase');
+    $('raiseBtn')?.classList.toggle('on', state.pathTool === 'raise');
+    $('lowerBtn')?.classList.toggle('on', state.pathTool === 'lower');
+    $('flatBtn')?.classList.toggle('on', state.pathTool === 'flat');
     $('enemySpawnBtn')?.classList.toggle('on', state.pathTool === 'enemy');
     $('enemyEraseBtn')?.classList.toggle('on', state.pathTool === 'enemyErase');
     $('addSpawn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
+  $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
+  $<HTMLButtonElement>('lowerBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: тапни/тягни на клітинку' : ''); draw(); });
+  $<HTMLButtonElement>('flatBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: тапни/тягни на клітинку' : ''); draw(); });
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
