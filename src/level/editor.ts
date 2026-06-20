@@ -61,6 +61,7 @@ export function initLevelEditor(prefix: string): void {
     pendingAsset: null as string | null,
     pendingRot: 0,    // градуси для ghost під час розміщення
     pendingScale: 1,  // масштаб ghost
+    pendingFlip: 1,   // 1 або -1 (M = дзеркало)
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
   };
@@ -447,7 +448,7 @@ export function initLevelEditor(prefix: string): void {
         ctx.filter = 'brightness(1000) saturate(0)'; // всі пікселі → білі, альфа збережена
         ctx.translate(mx, my);
         ctx.rotate(rad(state.pendingRot));
-        ctx.scale(k, k);
+        ctx.scale(state.pendingFlip * k, k);
         ctx.drawImage(pimg, -pimg.width / 2, -pimg.height / 2);
         ctx.restore();
       }
@@ -573,7 +574,7 @@ export function initLevelEditor(prefix: string): void {
         ev.stopPropagation();
         const same = state.pendingAsset === a.id;
         state.pendingAsset = same ? null : a.id;
-        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null; }
+        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null; state.pathTool = null; updatePathBtns(); }
         $('libGrid').querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         if (state.pendingAsset) el.classList.add('pending');
         draw();
@@ -582,7 +583,7 @@ export function initLevelEditor(prefix: string): void {
         ev.preventDefault();
         const same = state.pendingAsset === a.id;
         state.pendingAsset = same ? null : a.id;
-        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null; }
+        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null; state.pathTool = null; updatePathBtns(); }
         $('libGrid').querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         if (state.pendingAsset) el.classList.add('pending');
         draw();
@@ -828,9 +829,9 @@ export function initLevelEditor(prefix: string): void {
       if (pa) {
         pushUndo();
         const w = toWorld(x, y);
-        const p: Placed = { id: 'p' + Date.now(), cat: pa.cat, asset: pa.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: 1 };
+        const p: Placed = { id: 'p' + Date.now(), cat: pa.cat, asset: pa.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: state.pendingFlip };
         level().placed.push(p); state.selected = p.id;
-        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         refreshSel(); draw(); save(); return;
       }
@@ -893,9 +894,9 @@ export function initLevelEditor(prefix: string): void {
           if (a) {
             pushUndo();
             const w = toWorld(x, y);
-            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: 1 };
+            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: state.pendingFlip };
             level().placed.push(p); state.selected = p.id;
-            state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+            state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
             $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
             refreshSel(); draw(); save(); return;
           }
@@ -1016,7 +1017,7 @@ export function initLevelEditor(prefix: string): void {
       ev.preventDefault();
       if (state.pendingAsset) {
         if (ev.code === 'KeyG') { // скасувати розміщення
-          state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+          state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
           $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
           draw();
         } else { // R або S: увімкнути/вимкнути transform-режим ghost
@@ -1046,12 +1047,16 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'Digit2') { ev.preventDefault(); state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
     else if (ev.code === 'Digit3') { ev.preventDefault(); state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
     else if (ev.code === 'KeyY') { ev.preventDefault(); state.pathTool = state.pathTool === 'erase' ? null : 'erase'; updatePathBtns(); }
-    else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
+    else if (ev.code === 'KeyM') {
+      ev.preventDefault();
+      if (state.pendingAsset) { state.pendingFlip *= -1; draw(); }
+      else { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
+    }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
     else if (ev.code === 'Escape') {
       if (state.pendingAsset) {
-        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         draw();
       } else if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
