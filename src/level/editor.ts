@@ -201,6 +201,39 @@ export function initLevelEditor(prefix: string): void {
         ctx.fillStyle = type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)'; ctx.fill();
         ctx.strokeStyle = type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)'; ctx.stroke();
       }
+      // Авто-фаски: на внутрішніх кутах (порожня клітинка з двома замальованими
+      // СУМІЖНИМИ сторонами) домальовуємо трикутник-половинку до того кута — щоб
+      // персонаж міг зрізати кут по діагоналі. Виводяться автоматично з підлоги,
+      // не зберігаються. Та сама логіка, що у грі (walkableAt).
+      {
+        const kk = gs * Math.SQRT1_2;
+        const P = (ix: number, iy: number) => toScreen(ix * gs + iy * kk, iy * kk);
+        const floor = new Set<string>();
+        const cand = new Set<string>();
+        for (const cell of level().collider) {
+          const p = cell.split(','); if ((p[2] ?? 'h') !== 'h') continue;
+          const cx = Number(p[0]), cy = Number(p[1]); if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+          floor.add(cx + ',' + cy);
+          cand.add((cx - 1) + ',' + cy); cand.add((cx + 1) + ',' + cy);
+          cand.add(cx + ',' + (cy - 1)); cand.add(cx + ',' + (cy + 1));
+        }
+        const has = (ix: number, iy: number): boolean => floor.has(ix + ',' + iy);
+        const tri = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): void => {
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.closePath();
+          ctx.fillStyle = 'rgba(120,210,120,0.30)'; ctx.fill();
+          ctx.strokeStyle = 'rgba(120,210,120,0.9)'; ctx.stroke();
+        };
+        for (const key of cand) {
+          if (floor.has(key)) continue;
+          const [cx, cy] = key.split(',').map(Number);
+          const p1 = P(cx, cy), p2 = P(cx + 1, cy), p3 = P(cx + 1, cy + 1), p4 = P(cx, cy + 1);
+          const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
+          if (L && U) tri(p1, p2, p4); // верх-ліво
+          if (R && D) tri(p2, p3, p4); // низ-право
+          if (L && D) tri(p1, p3, p4); // низ-ліво
+          if (R && U) tri(p1, p2, p3); // верх-право
+        }
+      }
       // Зони спавна ворогів — червоний 3×3 (підлогова ґратка) + точка-центр.
       const k2 = gs * Math.SQRT1_2;
       const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);

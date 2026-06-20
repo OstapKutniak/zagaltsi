@@ -123,9 +123,20 @@ export class GameScene extends Phaser.Scene {
     }
     const gs = this.colliderGrid; const k = gs * Math.SQRT1_2;
     const editorY = gameY - this.bandBottom;
-    const cx = Math.floor((gameX - editorY) / gs);
-    const cy = Math.floor(editorY / k);
-    return this.floorSet.has(cx + ',' + cy);
+    const fcx = (gameX - editorY) / gs, fcy = editorY / k;
+    const cx = Math.floor(fcx), cy = Math.floor(fcy);
+    if (this.floorSet.has(cx + ',' + cy)) return true;
+    // Авто-фаска: порожня клітинка з двома замальованими СУМІЖНИМИ сторонами =
+    // внутрішній кут; половинка-трикутник до того кута прохідна (зрізаємо кут по
+    // діагоналі). fx,fy — локальні 0..1 у клітинці; "/"=fx+fy, "\"=fx−fy.
+    const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy);
+    const fx = fcx - cx, fy = fcy - cy;
+    const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
+    if (L && U && fx + fy < 1) return true; // верх-ліво
+    if (R && D && fx + fy > 1) return true; // низ-право
+    if (L && D && fy > fx) return true;     // низ-ліво
+    if (R && U && fx > fy) return true;     // верх-право
+    return false;
   }
 
   create(): void {
