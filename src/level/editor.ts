@@ -35,6 +35,11 @@ const ensureParallax = (lv: Level): Record<string, number> => {
   for (const k of PARALLAX_LAYERS) if (typeof lv.parallax[k] !== 'number') lv.parallax[k] = PARALLAX_DEFAULTS[k];
   return lv.parallax;
 };
+// scrollFactor шару (синхрон з LevelView): фонові 1−дальність, передній план 1+дальність.
+const layerScrollFactor = (cat: string, dist: number): number => (cat === 'foreground' ? 1 + dist : Math.max(0, 1 - dist));
+const GAME_VIEW_W = 1280; // ширина ігрового кадру — для виводу фініш-ліній паралакс-шарів
+// Кольори фініш-ліній шарів (плюс «кінець (карта)» завжди червоний).
+const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
@@ -69,6 +74,8 @@ export function initLevelEditor(prefix: string): void {
     snap: true,
     showCollider: true,
     showMarkers: true,
+    showEnemySpawns: true,
+    showPlayerSpawns: true,
     hiddenCats: new Set<string>(),
     soloFillCat: null as string | null,
     zoom: 0.6,
@@ -388,8 +395,10 @@ export function initLevelEditor(prefix: string): void {
           }
         }
       }
-      // Зони спавна ворогів — червоний 3×3 (підлогова ґратка) + точка-центр.
-      const k2 = gs * Math.SQRT1_2;
+    }
+    // Зони спавна ворогів — НЕЗАЛЕЖНИЙ тогл (не залежить від показу колайдерів).
+    if (state.showEnemySpawns) {
+      const gs = state.grid, k2 = gs * Math.SQRT1_2;
       const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
       // якщо виставляємо ворога — визначаємо клітинку під курсором для hover-підсвітки
       const mfc = state.pendingEnemy ? floorCellAt(state.mouse.x, state.mouse.y) : null;
@@ -469,11 +478,27 @@ export function initLevelEditor(prefix: string): void {
     const lv = level();
     if (state.showMarkers) {
       const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#5aff8f'; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
-      ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
-      ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
-      ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
+      ctx.font = '11px monospace';
+      // Початок (зелена) + фініш-лінії КОЖНОГО шару. Рухається тільки лінія карти (lv.end);
+      // решта виводяться з її позиції та дальності шару: чим швидший шар, тим далі фініш.
+      //   finishX(sf) = (lv.end − кадр)·sf + кадр  →  для карти (sf=1) = lv.end.
+      ctx.strokeStyle = '#5aff8f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
+      ctx.fillStyle = '#5aff8f'; ctx.fillText('початок', sx + 3, 14);
+      const px = ensureParallax(lv);
+      let labelY = 28;
+      for (const layer of PARALLAX_LAYERS) {
+        const sf = layerScrollFactor(layer, px[layer]);
+        const fx = toScreen((lv.end - GAME_VIEW_W) * sf + GAME_VIEW_W, 0).x;
+        const col = LAYER_LINE_COLOR[layer] ?? '#9a9a9a';
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
+        ctx.beginPath(); ctx.moveTo(fx, 0); ctx.lineTo(fx, canvas.height); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = col; ctx.fillText('фініш ' + PARALLAX_LABEL[layer], fx + 3, labelY); labelY += 14;
+      }
+      // Карта — головна (червона, єдина перетягувана) лінія кінця.
+      ctx.strokeStyle = '#ff6a6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
+      ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець (карта)', ex + 3, 14);
+    }
+    if (state.showPlayerSpawns) {
       // Спавни гравця — кольорова підлогова клітинка (без прапорця), номер у центрі.
       const gs = state.grid, k = gs * Math.SQRT1_2;
       lv.spawns.forEach((s, i) => {
@@ -1414,6 +1439,18 @@ export function initLevelEditor(prefix: string): void {
   linesBtn?.addEventListener('click', () => {
     state.showMarkers = !state.showMarkers;
     linesBtn.classList.toggle('on', state.showMarkers);
+    draw();
+  });
+  const enemySpawnsBtn = $<HTMLButtonElement>('enemySpawnsViewBtn');
+  enemySpawnsBtn?.addEventListener('click', () => {
+    state.showEnemySpawns = !state.showEnemySpawns;
+    enemySpawnsBtn.classList.toggle('on', state.showEnemySpawns);
+    draw();
+  });
+  const playerSpawnsBtn = $<HTMLButtonElement>('playerSpawnsViewBtn');
+  playerSpawnsBtn?.addEventListener('click', () => {
+    state.showPlayerSpawns = !state.showPlayerSpawns;
+    playerSpawnsBtn.classList.toggle('on', state.showPlayerSpawns);
     draw();
   });
   const constructorBtn = $<HTMLButtonElement>('constructorBtn');
