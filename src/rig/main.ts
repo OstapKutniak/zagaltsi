@@ -732,7 +732,7 @@ function setMode(mode: string): void {
     b.classList.toggle('light', b.getAttribute('data-tab') === mode);
   });
   if (mode === 'level') window.dispatchEvent(new CustomEvent('levelTabActivated'));
-  else if (mode === 'char') requestAnimationFrame(() => { resize(); draw(); }); // канвас знову видимий → перецентрувати
+  else { window.dispatchEvent(new CustomEvent('levelTabDeactivated')); if (mode === 'char') requestAnimationFrame(() => { resize(); draw(); }); }
 }
 for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
   const tab = b.getAttribute('data-tab');

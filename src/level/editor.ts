@@ -52,6 +52,7 @@ export function initLevelEditor(prefix: string): void {
     showCollider: true,
     showMarkers: true,
     hiddenCats: new Set<string>(),
+    soloFillCat: null as string | null,
     zoom: 0.6,
     pan: { x: 0, y: 0 },
     origin: { x: 0, y: 0 },
@@ -250,16 +251,36 @@ export function initLevelEditor(prefix: string): void {
     for (const p of placedSorted()) {
       const img = imgOf(p); if (!img) continue;
       const s2 = toScreen(p.x, p.y);
+      const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
       ctx.save();
+      if (dim) ctx.filter = 'grayscale(1)';
       ctx.translate(s2.x, s2.y);
       ctx.rotate(rad(p.rot));
       const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
       ctx.scale(p.flip * kx, ky);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
       ctx.restore();
-      if (p.id === state.selected) {
+      if (p.id === state.selected && !dim) {
         ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5;
         ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12);
+      }
+    }
+    // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
+    if (state.soloFillCat !== null) {
+      ctx.fillStyle = 'rgba(255,255,255,0.30)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const p of placedSorted()) {
+        if (p.cat !== state.soloFillCat) continue;
+        const img = imgOf(p); if (!img) continue;
+        const s2 = toScreen(p.x, p.y);
+        ctx.save();
+        ctx.translate(s2.x, s2.y);
+        ctx.rotate(rad(p.rot));
+        const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+        ctx.scale(p.flip * kx, ky);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.restore();
+        if (p.id === state.selected) { ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5; ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12); }
       }
     }
 
@@ -432,7 +453,7 @@ export function initLevelEditor(prefix: string): void {
   }
 
   function hitTest(sx: number, sy: number): string | null {
-    const list = placedSorted();
+    const list = placedSorted().filter(p => state.soloFillCat === null || p.cat === state.soloFillCat);
     for (let i = list.length - 1; i >= 0; i--) {
       const p = list[i]; const img = imgOf(p); if (!img) continue;
       const o = toScreen(p.x, p.y);
@@ -621,7 +642,7 @@ export function initLevelEditor(prefix: string): void {
   const planToggle = $<HTMLButtonElement>('planToggle');
   const planPanel = $<HTMLElement>('planPanel');
   if (planToggle && planPanel) {
-    planToggle.classList.add('on');
+    planPanel.style.display = 'none'; // звернуто за замовчуванням
     planToggle.addEventListener('click', () => {
       const open = planPanel.style.display === 'none';
       planPanel.style.display = open ? '' : 'none';
@@ -1055,13 +1076,20 @@ export function initLevelEditor(prefix: string): void {
     fillMenu.innerHTML = '';
     for (const c of CATS) {
       const b = document.createElement('button');
-      b.className = 'fillBtn' + (state.hiddenCats.has(c.key) ? ' off' : '');
+      const isSolo = state.soloFillCat === c.key;
+      const isBlocked = state.soloFillCat !== null && !isSolo;
+      b.className = 'fillBtn' + (state.hiddenCats.has(c.key) ? ' off' : '') + (isSolo ? ' solo' : '') + (isBlocked ? ' blocked' : '');
       b.textContent = c.label;
       b.onclick = () => {
         if (state.hiddenCats.has(c.key)) state.hiddenCats.delete(c.key); else state.hiddenCats.add(c.key);
         b.classList.toggle('off', state.hiddenCats.has(c.key));
         draw();
       };
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        state.soloFillCat = state.soloFillCat === c.key ? null : c.key;
+        buildFillMenu(); draw();
+      });
       fillMenu.appendChild(b);
     }
   }
@@ -1072,6 +1100,9 @@ export function initLevelEditor(prefix: string): void {
       fillMenu.style.display = fillOpen ? 'flex' : 'none';
     }
     $('fillBtn')?.classList.toggle('on', fillOpen);
+  });
+  window.addEventListener('levelTabDeactivated', () => {
+    if (fillOpen && fillMenu) { fillOpen = false; fillMenu.style.display = 'none'; $('fillBtn')?.classList.remove('on'); }
   });
   // Список «Наповнення» — у правій частині вьюпорта: ширина як таб «Історія» (B5),
   // верх врівень з кнопкою «＋ Новий рівень».
