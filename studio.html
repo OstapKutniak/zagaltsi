@@ -192,19 +192,34 @@
       #status { font-size: 12px; color: var(--muted); min-height: 0; }
       #lv-libSelect:hover { background: #565656 !important; }
 
-      /* ─── Mobile level editor layout ──────────────────────────────────── */
+      /* ─── Mobile layout (екран < 900px) ──────────────────────────────── */
       @media (max-width: 900px) {
         html, body { overflow: hidden; }
-        #app { padding: 4px; gap: 4px; }
 
-        /* Library → horizontal tile strip */
+        /* Базовий layout — колонка замість рядка */
+        #app { flex-direction: column; padding: 4px; gap: 4px; height: 100dvh; }
+
+        /* Ховаємо char-editor панелі — на мобільному тільки level editor */
+        #library, #right { display: none !important; }
+
+        /* Центр — повна ширина */
+        #center { width: 100% !important; min-width: 0; }
+
+        /* Вкладки — великі, зручні для тапу */
+        #topTabs { gap: 4px; flex-shrink: 0; }
+        #topTabs button { padding: 12px 6px; font-size: 13px; min-height: 44px; }
+
+        /* canvas — заборонити браузерний scroll/zoom */
+        #lv-stage { touch-action: none; }
+
+        /* ── Level editor: бібліотека тайлів — горизонтальна смуга ── */
         .mode-level #lv-library {
           width: 100% !important; flex: 0 0 auto;
           flex-direction: row !important; align-items: center;
           padding: 4px; gap: 6px; min-height: 84px; max-height: 84px;
         }
         .mode-level #lv-library > select {
-          flex: 0 0 auto; min-width: 60px; max-width: 74px;
+          flex: 0 0 auto; min-width: 64px; max-width: 80px;
           padding: 6px 2px; font-size: 11px; text-align: center;
           background: var(--rail); color: var(--ink);
           border: 1px solid var(--line); border-radius: 8px;
@@ -224,21 +239,17 @@
         }
         .libCard.pending { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent); }
 
-        /* Center fills remaining space */
-        #center { width: 100% !important; }
-        #topTabs button { padding: 8px 4px; font-size: 12px; }
-
-        /* Toolbar → horizontal scrollable strip */
+        /* ── Тулбар колайдерів — горизонтальний скрол ── */
         .mode-level #lv-levelToolbar {
           flex-wrap: nowrap !important; overflow-x: auto;
-          gap: 4px; min-height: 48px; padding: 4px;
+          gap: 4px; min-height: 48px; padding: 4px; flex-shrink: 0;
         }
         .mode-level #lv-levelToolbar button {
           flex: 0 0 auto; white-space: nowrap; font-size: 12px;
           padding: 8px 12px; min-height: 40px;
         }
 
-        /* Right panel → compact bottom bar (hide heavy elements) */
+        /* ── Права панель — компактна смуга знизу ── */
         .mode-level #lv-right {
           width: 100% !important; flex: 0 0 auto;
           flex-direction: row !important; align-items: center;
@@ -246,13 +257,8 @@
           padding: 4px; overflow: hidden;
         }
         .mode-level #lv-preview { display: none !important; }
-        /* Hide the big panel with levels/settings — only keep icon row + action footer */
         .mode-level #lv-right > .pane { display: none !important; }
-        /* Show icon row */
-        .mode-level #lv-right > div:not(.pane) {
-          flex: 0 0 auto; flex-wrap: wrap; padding: 0;
-        }
-        /* Mobile action buttons added below toolbar via lv-mobileActions */
+        .mode-level #lv-right > div:not(.pane) { flex: 0 0 auto; flex-wrap: wrap; padding: 0; }
         .mode-level #lv-mobileActions { display: flex !important; }
       }
     </style>

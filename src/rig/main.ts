@@ -741,6 +741,9 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
 
+// On mobile — auto-switch to level editor (char editor is not usable on touch)
+if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
+
 // ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
 let partsOpen = false;
 $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
