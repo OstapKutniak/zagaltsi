@@ -741,8 +741,12 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
 
-// On mobile — auto-switch to level editor (char editor is not usable on touch)
+// On mobile — auto-switch to level editor as default starting mode
 if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
+
+// Mobile char editor action buttons (proxy to existing hidden buttons)
+document.getElementById('charMobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveChar').click());
+document.getElementById('charMobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGameBtn').click());
 
 // ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
 let partsOpen = false;

@@ -196,23 +196,66 @@
       @media (max-width: 900px) {
         html, body { overflow: hidden; }
 
-        /* Базовий layout — колонка замість рядка */
+        /* Базовий layout — колонка */
         #app { flex-direction: column; padding: 4px; gap: 4px; height: 100dvh; }
-
-        /* Ховаємо char-editor панелі — на мобільному тільки level editor */
-        #library, #right { display: none !important; }
 
         /* Центр — повна ширина */
         #center { width: 100% !important; min-width: 0; }
 
-        /* Вкладки — великі, зручні для тапу */
+        /* Вкладки — великі, тільки перші дві (char / level), решту ховаємо */
         #topTabs { gap: 4px; flex-shrink: 0; }
         #topTabs button { padding: 12px 6px; font-size: 13px; min-height: 44px; }
+        #topTabs button[data-soon] { display: none; }
 
-        /* canvas — заборонити браузерний scroll/zoom */
-        #lv-stage { touch-action: none; }
+        /* canvas — без браузерного скролу/зуму */
+        #lv-stage, #stage { touch-action: none; }
 
-        /* ── Level editor: бібліотека тайлів — горизонтальна смуга ── */
+        /* ════ CHAR EDITOR ════════════════════════════════════════════════ */
+
+        /* Бібліотека персонажів — горизонтальна смуга */
+        .mode-char #library {
+          display: flex !important;
+          width: 100% !important; flex: 0 0 auto;
+          flex-direction: row !important; align-items: center;
+          padding: 4px; gap: 4px; min-height: 90px; max-height: 90px;
+        }
+        .mode-char #libToggle {
+          flex: 0 0 auto; width: auto; min-width: 58px; padding: 8px 6px;
+          font-size: 11px; writing-mode: horizontal-tb;
+        }
+        .mode-char #libList {
+          flex-direction: row !important; flex-wrap: nowrap !important;
+          overflow-x: auto; overflow-y: hidden;
+          height: 78px; min-height: 78px; gap: 6px !important;
+        }
+        .mode-char #libList .libCard {
+          flex: 0 0 72px !important; width: 72px !important; min-width: 72px; height: 72px;
+        }
+        .mode-char #libList .libCard::before { display: none; }
+        .mode-char #libList .libCard img {
+          position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+        }
+
+        /* Права панель char editor — компактний рядок знизу */
+        .mode-char #right {
+          display: flex !important;
+          width: 100% !important; flex: 0 0 auto;
+          flex-direction: row !important; align-items: center;
+          min-height: 56px; max-height: 56px; gap: 6px; padding: 4px; overflow: hidden;
+        }
+        .mode-char #preview { display: none !important; }
+        .mode-char #iconBar { flex: 0 0 auto; flex-wrap: nowrap; gap: 4px; padding: 0; }
+        .mode-char #tools { display: none !important; }
+        /* Кнопки "Зберегти" + "Оновити гру" для char editor на мобільному */
+        #charMobileActions { display: none; gap: 6px; flex: 1; }
+        .mode-char #charMobileActions { display: flex !important; }
+
+        /* Таймлайн — схований на мобільному (занадто складний для тачу) */
+        .mode-char #timelineBar { display: none !important; }
+
+        /* ════ LEVEL EDITOR ══════════════════════════════════════════════ */
+
+        /* Бібліотека тайлів — горизонтальна смуга */
         .mode-level #lv-library {
           width: 100% !important; flex: 0 0 auto;
           flex-direction: row !important; align-items: center;
@@ -227,8 +270,7 @@
         }
         .mode-level #lv-libGrid {
           flex-direction: row !important; flex-wrap: nowrap !important;
-          overflow-x: auto; overflow-y: hidden;
-          height: 76px; min-height: 76px;
+          overflow-x: auto; overflow-y: hidden; height: 76px; min-height: 76px;
         }
         .mode-level #lv-libGrid .libCard {
           flex: 0 0 68px !important; width: 68px !important; min-width: 68px; height: 68px;
@@ -239,7 +281,7 @@
         }
         .libCard.pending { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent); }
 
-        /* ── Тулбар колайдерів — горизонтальний скрол ── */
+        /* Тулбар колайдерів — горизонтальний скрол */
         .mode-level #lv-levelToolbar {
           flex-wrap: nowrap !important; overflow-x: auto;
           gap: 4px; min-height: 48px; padding: 4px; flex-shrink: 0;
@@ -249,12 +291,11 @@
           padding: 8px 12px; min-height: 40px;
         }
 
-        /* ── Права панель — компактна смуга знизу ── */
+        /* Права панель level editor — компактна смуга знизу */
         .mode-level #lv-right {
           width: 100% !important; flex: 0 0 auto;
           flex-direction: row !important; align-items: center;
-          min-height: 56px; max-height: 56px; gap: 6px;
-          padding: 4px; overflow: hidden;
+          min-height: 56px; max-height: 56px; gap: 6px; padding: 4px; overflow: hidden;
         }
         .mode-level #lv-preview { display: none !important; }
         .mode-level #lv-right > .pane { display: none !important; }
@@ -352,6 +393,10 @@
       <!-- ПРАВА ПАНЕЛЬ -->
       <aside id="right" class="col">
         <div id="preview"><iframe id="previewFrame" title="Превʼю гри"></iframe><div id="previewHint">Превʼю гри 20:9</div><div id="previewClick" title="ЛКМ — розгорнути / згорнути"></div></div>
+        <div id="charMobileActions" style="display:none;gap:6px;flex:1">
+          <button id="charMobSave" style="flex:1;font-size:13px;padding:8px">Зберегти</button>
+          <button id="charMobPublish" class="btn-accent" style="flex:1;font-size:13px;padding:8px">Оновити гру</button>
+        </div>
         <div id="iconBar">
           <label class="iconToggle" title="Показувати півоти"><input type="checkbox" id="showPivots" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></label>
           <label class="iconToggle" title="Показувати фоновий концепт"><input type="checkbox" id="showRef" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-4 4 3 3-3 6 5"/></svg></label>
