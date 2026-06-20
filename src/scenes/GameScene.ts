@@ -63,6 +63,7 @@ export class GameScene extends Phaser.Scene {
   private colliderCells: string[] = [];
   private colliderGrid = 48;
   private floorSet = new Set<string>(); // "cx,cy" намальованих підлогових (h) клітинок — для поклітинкової прохідності
+  private cellLevel = new Map<string, number>(); // "cx,cy" → рівень висоти клітинки (0 = земля); елевація px = рівень·gs
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
@@ -114,27 +115,31 @@ export class GameScene extends Phaser.Scene {
     return { top: this.bandBottom + minY, bottom: this.bandBottom + maxY };
   }
 
-  // Поклітинкова прохідність: точка (gameX, gameY) лежить на намальованій підлозі?
-  // Інверсія тієї ж ізо-ґратки, що в редакторі (editorY = gameY - bandBottom).
-  private walkableAt(gameX: number, gameY: number): boolean {
+  // Елевація поверхні (px) у точці (gameX, gameY): висота клітинки-платформи під нею,
+  // або null = підлоги нема (отвір/край). Та сама ізо-ґратка, що в редакторі
+  // (editorY = gameY - bandBottom). Гравець упирається в клітинку, чия поверхня вища
+  // за його поточну висоту (= стіна/сходинка), і приземляється на ту, що ≤ висоти.
+  private surfaceAt(gameX: number, gameY: number): number | null {
     if (!this.levelMode || !this.floorSet.size) {
       const b = this.band;
-      return gameY >= b.top && gameY <= b.bottom;
+      return (gameY >= b.top && gameY <= b.bottom) ? 0 : null;
     }
     const gs = this.colliderGrid; const k = gs * Math.SQRT1_2;
     const editorY = gameY - this.bandBottom;
     const fcx = (gameX - editorY) / gs, fcy = editorY / k;
     const cx = Math.floor(fcx), cy = Math.floor(fcy);
-    if (this.floorSet.has(cx + ',' + cy)) return true;
+    const lvl = (ix: number, iy: number): number => this.cellLevel.get(ix + ',' + iy) ?? 0;
+    if (this.floorSet.has(cx + ',' + cy)) return lvl(cx, cy) * gs;
     // Авто-фаска: порожня клітинка з двома замальованими СУМІЖНИМИ сторонами =
     // внутрішній кут; половинка-трикутник до того кута прохідна (зрізаємо кут по
     // діагоналі). fx,fy — локальні 0..1 у клітинці; "/"=fx+fy, "\"=fx−fy.
+    // Фаска успадковує висоту сусідньої клітинки-платформи, яку згладжує.
     const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy);
     const fx = fcx - cx, fy = fcy - cy;
     const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
-    if (L && U && fx + fy < 1) return true; // верх-ліво (діагональ /)
-    if (R && D && fx + fy > 1) return true; // низ-право  (діагональ /)
-    return false;
+    if (L && U && fx + fy < 1) return lvl(cx - 1, cy) * gs; // верх-ліво (діагональ /)
+    if (R && D && fx + fy > 1) return lvl(cx + 1, cy) * gs; // низ-право  (діагональ /)
+    return null;
   }
 
   create(): void {
@@ -258,8 +263,10 @@ export class GameScene extends Phaser.Scene {
     // редакторного Y затягувало б персонажа за нижній край екрана).
     this.colliderCells = doc.collider ?? [];
     this.colliderGrid = doc.grid ?? 48;
-    // Набір підлогових клітинок для поклітинкової прохідності (отвори блокують).
+    // Набір підлогових клітинок + їхні рівні висоти (для прохідності й елевації).
+    // Формат клітинки: "cx,cy,h" (рівень 0) або "cx,cy,h,L" (піднята платформа L).
     this.floorSet.clear();
+    this.cellLevel.clear();
     // Compute global fallback band from all cells (used when no cells at player's X)
     this.levelBand = null;
     if (this.colliderCells.length) {
@@ -268,7 +275,9 @@ export class GameScene extends Phaser.Scene {
       for (const c of this.colliderCells) {
         const p = c.split(','); if ((p[2] ?? 'h') !== 'h') continue;
         const cy = Number(p[1]); if (!Number.isFinite(cy)) continue;
-        this.floorSet.add(p[0] + ',' + p[1]);
+        const key = p[0] + ',' + p[1];
+        this.floorSet.add(key);
+        const lvl = Number(p[3]) || 0; if (lvl) this.cellLevel.set(key, lvl);
         const y0 = cy * k, y1 = (cy + 1) * k;
         if (y0 < minY) minY = y0; if (y1 > maxY) maxY = y1;
       }
@@ -565,7 +574,7 @@ export class GameScene extends Phaser.Scene {
     const band = this.getBandAtX(this.player.floorX);
 
     const cmd = this.controls.sample();
-    this.player.update(cmd, time, dt, (x, y) => this.walkableAt(x, y));
+    this.player.update(cmd, time, dt, (x, y) => this.surfaceAt(x, y));
 
     // Синхронізуємо зібраного персонажа з гравцем (позиція, анімація, напрям)
     if (this.character) {

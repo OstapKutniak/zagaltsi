@@ -60,7 +60,7 @@ export class Enemy extends Actor {
     if (this.character) {
       this.character.setAnim(anim);
       this.character.tick(dt, this.facing);
-      this.character.setPosition(this.fx, this.fy - this.character.feetOffset() - this.airZ);
+      this.character.setPosition(this.fx, this.fy - this.character.feetOffset() - this.hz);
       this.character.setDepth(this.fy + 0.1);
     }
 

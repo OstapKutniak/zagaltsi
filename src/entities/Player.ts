@@ -3,7 +3,11 @@ import { Actor } from './Actor';
 import { PLAYER, JUMP, WORLD_WIDTH } from '../config';
 import type { InputCommand } from '../core/input';
 
-// Чи прохідна точка (gameX, gameY) — поклітинкова перевірка підлоги (з GameScene).
+// Елевація поверхні (px) у точці (gameX, gameY): висота клітинки-платформи під цією
+// точкою, або null = підлоги нема (отвір/край). Стіна між рівнями = клітинка, чия
+// поверхня ВИЩА за поточну висоту гравця: туди не зайти, поки не підстрибнеш досить.
+type SurfaceAt = (x: number, y: number) => number | null;
+// Похідний предикат «тут можна стояти на поточній висоті» (підлога є і не зависоко).
 type Walkable = (x: number, y: number) => boolean;
 
 // Герой. Уся поведінка керується командами вводу (cmd) — це "симуляція,
@@ -24,9 +28,14 @@ export class Player extends Actor {
     super(scene, x, y, 'player', PLAYER.maxHp);
   }
 
-  update(cmd: InputCommand, time: number, dt: number, walkable: Walkable): void {
+  update(cmd: InputCommand, time: number, dt: number, surfaceAt: SurfaceAt): void {
     this.moving = false;
     this.running = false;
+    // «Можна стояти тут» = підлога є І її поверхня не вища за поточну висоту гравця.
+    // Вища клітинка (стіна/сходинка) непрохідна на землі, але стає прохідною, щойно
+    // підстрибнеш вище за неї — тоді заходиш на платформу й приземляєшся на її висоту.
+    const TOL = 6;
+    const walkable: Walkable = (x, y) => { const s = surfaceAt(x, y); return s !== null && s <= this.hz + TOL; };
     // Під час удару герой "вкопаний" — не ходить.
     if (!this.isAttacking(time)) {
       let vx = 0;
@@ -72,6 +81,11 @@ export class Player extends Actor {
       if (cmd.attack) this.tryAttack(time);
     }
 
+    // Висота поверхні під гравцем: гравітація тягне z до неї. Зайшов на вищу
+    // платформу (підстрибнувши) — floorZ росте, стоїш на ній; зійшов з краю —
+    // floorZ падає, гравець зривається і падає на нижчу.
+    const sf = surfaceAt(this.fx, this.fy);
+    if (sf !== null) this.floorZ = sf;
     this.stepZ(dt);
     const flashing = time < this.invulnUntil && Math.floor(time / 70) % 2 === 0;
     this.setAlpha(flashing ? 0.4 : 1);

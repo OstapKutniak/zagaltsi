@@ -25,3 +25,6 @@ const game = new Phaser.Game({
 });
 
 setupViewport(game);
+
+// Dev-only: доступ до інстансу гри з консолі для дебагу (у проді не активний).
+if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;
