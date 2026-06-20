@@ -474,6 +474,24 @@ export function initLevelEditor(prefix: string): void {
     }
   }
 
+  const _alphaCache = new Map<HTMLImageElement, Uint8ClampedArray>();
+  function _alphaAt(img: HTMLImageElement, lx: number, ly: number): number {
+    const px = Math.round(lx + img.width / 2);
+    const py = Math.round(ly + img.height / 2);
+    if (px < 0 || px >= img.width || py < 0 || py >= img.height) return 0;
+    let data = _alphaCache.get(img);
+    if (!data) {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = img.width; cv.height = img.height;
+        const c = cv.getContext('2d')!;
+        c.drawImage(img, 0, 0);
+        data = c.getImageData(0, 0, img.width, img.height).data;
+      } catch { data = new Uint8ClampedArray(0); }
+      _alphaCache.set(img, data);
+    }
+    return data[(py * img.width + px) * 4 + 3] ?? 0;
+  }
   function hitTest(sx: number, sy: number): string | null {
     const list = placedSorted().filter(p => state.soloFillCat === null || p.cat === state.soloFillCat);
     for (let i = list.length - 1; i >= 0; i--) {
@@ -483,7 +501,7 @@ export function initLevelEditor(prefix: string): void {
       const k = p.scale * sc();
       let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / k; const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / k;
       if (p.flip < 0) lx = -lx;
-      if (Math.abs(lx) <= img.width / 2 && Math.abs(ly) <= img.height / 2) return p.id;
+      if (Math.abs(lx) <= img.width / 2 && Math.abs(ly) <= img.height / 2 && _alphaAt(img, lx, ly) > 10) return p.id;
     }
     return null;
   }
@@ -945,6 +963,10 @@ export function initLevelEditor(prefix: string): void {
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (state.pendingAsset) {
+      state.pendingScale = Math.max(0.1, Math.min(10, state.pendingScale * (e.deltaY < 0 ? 1.1 : 0.9)));
+      draw(); return;
+    }
     if (['h', 'erase', 'raise', 'lower', 'flat'].includes(state.pathTool ?? '')) {
       state.brushSize = Math.max(1, Math.min(9, state.brushSize + (e.deltaY < 0 ? 1 : -1)));
       setStatus(`Пензель: ${state.brushSize}×${state.brushSize}`);
