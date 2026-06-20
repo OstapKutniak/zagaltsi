@@ -7,8 +7,9 @@ type TgUser = { id: number; first_name?: string; username?: string };
 interface TelegramWebApp {
   ready(): void;
   expand(): void;
+  isVersionAtLeast?(version: string): boolean;
   requestFullscreen?(): void; // Bot API 8.0+
-  disableVerticalSwipes?(): void;
+  disableVerticalSwipes?(): void; // Bot API 7.7+
   initDataUnsafe?: { user?: TgUser };
   CloudStorage?: {
     setItem(key: string, value: string, cb?: (err: unknown, ok: boolean) => void): void;
@@ -25,10 +26,12 @@ export function initTelegram(): void {
   if (!w) return;
   w.ready();
   w.expand(); // на весь доступний экран по висоті (мобілка)
-  // На нових клієнтах — справжній повноекранний режим; на старих просто немає методу.
-  try { w.requestFullscreen?.(); } catch { /* не підтримується — ок */ }
-  // Щоб свайп донизу не закривав гру випадково під час гри.
-  try { w.disableVerticalSwipes?.(); } catch { /* ignore */ }
+  // Версійно-гейтнуті методи: викликаємо лише якщо клієнт достатньо новий, інакше SDK
+  // сам пише console.error «not supported in version X» (виключення не кидає, try/catch не
+  // глушить). На старих клієнтах / у браузері просто залишаємось на expand().
+  const atLeast = (v: string): boolean => w.isVersionAtLeast?.(v) ?? false;
+  if (atLeast('8.0')) try { w.requestFullscreen?.(); } catch { /* ignore */ }
+  if (atLeast('7.7')) try { w.disableVerticalSwipes?.(); } catch { /* ignore */ }
 }
 
 export function getUser(): TgUser | null {
