@@ -42,7 +42,6 @@ export function initLevelEditor(prefix: string): void {
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
     pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn',
-    paintLevel: 0, // рівень висоти, яким фарбуємо підлогу (0=земля); змінюється клавішами ] / [
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -340,7 +339,9 @@ export function initLevelEditor(prefix: string): void {
         level().enemySpawns.find((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return cx >= acx && cx <= acx + 2 && cy >= acy && cy <= acy + 2; });
       if (state.pathTool === 'h') {
         const { present, lvlOf } = levelMaps();
-        drawFloorCell(c.cx, c.cy, state.paintLevel, present, lvlOf, true); // прев'ю на поточній висоті
+        // Прев'ю на висоті наявної клітинки (якщо є) — інакше земля (0).
+        const pl = present.has(c.cx + ',' + c.cy) ? lvlOf(c.cx, c.cy) : 0;
+        drawFloorCell(c.cx, c.cy, pl, present, lvlOf, true);
       } else if (state.pathTool === 'v') {
         const w = wallSnapCell(state.mouse.x, state.mouse.y);
         const [ea, eb] = floorRightEdge(c.cx, c.cy); // біла лінія = права грань підлогової клітинки (снеп)
@@ -627,13 +628,31 @@ export function initLevelEditor(prefix: string): void {
     if (state.pathTool === 'erase') {
       lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(matchH(p) || matchV(p)); });
     } else if (state.pathTool === 'h') {
+      // Малювання кладе ЗЕМЛЮ (рівень 0). Висоту наявних клітинок міняють клавіші 1/2/3.
+      // Перефарбування поверх наявної клітинки ЗБЕРІГАЄ її рівень (не скидає в 0).
+      const existing = lv.collider.find((z) => matchH(z.split(',')));
+      const keepL = existing ? (Number(existing.split(',')[3]) || 0) : 0;
       lv.collider = lv.collider.filter((z) => !matchH(z.split(',')));
-      lv.collider.push(state.paintLevel !== 0 ? `${fl.cx},${fl.cy},h,${state.paintLevel}` : `${fl.cx},${fl.cy},h`);
+      lv.collider.push(keepL !== 0 ? `${fl.cx},${fl.cy},h,${keepL}` : `${fl.cx},${fl.cy},h`);
     } else if (state.pathTool === 'v') {
       lv.collider = lv.collider.filter((z) => !matchV(z.split(',')));
       lv.collider.push(`${wl.cx},${wl.cy},v`);
     }
     draw();
+  }
+  // Змінити РІВЕНЬ ВИСОТИ наявної підлогової клітинки під курсором (не створює нову).
+  // 'up' +1 / 'down' −1 (від'ємні = яма) / 'flat' = 0. Клавіші 1 / 2 / 3.
+  function bumpCellLevel(mode: 'up' | 'down' | 'flat'): void {
+    const fl = floorCellAt(state.mouse.x, state.mouse.y);
+    const lv = level();
+    const idx = lv.collider.findIndex((z) => { const p = z.split(','); return Number(p[0]) === fl.cx && Number(p[1]) === fl.cy && (p[2] ?? 'h') === 'h'; });
+    if (idx < 0) { setStatus('Наведи курсор на клітинку підлоги, щоб змінити її висоту'); return; }
+    let L = Number(lv.collider[idx].split(',')[3]) || 0;
+    L = mode === 'up' ? L + 1 : mode === 'down' ? L - 1 : 0;
+    pushUndo();
+    lv.collider[idx] = L !== 0 ? `${fl.cx},${fl.cy},h,${L}` : `${fl.cx},${fl.cy},h`;
+    setStatus(`Висота клітинки: ${L}`);
+    draw(); save();
   }
   // Поставити вибраний спавн гравця на підлогову клітинку під курсором (центр клітинки).
   function placeSpawnAt(sx: number, sy: number): void {
@@ -751,18 +770,11 @@ export function initLevelEditor(prefix: string): void {
         refreshSel(); draw(); save(); startMode('G');
       }
     }
-    else if (ev.code === 'KeyH') { ev.preventDefault(); state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns(); if (state.pathTool === 'h') setStatus(`Підлога. Висота: ${state.paintLevel} — 1 вище / 2 нижче (стіни малюються самі)`); }
-    // Рівень висоти фарбування підлоги: 1 вище / 2 нижче (від'ємні = ями) / 3 — на рівень 0.
-    // Вмикає інструмент «Підлога».
-    else if (ev.code === 'Digit1' || ev.code === 'Digit2' || ev.code === 'Digit3') {
-      ev.preventDefault();
-      if (ev.code === 'Digit1') state.paintLevel++;
-      else if (ev.code === 'Digit2') state.paintLevel--;
-      else state.paintLevel = 0;
-      if (state.pathTool !== 'h') { state.pathTool = 'h'; updatePathBtns(); }
-      setStatus(`Висота фарбування: ${state.paintLevel} (стіни/ями малюються самі)`);
-      draw();
-    }
+    else if (ev.code === 'KeyH') { ev.preventDefault(); state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns(); if (state.pathTool === 'h') setStatus('Підлога (земля). Наведи на клітинку: 1 вище / 2 нижче / 3 вирівняти — стіни малюються самі'); }
+    // Висота НАЯВНОЇ клітинки під курсором: 1 вище / 2 нижче (від'ємні = ями) / 3 вирівняти.
+    else if (ev.code === 'Digit1') { ev.preventDefault(); bumpCellLevel('up'); }
+    else if (ev.code === 'Digit2') { ev.preventDefault(); bumpCellLevel('down'); }
+    else if (ev.code === 'Digit3') { ev.preventDefault(); bumpCellLevel('flat'); }
     else if (ev.code === 'KeyY') { ev.preventDefault(); state.pathTool = state.pathTool === 'erase' ? null : 'erase'; updatePathBtns(); }
     else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
