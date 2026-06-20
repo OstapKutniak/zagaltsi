@@ -20,13 +20,13 @@ const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, collide
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number }
+interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: { bg: number; sky: number } }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32 });
+  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { bg: 0.5, sky: 0.8 } });
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -213,6 +213,7 @@ export function initLevelEditor(prefix: string): void {
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
       if (typeof lv.grid !== 'number') lv.grid = 32; // міграція: всі рівні на gs=32
+      if (!lv.parallax) lv.parallax = { bg: 0.5, sky: 0.8 }; // міграція: паралакс фон/небо
     }
     state.grid = level().grid;
   }
@@ -544,9 +545,39 @@ export function initLevelEditor(prefix: string): void {
       bar.innerHTML = '';
       state.levels.forEach((lv, i) => bar.appendChild(makeCard(lv, i)));
     }
+    refreshParallaxUI();
   }
   $<HTMLButtonElement>('addLevel').addEventListener('click', addLevel);
   $<HTMLButtonElement>('levelBarAdd')?.addEventListener('click', addLevel);
+
+  // ── Паралакс: перемикач шару (Фон/Небо) + слайдер «Дальність» ──
+  // Дальність 0..1 регулює швидкість скролу шару в грі (0 — як карта, 1 — нерухоме).
+  let parallaxLayer: 'bg' | 'sky' = 'bg';
+  const PARALLAX_LABEL: Record<'bg' | 'sky', string> = { bg: 'Фон', sky: 'Небо' };
+  function refreshParallaxUI(): void {
+    const lv = level();
+    if (!lv.parallax) lv.parallax = { bg: 0.5, sky: 0.8 };
+    const btn = $<HTMLButtonElement>('parallaxLayer');
+    const sl = $<HTMLInputElement>('parallaxSlider');
+    const val = $('parallaxVal');
+    if (btn) btn.textContent = PARALLAX_LABEL[parallaxLayer];
+    const v = lv.parallax[parallaxLayer];
+    if (sl) sl.value = String(v);
+    if (val) val.textContent = v.toFixed(2);
+  }
+  $<HTMLButtonElement>('parallaxLayer')?.addEventListener('click', () => {
+    parallaxLayer = parallaxLayer === 'bg' ? 'sky' : 'bg';
+    refreshParallaxUI();
+  });
+  $<HTMLInputElement>('parallaxSlider')?.addEventListener('input', () => {
+    const sl = $<HTMLInputElement>('parallaxSlider');
+    const lv = level();
+    if (!lv.parallax) lv.parallax = { bg: 0.5, sky: 0.8 };
+    const v = Number(sl.value);
+    lv.parallax[parallaxLayer] = v;
+    const val = $('parallaxVal'); if (val) val.textContent = v.toFixed(2);
+    save();
+  });
 
   function refreshCatSelect(): void {
     $<HTMLSelectElement>('libSelect').value = state.cat;
@@ -1408,7 +1439,7 @@ export function initLevelEditor(prefix: string): void {
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, assets: used };
+    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: lv.parallax ?? { bg: 0.5, sky: 0.8 }, assets: used };
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
     idbSet('zag_level', buildLevelDoc())

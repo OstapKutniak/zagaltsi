@@ -15,10 +15,13 @@ export interface LevelDoc {
   collider?: string[];
   enemySpawns?: string[]; // зони спавна ворогів: "cx,cy" — кут 3×3 підлогових клітинок
   grid?: number;
+  parallax?: { bg: number; sky: number }; // «Дальність» 0..1: 0 = разом з картою, 1 = нерухоме
 }
 
 // шари: небо/фон/карта — позаду персонажа; декор/інтерактив/пастки — теж позаду (поки)
 const LAYER: Record<string, number> = { sky: -1200, bg: -1100, map: -1000, decor: -300, interactive: -250, trap: -250 };
+// Дефолтна дальність паралакса, якщо рівень її не задає: фон повільніше карти, небо ще повільніше.
+const PARALLAX_FALLBACK: Record<string, number> = { bg: 0.5, sky: 0.8 };
 
 function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
   return new Promise((res) => {
@@ -40,5 +43,10 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
     im.setRotation((p.rot * Math.PI) / 180);
     im.setScale(p.scale * p.flip, p.scale);
     im.setDepth(LAYER[p.cat] ?? -500);
+    // Паралакс лише для неба й фону: scrollFactor < 1 → шар скролиться повільніше за камеру.
+    if (p.cat === 'bg' || p.cat === 'sky') {
+      const dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
+      im.setScrollFactor(Math.max(0, 1 - dist), 1);
+    }
   }
 }
