@@ -179,6 +179,7 @@
       #lv-npcList, #npcList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 230px; overflow-y: auto; align-content: flex-start; }
       .npcCard { position: relative; width: calc(33.333% - 4px); aspect-ratio: 1; background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: grab; display: flex; align-items: center; justify-content: center; overflow: hidden; }
       .npcCard:hover { border-color: var(--sel); }
+      .npcCard.pending { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent); cursor: crosshair; }
       .npcCard:active { cursor: grabbing; }
       .npcCard img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
       .npcCard .npcName { position: absolute; bottom: 2px; left: 2px; right: 2px; font-size: 10px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }

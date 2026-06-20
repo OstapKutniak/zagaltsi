@@ -63,12 +63,14 @@ export function initLevelEditor(prefix: string): void {
     pendingScale: 1,  // масштаб ghost
     pendingFlip: 1,   // 1 або -1 (M = дзеркало)
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
+    pendingEnemy: null as string | null,          // id ворога що зараз виставляється
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
   };
 
   // Неігрові персонажі (вороги) з бібліотеки персонажів + кеш червоних тонованих мініатюр.
   let npcLib: LibItem[] = [];
   const npcTinted = new Map<string, HTMLCanvasElement>();
+  const npcImages = new Map<string, HTMLImageElement>();
 
   const level = (): Level => state.levels[state.cur];
   const sc = (): number => state.viewScale * state.zoom;
@@ -342,13 +344,16 @@ export function initLevelEditor(prefix: string): void {
       // Зони спавна ворогів — червоний 3×3 (підлогова ґратка) + точка-центр.
       const k2 = gs * Math.SQRT1_2;
       const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
+      // якщо виставляємо ворога — визначаємо клітинку під курсором для hover-підсвітки
+      const mfc = state.pendingEnemy ? floorCellAt(state.mouse.x, state.mouse.y) : null;
       for (const z of level().enemySpawns) {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); const enemyId = p[2];
         if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const hovered = mfc ? (mfc.cx >= acx && mfc.cx <= acx + 2 && mfc.cy >= acy && mfc.cy <= acy + 2) : false;
         const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
-        ctx.fillStyle = 'rgba(255,40,40,0.20)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,40,40,0.9)'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = hovered ? 'rgba(255,40,40,0.55)' : 'rgba(255,40,40,0.20)'; ctx.fill();
+        ctx.strokeStyle = hovered ? 'rgba(255,80,80,1)' : 'rgba(255,40,40,0.9)'; ctx.lineWidth = hovered ? 3 : 2; ctx.stroke();
         const ctr = Pf(acx + 1.5, acy + 1.5);
         const tint = enemyId ? npcTinted.get(enemyId) : null;
         if (tint) { // напівпрозоре червоне зображення виставленого ворога, прив'язане до зони
@@ -451,6 +456,20 @@ export function initLevelEditor(prefix: string): void {
         ctx.rotate(rad(state.pendingRot));
         ctx.scale(state.pendingFlip * k, k);
         ctx.drawImage(pimg, -pimg.width / 2, -pimg.height / 2);
+        ctx.restore();
+      }
+    }
+
+    if (state.pendingEnemy) {
+      const pimg = npcImages.get(state.pendingEnemy);
+      if (pimg?.complete && pimg.naturalWidth) {
+        const mx = state.mouse.x, my = state.mouse.y;
+        const gh = 80 * sc();
+        const gw = gh * (pimg.naturalWidth / pimg.naturalHeight);
+        ctx.save();
+        ctx.globalAlpha = 0.88;
+        ctx.filter = 'brightness(1000) saturate(0)';
+        ctx.drawImage(pimg, mx - gw / 2, my - gh * 0.9, gw, gh);
         ctx.restore();
       }
     }
@@ -853,6 +872,23 @@ export function initLevelEditor(prefix: string): void {
       const si = lv0.spawns.findIndex((s) => Math.floor((s.x - s.y) / gs0) === cc.cx && Math.floor(s.y / k0) === cc.cy);
       if (si >= 0) { state.spawnSel = si; refreshSpawnUI(); draw(); return; }
     }
+    // Pending-ворог: ЛКМ виставляє ворога у зону спавна під курсором
+    if (ev.button === 0 && state.pendingEnemy) {
+      const w = toWorld(x, y); const gs = state.grid, k = gs * Math.SQRT1_2;
+      const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+      const lv = level();
+      const idx = lv.enemySpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
+      if (idx >= 0) {
+        pushUndo();
+        const p = lv.enemySpawns[idx].split(',');
+        lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${state.pendingEnemy}`;
+        save(); draw(); setStatus('Ворога виставлено'); return;
+      }
+      // клік поза зоною — скасувати
+      state.pendingEnemy = null;
+      $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+      draw(); return;
+    }
     // Pending-ассет: ЛКМ підтверджує transform-режим або розміщує ассет
     if (ev.button === 0 && !state.pathTool && state.pendingAsset) {
       if (state.pendingTransMode) { state.pendingTransMode = null; draw(); return; }
@@ -1086,7 +1122,11 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
     else if (ev.code === 'Escape') {
-      if (state.pendingAsset) {
+      if (state.pendingEnemy) {
+        state.pendingEnemy = null;
+        $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+        draw();
+      } else if (state.pendingAsset) {
         state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         draw();
@@ -1337,10 +1377,22 @@ export function initLevelEditor(prefix: string): void {
     }
     for (const it of enemies) {
       buildNpcTint(it);
+      // передзавантажити зображення для ghost
+      if (it.thumb && !npcImages.has(it.id)) {
+        const img = new Image(); img.src = it.thumb; npcImages.set(it.id, img);
+      }
       const card = document.createElement('div'); card.className = 'npcCard'; card.title = it.name; card.draggable = true;
+      if (state.pendingEnemy === it.id) card.classList.add('pending');
       if (it.thumb) { const im = document.createElement('img'); im.src = it.thumb; card.appendChild(im); }
       const nm = document.createElement('div'); nm.className = 'npcName'; nm.textContent = it.name; card.appendChild(nm);
       card.addEventListener('dragstart', (e) => { (e as DragEvent).dataTransfer?.setData('text/enemy-id', it.id); });
+      card.addEventListener('click', () => {
+        const active = state.pendingEnemy === it.id;
+        state.pendingEnemy = active ? null : it.id;
+        npcList.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+        if (!active) card.classList.add('pending');
+        draw();
+      });
       npcList.appendChild(card);
     }
   }
