@@ -748,11 +748,16 @@ if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
 document.getElementById('charMobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveChar').click());
 document.getElementById('charMobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGameBtn').click());
 
-// ---- «Частини персонажа» — кнопка, що розкриває/ховає список частин ----
+// ---- «Частини персонажа» — ЛКМ: розкриває/ховає список частин; ПКМ: згортає панель тулзів ----
 let partsOpen = false;
 $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
   partsOpen = !partsOpen;
   $('partsList').style.display = partsOpen ? '' : 'none';
+});
+$<HTMLButtonElement>('partsToggle').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const body = $<HTMLElement>('toolsBody');
+  body.style.display = body.style.display === 'none' ? '' : 'none';
 });
 // вирівняти верх списку частин по верху кнопки «Частини персонажа»
 function alignPartsList(): void {
@@ -840,17 +845,17 @@ function flipAllBends(): void {
 }
 $<HTMLButtonElement>('flipAllBtn').addEventListener('click', flipAllBends);
 // ---- Завантажити картинку ----
-$<HTMLButtonElement>('loadImgBtn').addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
-
-// ---- Export JSON / (ПКМ) Import JSON — одна кнопка з тоглом ----
-let importMode = false;
-const exportBtnEl = $<HTMLButtonElement>('exportBtn');
-function refreshExportBtn(): void {
-  exportBtnEl.textContent = importMode ? 'Імпортувати JSON' : 'Експортувати JSON';
-  exportBtnEl.title = importMode ? 'ПКМ — назад на Експорт' : 'ПКМ — перемкнути на Імпорт';
-  exportBtnEl.classList.toggle('light', importMode);
-}
-exportBtnEl.addEventListener('contextmenu', (e) => { e.preventDefault(); importMode = !importMode; refreshExportBtn(); });
+// ---- imgGrid: клік на пустому = відкрити picker; DnD = завантажити PNG ----
+$('imgGrid').addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  if (t.id === 'imgGrid' || t.classList.contains('empty')) $<HTMLInputElement>('fileInput').click();
+});
+['dragenter', 'dragover'].forEach((ev) => $('imgGrid').addEventListener(ev, (e) => e.preventDefault()));
+$('imgGrid').addEventListener('drop', (e) => {
+  e.preventDefault();
+  const files = Array.from((e as DragEvent).dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+  if (files.length) { pushUndo(); files.forEach((f) => addImageFile(f, files.length === 1)); status(`Перетягнуто ${files.length} — розкладаю по назвах…`); }
+});
 
 // ---- canvas ----
 let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null = null;
@@ -1048,13 +1053,6 @@ function saveCharacter(): void {
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
 $<HTMLButtonElement>('libToggle').addEventListener('click', () => { libCat = libCat === 'char' ? 'enemy' : 'char'; renderLibrary(); });
 
-$<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
-  if (importMode) { $<HTMLInputElement>('importInput').click(); return; } // у режимі імпорту (ПКМ) — відкрити файл
-  const doc = buildDoc();
-  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'character.json'; a.click();
-  status(`Експортовано character.json (частин: ${Object.keys(doc.images).length}) — кинь у гру`);
-});
 async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {
   btn.disabled = true;
   const orig = btn.textContent!;
@@ -1080,16 +1078,6 @@ async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => vo
 $<HTMLButtonElement>('toGameBtn').addEventListener('click', () => {
   reloadPreview();
   void publishToGame($<HTMLButtonElement>('toGameBtn'), status);
-});
-$<HTMLButtonElement>('importBtn').addEventListener('click', () => $<HTMLInputElement>('importInput').click());
-$<HTMLInputElement>('importInput').addEventListener('change', (ev) => {
-  const file = (ev.target as HTMLInputElement).files?.[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try { loadCharFromDoc(JSON.parse(String(reader.result))); status('Імпортовано.'); }
-    catch { status('Помилка читання JSON'); }
-  };
-  reader.readAsText(file);
 });
 
 // ---- таймлайн / авторські анімації ----

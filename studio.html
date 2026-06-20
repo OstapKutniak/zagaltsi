@@ -434,7 +434,7 @@
         </div>
         <div id="tools" class="pane">
           <button id="partsToggle" class="header">Частини персонажа</button>
-          <div class="body">
+          <div id="toolsBody" class="body">
             <div class="btns oneRow">
               <button id="setPivot">Півот (Q)</button>
               <button id="mirrorBtn">Мірор (M)</button>
@@ -442,16 +442,9 @@
               <button id="bendFlipBtn">Напрям (B)</button>
               <button id="flipAllBtn">Фліп</button>
             </div>
-            <button id="loadImgBtn">Завантажити картинку</button>
             <input type="file" id="fileInput" accept="image/png,image/*" multiple style="display:none" />
-            <div id="imgGrid"></div>
-
-            <div class="btns">
-              <button id="saveChar" style="flex:1">Зберегти персонажа</button>
-              <button id="exportBtn" style="flex:1" title="ПКМ — перемкнути на Імпорт">Експортувати JSON</button>
-              <button id="importBtn" style="display:none"></button>
-              <input type="file" id="importInput" accept="application/json" style="display:none" />
-            </div>
+            <div id="imgGrid" title="Клік — завантажити картинку · Перетягни PNG"></div>
+            <button id="saveChar">Зберегти персонажа</button>
             <div class="btns"><button id="toGameBtn" class="btn-accent" style="flex:1">Оновити гру</button></div>
 
             <!-- приховані контролі (доступ через хоткеї/мишу та грід); концепт вантажиться кнопкою «Завантажити картинку» коли вибрано «Фоновий концепт» -->
