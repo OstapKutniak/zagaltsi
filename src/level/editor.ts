@@ -41,7 +41,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -68,6 +68,33 @@ export function initLevelEditor(prefix: string): void {
   const toScreen = (wx: number, wy: number) => ({ x: state.origin.x + wx * sc(), y: state.origin.y + wy * sc() });
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
+
+  // ── Геометрія ізо-ґратки (спільна для draw / прев'ю / кліків) ──
+  type Pt = { x: number; y: number };
+  // Підлогова клітинка (cx,cy) розміром w×h клітинок → 4 екранні точки.
+  const floorPts = (cx: number, cy: number, w = 1, h = 1): Pt[] => {
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const P = (ix: number, iy: number): Pt => toScreen(ix * gs + iy * k, iy * k);
+    return [P(cx, cy), P(cx + w, cy), P(cx + w, cy + h), P(cx, cy + h)];
+  };
+  // Вертикальна стіна, що піднімається із задньої грані підлогової клітинки (cx,cy).
+  const wallPts = (cx: number, cy: number): Pt[] => {
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const ax = cx * gs + cy * k, bx = (cx + 1) * gs + cy * k, ay = cy * k;
+    return [toScreen(ax, ay - gs), toScreen(bx, ay - gs), toScreen(bx, ay), toScreen(ax, ay)];
+  };
+  // Підлогова клітинка під екранною точкою (інверсія підлогової ґратки).
+  const floorCellAt = (sx: number, sy: number): { cx: number; cy: number } => {
+    const w = toWorld(sx, sy), gs = state.grid, k = gs * Math.SQRT1_2;
+    return { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
+  };
+  const fillStroke = (pts: Pt[], fill: string | null, stroke: string | null, lw = 1.5): void => {
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+  };
 
   // Надгробки: id видалених ассетів, щоб синк із GitHub не повертав їх назад.
   const deletedIds = new Set<string>();
@@ -176,30 +203,16 @@ export function initLevelEditor(prefix: string): void {
     }
 
     if (state.showCollider) {
-      const gs = state.grid; ctx.lineWidth = 1;
+      const gs = state.grid;
+      // Підлога (h) — нахилена площина; стіна (v) — піднімається із задньої грані
+      // тієї ж підлогової клітинки (тож завжди прив'язана до підлоги в просторі).
       for (const cell of level().collider) {
         const parts = cell.split(',');
         const cx = Number(parts[0]); const cy = Number(parts[1]); const type = parts[2] ?? 'h';
-        let p1, p2, p3, p4;
-        // Кумулятивна ізо-ґратка: рівна нахилена площина (підлога) + стіна, кути 90°/45°.
-        // k=gs/√2 — катет 45°-ребра. Та сама ґратка інвертується у paintAt (курсор)
-        // і читається грою (хідьба тільки по намальованому).
-        const k = gs * Math.SQRT1_2;
-        if (type === 'h') {
-          // Підлога: верх/низ горизонтальні (gs,0); боки 45° вниз-вправо (k,k)
-          const P = (ix: number, iy: number) => toScreen(ix * gs + iy * k, iy * k);
-          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
-        } else {
-          // Стіна: боки вертикальні (0,gs); верх/низ 45° вниз-вправо (k,k)
-          const P = (ix: number, iy: number) => toScreen(ix * k, ix * k + iy * gs);
-          p1 = P(cx, cy); p2 = P(cx + 1, cy); p3 = P(cx + 1, cy + 1); p4 = P(cx, cy + 1);
-        }
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-        ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
-        ctx.closePath();
-        ctx.fillStyle = type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)'; ctx.fill();
-        ctx.strokeStyle = type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)'; ctx.stroke();
+        const pts = type === 'h' ? floorPts(cx, cy) : wallPts(cx, cy);
+        fillStroke(pts,
+          type === 'h' ? 'rgba(255,154,31,0.22)' : 'rgba(64,160,255,0.22)',
+          type === 'h' ? 'rgba(255,154,31,0.8)' : 'rgba(64,160,255,0.8)', 1);
       }
       // Авто-фаски: на внутрішніх кутах (порожня клітинка з двома замальованими
       // СУМІЖНИМИ сторонами) домальовуємо трикутник-половинку до того кута — щоб
@@ -256,6 +269,34 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
+    // Прев'ю під курсором для активного інструмента — видно ДЕ ляже дія до кліку.
+    if (state.pathTool) {
+      const c = floorCellAt(state.mouse.x, state.mouse.y);
+      const colAt = (cx: number, cy: number, t: string): boolean =>
+        level().collider.some((z) => { const p = z.split(','); return Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === t; });
+      const zoneAt = (cx: number, cy: number): string | undefined =>
+        level().enemySpawns.find((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return cx >= acx && cx <= acx + 2 && cy >= acy && cy <= acy + 2; });
+      if (state.pathTool === 'h') {
+        fillStroke(floorPts(c.cx, c.cy), 'rgba(255,154,31,0.25)', 'rgba(255,154,31,0.95)', 2);
+      } else if (state.pathTool === 'v') {
+        fillStroke(floorPts(c.cx, c.cy), 'rgba(255,255,255,0.12)', 'rgba(255,255,255,0.95)', 2); // біла лінія підлогового колайдера-цілі (снеп)
+        fillStroke(wallPts(c.cx, c.cy), 'rgba(64,160,255,0.30)', 'rgba(64,160,255,0.95)', 2);    // де ляже вертикальний
+      } else if (state.pathTool === 'erase') {
+        const h = colAt(c.cx, c.cy, 'h'), v = colAt(c.cx, c.cy, 'v');
+        if (h) fillStroke(floorPts(c.cx, c.cy), 'rgba(255,60,60,0.30)', 'rgba(255,60,60,0.95)', 2);
+        if (v) fillStroke(wallPts(c.cx, c.cy), 'rgba(255,60,60,0.30)', 'rgba(255,60,60,0.95)', 2);
+        if (!h && !v) fillStroke(floorPts(c.cx, c.cy), null, 'rgba(255,60,60,0.5)', 1.5);
+      } else if (state.pathTool === 'spawn') {
+        const col = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length];
+        ctx.globalAlpha = 0.35; fillStroke(floorPts(c.cx, c.cy), col, null); ctx.globalAlpha = 1;
+        fillStroke(floorPts(c.cx, c.cy), null, col, 2.5);
+      } else if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') {
+        const hit = zoneAt(c.cx, c.cy);
+        if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(255,40,40,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
+        if (state.pathTool === 'enemy') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(255,40,40,0.18)', 'rgba(255,40,40,0.9)', 2); // де ляже нова 3×3
+      }
+    }
+
     const lv = level();
     if (state.showMarkers) {
       const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
@@ -264,14 +305,18 @@ export function initLevelEditor(prefix: string): void {
       ctx.strokeStyle = '#ff6a6a'; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
       ctx.fillStyle = '#5aff8f'; ctx.font = '11px monospace'; ctx.fillText('початок', sx + 3, 14);
       ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець', ex + 3, 14);
+      // Спавни гравця — кольорова підлогова клітинка (без прапорця), номер у центрі.
+      const gs = state.grid, k = gs * Math.SQRT1_2;
       lv.spawns.forEach((s, i) => {
-        const sp = toScreen(s.x, s.y);
+        const cx = Math.floor((s.x - s.y) / gs), cy = Math.floor(s.y / k);
         const col = SPAWN_COLORS[i % SPAWN_COLORS.length];
-        ctx.strokeStyle = col; ctx.lineWidth = i === state.spawnSel ? 3 : 2;
-        ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(sp.x, sp.y - 42); ctx.stroke();
-        ctx.fillStyle = col; ctx.fillRect(sp.x, sp.y - 42, 20, 14);
-        ctx.beginPath(); ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#000'; ctx.font = 'bold 11px monospace'; ctx.fillText(String(i + 1), sp.x + 6, sp.y - 31);
+        ctx.globalAlpha = i === state.spawnSel ? 0.5 : 0.32;
+        fillStroke(floorPts(cx, cy), col, null); ctx.globalAlpha = 1;
+        fillStroke(floorPts(cx, cy), null, col, i === state.spawnSel ? 3 : 1.8);
+        const ctr = toScreen((cx + 0.5) * gs + (cy + 0.5) * k, (cy + 0.5) * k);
+        ctx.fillStyle = '#000'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(i + 1), ctr.x, ctr.y);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       });
     }
 
@@ -497,31 +542,32 @@ export function initLevelEditor(prefix: string): void {
     $('erasePathBtn')?.classList.toggle('on', state.pathTool === 'erase');
     $('enemySpawnBtn')?.classList.toggle('on', state.pathTool === 'enemy');
     $('enemyEraseBtn')?.classList.toggle('on', state.pathTool === 'enemyErase');
+    $('addSpawn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
-    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
-    // Інвертуємо ту саму ґратку, що й у draw() — клітинка лягає під курсор.
-    // Підлога: x=cx*gs+cy*k, y=cy*k → cx=(x-y)/gs, cy=y/k
-    const fl = { cx: Math.floor((w.x - w.y) / gs), cy: Math.floor(w.y / k) };
-    // Стіна: x=cx*k, y=cx*k+cy*gs → cx=x/k, cy=(y-x)/gs
-    const wl = { cx: Math.floor(w.x / k), cy: Math.floor((w.y - w.x) / gs) };
+    // І підлога (h), і стіна (v) тепер прив'язані до ОДНІЄЇ підлогової клітинки під
+    // курсором — стіна піднімається з її задньої грані, тож вертикальний колайдер
+    // завжди «знає» де він у просторі (снеп до горизонтального).
+    const c = floorCellAt(sx, sy);
+    const lv = level();
     if (state.pathTool === 'erase') {
-      level().collider = level().collider.filter((c) => {
-        const p = c.split(','); const t = p[2] ?? 'h'; const cell = t === 'h' ? fl : wl;
-        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy);
-      });
-    } else {
-      const cell = state.pathTool === 'h' ? fl : wl;
-      level().collider = level().collider.filter((c) => {
-        const p = c.split(',');
-        return !(Number(p[0]) === cell.cx && Number(p[1]) === cell.cy && (p[2] ?? 'h') === state.pathTool);
-      });
-      level().collider.push(`${cell.cx},${cell.cy},${state.pathTool}`);
+      lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(Number(p[0]) === c.cx && Number(p[1]) === c.cy); });
+    } else if (state.pathTool === 'h' || state.pathTool === 'v') {
+      lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(Number(p[0]) === c.cx && Number(p[1]) === c.cy && (p[2] ?? 'h') === state.pathTool); });
+      lv.collider.push(`${c.cx},${c.cy},${state.pathTool}`);
     }
+    draw();
+  }
+  // Поставити вибраний спавн гравця на підлогову клітинку під курсором (центр клітинки).
+  function placeSpawnAt(sx: number, sy: number): void {
+    const c = floorCellAt(sx, sy); const gs = state.grid, k = gs * Math.SQRT1_2;
+    const lv = level();
+    lv.spawns[state.spawnSel] = { x: (c.cx + 0.5) * gs + (c.cy + 0.5) * k, y: (c.cy + 0.5) * k };
+    lv.spawn = lv.spawns[0];
     draw();
   }
   // Зона спавна ворогів — 3×3 підлогових клітинки, центровані на клітинці під курсором.
@@ -550,11 +596,14 @@ export function initLevelEditor(prefix: string): void {
     const endSx = toScreen(lv0.end, 0).x;
     if (Math.abs(x - startSx) < MHIT) { pushUndo(); state.markerDrag = 'start'; return; }
     if (Math.abs(x - endSx) < MHIT) { pushUndo(); state.markerDrag = 'end'; return; }
-    for (let i = 0; i < lv0.spawns.length; i++) {
-      const sp = toScreen(lv0.spawns[i].x, lv0.spawns[i].y);
-      if (Math.abs(x - sp.x) < 16 && y > sp.y - 52 && y < sp.y + 8) { pushUndo(); state.markerDrag = 'spawn'; state.spawnSel = i; refreshSpawnUI(); return; }
+    // Клік по кольоровій клітинці спавна (без інструмента) — вибрати цей спавн.
+    if (!state.pathTool && !state.mode) {
+      const cc = floorCellAt(x, y); const gs0 = state.grid, k0 = gs0 * Math.SQRT1_2;
+      const si = lv0.spawns.findIndex((s) => Math.floor((s.x - s.y) / gs0) === cc.cx && Math.floor(s.y / k0) === cc.cy);
+      if (si >= 0) { state.spawnSel = si; refreshSpawnUI(); draw(); return; }
     }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
+    if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
     if (state.pathTool) { pushUndo(); painting = true; paintAt(x, y); return; }
     const hit = hitTest(x, y);
@@ -576,6 +625,7 @@ export function initLevelEditor(prefix: string): void {
     if (painting) { paintAt(state.mouse.x, state.mouse.y); return; }
     if (state.mode) { applyMode(); return; }
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
+    else if (state.pathTool) draw(); // оновити прев'ю інструмента під курсором
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
@@ -911,11 +961,16 @@ export function initLevelEditor(prefix: string): void {
   }
   function wireSpawnControls(): void {
     $('addSpawn')?.addEventListener('click', () => {
-      const lv = level(); if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
+      const lv = level();
+      // Якщо інструмент уже активний — просто вимкнути (тогл).
+      if (state.pathTool === 'spawn') { state.pathTool = null; updatePathBtns(); draw(); return; }
+      if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
       pushUndo(); const w = toWorld(canvas.width / 2, state.origin.y);
       lv.spawns.push({ x: Math.round(w.x), y: 0 }); lv.spawn = lv.spawns[0];
-      state.spawnSel = lv.spawns.length - 1; save(); refreshSpawnUI(); draw();
-      setStatus('Додано точку спавна — перетягни прапорець, куди треба');
+      state.spawnSel = lv.spawns.length - 1;
+      state.pathTool = 'spawn'; updatePathBtns(); // одразу режим розставляння — тицьни на колайдер
+      save(); refreshSpawnUI(); draw();
+      setStatus(`Тицьни на колайдер — там зʼявиться спавн ${state.spawnSel + 1}`);
     });
     $('delSpawn')?.addEventListener('click', () => {
       const lv = level(); if (lv.spawns.length <= 1) { setStatus('Має лишитись хоча б 1 спавн'); return; }
