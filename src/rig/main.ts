@@ -728,8 +728,14 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
 const appEl = document.getElementById('app')!;
 function syncLevelToolbarHeight(): void {
   const tl = document.getElementById('timelineBar');
+  const h = tl ? tl.clientHeight : 0;
+  if (h <= 0) return;
   const lvTl = document.getElementById('lv-levelToolbar');
-  if (tl && lvTl) lvTl.style.minHeight = tl.clientHeight + 'px';
+  const aiPanel = document.getElementById('aiPanel');
+  const lvAiPanel = document.getElementById('lv-aiPanel');
+  if (lvTl) { lvTl.style.minHeight = ''; lvTl.style.height = h + 'px'; }
+  if (aiPanel) aiPanel.style.height = h + 'px';
+  if (lvAiPanel) lvAiPanel.style.height = h + 'px';
 }
 function setMode(mode: string): void {
   if (mode === 'level') syncLevelToolbarHeight(); // зчитати висоту поки timelineBar ще видимий
@@ -1803,4 +1809,5 @@ requestAnimationFrame(() => { resize(); draw(); });
 
 // Синхронізувати висоту lv-levelToolbar з timelineBar після того як кістки завантажились
 setTimeout(syncLevelToolbarHeight, 300);
+window.addEventListener('resize', syncLevelToolbarHeight);
 

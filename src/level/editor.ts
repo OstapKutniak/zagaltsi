@@ -932,7 +932,7 @@ export function initLevelEditor(prefix: string): void {
       draw(); return;
     }
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
-    else if (state.pathTool || state.pendingAsset) draw(); // оновити прев'ю інструмента або ghost під курсором
+    else if (state.pathTool || state.pendingAsset || state.pendingEnemy) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
 
@@ -1541,7 +1541,9 @@ export function initLevelEditor(prefix: string): void {
     const lt = document.getElementById(prefix + 'levelToolbar');
     if (!lt) return;
     const h = measureTimeline();
-    lt.style.height = h > 0 ? h + 'px' : ''; // 0 → фолбек на CSS min-height
+    lt.style.height = h > 0 ? h + 'px' : '';
+    const lvAi = document.getElementById(prefix + 'aiPanel');
+    if (lvAi && h > 0) lvAi.style.height = h + 'px';
   }
 
   // Re-render when tab becomes visible
