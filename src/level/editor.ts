@@ -220,18 +220,16 @@ export function initLevelEditor(prefix: string): void {
         const has = (ix: number, iy: number): boolean => floor.has(ix + ',' + iy);
         const tri = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): void => {
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.closePath();
-          ctx.fillStyle = 'rgba(120,210,120,0.30)'; ctx.fill();
-          ctx.strokeStyle = 'rgba(120,210,120,0.9)'; ctx.stroke();
+          ctx.fillStyle = 'rgba(255,154,31,0.22)'; ctx.fill();
+          ctx.strokeStyle = 'rgba(255,154,31,0.8)'; ctx.stroke();
         };
         for (const key of cand) {
           if (floor.has(key)) continue;
           const [cx, cy] = key.split(',').map(Number);
           const p1 = P(cx, cy), p2 = P(cx + 1, cy), p3 = P(cx + 1, cy + 1), p4 = P(cx, cy + 1);
           const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
-          if (L && U) tri(p1, p2, p4); // верх-ліво
-          if (R && D) tri(p2, p3, p4); // низ-право
-          if (L && D) tri(p1, p3, p4); // низ-ліво
-          if (R && U) tri(p1, p2, p3); // верх-право
+          if (L && U) tri(p1, p2, p4); // верх-ліво (діагональ /)
+          if (R && D) tri(p2, p3, p4); // низ-право  (діагональ /)
         }
       }
       // Зони спавна ворогів — червоний 3×3 (підлогова ґратка) + точка-центр.

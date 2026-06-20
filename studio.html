@@ -33,6 +33,8 @@
       button { background: #4a4a4a; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
       button:hover { background: #565656; }
       button.light { background: #e8e8e8; color: #1b1b1b; font-weight: 600; } /* активна / світла з темним написом */
+      .btn-accent { background: var(--accent); color: #1b1b1b; font-weight: 600; }
+      .btn-accent:hover { background: #fff; color: #1b1b1b; }
       button:disabled { opacity: .4; cursor: default; }
       /* ховаємо скролбари — гортання колесом (видно по руху карток) */
       * { scrollbar-width: none; }
@@ -42,6 +44,7 @@
       .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
       .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
       .header { font-size: 12px; color: var(--ink); text-align: center; padding: 10px; background: var(--rail); border-radius: 11px 11px 0 0; font-weight: 600; width: 100%; border: 0; cursor: pointer; }
+      .header:hover { background: #3a3a3a; }
 
       /* ---- ліва бібліотека (ширша) ---- */
       #library { width: 280px; flex: 0 0 auto; padding: 8px; }
@@ -49,8 +52,9 @@
       #libList { flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
       .libCard { position: relative; width: calc(50% - 4px); background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
       .libCard::before { content: ''; display: block; padding-top: 100%; } /* квадрат: у flex % padding надійно бере ширину картки */
-      .libCard.empty { cursor: default; background: #434343; }
+      .libCard.empty { background: #434343; cursor: pointer; }
       .libCard:not(.empty):hover { border-color: var(--sel); }
+      .libCard.empty:hover { border-color: var(--sel); opacity: 0.8; }
       .libCard img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
       .libName { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; background: rgba(0,0,0,.5); padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .libDel { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; padding: 0; border-radius: 4px; background: rgba(0,0,0,.6); color:#fff; font-size: 14px; line-height: 1; display:flex; align-items:center; justify-content:center; z-index:2; }
@@ -122,6 +126,8 @@
       .iconToggle input { display: none; }
       .iconToggle svg { width: 20px; height: 20px; }
       .iconToggle:has(input:checked), .iconToggle.on { background: var(--accent); border-color: var(--accent); color: #1b1b1b; }
+      .iconToggle:hover { background: #5c5c5c; }
+      .iconToggle.on:hover, .iconToggle:has(input:checked):hover { background: #ffb040; }
       /* level editor library grid */
       #lv-libGrid { flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
       /* level editor list items */
@@ -177,6 +183,7 @@
       details.adv summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
       details.adv .row { margin-top: 6px; }
       #status { font-size: 12px; color: var(--muted); min-height: 0; }
+      #lv-libSelect:hover { background: #565656 !important; }
     </style>
   </head>
   <body>
@@ -296,7 +303,7 @@
               <button id="importBtn" style="display:none"></button>
               <input type="file" id="importInput" accept="application/json" style="display:none" />
             </div>
-            <div class="btns"><button id="toGameBtn" style="flex:1;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button></div>
+            <div class="btns"><button id="toGameBtn" class="btn-accent" style="flex:1">Оновити гру</button></div>
 
             <!-- приховані контролі (доступ через хоткеї/мишу та грід); концепт вантажиться кнопкою «Завантажити картинку» коли вибрано «Фоновий концепт» -->
             <div id="adv" style="display:none">
@@ -333,7 +340,7 @@
           <!-- Секція: Рівні -->
           <button id="lv-secLevels" class="header secToggle open">Рівні</button>
           <div id="lv-bodyLevels" class="secBody">
-            <button id="lv-addLevel" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600;padding:8px">＋ Новий рівень</button>
+            <button id="lv-addLevel" class="btn-accent" style="width:100%;padding:8px">＋ Новий рівень</button>
             <div id="lv-levelList"></div>
             <button id="lv-saveLevelBtn" style="width:100%;font-size:12px;padding:8px 4px">Зберегти рівень</button>
           </div>
@@ -377,7 +384,7 @@
           <!-- Футер -->
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)" />
-            <button id="lv-toGame" style="width:100%;background:var(--accent);color:#1b1b1b;font-weight:600">Оновити гру</button>
+            <button id="lv-toGame" class="btn-accent" style="width:100%">Оновити гру</button>
             <div id="lv-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>

@@ -132,10 +132,8 @@ export class GameScene extends Phaser.Scene {
     const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy);
     const fx = fcx - cx, fy = fcy - cy;
     const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
-    if (L && U && fx + fy < 1) return true; // верх-ліво
-    if (R && D && fx + fy > 1) return true; // низ-право
-    if (L && D && fy > fx) return true;     // низ-ліво
-    if (R && U && fx > fy) return true;     // верх-право
+    if (L && U && fx + fy < 1) return true; // верх-ліво (діагональ /)
+    if (R && D && fx + fy > 1) return true; // низ-право  (діагональ /)
     return false;
   }
 

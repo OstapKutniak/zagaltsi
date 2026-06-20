@@ -42,10 +42,12 @@ function build(): HTMLDivElement {
     const block = isLevel ? String.fromCharCode(65 + li) : String(li + 1);
     li++;
     addBox(root, pane.getBoundingClientRect(), block, true);
-    const ctrls = Array.from(pane.querySelectorAll('button, select, input[type=range]')).filter(isVisible);
+    // Нумерація за DOM-порядком (незалежно від видимості), бокс — тільки для видимих.
+    // Так D8 лишається D8 навіть якщо згорнути секцію з D2..D7.
+    const ctrls = Array.from(pane.querySelectorAll('button, select, input[type=range]'));
     ctrls.forEach((c, i) => {
       const code = isLevel ? block + (i + 1) : block + String.fromCharCode(65 + i);
-      addBox(root, c.getBoundingClientRect(), code, false);
+      if (isVisible(c as Element)) addBox(root, c.getBoundingClientRect(), code, false);
     });
   }
   return root;
