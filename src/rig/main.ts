@@ -88,6 +88,7 @@ const state = {
   clips: {} as Record<string, Clip>, // авторські анімації
   playing: false,
   selKeys: [] as number[], // вибрані ключі (для звʼязування)
+  selKeyBone: null as string | null, // кістка одинарного виділення (null = мульти/рамка)
   setup: null as Record<string, Slot> | null, // bind-поза, поки редагуємо кліп
   prop: { overall: 1, head: 1.4, torso: 0.95, arms: 1.1, legs: 1.3 },
   slots: {} as Record<string, Slot>,
@@ -1258,9 +1259,10 @@ function movePlayhead(): void {
   }
 }
 
-function makeDot(i: number, k: Keyframe, fiv: number): HTMLElement {
+function makeDot(i: number, k: Keyframe, fiv: number, boneKey: string): HTMLElement {
   const dot = document.createElement('div');
-  dot.className = 'keyDot' + (state.selKeys.includes(i) ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
+  const isSel = state.selKeys.includes(i) && (state.selKeyBone === null || state.selKeyBone === boneKey);
+  dot.className = 'keyDot' + (isSel ? ' sel' : '') + (k.interp === 'smooth' ? ' smooth' : '');
   dot.style.left = (k.t * FPS / fiv * 100) + '%';
   dot.dataset.ki = String(i);
   const lbl = document.createElement('span'); lbl.className = 'dotLabel'; lbl.textContent = String(Math.round(k.t * FPS));
@@ -1269,12 +1271,14 @@ function makeDot(i: number, k: Keyframe, fiv: number): HTMLElement {
     const me = e as MouseEvent;
     if (me.button !== 0) return;
     e.stopPropagation();
-    if (me.shiftKey) { // shift — додати/прибрати з виділення (без драгу)
+    if (me.shiftKey) { // shift — мульти-виділення (по всіх кістках)
       const j = state.selKeys.indexOf(i); if (j >= 0) state.selKeys.splice(j, 1); else state.selKeys.push(i);
+      state.selKeyBone = null;
       refreshTimeline(); return;
     }
-    // клік по невиділеному — виділяємо лише його; по виділеному — лишаємо групу (драг рухає всю)
-    if (!state.selKeys.includes(i)) state.selKeys = [i];
+    // ЛКМ — виділяємо тільки цю кістку
+    state.selKeys = [i];
+    state.selKeyBone = boneKey;
     beginKeyDrag(me.clientX, k);
   });
   return dot;
@@ -1359,7 +1363,7 @@ function refreshTimeline(): void {
       for (let i = 0; i < clip.keys.length; i++) {
         const k = clip.keys[i];
         if (!(d.key in k.pose)) continue; // немає ключа для цієї кістки
-        row.appendChild(makeDot(i, k, fiv));
+        row.appendChild(makeDot(i, k, fiv, d.key));
       }
     }
     tracksEl.appendChild(row);
@@ -1425,6 +1429,7 @@ function selectKeysInBox(x1: number, y1: number, x2: number, y2: number): void {
     if (hit) { const ki = Number(d.dataset.ki); if (!Number.isNaN(ki)) sel.add(ki); }
   });
   state.selKeys = Array.from(sel);
+  state.selKeyBone = null;
 }
 
 // ── буфер ключів (Ctrl+C / Ctrl+V над таймлайном) ──

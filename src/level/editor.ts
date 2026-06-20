@@ -146,8 +146,8 @@ export function initLevelEditor(prefix: string): void {
       }
     }
     // Верх: піднята платформа — насичений помаранчевий, яма — приглушений, земля — середній.
-    const topFill = L > 0 ? 'rgba(255,154,31,0.32)' : L < 0 ? 'rgba(255,60,60,0.28)' : 'rgba(255,154,31,0.20)';
-    const topStroke = L < 0 ? 'rgba(255,60,60,' + (preview ? 0.95 : 0.85) + ')' : 'rgba(255,154,31,' + (preview ? 0.95 : 0.85) + ')';
+    const topFill = L > 0 ? 'rgba(255,154,31,0.32)' : 'rgba(255,154,31,0.20)';
+    const topStroke = 'rgba(255,154,31,' + (preview ? 0.95 : 0.85) + ')';
     fillStroke(top, topFill, topStroke, preview ? 2 : 1);
     if (L !== 0) {
       const ctr = { x: (top[0].x + top[2].x) / 2, y: (top[0].y + top[2].y) / 2 };
