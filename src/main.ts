@@ -4,6 +4,7 @@ import { GameScene } from './scenes/GameScene';
 import { initTelegram } from './telegram';
 import { setupViewport } from './viewport';
 import { initLobbyUI } from './multiplayer/lobbyUI';
+import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from './config';
 
 initTelegram();
 initLobbyUI();
@@ -16,10 +17,14 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#2a2233',
+  // backing-роздільність у RENDER_SCALE× більша; камера зумиться тим самим множником у
+  // GameScene, тож поле огляду лишається LOGICAL_W×LOGICAL_H. viewport.ts CSS-вписує канвас
+  // у вікно (downscale → різко). roundPixels прибирає суб-піксельне миготіння при скролі.
+  render: { antialias: true, roundPixels: true },
   scale: {
     mode: Phaser.Scale.NONE,
-    width: 1280,
-    height: 576,
+    width: LOGICAL_W * RENDER_SCALE,
+    height: LOGICAL_H * RENDER_SCALE,
   },
   scene: [BootScene, GameScene],
 });

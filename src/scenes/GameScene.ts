@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER } from '../config';
+import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER, RENDER_SCALE } from '../config';
 import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
@@ -91,6 +91,10 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
+  // Логічні розміри кадру (backing у RENDER_SCALE× більший — ділимо, щоб лишити 1280×576).
+  private get logicalW(): number { return this.scale.width / RENDER_SCALE; }
+  private get logicalH(): number { return this.scale.height / RENDER_SCALE; }
+
   private get band(): { top: number; bottom: number } {
     return this.levelBand ?? { top: this.bandTop, bottom: this.bandBottom };
   }
@@ -158,6 +162,7 @@ export class GameScene extends Phaser.Scene {
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
     this.cameras.main.setBackgroundColor('#2a2233');
+    this.cameras.main.setZoom(RENDER_SCALE); // backing×RENDER_SCALE + zoom = те саме поле огляду, але різкіше
     this.computeLayout();
 
     // Фон: "небо" зверху + смуга підлоги знизу (присмерковий тон у дусі Don't Starve)
@@ -237,7 +242,7 @@ export class GameScene extends Phaser.Scene {
   // Рахує смугу підлоги під поточний розмір екрана (без зуму: 1 світ = 1 піксель,
   // тож HUD і спрайти лишаються чіткими та на місцях, а чорних полів немає).
   private computeLayout(): void {
-    this.worldH = this.scale.height;
+    this.worldH = this.logicalH;
     this.bandBottom = this.worldH - FLOOR_MARGIN;
     this.bandTop = Math.max(this.worldH * 0.28, this.bandBottom - BAND_DEPTH);
     if (this.levelMode) this.cameras.main.setBounds(this.levelStart, 0, Math.max(1, this.levelEnd - this.levelStart), this.worldH);
@@ -463,7 +468,7 @@ export class GameScene extends Phaser.Scene {
   private onResize(): void {
     this.computeLayout();
     this.repositionWorld();
-    if (this.banner) this.banner.setPosition(this.scale.width / 2, 84);
+    if (this.banner) this.banner.setPosition(this.logicalW / 2, 84);
     this.buildHudLayout();
     this.createHudGraphics();
     this.player?.clampDepth(this.band.top, this.band.bottom);
@@ -473,7 +478,7 @@ export class GameScene extends Phaser.Scene {
   // ── HUD helpers ─────────────────────────────────────────────────────────────
 
   private buildHudLayout(): void {
-    const w = this.scale.width;
+    const w = this.logicalW;
     const margin = 10;
     const iconD = 48;   // діаметр іконки
     const gap = 8;      // відступ іконка → бар
@@ -569,7 +574,7 @@ export class GameScene extends Phaser.Scene {
       [1120, mid],
     ];
     for (const [x, y] of spots) this.enemies.push(new Enemy(this, x, y));
-    this.banner.setPosition(this.scale.width / 2, 84).setText('БИЙСЯ! Зачисти ворогів');
+    this.banner.setPosition(this.logicalW / 2, 84).setText('БИЙСЯ! Зачисти ворогів');
   }
 
   // Phaser викликає update щокадру; ми накопичуємо час і крутимо симуляцію
@@ -634,7 +639,7 @@ export class GameScene extends Phaser.Scene {
       this.cleared = true;
       this.player.maxX = WORLD_WIDTH - 20;
       this.gateLine.setVisible(false);
-      this.banner.setPosition(this.scale.width / 2, 84).setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
+      this.banner.setPosition(this.logicalW / 2, 84).setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
       this.time.delayedCall(1600, () => this.banner.setText(''));
     }
 
@@ -652,8 +657,8 @@ export class GameScene extends Phaser.Scene {
     this.finished = true;
     void saveValue('level1', 'done'); // прогрес у Telegram CloudStorage
 
-    const cx = this.scale.width / 2;
-    const cy = this.scale.height / 2;
+    const cx = this.logicalW / 2;
+    const cy = this.logicalH / 2;
     this.add
       .text(cx, cy - 20, 'ПИВО ДОБУТО! 🍺', { fontFamily: 'monospace', fontSize: '28px', color: '#ffd000' })
       .setOrigin(0.5)
