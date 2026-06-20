@@ -50,11 +50,10 @@ export class Player extends Actor {
       let ny = oy;
       if (curOk && dx !== 0 && !walkable(nx, oy)) {
         // Вперлись у отвір/край по X — замість різкої зупинки плавно з'їжджаємо
-        // на найближчу сусідню лінію глибини (заокруглений перехід між рядами).
-        // Ребра клітинок нахилені 45° в один бік, тож ramp для руху ВПРАВО і ВЛІВО
-        // йде в ПРОТИЛЕЖНІ вертикальні боки — інакше один напрям впирався б у кут.
-        const prefer = dx > 0 ? -1 : 1;
-        const dir = this.slipDepthDir(walkable, nx, oy, prefer);
+        // на сусідню лінію глибини (заокруглений перехід між рядами). Бік (вгору/вниз)
+        // визначаємо автоматично: той, що дає продовжити рух у бік `dx` (їдемо ВЗДОВЖ
+        // 45°-краю, а не в кут) — працює однаково для нахилу і «\», і «/».
+        const dir = this.slipDepthDir(walkable, nx, oy, Math.sign(dx));
         const ng = oy + dir * spd * dt;
         if (dir !== 0 && (walkable(ox, ng) || walkable(nx, ng))) {
           ny = ng;
@@ -79,15 +78,23 @@ export class Player extends Actor {
     this.sync();
   }
 
-  // Шукає напрямок по глибині (1 = вглиб/вниз, -1 = ближче/вгору) до найближчої
-  // прохідної точки в колонці X, у межах SLIP_RANGE. Спершу повністю пробує
-  // `prefer` (ramp у бік, що відповідає напрямку руху по 45°-ребру), і лише якщо
-  // там глухо — протилежний. 0 — нема куди з'їхати.
-  private slipDepthDir(walkable: Walkable, x: number, y: number, prefer: number): number {
-    const STEP = 4, SLIP_RANGE = 72;
-    for (let s = STEP; s <= SLIP_RANGE; s += STEP) if (walkable(x, y + prefer * s)) return prefer;
-    for (let s = STEP; s <= SLIP_RANGE; s += STEP) if (walkable(x, y - prefer * s)) return -prefer;
-    return 0;
+  // Бік по глибині (1 = вглиб/вниз, -1 = ближче/вгору) для ковзання повз край.
+  // Для кожного боку шукає найближчу прохідну точку, де ВОДНОЧАС відкривається
+  // подальший рух у бік xDir (тобто їдемо ВЗДОВЖ 45°-краю, а не в його кут).
+  // Так напрям визначається з самої геометрії — байдуже «\» чи «/». 0 — нікуди.
+  private slipDepthDir(walkable: Walkable, x: number, y: number, xDir: number): number {
+    const STEP = 4, SLIP_RANGE = 80, AHEAD = STEP * 2;
+    let best = 0, bestS = Infinity, fallback = 0, fallS = Infinity;
+    for (const dir of [1, -1]) {
+      for (let s = STEP; s <= SLIP_RANGE; s += STEP) {
+        if (!walkable(x, y + dir * s)) continue;
+        if (s < fallS) { fallS = s; fallback = dir; }
+        // край «відступає» в цей бік, якщо звідси можна йти далі по xDir
+        if (walkable(x + xDir * AHEAD, y + dir * s) && s < bestS) { bestS = s; best = dir; }
+        break;
+      }
+    }
+    return best || fallback;
   }
 
   private tryAttack(time: number): void {
