@@ -51,7 +51,10 @@ export class Player extends Actor {
       if (curOk && dx !== 0 && !walkable(nx, oy)) {
         // Вперлись у отвір/край по X — замість різкої зупинки плавно з'їжджаємо
         // на найближчу сусідню лінію глибини (заокруглений перехід між рядами).
-        const dir = this.slipDepthDir(walkable, nx, oy);
+        // Ребра клітинок нахилені 45° в один бік, тож ramp для руху ВПРАВО і ВЛІВО
+        // йде в ПРОТИЛЕЖНІ вертикальні боки — інакше один напрям впирався б у кут.
+        const prefer = dx > 0 ? -1 : 1;
+        const dir = this.slipDepthDir(walkable, nx, oy, prefer);
         const ng = oy + dir * spd * dt;
         if (dir !== 0 && (walkable(ox, ng) || walkable(nx, ng))) {
           ny = ng;
@@ -77,13 +80,13 @@ export class Player extends Actor {
   }
 
   // Шукає напрямок по глибині (1 = вглиб/вниз, -1 = ближче/вгору) до найближчої
-  // прохідної точки в колонці X, у межах SLIP_RANGE. 0 — нема куди з'їхати.
-  private slipDepthDir(walkable: Walkable, x: number, y: number): number {
+  // прохідної точки в колонці X, у межах SLIP_RANGE. Спершу повністю пробує
+  // `prefer` (ramp у бік, що відповідає напрямку руху по 45°-ребру), і лише якщо
+  // там глухо — протилежний. 0 — нема куди з'їхати.
+  private slipDepthDir(walkable: Walkable, x: number, y: number, prefer: number): number {
     const STEP = 4, SLIP_RANGE = 72;
-    for (let s = STEP; s <= SLIP_RANGE; s += STEP) {
-      if (walkable(x, y + s)) return 1;
-      if (walkable(x, y - s)) return -1;
-    }
+    for (let s = STEP; s <= SLIP_RANGE; s += STEP) if (walkable(x, y + prefer * s)) return prefer;
+    for (let s = STEP; s <= SLIP_RANGE; s += STEP) if (walkable(x, y - prefer * s)) return -prefer;
     return 0;
   }
 
