@@ -5,6 +5,7 @@ import { pullLevelData, mergeLevelAssets } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { footprintWorldCells } from './footprint';
+import { generateGameAsset, hasFalKey } from '../ai';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -648,6 +649,19 @@ export function initLevelEditor(prefix: string): void {
     const ct = $('colliderTools'); if (ct) ct.style.display = 'none'; // path tools moved to bottom toolbar
     $('libGrid').style.display = 'flex';
   }
+  // Інлайн-ренейм ассета: підпис картки → текстове поле.
+  function startRename(nm: HTMLElement, a: Asset): void {
+    const inp = document.createElement('input');
+    inp.value = a.name;
+    inp.style.cssText = 'position:absolute;bottom:0;left:0;right:0;width:100%;font-size:10px;padding:2px 3px;background:#1b1b1b;color:#fff;border:1px solid var(--accent);border-radius:0 0 7px 7px;outline:none;z-index:3';
+    nm.replaceWith(inp); inp.focus(); inp.select();
+    let done = false;
+    const commit = (sv: boolean): void => { if (done) return; done = true; const v = inp.value.trim(); if (sv && v) { a.name = v; save(); } refreshAssets(); };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); commit(false); } });
+    inp.addEventListener('blur', () => commit(true));
+    inp.addEventListener('click', (e) => e.stopPropagation());
+    inp.addEventListener('mousedown', (e) => e.stopPropagation());
+  }
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
@@ -667,6 +681,12 @@ export function initLevelEditor(prefix: string): void {
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
       if (a.footprint?.cells.length) { const dot = document.createElement('div'); dot.className = 'fpDot'; dot.title = 'має колайдери'; el.appendChild(dot); }
       el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
+      // Перетягування картки в AI-поле (реф) — несемо id ассета.
+      el.draggable = true;
+      el.addEventListener('dragstart', (ev) => { (ev as DragEvent).dataTransfer?.setData('text/asset-id', a.id); });
+      // Клік колесом (середня) — ренейм ассета інлайн.
+      el.addEventListener('mousedown', (ev) => { if (ev.button === 1) { ev.preventDefault(); ev.stopPropagation(); startRename(nm, a); } });
+      el.addEventListener('auxclick', (ev) => { if (ev.button === 1) ev.preventDefault(); });
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const same = state.pendingAsset === a.id;
@@ -1715,9 +1735,63 @@ export function initLevelEditor(prefix: string): void {
       drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
       drop.addEventListener('drop', (e) => {
         e.preventDefault(); drop.classList.remove('drag-over');
-        const file = (e as DragEvent).dataTransfer?.files[0];
+        const dt = (e as DragEvent).dataTransfer;
+        const assetId = dt?.getData('text/asset-id');
+        if (assetId) { // перетягнули картку з бібліотеки → беремо її зображення як реф
+          const a = state.assets.find((x) => x.id === assetId);
+          if (a) { img.src = a.url; img.style.display = 'block'; }
+          return;
+        }
+        const file = dt?.files[0];
         if (file?.type.startsWith('image/')) setRef(file);
       });
     }
+    wireAiGenerate();
+  }
+
+  // Конвертувати будь-який src (data/http) у WebP-dataURL з обмеженням розміру (альфа збережена).
+  function imgSrcToWebP(src: string, maxPx: number): Promise<string> {
+    return new Promise((resolve) => {
+      const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => {
+        const k = Math.min(1, maxPx / Math.max(im.naturalWidth, im.naturalHeight));
+        const w = Math.round(im.naturalWidth * k), h = Math.round(im.naturalHeight * k);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d')!.drawImage(im, 0, 0, w, h);
+        const out = c.toDataURL('image/webp', 0.9);
+        resolve(out.startsWith('data:image/webp') ? out : c.toDataURL('image/png'));
+      };
+      im.onerror = () => resolve(src);
+      im.src = src;
+    });
+  }
+  let aiBusy = false;
+  function wireAiGenerate(): void {
+    const btn = $<HTMLButtonElement>('aiGenBtn');
+    const promptEl = document.getElementById(prefix + 'aiPrompt') as HTMLTextAreaElement | null;
+    const refImg = document.getElementById(prefix + 'aiRefImg') as HTMLImageElement | null;
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (aiBusy) return;
+      const prompt = promptEl?.value ?? '';
+      const refUrl = refImg && refImg.style.display !== 'none' && refImg.src ? refImg.src : null;
+      if (!hasFalKey()) { setStatus('Нема VITE_FAL_KEY у .env'); return; }
+      if (!prompt.trim() && !refUrl) { setStatus('Введи опис або кинь реф-зображення'); return; }
+      aiBusy = true; const orig = btn.textContent; btn.textContent = 'Генерую…'; btn.disabled = true;
+      setStatus('AI генерує — це може зайняти 10–30с…');
+      void (async () => {
+        try {
+          const png = await generateGameAsset({ prompt, refDataUrl: refUrl });
+          const url = await imgSrcToWebP(png, CAT_MAX_PX[state.cat] ?? 1024);
+          const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: (prompt.trim().slice(0, 24) || 'AI'), url };
+          state.assets.push(a); loadImg(a); refreshAssets(); save();
+          setStatus('✔ Готово — ассет у бібліотеці (' + state.cat + ')');
+        } catch (e) {
+          setStatus('AI помилка: ' + ((e as Error)?.message ?? e));
+        } finally {
+          aiBusy = false; btn.textContent = orig; btn.disabled = false;
+        }
+      })();
+    });
   }
 }
