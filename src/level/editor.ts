@@ -41,7 +41,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn' | 'raise' | 'lower' | 'flat',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -361,6 +361,13 @@ export function initLevelEditor(prefix: string): void {
         const hit = zoneAt(c.cx, c.cy);
         if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(255,40,40,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
         if (state.pathTool === 'enemy') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(255,40,40,0.18)', 'rgba(255,40,40,0.9)', 2); // де ляже нова 3×3
+      } else if (state.pathTool === 'raise' || state.pathTool === 'lower' || state.pathTool === 'flat') {
+        // Висотний інструмент — підсвічуємо БІЛИМ наявну клітинку під курсором (на її висоті).
+        const { present, lvlOf } = levelMaps();
+        if (present.has(c.cx + ',' + c.cy)) {
+          const top = liftedFloorPts(c.cx, c.cy, lvlOf(c.cx, c.cy));
+          fillStroke(top, 'rgba(255,255,255,0.30)', 'rgba(255,255,255,0.95)', 2.5);
+        }
       }
     }
 
@@ -617,6 +624,7 @@ export function initLevelEditor(prefix: string): void {
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
+  const strokeCells = new Set<string>(); // клітинки, вже зачеплені поточним штрихом висоти (щоб драг не множив +1)
   function paintAt(sx: number, sy: number): void {
     if (!state.pathTool) return;
     // Підлога (h) — клітинка під курсором; стіна (v) — снеп до правої грані тієї клітинки.
@@ -637,22 +645,28 @@ export function initLevelEditor(prefix: string): void {
     } else if (state.pathTool === 'v') {
       lv.collider = lv.collider.filter((z) => !matchV(z.split(',')));
       lv.collider.push(`${wl.cx},${wl.cy},v`);
+    } else if (state.pathTool === 'raise' || state.pathTool === 'lower' || state.pathTool === 'flat') {
+      // Висотні інструменти: міняють РІВЕНЬ наявної клітинки під курсором. Драгом —
+      // кожну клітинку лише раз за штрих (інакше +1 множився б щокадру).
+      const key = fl.cx + ',' + fl.cy;
+      if (!strokeCells.has(key)) {
+        strokeCells.add(key);
+        const L = setCellLevel(fl.cx, fl.cy, state.pathTool);
+        if (L !== null) setStatus(`Висота клітинки: ${L}`);
+      }
     }
     draw();
   }
-  // Змінити РІВЕНЬ ВИСОТИ наявної підлогової клітинки під курсором (не створює нову).
-  // 'up' +1 / 'down' −1 (від'ємні = яма) / 'flat' = 0. Клавіші 1 / 2 / 3.
-  function bumpCellLevel(mode: 'up' | 'down' | 'flat'): void {
-    const fl = floorCellAt(state.mouse.x, state.mouse.y);
+  // Змінити РІВЕНЬ ВИСОТИ наявної підлогової клітинки (cx,cy). Не створює нову.
+  // 'raise' +1 / 'lower' −1 (від'ємні = яма) / 'flat' = 0. Повертає новий рівень або null.
+  function setCellLevel(cx: number, cy: number, mode: 'raise' | 'lower' | 'flat'): number | null {
     const lv = level();
-    const idx = lv.collider.findIndex((z) => { const p = z.split(','); return Number(p[0]) === fl.cx && Number(p[1]) === fl.cy && (p[2] ?? 'h') === 'h'; });
-    if (idx < 0) { setStatus('Наведи курсор на клітинку підлоги, щоб змінити її висоту'); return; }
+    const idx = lv.collider.findIndex((z) => { const p = z.split(','); return Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === 'h'; });
+    if (idx < 0) return null;
     let L = Number(lv.collider[idx].split(',')[3]) || 0;
-    L = mode === 'up' ? L + 1 : mode === 'down' ? L - 1 : 0;
-    pushUndo();
-    lv.collider[idx] = L !== 0 ? `${fl.cx},${fl.cy},h,${L}` : `${fl.cx},${fl.cy},h`;
-    setStatus(`Висота клітинки: ${L}`);
-    draw(); save();
+    L = mode === 'raise' ? L + 1 : mode === 'lower' ? L - 1 : 0;
+    lv.collider[idx] = L !== 0 ? `${cx},${cy},h,${L}` : `${cx},${cy},h`;
+    return L;
   }
   // Поставити вибраний спавн гравця на підлогову клітинку під курсором (центр клітинки).
   function placeSpawnAt(sx: number, sy: number): void {
@@ -697,7 +711,7 @@ export function initLevelEditor(prefix: string): void {
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
-    if (state.pathTool) { pushUndo(); painting = true; paintAt(x, y); return; }
+    if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
     const hit = hitTest(x, y);
     state.selected = hit;
     if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
@@ -771,10 +785,11 @@ export function initLevelEditor(prefix: string): void {
       }
     }
     else if (ev.code === 'KeyH') { ev.preventDefault(); state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns(); if (state.pathTool === 'h') setStatus('Підлога (земля). Наведи на клітинку: 1 вище / 2 нижче / 3 вирівняти — стіни малюються самі'); }
-    // Висота НАЯВНОЇ клітинки під курсором: 1 вище / 2 нижче (від'ємні = ями) / 3 вирівняти.
-    else if (ev.code === 'Digit1') { ev.preventDefault(); bumpCellLevel('up'); }
-    else if (ev.code === 'Digit2') { ev.preventDefault(); bumpCellLevel('down'); }
-    else if (ev.code === 'Digit3') { ev.preventDefault(); bumpCellLevel('flat'); }
+    // Висотні інструменти: 1 підняти / 2 опустити / 3 вирівняти. Клавіша лише АКТИВУЄ режим —
+    // далі наводиш на колайдер (підсвічується білим) і клікаєш/тягнеш ЛКМ, щоб застосувати.
+    else if (ev.code === 'Digit1') { ev.preventDefault(); state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
+    else if (ev.code === 'Digit2') { ev.preventDefault(); state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
+    else if (ev.code === 'Digit3') { ev.preventDefault(); state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
     else if (ev.code === 'KeyY') { ev.preventDefault(); state.pathTool = state.pathTool === 'erase' ? null : 'erase'; updatePathBtns(); }
     else if (ev.code === 'KeyM') { ev.preventDefault(); const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
