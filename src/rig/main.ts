@@ -749,16 +749,16 @@ if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
 document.getElementById('charMobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveChar').click());
 document.getElementById('charMobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGameBtn').click());
 
-// ---- «Частини персонажа» — ЛКМ: розкриває/ховає список частин; ПКМ: згортає панель тулзів ----
+// ---- «Частини персонажа» — ЛКМ: згортає/розгортає панель тулзів; ПКМ: розкриває/ховає список частин ----
 let partsOpen = false;
 $<HTMLButtonElement>('partsToggle').addEventListener('click', () => {
-  partsOpen = !partsOpen;
-  $('partsList').style.display = partsOpen ? '' : 'none';
+  const body = $<HTMLElement>('toolsBody');
+  body.style.display = body.style.display === 'none' ? '' : 'none';
 });
 $<HTMLButtonElement>('partsToggle').addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  const body = $<HTMLElement>('toolsBody');
-  body.style.display = body.style.display === 'none' ? '' : 'none';
+  partsOpen = !partsOpen;
+  $('partsList').style.display = partsOpen ? '' : 'none';
 });
 // вирівняти верх списку частин по верху кнопки «Частини персонажа»
 function alignPartsList(): void {

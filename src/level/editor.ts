@@ -59,6 +59,9 @@ export function initLevelEditor(prefix: string): void {
     viewScale: 1,
     mouse: { x: 0, y: 0 },
     pendingAsset: null as string | null,
+    pendingRot: 0,    // градуси для ghost під час розміщення
+    pendingScale: 1,  // масштаб ghost
+    pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
   };
 
@@ -141,8 +144,9 @@ export function initLevelEditor(prefix: string): void {
         const dd = (L - NL) * state.grid * sc();
         const tA = top[a], tB = top[b];
         const bA = { x: tA.x, y: tA.y + dd }, bB = { x: tB.x, y: tB.y + dd };
-        const wallFill = L < 0 ? (preview ? 'rgba(255,60,60,0.40)' : 'rgba(255,60,60,0.28)') : (preview ? 'rgba(64,160,255,0.40)' : 'rgba(64,160,255,0.28)');
-        const wallStroke = L < 0 ? 'rgba(255,60,60,0.9)' : 'rgba(64,160,255,0.9)';
+        const isPit = L < 0 || NL < 0;
+        const wallFill = isPit ? (preview ? 'rgba(255,60,60,0.40)' : 'rgba(255,60,60,0.28)') : (preview ? 'rgba(64,160,255,0.40)' : 'rgba(64,160,255,0.28)');
+        const wallStroke = isPit ? 'rgba(255,60,60,0.9)' : 'rgba(64,160,255,0.9)';
         fillStroke([tA, tB, bB, bA], wallFill, wallStroke, preview ? 2 : 1);
       }
     }
@@ -431,6 +435,26 @@ export function initLevelEditor(prefix: string): void {
       });
     }
 
+    // Білий ghost для pending-ассету: слідує за курсором
+    if (state.pendingAsset) {
+      const pa = state.assets.find((x) => x.id === state.pendingAsset);
+      const pimg = pa ? state.images.get(pa.id) : undefined;
+      if (pimg) {
+        const mx = state.mouse.x, my = state.mouse.y;
+        const k = state.pendingScale * sc();
+        ctx.save();
+        ctx.globalAlpha = 0.88;
+        ctx.translate(mx, my);
+        ctx.rotate(rad(state.pendingRot));
+        ctx.scale(k, k);
+        ctx.drawImage(pimg, -pimg.width / 2, -pimg.height / 2);
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = 'rgba(255,255,255,1.0)';
+        ctx.fillRect(-pimg.width / 2, -pimg.height / 2, pimg.width, pimg.height);
+        ctx.restore();
+      }
+    }
+
     if (state.camView) {
       // Game view: 1280×576, floor (Y=0 in editor) at 550/576 from top of game screen.
       // Рамка ЗАВЖДИ по центру по горизонталі — панаруєш світ, бачиш кадр уздовж усього рівня.
@@ -516,7 +540,7 @@ export function initLevelEditor(prefix: string): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
     for (const a of cats) {
-      const el = document.createElement('div'); el.className = 'libCard'; el.draggable = true;
+      const el = document.createElement('div'); el.className = 'libCard';
       const img = document.createElement('img'); img.src = a.url; img.draggable = false;
       const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
       const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '×';
@@ -529,15 +553,23 @@ export function initLevelEditor(prefix: string): void {
         refreshAssets(); refreshSel(); draw(); save();
       });
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
-      el.addEventListener('dragstart', (e) => e.dataTransfer?.setData('text/plain', a.id));
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const same = state.pendingAsset === a.id;
+        state.pendingAsset = same ? null : a.id;
+        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null; }
+        $('libGrid').querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+        if (state.pendingAsset) el.classList.add('pending');
+        draw();
+      });
       el.addEventListener('touchend', (ev) => {
         ev.preventDefault();
-        const prev = state.pendingAsset;
-        state.pendingAsset = (prev === a.id) ? null : a.id;
-        // Update highlight on all libCards in the grid
-        const grid = $('libGrid');
-        grid.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+        const same = state.pendingAsset === a.id;
+        state.pendingAsset = same ? null : a.id;
+        if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null; }
+        $('libGrid').querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         if (state.pendingAsset) el.classList.add('pending');
+        draw();
       }, { passive: false });
       box.appendChild(el);
     }
@@ -773,6 +805,20 @@ export function initLevelEditor(prefix: string): void {
       const si = lv0.spawns.findIndex((s) => Math.floor((s.x - s.y) / gs0) === cc.cx && Math.floor(s.y / k0) === cc.cy);
       if (si >= 0) { state.spawnSel = si; refreshSpawnUI(); draw(); return; }
     }
+    // Pending-ассет: ЛКМ підтверджує transform-режим або розміщує ассет
+    if (ev.button === 0 && !state.pathTool && state.pendingAsset) {
+      if (state.pendingTransMode) { state.pendingTransMode = null; draw(); return; }
+      const pa = state.assets.find((a) => a.id === state.pendingAsset);
+      if (pa) {
+        pushUndo();
+        const w = toWorld(x, y);
+        const p: Placed = { id: 'p' + Date.now(), cat: pa.cat, asset: pa.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: 1 };
+        level().placed.push(p); state.selected = p.id;
+        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+        $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+        refreshSel(); draw(); save(); return;
+      }
+    }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
@@ -795,8 +841,14 @@ export function initLevelEditor(prefix: string): void {
     }
     if (painting) { paintAt(state.mouse.x, state.mouse.y); return; }
     if (state.mode) { applyMode(); return; }
+    if (state.pendingAsset && state.pendingTransMode) {
+      const dx = state.mouse.x - state.startWx;
+      if (state.pendingTransMode === 'R') state.pendingRot = dx * 0.8;
+      else state.pendingScale = Math.max(0.1, Math.min(10, 1 + dx / 120));
+      draw(); return;
+    }
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
-    else if (state.pathTool) draw(); // оновити прев'ю інструмента під курсором
+    else if (state.pathTool || state.pendingAsset) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
 
@@ -825,8 +877,10 @@ export function initLevelEditor(prefix: string): void {
           if (a) {
             pushUndo();
             const w = toWorld(x, y);
-            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: 0, scale: 1, flip: 1 };
+            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: 1 };
             level().placed.push(p); state.selected = p.id;
+            state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+            $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
             refreshSel(); draw(); save(); return;
           }
         }
@@ -938,7 +992,23 @@ export function initLevelEditor(prefix: string): void {
     if ((ev.code === 'KeyX' || ev.code === 'KeyZ') && (state.mode === 'G' || state.mode === 'S')) {
       ev.preventDefault(); state.axisLock = ev.code === 'KeyX' ? 'x' : 'z'; return;
     }
-    if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+    if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') {
+      ev.preventDefault();
+      if (state.pendingAsset) {
+        if (ev.code === 'KeyG') { // скасувати розміщення
+          state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+          $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+          draw();
+        } else { // R або S: увімкнути/вимкнути transform-режим ghost
+          const m = ev.code === 'KeyR' ? 'R' : 'S';
+          state.pendingTransMode = state.pendingTransMode === m ? null : m;
+          state.startWx = state.mouse.x;
+          if (state.pendingTransMode === null && m === 'R') state.pendingRot = 0;
+          if (state.pendingTransMode === null && m === 'S') state.pendingScale = 1;
+          draw();
+        }
+      } else { startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+    }
     else if (ev.code === 'KeyD' && ev.shiftKey) {
       ev.preventDefault();
       const p = sel();
@@ -960,7 +1030,11 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
     else if (ev.code === 'Escape') {
-      if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
+      if (state.pendingAsset) {
+        state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingTransMode = null;
+        $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+        draw();
+      } else if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
       else if (state.pathTool) { state.pathTool = null; updatePathBtns(); }
     }
   });
