@@ -444,13 +444,11 @@ export function initLevelEditor(prefix: string): void {
         const k = state.pendingScale * sc();
         ctx.save();
         ctx.globalAlpha = 0.88;
+        ctx.filter = 'brightness(1000) saturate(0)'; // всі пікселі → білі, альфа збережена
         ctx.translate(mx, my);
         ctx.rotate(rad(state.pendingRot));
         ctx.scale(k, k);
         ctx.drawImage(pimg, -pimg.width / 2, -pimg.height / 2);
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = 'rgba(255,255,255,1.0)';
-        ctx.fillRect(-pimg.width / 2, -pimg.height / 2, pimg.width, pimg.height);
         ctx.restore();
       }
     }
@@ -1206,7 +1204,26 @@ export function initLevelEditor(prefix: string): void {
     });
   }
   wireSection('secLevels', 'bodyLevels');
-  wireSection('secSettings', 'bodySettings');
+  // D8 «Налаштування»: ЛКМ = кнопки знизу блоку D; ПКМ = inline-секція
+  {
+    const hd = $<HTMLButtonElement>('secSettings');
+    const body = $<HTMLElement>('bodySettings');
+    const bottom = $<HTMLElement>('settingsBottom');
+    if (hd && body) {
+      hd.addEventListener('click', () => {
+        if (!bottom) return;
+        const open = bottom.style.display === 'none';
+        bottom.style.display = open ? '' : 'none';
+        hd.classList.toggle('open', open);
+      });
+      hd.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const open = body.style.display === 'none';
+        body.style.display = open ? '' : 'none';
+        hd.classList.toggle('open', open);
+      });
+    }
+  }
   wireSection('secNpc', 'bodyNpc');
 
   // ── Неігрові персонажі: бібліотека ворогів (drag → зона спавна) ──
@@ -1318,6 +1335,36 @@ export function initLevelEditor(prefix: string): void {
   $('zBack')?.addEventListener('click', () => reorderSel('back'));
   $('zFront')?.addEventListener('click', () => reorderSel('front'));
   $('zBottom')?.addEventListener('click', () => reorderSel('bottom'));
+
+  // ── B-суфіксні дублікати в settingsBottom ──
+  $('fillBtnB')?.addEventListener('click', () => $<HTMLButtonElement>('fillBtn')?.click());
+
+  {
+    const togB = $<HTMLButtonElement>('planToggleB');
+    const panelB = $<HTMLElement>('planPanelB');
+    if (togB && panelB) {
+      togB.addEventListener('click', () => {
+        const open = panelB.style.display === 'none';
+        panelB.style.display = open ? '' : 'none';
+        togB.classList.toggle('on', open);
+      });
+    }
+  }
+
+  function setPlanModeB(mode: 'bg' | 'game'): void {
+    $('planBgBtnB')?.classList.toggle('on', mode === 'bg');
+    $('planGameBtnB')?.classList.toggle('on', mode === 'game');
+    const bg = $('planBgB'), gm = $('planGameB');
+    if (bg) bg.style.display = mode === 'bg' ? 'flex' : 'none';
+    if (gm) gm.style.display = mode === 'game' ? 'flex' : 'none';
+  }
+  $('planBgBtnB')?.addEventListener('click', () => setPlanModeB('bg'));
+  $('planGameBtnB')?.addEventListener('click', () => setPlanModeB('game'));
+
+  $('zForwardB')?.addEventListener('click', () => reorderSel('forward'));
+  $('zBackB')?.addEventListener('click', () => reorderSel('back'));
+  $('zFrontB')?.addEventListener('click', () => reorderSel('front'));
+  $('zBottomB')?.addEventListener('click', () => reorderSel('bottom'));
 
   // ── керування точками спавна (до 5, різнокольорові) — кнопки в нижній панелі ──
   function refreshSpawnUI(): void {
