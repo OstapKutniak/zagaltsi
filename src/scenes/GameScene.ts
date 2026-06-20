@@ -460,7 +460,7 @@ export class GameScene extends Phaser.Scene {
   private buildHudLayout(): void {
     const w = this.scale.width;
     const margin = 10;
-    const iconD = 36;   // діаметр іконки
+    const iconD = 48;   // діаметр іконки
     const gap = 8;      // відступ іконка → бар
     const arrowW = 12;  // ширина стрілки на кінці
     const barW = (w - 2 * margin - 3 * (iconD + gap + arrowW)) / 3;
@@ -502,7 +502,7 @@ export class GameScene extends Phaser.Scene {
         this.add.image(iconCx, barYC, iconKey)
           .setScrollFactor(0)
           .setDepth(10002)
-          .setDisplaySize(34, 34),
+          .setDisplaySize(46, 46),
       );
     }
 
