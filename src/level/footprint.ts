@@ -31,9 +31,17 @@ const cellCenter = (cx: number, cy: number, gs: number): { x: number; y: number 
 // (editor: p.x,p.y; game: p.x, floorY+p.y). Повертає рядки "cx,cy".
 export function footprintWorldCells(fp: Footprint, inst: FootInstance, ox: number, oy: number, gs: number): string[] {
   if (!fp.cells.length) return [];
-  const s = inst.scale || 1, f = inst.flip || 1, rad = ((inst.rot || 0) * Math.PI) / 180;
+  const f = inst.flip || 1, rad = ((inst.rot || 0) * Math.PI) / 180;
   const cosr = Math.cos(rad), sinr = Math.sin(rad);
   const local = new Set(fp.cells.map((c) => c.dx + ',' + c.dy));
+  // Клемп масштабу для футпринта: при зменшенні кількість клітинок може падати, але
+  // тонший бік не опускаємо нижче 1 клітинки — інакше дрібний ассет втрачає колайдер
+  // повністю (центри світових клітинок промахуються повз маску). Візуал масштабується
+  // вільно; колайдер — мінімум 1 ряд.
+  let mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
+  for (const c of fp.cells) { if (c.dx < mnx) mnx = c.dx; if (c.dx > mxx) mxx = c.dx; if (c.dy < mny) mny = c.dy; if (c.dy > mxy) mxy = c.dy; }
+  const thinCells = Math.max(1, Math.min(mxx - mnx + 1, mxy - mny + 1));
+  const s = Math.max(inst.scale || 1, 1 / thinCells);
 
   // Пряма трансформація локальної точки (відносно центру) у світ: rot → scale(s*f, s) → +центр.
   const toWorld = (lx: number, ly: number): { x: number; y: number } => {

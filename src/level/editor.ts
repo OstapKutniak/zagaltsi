@@ -719,14 +719,16 @@ export function initLevelEditor(prefix: string): void {
     cells: new Set<string>(),
     tool: 'paint' as 'paint' | 'erase',
     zoom: 1,
+    panX: 0, panY: 0,
     painting: false,
+    panning: false, panStart: { mx: 0, my: 0, px: 0, py: 0 },
     wired: false,
   };
   function openFootprintEditor(a: Asset): void {
     if (!state.images.get(a.id)) loadImg(a);
     fp.asset = a;
     fp.cells = new Set((a.footprint?.cells ?? []).map((c) => c.dx + ',' + c.dy));
-    fp.zoom = 1; fp.tool = 'paint';
+    fp.zoom = 1; fp.tool = 'paint'; fp.panX = 0; fp.panY = 0;
     const modal = document.getElementById(prefix + 'fpModal') as HTMLElement;
     const backdrop = document.getElementById(prefix + 'fpBackdrop') as HTMLElement;
     const title = document.getElementById(prefix + 'fpTitle');
@@ -764,7 +766,7 @@ export function initLevelEditor(prefix: string): void {
   function fpCanvas(): HTMLCanvasElement { return document.getElementById(prefix + 'fpCanvas') as HTMLCanvasElement; }
   function fpMetrics(cv: HTMLCanvasElement) {
     const img = fp.asset ? state.images.get(fp.asset.id) : undefined;
-    const cx = cv.width * 0.5, cy = cv.height * 0.55;
+    const cx = cv.width * 0.5 + fp.panX, cy = cv.height * 0.55 + fp.panY;
     const ds = (img ? Math.min(cv.width * 0.5 / img.width, cv.height * 0.5 / img.height) : 1) * fp.zoom;
     return { img, cx, cy, ds };
   }
@@ -784,25 +786,15 @@ export function initLevelEditor(prefix: string): void {
     const gs = state.grid, k = gs * Math.SQRT1_2;
     const S = (wx: number, wy: number) => ({ x: cx + wx * ds, y: cy + wy * ds });
     const P = (ix: number, iy: number) => S(ix * gs + iy * k, iy * k);
-    if (img) { g.globalAlpha = 0.85; g.drawImage(img, cx - img.width * ds / 2, cy - img.height * ds / 2, img.width * ds, img.height * ds); g.globalAlpha = 1; }
-    // Ізо-сітка
-    const R = 7;
-    g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1;
-    for (let i = -R; i <= R; i++) {
-      let p = P(i, -R); g.beginPath(); g.moveTo(p.x, p.y); let q = P(i, R); g.lineTo(q.x, q.y); g.stroke();
-      p = P(-R, i); g.beginPath(); g.moveTo(p.x, p.y); q = P(R, i); g.lineTo(q.x, q.y); g.stroke();
-    }
-    // Намальовані клітинки
-    g.fillStyle = 'rgba(255,60,60,.45)'; g.strokeStyle = 'rgba(255,90,90,.9)'; g.lineWidth = 1.5;
+    if (img) { g.drawImage(img, cx - img.width * ds / 2, cy - img.height * ds / 2, img.width * ds, img.height * ds); }
+    // Намальовані непрохідні клітинки (без фонової сітки/якоря — лише сам ассет + зони)
+    g.fillStyle = 'rgba(255,60,60,.42)'; g.strokeStyle = 'rgba(255,90,90,.95)'; g.lineWidth = 1.5;
     for (const s of fp.cells) {
       const [dx, dy] = s.split(',').map(Number);
       const a = P(dx, dy), b = P(dx + 1, dy), c = P(dx + 1, dy + 1), d = P(dx, dy + 1);
       g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath();
       g.fill(); g.stroke();
     }
-    // Якір (центр ассета) — хрестик
-    g.strokeStyle = 'rgba(90,255,143,.9)'; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(cx - 7, cy); g.lineTo(cx + 7, cy); g.moveTo(cx, cy - 7); g.lineTo(cx, cy + 7); g.stroke();
   }
   function fpPaintAt(mx: number, my: number): void {
     const c = fpCellAt(mx, my); if (!c) return;
@@ -818,9 +810,19 @@ export function initLevelEditor(prefix: string): void {
     document.getElementById(prefix + 'fpClear')?.addEventListener('click', () => { fp.cells.clear(); fpRender(); });
     document.getElementById(prefix + 'fpDone')?.addEventListener('click', () => fpClose(true));
     document.getElementById(prefix + 'fpBackdrop')?.addEventListener('click', () => fpClose(true));
-    cv.addEventListener('mousedown', (e) => { const r = cv.getBoundingClientRect(); fp.painting = true; fpPaintAt(e.clientX - r.left, e.clientY - r.top); });
-    cv.addEventListener('mousemove', (e) => { if (!fp.painting) return; const r = cv.getBoundingClientRect(); fpPaintAt(e.clientX - r.left, e.clientY - r.top); });
-    window.addEventListener('mouseup', () => { fp.painting = false; });
+    cv.addEventListener('mousedown', (e) => {
+      const r = cv.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top;
+      if (e.button === 1) { e.preventDefault(); fp.panning = true; fp.panStart = { mx, my, px: fp.panX, py: fp.panY }; return; } // середня — панорама
+      if (e.button !== 0) return;
+      fp.painting = true; fpPaintAt(mx, my);
+    });
+    cv.addEventListener('mousemove', (e) => {
+      const r = cv.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top;
+      if (fp.panning) { fp.panX = fp.panStart.px + (mx - fp.panStart.mx); fp.panY = fp.panStart.py + (my - fp.panStart.my); fpRender(); return; }
+      if (fp.painting) fpPaintAt(mx, my);
+    });
+    cv.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); }); // глушимо авто-скрол середньої
+    window.addEventListener('mouseup', () => { fp.painting = false; fp.panning = false; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); fp.zoom = Math.min(4, Math.max(0.3, fp.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); fpRender(); }, { passive: false });
     window.addEventListener('keydown', (e) => { if (fp.asset && e.key === 'Escape') fpClose(true); });
   }
