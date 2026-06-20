@@ -4,6 +4,7 @@ import { ghCommit } from '../github';
 import { pullLevelData, mergeLevelAssets } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
+import { footprintWorldCells } from './footprint';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -18,7 +19,7 @@ const CATS = [
 ] as const;
 const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, collider: 3, interactive: 3, trap: 3 };
 
-interface Asset { id: string; cat: string; name: string; url: string }
+interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
 interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: { bg: number; sky: number } }
 
@@ -249,6 +250,17 @@ export function initLevelEditor(prefix: string): void {
       .filter((p) => !state.hiddenCats.has(p.cat)) // «Наповнення» — приховані категорії не малюються/не клікаються
       .sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
   }
+  // Світові ізо-клітинки, вирізані футпринтами розміщених ассетів (непрохідні + плановість).
+  function collectFootprintCells(): Set<string> {
+    const out = new Set<string>(); const gs = state.grid;
+    for (const p of level().placed) {
+      if (state.hiddenCats.has(p.cat)) continue;
+      const a = state.assets.find((x) => x.id === p.asset);
+      if (!a?.footprint?.cells.length) continue;
+      for (const c of footprintWorldCells(a.footprint, { x: p.x, y: p.y, scale: p.scale, flip: p.flip, rot: p.rot }, p.x, p.y, gs)) out.add(c);
+    }
+    return out;
+  }
   function draw(): void {
     if (!canvas.width) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -307,6 +319,24 @@ export function initLevelEditor(prefix: string): void {
           .filter((c) => Number.isFinite(c.cx) && Number.isFinite(c.cy))
           .sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx) || (a.L - b.L));
         for (const { cx, cy, L } of cells) drawFloorCell(cx, cy, L, present, lvlOf);
+      }
+      // Футпринт-клітинки ассетів — непрохідні (вирізані з підлоги). Помаранчево-червоні.
+      {
+        const blocked = collectFootprintCells();
+        // ghost майбутнього розміщення: pending-ассет із футпринтом під курсором
+        const pa = state.pendingAsset ? state.assets.find((x) => x.id === state.pendingAsset) : null;
+        if (pa?.footprint?.cells.length) {
+          const w = toWorld(state.mouse.x, state.mouse.y);
+          for (const c of footprintWorldCells(pa.footprint, { x: w.x, y: w.y, scale: state.pendingScale, flip: state.pendingFlip, rot: state.pendingRot }, w.x, w.y, gs)) blocked.add(c);
+        }
+        const kf = gs * Math.SQRT1_2;
+        const Pp = (ix: number, iy: number) => toScreen(ix * gs + iy * kf, iy * kf);
+        ctx.fillStyle = 'rgba(255,80,30,0.28)'; ctx.strokeStyle = 'rgba(255,120,40,0.85)'; ctx.lineWidth = 1;
+        for (const s of blocked) {
+          const [cx, cy] = s.split(',').map(Number);
+          const a = Pp(cx, cy), b = Pp(cx + 1, cy), c = Pp(cx + 1, cy + 1), d = Pp(cx, cy + 1);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
       }
       // Авто-фаски з висотою: трикутник на внутрішньому куті — вершини підняті
       // до висоти суміжних клітинок (мін при спільному куті).
@@ -620,6 +650,8 @@ export function initLevelEditor(prefix: string): void {
         refreshAssets(); refreshSel(); draw(); save();
       });
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
+      if (a.footprint?.cells.length) { const dot = document.createElement('div'); dot.className = 'fpDot'; dot.title = 'має колайдери'; el.appendChild(dot); }
+      el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const same = state.pendingAsset === a.id;
@@ -679,6 +711,118 @@ export function initLevelEditor(prefix: string): void {
       img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(''); };
       img.src = blobUrl;
     });
+  }
+
+  // ── Вікно футпринта (колайдери ассета) — ПКМ по картці ──
+  const fp = {
+    asset: null as Asset | null,
+    cells: new Set<string>(),
+    tool: 'paint' as 'paint' | 'erase',
+    zoom: 1,
+    painting: false,
+    wired: false,
+  };
+  function openFootprintEditor(a: Asset): void {
+    if (!state.images.get(a.id)) loadImg(a);
+    fp.asset = a;
+    fp.cells = new Set((a.footprint?.cells ?? []).map((c) => c.dx + ',' + c.dy));
+    fp.zoom = 1; fp.tool = 'paint';
+    const modal = document.getElementById(prefix + 'fpModal') as HTMLElement;
+    const backdrop = document.getElementById(prefix + 'fpBackdrop') as HTMLElement;
+    const title = document.getElementById(prefix + 'fpTitle');
+    if (title) title.textContent = 'Колайдери: ' + a.name;
+    // Габарити за скріншотом: ліворуч = бібліотека, праворуч = під кнопку «Редактор Рівнів»,
+    // вниз ~3 ряди карток.
+    const lib = $('library').getBoundingClientRect();
+    const levelTab = document.querySelector('#topTabs button[data-tab="level"]')?.getBoundingClientRect();
+    const grid = $('libGrid');
+    const cardW = (grid.clientWidth - 8) / 2;
+    const left = lib.left, top = lib.top;
+    const right = levelTab ? levelTab.right : lib.right + 360;
+    const h = Math.min(window.innerHeight - top - 12, 44 + cardW * 3 + 16);
+    modal.style.left = left + 'px'; modal.style.top = top + 'px';
+    modal.style.width = (right - left) + 'px'; modal.style.height = h + 'px';
+    modal.style.display = 'flex'; backdrop.style.display = 'block';
+    fpWire();
+    fpSyncToolBtns();
+    requestAnimationFrame(fpRender);
+  }
+  function fpClose(saveIt: boolean): void {
+    if (saveIt && fp.asset) {
+      const cells = [...fp.cells].map((s) => { const [dx, dy] = s.split(',').map(Number); return { dx, dy }; });
+      fp.asset.footprint = cells.length ? { cells } : undefined;
+      save(); refreshAssets(); draw();
+    }
+    fp.asset = null; fp.painting = false;
+    (document.getElementById(prefix + 'fpModal') as HTMLElement).style.display = 'none';
+    (document.getElementById(prefix + 'fpBackdrop') as HTMLElement).style.display = 'none';
+  }
+  function fpSyncToolBtns(): void {
+    document.getElementById(prefix + 'fpPaint')?.classList.toggle('light', fp.tool === 'paint');
+    document.getElementById(prefix + 'fpErase')?.classList.toggle('light', fp.tool === 'erase');
+  }
+  function fpCanvas(): HTMLCanvasElement { return document.getElementById(prefix + 'fpCanvas') as HTMLCanvasElement; }
+  function fpMetrics(cv: HTMLCanvasElement) {
+    const img = fp.asset ? state.images.get(fp.asset.id) : undefined;
+    const cx = cv.width * 0.5, cy = cv.height * 0.55;
+    const ds = (img ? Math.min(cv.width * 0.5 / img.width, cv.height * 0.5 / img.height) : 1) * fp.zoom;
+    return { img, cx, cy, ds };
+  }
+  function fpCellAt(mx: number, my: number): { dx: number; dy: number } | null {
+    const cv = fpCanvas(); const { cx, cy, ds } = fpMetrics(cv);
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const lx = (mx - cx) / ds, ly = (my - cy) / ds;
+    return { dx: Math.floor((lx - ly) / gs), dy: Math.floor(ly / k) };
+  }
+  function fpRender(): void {
+    if (!fp.asset) return;
+    const cv = fpCanvas();
+    if (cv.width !== cv.clientWidth || cv.height !== cv.clientHeight) { cv.width = cv.clientWidth; cv.height = cv.clientHeight; }
+    const g = cv.getContext('2d')!;
+    g.clearRect(0, 0, cv.width, cv.height);
+    const { img, cx, cy, ds } = fpMetrics(cv);
+    const gs = state.grid, k = gs * Math.SQRT1_2;
+    const S = (wx: number, wy: number) => ({ x: cx + wx * ds, y: cy + wy * ds });
+    const P = (ix: number, iy: number) => S(ix * gs + iy * k, iy * k);
+    if (img) { g.globalAlpha = 0.85; g.drawImage(img, cx - img.width * ds / 2, cy - img.height * ds / 2, img.width * ds, img.height * ds); g.globalAlpha = 1; }
+    // Ізо-сітка
+    const R = 7;
+    g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1;
+    for (let i = -R; i <= R; i++) {
+      let p = P(i, -R); g.beginPath(); g.moveTo(p.x, p.y); let q = P(i, R); g.lineTo(q.x, q.y); g.stroke();
+      p = P(-R, i); g.beginPath(); g.moveTo(p.x, p.y); q = P(R, i); g.lineTo(q.x, q.y); g.stroke();
+    }
+    // Намальовані клітинки
+    g.fillStyle = 'rgba(255,60,60,.45)'; g.strokeStyle = 'rgba(255,90,90,.9)'; g.lineWidth = 1.5;
+    for (const s of fp.cells) {
+      const [dx, dy] = s.split(',').map(Number);
+      const a = P(dx, dy), b = P(dx + 1, dy), c = P(dx + 1, dy + 1), d = P(dx, dy + 1);
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath();
+      g.fill(); g.stroke();
+    }
+    // Якір (центр ассета) — хрестик
+    g.strokeStyle = 'rgba(90,255,143,.9)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(cx - 7, cy); g.lineTo(cx + 7, cy); g.moveTo(cx, cy - 7); g.lineTo(cx, cy + 7); g.stroke();
+  }
+  function fpPaintAt(mx: number, my: number): void {
+    const c = fpCellAt(mx, my); if (!c) return;
+    const key = c.dx + ',' + c.dy;
+    if (fp.tool === 'paint') fp.cells.add(key); else fp.cells.delete(key);
+    fpRender();
+  }
+  function fpWire(): void {
+    if (fp.wired) return; fp.wired = true;
+    const cv = fpCanvas();
+    document.getElementById(prefix + 'fpPaint')?.addEventListener('click', () => { fp.tool = 'paint'; fpSyncToolBtns(); });
+    document.getElementById(prefix + 'fpErase')?.addEventListener('click', () => { fp.tool = 'erase'; fpSyncToolBtns(); });
+    document.getElementById(prefix + 'fpClear')?.addEventListener('click', () => { fp.cells.clear(); fpRender(); });
+    document.getElementById(prefix + 'fpDone')?.addEventListener('click', () => fpClose(true));
+    document.getElementById(prefix + 'fpBackdrop')?.addEventListener('click', () => fpClose(true));
+    cv.addEventListener('mousedown', (e) => { const r = cv.getBoundingClientRect(); fp.painting = true; fpPaintAt(e.clientX - r.left, e.clientY - r.top); });
+    cv.addEventListener('mousemove', (e) => { if (!fp.painting) return; const r = cv.getBoundingClientRect(); fpPaintAt(e.clientX - r.left, e.clientY - r.top); });
+    window.addEventListener('mouseup', () => { fp.painting = false; });
+    cv.addEventListener('wheel', (e) => { e.preventDefault(); fp.zoom = Math.min(4, Math.max(0.3, fp.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); fpRender(); }, { passive: false });
+    window.addEventListener('keydown', (e) => { if (fp.asset && e.key === 'Escape') fpClose(true); });
   }
 
   $<HTMLButtonElement>('loadAsset')?.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());

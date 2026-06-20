@@ -5,6 +5,7 @@ import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { buildLevelView, type LevelDoc } from '../level/LevelView';
+import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
 import {
@@ -64,6 +65,7 @@ export class GameScene extends Phaser.Scene {
   private colliderGrid = 48;
   private floorSet = new Set<string>(); // "cx,cy" намальованих підлогових (h) клітинок — для поклітинкової прохідності
   private cellLevel = new Map<string, number>(); // "cx,cy" → рівень висоти клітинки (0 = земля); елевація px = рівень·gs
+  private blockedCells = new Set<string>(); // "cx,cy" вирізані футпринтами ассетів — непрохідні (персонаж обходить, малюється за)
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
@@ -105,6 +107,7 @@ export class GameScene extends Phaser.Scene {
       const p = c.split(',');
       if ((p[2] ?? 'h') !== 'h') continue;
       const cx = Number(p[0]), cy = Number(p[1]);
+      if (this.blockedCells.has(cx + ',' + cy)) continue; // вирізано футпринтом — не прохідно
       const x0 = cx * gs + cy * k, x1 = (cx + 1) * gs + (cy + 1) * k;
       if (worldX < x0 || worldX >= x1) continue;
       const y0 = cy * k, y1 = (cy + 1) * k;
@@ -129,12 +132,12 @@ export class GameScene extends Phaser.Scene {
     const fcx = (gameX - editorY) / gs, fcy = editorY / k;
     const cx = Math.floor(fcx), cy = Math.floor(fcy);
     const lvl = (ix: number, iy: number): number => this.cellLevel.get(ix + ',' + iy) ?? 0;
-    if (this.floorSet.has(cx + ',' + cy)) return lvl(cx, cy) * gs;
+    if (this.floorSet.has(cx + ',' + cy) && !this.blockedCells.has(cx + ',' + cy)) return lvl(cx, cy) * gs;
     // Авто-фаска: порожня клітинка з двома замальованими СУМІЖНИМИ сторонами =
     // внутрішній кут; половинка-трикутник до того кута прохідна (зрізаємо кут по
     // діагоналі). fx,fy — локальні 0..1 у клітинці; "/"=fx+fy, "\"=fx−fy.
     // Фаска успадковує висоту сусідньої клітинки-платформи, яку згладжує.
-    const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy);
+    const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy) && !this.blockedCells.has(ix + ',' + iy);
     const fx = fcx - cx, fy = fcy - cy;
     const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
     if (L && U && fx + fy < 1) return lvl(cx - 1, cy) * gs; // верх-ліво (діагональ /)
@@ -282,6 +285,18 @@ export class GameScene extends Phaser.Scene {
         if (y0 < minY) minY = y0; if (y1 > maxY) maxY = y1;
       }
       if (minY !== Infinity) this.levelBand = { top: this.bandBottom + minY, bottom: this.bandBottom + maxY };
+    }
+    // Футпринти ассетів — вирізаємо клітинки з прохідної підлоги (ті самі ізо-координати,
+    // що й колайдери: центр ассета = p.x,p.y у редакторному просторі = p.x, editorY=p.y у грі).
+    this.blockedCells.clear();
+    {
+      const gs = this.colliderGrid;
+      const fpMap = new Map<string, { cells: { dx: number; dy: number }[] }>();
+      for (const a of doc.assets) if (a.footprint?.cells?.length) fpMap.set(a.id, a.footprint);
+      if (fpMap.size) for (const p of doc.placed) {
+        const f = fpMap.get(p.asset); if (!f) continue;
+        for (const c of footprintWorldCells(f, { x: p.x, y: p.y, scale: p.scale, flip: p.flip, rot: p.rot }, p.x, p.y, gs)) this.blockedCells.add(c);
+      }
     }
 
     // Вороги з намальованих зон 3×3: позиція в межах зони — детермінована (однакова
