@@ -1505,4 +1505,24 @@ export function initLevelEditor(prefix: string): void {
     requestAnimationFrame(syncToolbarHeight);
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });
+
+  // ---- AI панель: drag-and-drop + click для рефу ----
+  {
+    const drop = document.getElementById('lv-aiRefDrop');
+    const input = document.getElementById('lv-aiRefInput') as HTMLInputElement | null;
+    const img = document.getElementById('lv-aiRefImg') as HTMLImageElement | null;
+    if (drop && input && img) {
+      const setRef = (file: File) => { img.src = URL.createObjectURL(file); img.style.display = 'block'; };
+      drop.addEventListener('click', () => input.click());
+      drop.addEventListener('contextmenu', (e) => { e.preventDefault(); img.src = ''; img.style.display = 'none'; });
+      input.addEventListener('change', () => { if (input.files?.[0]) setRef(input.files[0]); });
+      drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag-over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+      drop.addEventListener('drop', (e) => {
+        e.preventDefault(); drop.classList.remove('drag-over');
+        const file = (e as DragEvent).dataTransfer?.files[0];
+        if (file?.type.startsWith('image/')) setRef(file);
+      });
+    }
+  }
 }
