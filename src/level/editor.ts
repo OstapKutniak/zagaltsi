@@ -16,7 +16,7 @@ const CATS = [
   { key: 'interactive', label: 'Інтерактив' },
   { key: 'trap', label: 'Пастки' },
 ] as const;
-const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, decor: 3, interactive: 3, trap: 3 };
+const LAYER: Record<string, number> = { sky: 0, bg: 1, map: 2, collider: 2, decor: 3, interactive: 3, trap: 3 };
 
 interface Asset { id: string; cat: string; name: string; url: string }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
