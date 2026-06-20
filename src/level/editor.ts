@@ -437,8 +437,7 @@ export function initLevelEditor(prefix: string): void {
     state.cur = state.levels.length - 1; state.grid = level().grid; state.selected = null; refreshLevels(); draw(); save();
   }
   function refreshLevels(): void {
-    const box = $('levelList'); box.innerHTML = '';
-    state.levels.forEach((lv, i) => {
+    const makeCard = (lv: Level, i: number): HTMLDivElement => {
       const el = document.createElement('div');
       el.className = 'lvCard' + (i === state.cur ? ' sel' : '');
       const nm = document.createElement('div'); nm.textContent = lv.name; el.appendChild(nm);
@@ -453,16 +452,24 @@ export function initLevelEditor(prefix: string): void {
         };
         el.appendChild(x);
       }
-      box.appendChild(el);
-    });
+      return el;
+    };
+    const box = $('levelList'); box.innerHTML = '';
+    state.levels.forEach((lv, i) => box.appendChild(makeCard(lv, i)));
     const empties = Math.max(0, 9 - state.levels.length);
     for (let i = 0; i < empties; i++) {
       const e = document.createElement('div'); e.className = 'lvCard empty';
-      e.onclick = () => addLevel();
-      box.appendChild(e);
+      e.onclick = () => addLevel(); box.appendChild(e);
+    }
+    // Мобільна смуга рівнів
+    const bar = $<HTMLElement>('levelBarList');
+    if (bar) {
+      bar.innerHTML = '';
+      state.levels.forEach((lv, i) => bar.appendChild(makeCard(lv, i)));
     }
   }
   $<HTMLButtonElement>('addLevel').addEventListener('click', addLevel);
+  $<HTMLButtonElement>('levelBarAdd')?.addEventListener('click', addLevel);
 
   function refreshCatSelect(): void {
     $<HTMLSelectElement>('libSelect').value = state.cat;
