@@ -726,7 +726,13 @@ $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
 
 // ---- верхні таби розділів — перемикання панелей всередині однієї сторінки ----
 const appEl = document.getElementById('app')!;
+function syncLevelToolbarHeight(): void {
+  const tl = document.getElementById('timelineBar');
+  const lvTl = document.getElementById('lv-levelToolbar');
+  if (tl && lvTl) lvTl.style.minHeight = tl.clientHeight + 'px';
+}
 function setMode(mode: string): void {
+  if (mode === 'level') syncLevelToolbarHeight(); // зчитати висоту поки timelineBar ще видимий
   appEl.className = 'mode-' + mode;
   document.querySelectorAll<HTMLButtonElement>('#topTabs button[data-tab]').forEach(b => {
     b.classList.toggle('light', b.getAttribute('data-tab') === mode);
@@ -1794,4 +1800,7 @@ status('');
 
 // Перерахувати розміри після того як таймлайн зайняв місце в DOM
 requestAnimationFrame(() => { resize(); draw(); });
+
+// Синхронізувати висоту lv-levelToolbar з timelineBar після того як кістки завантажились
+setTimeout(syncLevelToolbarHeight, 300);
 
