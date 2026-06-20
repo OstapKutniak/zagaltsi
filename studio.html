@@ -331,6 +331,14 @@
       <aside id="library" class="col pane">
         <button id="libToggle" class="light">Герої</button>
         <div id="libList"></div>
+        <div id="aiPanel" style="flex:0 0 auto;display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--line)">
+          <textarea id="aiPrompt" rows="3" placeholder="Промпт для генерації…" style="width:100%;background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px;resize:none;font-family:inherit;outline:none"></textarea>
+          <div id="aiRefDrop" style="height:72px;background:var(--rail);border:2px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;color:var(--muted);position:relative;overflow:hidden;transition:border-color .15s">
+            <span id="aiRefLabel">перетягни реф · або клікни</span>
+            <img id="aiRefImg" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain">
+            <input type="file" id="aiRefInput" accept="image/*" style="display:none">
+          </div>
+        </div>
       </aside>
 
       <!-- ЛІВА БІБЛІОТЕКА — редактор рівнів -->

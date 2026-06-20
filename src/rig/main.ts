@@ -1760,6 +1760,38 @@ refreshAnimOptions();
 refreshTimeline();
 alignPartsList();
 status('');
+
+// ---- AI панель: drag-and-drop + click для рефу ----
+{
+  const drop = document.getElementById('aiRefDrop')!;
+  const input = document.getElementById('aiRefInput') as HTMLInputElement;
+  const img = document.getElementById('aiRefImg') as HTMLImageElement;
+  const label = document.getElementById('aiRefLabel')!;
+
+  function setRef(file: File) {
+    const url = URL.createObjectURL(file);
+    img.src = url;
+    img.style.display = 'block';
+    label.style.display = 'none';
+  }
+
+  drop.addEventListener('click', () => input.click());
+  drop.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    img.src = ''; img.style.display = 'none'; label.style.display = '';
+  });
+  input.addEventListener('change', () => { if (input.files?.[0]) setRef(input.files[0]); });
+
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; });
+  drop.addEventListener('dragleave', () => { drop.style.borderColor = ''; });
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.style.borderColor = '';
+    const file = e.dataTransfer?.files[0];
+    if (file?.type.startsWith('image/')) setRef(file);
+  });
+}
+
 // Перерахувати розміри після того як таймлайн зайняв місце в DOM
 requestAnimationFrame(() => { resize(); draw(); });
 
