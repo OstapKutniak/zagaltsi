@@ -1836,12 +1836,15 @@ window.addEventListener('resize', syncPanelHeights);
   if (tl) new ResizeObserver(syncPanelHeights).observe(tl);
 }
 
-// ─── Touch support for rig canvas (1-finger = drag/mode, 2-finger = pan+pinch) ────
+// ─── Touch support for rig canvas (1-finger = drag/bone, 2-finger = pan, double-tap+drag = zoom) ────
 {
   let _touchPanActive = false;
   let _touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
-  let _pinchDist = 0;
   let _singleTouchDown = false;
+  let _lastTapTime = 0;
+  let _zoomMode = false;
+  let _zoomStartY = 0;
+  let _zoomStartZoom = 1;
 
   const _cpos = (t: Touch): { x: number; y: number } => {
     const r = canvas.getBoundingClientRect();
@@ -1851,8 +1854,15 @@ window.addEventListener('resize', syncPanelHeights);
   canvas.addEventListener('touchstart', (ev) => {
     ev.preventDefault();
     if (ev.touches.length === 1) {
-      _singleTouchDown = true; _touchPanActive = false;
+      const now = Date.now();
       const { x, y } = _cpos(ev.touches[0]);
+      if (now - _lastTapTime < 300) {
+        // double-tap: enter zoom-by-drag mode
+        _zoomMode = true; _zoomStartY = y; _zoomStartZoom = state.zoom;
+        _singleTouchDown = false; drag = null; _lastTapTime = 0; return;
+      }
+      _lastTapTime = now;
+      _zoomMode = false; _touchPanActive = false; _singleTouchDown = true;
       state.mouse = { x, y };
       const c = { x: mirrorX(x), y };
       if (state.mode) return; // touchend підтверджує
@@ -1870,9 +1880,8 @@ window.addEventListener('resize', syncPanelHeights);
       const key = hit ?? (state.selected === 'ref' && state.ref.canvas ? 'ref' : null);
       if (key) { state.selected = key; pushUndo(); const t2 = tf(key); drag = { key, sx: c.x, sy: c.y, dx: t2.dx, dy: t2.dy }; refreshUI(); }
     } else if (ev.touches.length === 2) {
-      _singleTouchDown = false; drag = null;
+      _singleTouchDown = false; _zoomMode = false; drag = null;
       const p1 = _cpos(ev.touches[0]), p2 = _cpos(ev.touches[1]);
-      _pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
       const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
       _touchPanActive = true; _rigPanning = true;
       _touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
@@ -1881,7 +1890,13 @@ window.addEventListener('resize', syncPanelHeights);
 
   canvas.addEventListener('touchmove', (ev) => {
     ev.preventDefault();
-    if (ev.touches.length === 1 && _singleTouchDown && !_touchPanActive) {
+    if (_zoomMode && ev.touches.length === 1) {
+      const { y } = _cpos(ev.touches[0]);
+      // drag up = zoom in; 150px travel = 1.8× zoom
+      const delta = (_zoomStartY - y) / 150;
+      state.zoom = Math.min(3, Math.max(0.3, _zoomStartZoom * Math.pow(1.8, delta)));
+      applyOrigin(); resize(); draw();
+    } else if (ev.touches.length === 1 && _singleTouchDown && !_touchPanActive) {
       const { x, y } = _cpos(ev.touches[0]);
       state.mouse = { x, y };
       if (state.mode) { applyMode(); draw(); return; }
@@ -1897,11 +1912,8 @@ window.addEventListener('resize', syncPanelHeights);
     } else if (ev.touches.length === 2 && _touchPanActive) {
       const p1 = _cpos(ev.touches[0]), p2 = _cpos(ev.touches[1]);
       const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
       state.pan.x = _touchPanStart.px + (mx - _touchPanStart.mx);
       state.pan.y = _touchPanStart.py + (my - _touchPanStart.my);
-      if (_pinchDist > 0) state.zoom = Math.min(3, Math.max(0.3, state.zoom * dist / _pinchDist));
-      _pinchDist = dist;
       _touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
       applyOrigin(); resize(); draw();
     }
@@ -1912,10 +1924,10 @@ window.addEventListener('resize', syncPanelHeights);
     if (ev.touches.length === 0) {
       if (_singleTouchDown && state.mode) endMode(true);
       drag = null;
-      _singleTouchDown = false; _touchPanActive = false; _pinchDist = 0;
-      _rigPanning = false; draw();
+      _singleTouchDown = false; _touchPanActive = false;
+      _zoomMode = false; _rigPanning = false; draw();
     } else if (ev.touches.length === 1 && _touchPanActive) {
-      _touchPanActive = false; _pinchDist = 0; _singleTouchDown = true;
+      _touchPanActive = false; _singleTouchDown = true;
       _rigPanning = false; draw();
     }
   }, { passive: false });

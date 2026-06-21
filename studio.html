@@ -722,7 +722,12 @@
         </div>
         <!-- AI prompt -->
         <div id="mob-char-prompt-row" style="display:flex;gap:5px;padding:4px 6px;border-top:1px solid var(--line);align-items:center">
-          <input type="text" id="mob-char-aiPrompt" placeholder="Опис персонажа…" style="flex:1;height:32px;background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;font-family:inherit;outline:none">
+          <input type="text" id="mob-char-aiPrompt" placeholder="Опис персонажа…" style="flex:1;min-width:0;height:32px;background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;font-family:inherit;outline:none">
+          <div id="mob-char-aiRefDrop" class="ai-drop-zone" style="flex:0 0 32px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;position:relative">
+            <img id="mob-char-aiRefImg" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:8px">
+            <input type="file" id="mob-char-aiRefInput" accept="image/*" style="display:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;opacity:.5;pointer-events:none"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          </div>
           <button id="mob-char-aiGenBtn" style="flex:0 0 auto;padding:6px 10px;font-size:12px">gen</button>
         </div>
         <!-- Actions -->
@@ -870,8 +875,33 @@
         var src = document.getElementById('mob-char-aiPrompt');
         var dst = document.getElementById('aiPrompt');
         if (src && dst) dst.value = src.value;
+        // sync mobile ref image → desktop ref image before generating
+        var mobImg = document.getElementById('mob-char-aiRefImg');
+        var deskImg = document.getElementById('aiRefImg');
+        if (mobImg && deskImg && mobImg.src) { deskImg.src = mobImg.src; deskImg.style.display = 'block'; }
         document.getElementById('aiGenBtn')?.click();
       });
+
+      // Char dock: mobile ref image drop zone
+      (function () {
+        var drop = document.getElementById('mob-char-aiRefDrop');
+        var input = document.getElementById('mob-char-aiRefInput');
+        var img = document.getElementById('mob-char-aiRefImg');
+        if (!drop || !input || !img) return;
+        function setMobRef(file) {
+          img.src = URL.createObjectURL(file); img.style.display = 'block';
+        }
+        drop.addEventListener('click', function () { input.click(); });
+        drop.addEventListener('contextmenu', function (e) { e.preventDefault(); img.src = ''; img.style.display = 'none'; });
+        input.addEventListener('change', function () { if (input.files && input.files[0]) setMobRef(input.files[0]); });
+        drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('drag-over'); });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('drag-over'); });
+        drop.addEventListener('drop', function (e) {
+          e.preventDefault(); drop.classList.remove('drag-over');
+          var file = e.dataTransfer && e.dataTransfer.files[0];
+          if (file && file.type.startsWith('image/')) setMobRef(file);
+        });
+      })();
 
       // Char dock: anim selects sync
       function syncCharAnimSelects() {
