@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <title>Хоругва</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden; background: #000;
+        font-family: system-ui, sans-serif; color: #e8e8e8;
+      }
+      #menu {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 22px; padding: 24px;
+      }
+      #menu h1 {
+        font-size: 34px; font-weight: 900; letter-spacing: 6px; color: #ff9a1f;
+        text-transform: uppercase; margin-bottom: 8px;
+      }
+      #menu a {
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        width: 100%; max-width: 320px; padding: 18px 24px;
+        border-radius: 14px; font-size: 18px; font-weight: 700;
+        text-decoration: none; cursor: pointer; user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #menu a.play { background: #ff9a1f; color: #1b1b1b; }
+      #menu a.editor { background: #2a2a2a; color: #e8e8e8; border: 1px solid #3a3a3a; }
+      #menu a:active { transform: scale(0.97); }
+      #menu .hint { font-size: 12px; color: #6a6a6a; margin-top: 10px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div id="menu">
+      <h1>Хоругва</h1>
+      <a class="play" href="game.html">▶ Грати</a>
+      <a class="editor" href="studio.html">✎ Редактор</a>
+      <p class="hint">Загальці</p>
+    </div>
+  </body>
+</html>

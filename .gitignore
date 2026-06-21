@@ -6,6 +6,9 @@ dist/
 .env
 *.env
 
+# Capacitor: нативний Android-проєкт генерується в CI (npx cap add android)
+android/
+
 # приватний Blender-аддон — НЕ для публічного репо
 *.rar
 BlenderAIReplace/

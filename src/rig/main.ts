@@ -762,9 +762,13 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
   if (tab) { b.addEventListener('click', () => setMode(tab)); }
   else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
 }
+// Шлях до гри: у веб-збірці гра = index.html; у Android-APK (Capacitor) index.html —
+// це меню, а гра лежить у game.html. Визначаємо за наявністю Capacitor-бриджа.
+const GAME_URL = (window as unknown as { Capacitor?: unknown }).Capacitor ? 'game.html' : 'index.html';
+
 // «Грати» — запускає саму гру (зручно перевіряти після оновлення)
 document.getElementById('playTab')?.addEventListener('click', () => {
-  window.location.href = 'index.html';
+  window.location.href = GAME_URL;
 });
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
@@ -804,7 +808,7 @@ $<HTMLButtonElement>('setHeadLine').addEventListener('click', () => {
 
 // ---- превʼю гри (вбудована гра в iframe; оновлюється по «Експорт у гру») ----
 const previewFrame = $<HTMLIFrameElement>('previewFrame');
-function reloadPreview(): void { previewFrame.src = 'index.html?t=' + Date.now(); const h = document.getElementById('previewHint'); if (h) h.style.display = 'none'; }
+function reloadPreview(): void { previewFrame.src = GAME_URL + '?t=' + Date.now(); const h = document.getElementById('previewHint'); if (h) h.style.display = 'none'; }
 reloadPreview();
 const previewBox = $('preview');
 // backdrop — прозорий шар позаду великого превʼю (z:99 < preview z:100).

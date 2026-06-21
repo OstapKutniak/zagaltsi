@@ -1,0 +1,64 @@
+name: Build Android APK
+
+# Збирає Android APK (Хоругва) через Capacitor.
+# Запуск вручну: вкладка Actions → "Build Android APK" → Run workflow.
+# Готовий APK з'явиться внизу сторінки запуску в розділі Artifacts (horugva-apk).
+# Завантаж його на телефон і встанови (дозволь установку з невідомих джерел).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Збірка веб-частини (та сама, що й для GitHub Pages)
+      - run: npm run build
+        env:
+          VITE_FAL_PROXY: ${{ vars.VITE_FAL_PROXY }}
+
+      # Домашній екран APK = меню (Грати / Редактор).
+      # У вебі index.html — це гра; в APK index.html стає меню, а гра переїжджає в game.html
+      # (код навігації це враховує через наявність Capacitor).
+      - name: Prepare app entry (menu)
+        run: |
+          mv dist/index.html dist/game.html
+          mv dist/menu.html dist/index.html
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      # Генеруємо нативний проєкт і кладемо в нього зібрані веб-асети
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web assets
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horugva-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
