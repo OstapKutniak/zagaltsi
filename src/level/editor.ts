@@ -1028,8 +1028,8 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
   $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; draw(); save(); });
-  const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn', 'enemySpawnBtn', 'enemyEraseBtn'] as const;
-  const pathBtnTools: Record<string, 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase', enemySpawnBtn: 'enemy', enemyEraseBtn: 'enemyErase' };
+  const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
+  const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
   for (const id of pathBtnIds) {
     $<HTMLButtonElement>(id)?.addEventListener('click', () => {
       const tool = pathBtnTools[id];
@@ -1076,9 +1076,8 @@ export function initLevelEditor(prefix: string): void {
     $('lowerBtn')?.classList.toggle('on', state.pathTool === 'lower');
     $('flatBtn')?.classList.toggle('on', state.pathTool === 'flat');
     $('walkBtn')?.classList.toggle('on', state.pathTool === 'walk');
-    $('enemySpawnBtn')?.classList.toggle('on', state.pathTool === 'enemy');
-    $('enemyEraseBtn')?.classList.toggle('on', state.pathTool === 'enemyErase');
-    $('addSpawn')?.classList.toggle('on', state.pathTool === 'spawn');
+    $('enemyBtn')?.classList.toggle('on', state.pathTool === 'enemy' || state.pathTool === 'enemyErase');
+    $('spawnBtn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
   $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
   $<HTMLButtonElement>('lowerBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: тапни/тягни на клітинку' : ''); draw(); });
@@ -1245,11 +1244,16 @@ export function initLevelEditor(prefix: string): void {
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
 
-  // Touch support: 1 finger = draw/interact, 2 fingers = pan + pinch-zoom
+  // Touch support: 1 finger = draw/interact, 2 fingers = pan; double-tap = toggle zoom mode (persistent)
   {
     let touchPanActive = false;
     let touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
     let singleTouchDown = false;
+    let _lvZoomMode = false;
+    let _lvZoomStartY = 0;
+    let _lvZoomStart = 1;
+    let _lvLastTapTime = 0;
+    let _lvLastTapWasDrag = false;
     const cpos = (t: Touch): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect();
       return { x: t.clientX - r.left, y: t.clientY - r.top };
@@ -1257,8 +1261,16 @@ export function initLevelEditor(prefix: string): void {
     canvas.addEventListener('touchstart', (ev) => {
       ev.preventDefault();
       if (ev.touches.length === 1) {
-        singleTouchDown = true; touchPanActive = false;
         const { x, y } = cpos(ev.touches[0]);
+        const now = Date.now();
+        if (now - _lvLastTapTime < 300 && !_lvLastTapWasDrag) {
+          _lvZoomMode = !_lvZoomMode;
+          if (_lvZoomMode) { _lvZoomStartY = y; _lvZoomStart = state.zoom; }
+          singleTouchDown = false; _lvLastTapTime = 0; return;
+        }
+        if (_lvZoomMode) { _lvZoomStartY = y; _lvZoomStart = state.zoom; singleTouchDown = false; return; }
+        _lvLastTapTime = now; _lvLastTapWasDrag = false;
+        singleTouchDown = true; touchPanActive = false;
         state.mouse = { x, y };
         const lv0 = level();
         const MHIT = 18;
@@ -1286,6 +1298,7 @@ export function initLevelEditor(prefix: string): void {
         refreshSel(); draw();
       } else if (ev.touches.length === 2) {
         singleTouchDown = false;
+        _lvZoomMode = false; _lvLastTapTime = 0;
         if (drag || painting || state.markerDrag) save();
         drag = null; painting = false; state.markerDrag = null;
         const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
@@ -1296,6 +1309,11 @@ export function initLevelEditor(prefix: string): void {
     }, { passive: false });
     canvas.addEventListener('touchmove', (ev) => {
       ev.preventDefault();
+      if (_lvZoomMode && ev.touches.length === 1) {
+        const { y } = cpos(ev.touches[0]);
+        state.zoom = Math.min(3, Math.max(0.15, _lvZoomStart * Math.pow(1.8, (_lvZoomStartY - y) / 150)));
+        resize(); draw(); return;
+      }
       if (ev.touches.length === 1 && singleTouchDown && !touchPanActive) {
         const { x, y } = cpos(ev.touches[0]);
         state.mouse = { x, y };
@@ -1308,7 +1326,7 @@ export function initLevelEditor(prefix: string): void {
           draw(); return;
         }
         if (painting) { paintAt(x, y); return; }
-        if (drag) { const p = sel(); if (p) { p.x = drag.ox + (x - drag.x) / sc(); p.y = drag.oy + (y - drag.y) / sc(); draw(); } return; }
+        if (drag) { _lvLastTapWasDrag = true; const p = sel(); if (p) { p.x = drag.ox + (x - drag.x) / sc(); p.y = drag.oy + (y - drag.y) / sc(); draw(); } return; }
         if (state.pathTool) draw();
       } else if (ev.touches.length === 2 && touchPanActive) {
         const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
@@ -1352,13 +1370,14 @@ export function initLevelEditor(prefix: string): void {
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
       }
       if (!_libDragActive) return;
+      ev.preventDefault(); // prevent library scroll once drag is active
       if (_libDragGhost) { (_libDragGhost as HTMLElement).style.left = t.clientX + 'px'; (_libDragGhost as HTMLElement).style.top = t.clientY + 'px'; }
       // update mouse position on canvas for white-ghost preview
       const cr = canvas.getBoundingClientRect();
       if (t.clientX >= cr.left && t.clientX <= cr.right && t.clientY >= cr.top && t.clientY <= cr.bottom) {
         state.mouse = { x: t.clientX - cr.left, y: t.clientY - cr.top }; draw();
       }
-    }, { passive: true });
+    }, { passive: false });
 
     document.addEventListener('touchend', (ev) => {
       if (!_libDragId) return;
@@ -1690,21 +1709,20 @@ export function initLevelEditor(prefix: string): void {
   // панелі — щоб довгий список (10 категорій) не накладався на тулбар.
   function positionFillMenu(): void {
     if (!fillMenu) return;
-    const b5 = document.querySelectorAll('#topTabs button')[4] as HTMLElement | undefined;
-    const preview = $('preview'); // lv-preview — зверху хелсбари гри; вирівнюємо меню по його верху
-    const toolbar = $('levelToolbar'); // нижня панель — нижня межа меню
+    const toolbar = $('levelToolbar');
     const stage = canvas.getBoundingClientRect();
-    const w = b5?.offsetWidth || 170;
-    const top = preview ? preview.getBoundingClientRect().top : stage.top + 16;
-    const botLimit = toolbar ? toolbar.getBoundingClientRect().top - 8 : window.innerHeight - 8;
+    const w = 170;
+    const toolbarTop = toolbar ? toolbar.getBoundingClientRect().top : window.innerHeight;
+    const bottomOffset = window.innerHeight - toolbarTop + 8; // 8px above toolbar
+    const maxH = Math.max(120, toolbarTop - stage.top - 16);
     fillMenu.style.position = 'fixed';
     fillMenu.style.left = (stage.right - w - 16) + 'px';
     fillMenu.style.right = 'auto';
-    fillMenu.style.bottom = 'auto';
-    fillMenu.style.top = top + 'px';
+    fillMenu.style.top = 'auto';
+    fillMenu.style.bottom = bottomOffset + 'px';
     fillMenu.style.width = w + 'px';
     fillMenu.style.flexDirection = 'column';
-    fillMenu.style.maxHeight = Math.max(120, botLimit - top) + 'px';
+    fillMenu.style.maxHeight = maxH + 'px';
     fillMenu.style.overflowY = 'auto';
   }
 
@@ -1853,24 +1871,55 @@ export function initLevelEditor(prefix: string): void {
     if (info) { info.textContent = `спавн ${state.spawnSel + 1}/${lv.spawns.length}`; (info as HTMLElement).style.color = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length]; }
   }
   function wireSpawnControls(): void {
-    $('addSpawn')?.addEventListener('click', () => {
-      const lv = level();
-      // Якщо інструмент уже активний — просто вимкнути (тогл).
-      if (state.pathTool === 'spawn') { state.pathTool = null; updatePathBtns(); draw(); return; }
-      if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
-      pushUndo(); const w = toWorld(canvas.width / 2, state.origin.y);
-      lv.spawns.push({ x: Math.round(w.x), y: 0 }); lv.spawn = lv.spawns[0];
-      state.spawnSel = lv.spawns.length - 1;
-      state.pathTool = 'spawn'; updatePathBtns(); // одразу режим розставляння — тицьни на колайдер
-      save(); refreshSpawnUI(); draw();
-      setStatus(`Тицьни на колайдер — там зʼявиться спавн ${state.spawnSel + 1}`);
-    });
-    $('delSpawn')?.addEventListener('click', () => {
-      const lv = level(); if (lv.spawns.length <= 1) { setStatus('Має лишитись хоча б 1 спавн'); return; }
-      pushUndo(); lv.spawns.splice(state.spawnSel, 1);
-      state.spawnSel = Math.min(state.spawnSel, lv.spawns.length - 1); lv.spawn = lv.spawns[0];
-      save(); refreshSpawnUI(); draw();
-    });
+    // Merged spawn button: LMB = act, RMB = toggle label
+    const spawnBtn = $<HTMLButtonElement>('spawnBtn');
+    let _spawnMode: 'add' | 'del' = 'add';
+    if (spawnBtn) {
+      spawnBtn.textContent = 'Додати стартову';
+      spawnBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        _spawnMode = _spawnMode === 'add' ? 'del' : 'add';
+        spawnBtn.textContent = _spawnMode === 'add' ? 'Додати стартову' : 'Прибрати стартову';
+        spawnBtn.classList.remove('on');
+        if (state.pathTool === 'spawn') { state.pathTool = null; updatePathBtns(); draw(); }
+      });
+      spawnBtn.addEventListener('click', () => {
+        if (_spawnMode === 'add') {
+          const lv = level();
+          if (state.pathTool === 'spawn') { state.pathTool = null; updatePathBtns(); draw(); return; }
+          if (lv.spawns.length >= 5) { setStatus('Максимум 5 точок спавна'); return; }
+          pushUndo(); const w = toWorld(canvas.width / 2, state.origin.y);
+          lv.spawns.push({ x: Math.round(w.x), y: 0 }); lv.spawn = lv.spawns[0];
+          state.spawnSel = lv.spawns.length - 1;
+          state.pathTool = 'spawn'; updatePathBtns();
+          save(); refreshSpawnUI(); draw();
+          setStatus(`Тицьни на колайдер — там зʼявиться спавн ${state.spawnSel + 1}`);
+        } else {
+          const lv = level(); if (lv.spawns.length <= 1) { setStatus('Має лишитись хоча б 1 спавн'); return; }
+          pushUndo(); lv.spawns.splice(state.spawnSel, 1);
+          state.spawnSel = Math.min(state.spawnSel, lv.spawns.length - 1); lv.spawn = lv.spawns[0];
+          save(); refreshSpawnUI(); draw();
+        }
+      });
+    }
+    // Merged enemy button: LMB = act current mode, RMB = toggle label
+    const enemyBtn = $<HTMLButtonElement>('enemyBtn');
+    let _enemyMode: 'add' | 'erase' = 'add';
+    if (enemyBtn) {
+      enemyBtn.textContent = 'Додати ворогів';
+      enemyBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        _enemyMode = _enemyMode === 'add' ? 'erase' : 'add';
+        enemyBtn.textContent = _enemyMode === 'add' ? 'Додати ворогів' : 'Прибрати ворогів';
+        enemyBtn.classList.remove('on');
+        if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { state.pathTool = null; updatePathBtns(); draw(); }
+      });
+      enemyBtn.addEventListener('click', () => {
+        const tool: 'enemy' | 'enemyErase' = _enemyMode === 'add' ? 'enemy' : 'enemyErase';
+        state.pathTool = state.pathTool === tool ? null : tool;
+        updatePathBtns();
+      });
+    }
     refreshSpawnUI();
   }
 
