@@ -71,7 +71,7 @@ async function openaiImage(prompt: string): Promise<string> {
     const res = await fetch(AI_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, size: SIZE }),
+      body: JSON.stringify({ prompt, size: SIZE, quality: 'high' }),
     });
     if (!res.ok) throw new Error(`Проксі gpt-image: ${res.status} ${(await res.text()).slice(0, 200)}`);
     return openaiOutToDataUrl(await res.json());

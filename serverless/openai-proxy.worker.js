@@ -95,7 +95,7 @@ export default {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: MODEL, prompt, size,
+          model: MODEL, prompt, size, quality: 'high',
           background: 'transparent', output_format: 'png', n: 1,
         }),
       });
