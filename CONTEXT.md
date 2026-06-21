@@ -143,14 +143,18 @@ GitHub Pages через Vite build.
 
 ---
 
-## AI генерація (в розробці)
+## AI генерація (працює локально)
 - `.env` в корені проєкту (не в git): `VITE_FAL_KEY`, `VITE_LEONARDO_KEY`, `VITE_OPENAI_KEY`
-- Доступ в коді: `import.meta.env.VITE_FAL_KEY`
-- **Редактор персонажів** (`#library`): `#aiPanel` (220px) — textarea промпту + drop zone для рефу + кнопка «Створити»
-- **Редактор рівнів** (`#lv-library`): `#lv-aiPanel` (220px) — textarea «Опис декорації» + drop zone + кнопка «Створити»
-- Drop zone: `.ai-drop-zone` клас, hover/drag-over підсвітка; ПКМ очищає реф
-- Кнопка «Створити» — поки заглушка, логіка виклику Fal API ще не підключена
-- Обговорюється стилістичний промпт під козацький стиль гри перед підключенням API
+- Доступ в коді: `import.meta.env.VITE_FAL_KEY` (інлайниться Vite на ЕТАПІ БІЛДУ)
+- `src/ai.ts`: `generateGameAsset()` — промпт(+опц.реф) → FLUX (`flux/dev`) → виріз фону (BiRefNet) → dataURL.
+  `STYLE_PREPROMPT` — ЧЕРНЕТКА під козацький стиль (фіналізувати).
+- **Редактор рівнів** (`#lv-aiGenBtn`): wireAiGenerate() — клік → generateGameAsset → imgSrcToWebP →
+  додає Asset у бібліотеку під ПОТОЧНОЮ категорією (`state.cat`) → refreshAssets+save. **Повністю робоче.**
+- Drop zone: `.ai-drop-zone`, ПКМ очищає реф.
+- ⚠️ **Лишилось:** (1) на ДЕПЛОЇ (github.io) ключа НЕМА — `deploy.yml` робить `npm run build` без
+  `VITE_FAL_KEY`, тож на живій студії кнопка каже «Нема ключа». Працює лише локально (`npm run dev`).
+  Щоб увімкнути на деплої: GH-секрет у build-крок — АЛЕ ключ запечеться в ПУБЛІЧНИЙ бандл (ризик
+  рахунку Fal). Безпечніше: тримати локально або проксі через serverless. (2) фіналізувати стиль-промпт.
 
 ---
 
