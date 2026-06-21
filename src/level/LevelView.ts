@@ -67,7 +67,14 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
     // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
     if (p.cat in PARALLAX_FALLBACK) {
       const dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
-      im.setScrollFactor(layerScrollFactor(p.cat, dist), 1);
+      const sf = layerScrollFactor(p.cat, dist);
+      im.setScrollFactor(sf, 1);
+      // Анкер паралаксу — лінія «початок» рівня, а не світовий 0. Phaser центрує паралакс на
+      // scrollX=0, тож на рівні зі start≠0 фон зсувався б уже на старті. Зсуваємо світову X шару
+      // на start·(1−sf): при scrollX=start шар стає рівно там, де намальований у редакторі (плоско),
+      // а далі — нормальний паралакс відносно старту.
+      const startX = doc.start ?? 0;
+      im.x = p.x - startX * (1 - sf);
     }
   }
 }
