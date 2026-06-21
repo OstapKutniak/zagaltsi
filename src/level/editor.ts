@@ -1840,7 +1840,7 @@ export function initLevelEditor(prefix: string): void {
       if (aiBusy) return;
       const prompt = promptEl?.value ?? '';
       const refUrl = refImg && refImg.style.display !== 'none' && refImg.src ? refImg.src : null;
-      if (!hasFalKey()) { setStatus('Нема VITE_FAL_KEY у .env'); return; }
+      if (!hasFalKey()) { setStatus('Нема VITE_OPENAI_KEY у .env (або VITE_FAL_PROXY на деплої)'); return; }
       if (!prompt.trim() && !refUrl) { setStatus('Введи опис або кинь реф-зображення'); return; }
       aiBusy = true; const orig = btn.textContent; btn.textContent = 'Генерую…'; btn.disabled = true;
       setStatus('AI генерує — це може зайняти 10–30с…');

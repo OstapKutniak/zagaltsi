@@ -143,22 +143,24 @@ GitHub Pages через Vite build.
 
 ---
 
-## AI генерація (працює локально)
-- `.env` в корені проєкту (не в git): `VITE_FAL_KEY`, `VITE_LEONARDO_KEY`, `VITE_OPENAI_KEY`
-- Доступ в коді: `import.meta.env.VITE_FAL_KEY` (інлайниться Vite на ЕТАПІ БІЛДУ)
-- `src/ai.ts`: `generateGameAsset()` — промпт(+опц.реф) → FLUX (`flux/dev`) → виріз фону (BiRefNet) → dataURL.
-  `STYLE_PREPROMPT` — ЧЕРНЕТКА під козацький стиль (фіналізувати).
+## AI генерація (OpenAI gpt-image-1)
+- ⚠️ Раніше була на **fal (flux/dev + birefnet)** — переведено на **OpenAI `gpt-image-1`** (2026-06-21),
+  бо fal-акаунт `84607c5c-…` заблокувався (exhausted balance; той самий ключ палив 3D Hunyuan у Blender-тулзі).
+- `.env` в корені (не в git): `VITE_OPENAI_KEY` (генерація), `VITE_FAL_KEY`/`VITE_LEONARDO_KEY` (лишились, не вживаються студією).
+- `src/ai.ts`: `generateGameAsset()` — промпт(+опц.реф) → `gpt-image-1` → прозорий PNG (фон вирізає сама
+  модель, `background:transparent`; окремий крок birefnet ВИКИНУТО) → dataURL. `STYLE_PREPROMPT` — ЧЕРНЕТКА.
+  text2img → `/v1/images/generations`; img2img (реф) → `/v1/images/edits` (multipart). Розмір `1024x1024`.
 - **Редактор рівнів** (`#lv-aiGenBtn`): wireAiGenerate() — клік → generateGameAsset → imgSrcToWebP →
-  додає Asset у бібліотеку під ПОТОЧНОЮ категорією (`state.cat`) → refreshAssets+save. **Повністю робоче.**
+  додає Asset у бібліотеку під ПОТОЧНОЮ категорією (`state.cat`) → refreshAssets+save.
 - Drop zone: `.ai-drop-zone`, ПКМ очищає реф.
 - **Деплой (github.io) — через ПРОКСІ** (щоб не світити ключ): `ai.ts` дивиться на `VITE_FAL_PROXY`
-  (URL воркера). Заданий → виклики йдуть на воркер `{model, body}`, ключ Fal на сервері. Не заданий →
-  прямий виклик із `VITE_FAL_KEY` (локальна розробка). Воркер: [`serverless/fal-proxy.worker.js`](serverless/fal-proxy.worker.js)
-  (Cloudflare Worker, кроки в коментарях). `deploy.yml` інжектить `VITE_FAL_PROXY` із repo VARIABLE (не secret — це URL).
-- ✅ **ПІДКЛЮЧЕНО НА ДЕПЛОЇ** (2026-06-21): воркер `horugva.priko1isf.workers.dev` (Cloudflare, акаунт
-  priko1isf), `FAL_KEY` — секрет воркера; repo variable `VITE_FAL_PROXY` = URL воркера. Генерація працює
-  на живій студії з усіх пристроїв. Лишилось: фіналізувати стиль-промпт (`STYLE_PREPROMPT`); поставити
-  ліміт витрат у Fal (запобіжник проти зловживання відкритим URL воркера).
+  (історична назва repo variable = URL воркера; лишена щоб не чіпати Actions). Заданий → шле на воркер
+  `{prompt, size, image?}`, ключ OpenAI на сервері. Не заданий → прямий виклик із `VITE_OPENAI_KEY` (локально).
+  Воркер: [`serverless/openai-proxy.worker.js`](serverless/openai-proxy.worker.js) (кроки деплою в коментарях).
+- ✅ **НА ДЕПЛОЇ** (2026-06-21): воркер `horugva.priko1isf.workers.dev` (Cloudflare, акаунт priko1isf).
+  ТРЕБА на воркері: вставити новий код `openai-proxy.worker.js` + додати секрет `OPENAI_KEY` (sk-proj-…).
+  repo variable `VITE_FAL_PROXY` (= URL воркера) лишається без змін. Лишилось: фіналізувати `STYLE_PREPROMPT`;
+  поставити ліміт витрат в OpenAI (platform.openai.com → Billing) — запобіжник проти зловживання відкритим URL.
 
 ---
 
