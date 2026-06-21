@@ -267,14 +267,20 @@
           position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
         }
         /* canvas area flex-column */
-        .mode-char #centerMid { display: flex !important; flex-direction: column; order: 3; }
+        .mode-char #centerMid { display: flex !important; flex-direction: column; order: 4; }
         .mode-char #stageWrap { position: relative !important; flex: 1; min-height: 0; overflow: hidden; }
         .mode-char #stageWrap canvas { width: 100%; height: 100%; display: block; }
         .mode-char #lv-stageWrap { display: none !important; }
         .mode-char #partsList { display: none !important; }
         .mode-char #faceList { display: none !important; }
-        /* parts strip row */
-        .mode-char #mob-char-parts { order: 3; display: flex !important; flex-direction: row; align-items: center; }
+        /* parts strip row — між бібліотекою героїв (order:2) і канвасом (order:4) */
+        #mob-char-parts-row { display: none; }
+        .mode-char #mob-char-parts-row {
+          order: 3; display: flex !important; flex-shrink: 0;
+          min-height: 50px; max-height: 50px; overflow: hidden;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 3px 4px;
+        }
         /* timeline hidden */
         .mode-char #timelineBar { display: none !important; }
         /* right panel replaced by dock */
@@ -285,7 +291,7 @@
         /* mob parts chips */
         #mob-char-parts-chips, #mob-char-face-chips {
           display: flex; flex-direction: row; flex-wrap: nowrap;
-          overflow-x: auto; gap: 4px; align-items: center; scrollbar-width: none;
+          overflow-x: auto; gap: 4px; align-items: center; scrollbar-width: none; width: 100%;
         }
         #mob-char-parts-chips::-webkit-scrollbar, #mob-char-face-chips::-webkit-scrollbar { display: none; }
         #mob-char-parts-chips .chip, #mob-char-face-chips .chip {
@@ -294,11 +300,13 @@
           display: flex !important; align-items: center; justify-content: center; text-align: center;
           white-space: normal; line-height: 1.2;
         }
-        /* anim select in dock */
-        #mob-char-anim-row { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; }
-        #mob-char-anim-row select { width: 100%; padding: 7px 8px; border-radius: 8px; background: #4a4a4a; color: var(--ink); border: 0; font-size: 12px; font-weight: 600; }
-        #mob-char-anim-btns { display: flex; gap: 5px; }
-        #mob-char-anim-btns button { flex: 1; padding: 7px 4px; font-size: 12px; }
+        /* anim strip — завжди видима смуга вибору анімації */
+        #mob-char-anim-strip { display: flex; gap: 5px; padding: 4px 6px; border-bottom: 1px solid var(--line); align-items: center; flex-shrink: 0; }
+        #mob-char-anim-strip select { flex: 1; min-width: 0; padding: 5px 6px; border-radius: 8px; background: #4a4a4a; color: var(--ink); border: 0; font-size: 11px; font-weight: 600; }
+        #mob-char-anim-strip button { flex: 0 0 auto; padding: 6px 10px; font-size: 14px; min-height: 32px; }
+        /* tools row — завжди видима горизонтальна смуга інструментів */
+        #mob-char-tools { display: flex; flex-direction: row; gap: 5px; padding: 5px 6px; overflow-x: auto; align-items: center; flex-shrink: 0; scrollbar-width: none; }
+        #mob-char-tools::-webkit-scrollbar { display: none; }
 
         /* ════ LEVEL EDITOR ══════════════════════════════════════════════ */
 
@@ -440,6 +448,10 @@
         <div id="lv-levelBar" style="display:none">
           <div id="lv-levelBarList"></div>
           <button id="lv-levelBarAdd" class="btn-accent" title="Новий рівень">＋</button>
+        </div>
+        <!-- Мобільна смуга частин персонажа (між бібліотекою героїв і канвасом) -->
+        <div id="mob-char-parts-row">
+          <div id="mob-char-parts-chips"></div>
         </div>
         <div id="centerMid">
           <div id="stageWrap"><canvas id="stage"></canvas></div>
@@ -690,13 +702,15 @@
 
       <!-- МОБІЛЬНИЙ ДОКЕР — редактор персонажів -->
       <div id="mob-char-dock">
-        <div id="mob-char-tabRow">
-          <button class="mob-tab on" data-mob-char-panel="mobCharTransf">G · R · S</button>
-          <button class="mob-tab" data-mob-char-panel="mobCharParts">Частини</button>
-          <button class="mob-tab" data-mob-char-panel="mobCharAnim">Анімація</button>
+        <!-- Смуга анімації (завжди видима) -->
+        <div id="mob-char-anim-strip">
+          <select id="mob-charSel" title="Персонаж"></select>
+          <select id="mob-anim" title="Анімація"></select>
+          <button id="mob-char-play" data-mob-key="Space">▶/⏸</button>
+          <button data-mob-char-click="resetAnim">↺</button>
         </div>
-        <!-- G/R/S/M/B panel -->
-        <div id="mobCharTransf" class="mob-panel on">
+        <!-- Інструменти G/R/S (завжди видимий горизонтальний скрол) -->
+        <div id="mob-char-tools">
           <button class="mob-tool" data-mob-key="KeyG">Перемістити</button>
           <button class="mob-tool" data-mob-key="KeyR">Повернути</button>
           <button class="mob-tool" data-mob-key="KeyS">Масштаб</button>
@@ -705,22 +719,6 @@
           <button class="mob-tool" data-mob-key="KeyQ">Піовт</button>
           <button class="mob-tool" data-mob-key="Escape">Скасувати</button>
           <button class="mob-tool" data-mob-key="Enter">Ок</button>
-        </div>
-        <!-- Parts panel -->
-        <div id="mobCharParts" class="mob-panel">
-          <div id="mob-char-parts-chips"></div>
-        </div>
-        <!-- Anim panel -->
-        <div id="mobCharAnim" class="mob-panel" style="flex-direction:column;padding:4px 6px;gap:4px;min-height:auto">
-          <div id="mob-char-anim-row">
-            <select id="mob-charSel" title="Персонаж"></select>
-            <select id="mob-anim" title="Анімація"></select>
-          </div>
-          <div id="mob-char-anim-btns">
-            <button class="mob-tool" id="mob-char-play" data-mob-key="Space">▶ / ⏸</button>
-            <button class="mob-tool" data-mob-char-click="resetAnim">Скинути</button>
-            <button class="mob-tool" data-mob-char-click="keyBtn">Ключ</button>
-          </div>
         </div>
         <!-- AI prompt -->
         <div id="mob-char-prompt-row" style="display:flex;gap:5px;padding:4px 6px;border-top:1px solid var(--line);align-items:center">
@@ -734,7 +732,7 @@
           <button id="mob-char-publish" class="btn-accent" style="flex:1;padding:8px 4px;font-size:13px">Оновити гру</button>
         </div>
         <!-- Icon row -->
-        <div id="mob-char-iconRow" class="mob-iconRow" style="display:flex;gap:4px;padding:4px 6px;border-top:1px solid var(--line);overflow-x:auto;scrollbar-width:none">
+        <div id="mob-char-iconRow" style="display:flex;gap:4px;padding:4px 6px;border-top:1px solid var(--line);overflow-x:auto;scrollbar-width:none">
           <button class="mob-icon" data-mob-char-toggle="showPivots" title="Піоти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
           <button class="mob-icon" data-mob-char-toggle="showRef" title="Концепт"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-4 4 3 3-3 6 5"/></svg></button>
           <button class="mob-icon" data-mob-char-toggle="keyBg" title="Очищати фон"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7z"/></svg></button>
@@ -777,7 +775,6 @@
         });
       }
       setupDock('mob-dock', 'mobPanel');
-      setupDock('mob-char-dock', 'mobCharPanel');
 
       // ── Keydown dispatch — спільний для обох докерів ──
       document.querySelectorAll('[data-mob-key]').forEach(function (btn) {
