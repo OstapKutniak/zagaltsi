@@ -214,6 +214,16 @@ export function initLevelEditor(prefix: string): void {
     const hadLocalLevels = state.levels.length > 0; // capture before async pull (line below adds default)
     // Pull from GitHub in background — merge new assets, update layouts if remote has data
     pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
+      // Рівні виставляємо ПЕРШИМИ — щоб loadImg → draw() вже бачив placed-елементи
+      if (remoteLayouts?.levels?.length && !hadLocalLevels) {
+        state.levels = remoteLayouts.levels as Level[];
+        state.cur = remoteLayouts.cur || 0;
+        for (const lv of state.levels) if (typeof lv.grid !== 'number') lv.grid = 48;
+        state.grid = level().grid;
+        idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
+        refreshLevels();
+        draw();
+      }
       const remoteFiltered = (remoteAssets ?? []).filter((r) => !deletedIds.has((r as Asset).id));
       const { merged, added } = mergeLevelAssets(state.assets, remoteFiltered);
       if (added > 0) {
@@ -222,14 +232,6 @@ export function initLevelEditor(prefix: string): void {
         idbSet('zag_assets', state.assets).catch(() => {});
         refreshAssets();
         setStatus(`Синхронізовано: +${added} ассетів з GitHub`);
-      }
-      if (remoteLayouts?.levels?.length && !hadLocalLevels) {
-        state.levels = remoteLayouts.levels as Level[];
-        state.cur = remoteLayouts.cur || 0;
-        for (const lv of state.levels) if (typeof lv.grid !== 'number') lv.grid = 48;
-        state.grid = level().grid;
-        idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
-        refreshLevels();
       }
     }).catch(() => {});
     if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
