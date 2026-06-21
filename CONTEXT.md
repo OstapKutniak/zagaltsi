@@ -155,8 +155,10 @@ GitHub Pages через Vite build.
   (URL воркера). Заданий → виклики йдуть на воркер `{model, body}`, ключ Fal на сервері. Не заданий →
   прямий виклик із `VITE_FAL_KEY` (локальна розробка). Воркер: [`serverless/fal-proxy.worker.js`](serverless/fal-proxy.worker.js)
   (Cloudflare Worker, кроки в коментарях). `deploy.yml` інжектить `VITE_FAL_PROXY` із repo VARIABLE (не secret — це URL).
-- ⚠️ **Лишилось для увімкнення на деплої:** (1) підняти воркер за інструкцією у файлі вище, додати repo
-  variable `VITE_FAL_PROXY`, поставити ЛІМІТ витрат у Fal; (2) фіналізувати стиль-промпт (`STYLE_PREPROMPT`).
+- ✅ **ПІДКЛЮЧЕНО НА ДЕПЛОЇ** (2026-06-21): воркер `horugva.priko1isf.workers.dev` (Cloudflare, акаунт
+  priko1isf), `FAL_KEY` — секрет воркера; repo variable `VITE_FAL_PROXY` = URL воркера. Генерація працює
+  на живій студії з усіх пристроїв. Лишилось: фіналізувати стиль-промпт (`STYLE_PREPROMPT`); поставити
+  ліміт витрат у Fal (запобіжник проти зловживання відкритим URL воркера).
 
 ---
 
