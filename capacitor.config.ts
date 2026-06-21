@@ -1,14 +1,18 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-// Обгортка веб-застосунку в Android APK через Capacitor.
-// webDir — папка зі зібраним сайтом (vite build → dist). Точка входу — index.html (гра);
-// зі сторінки гри/редактора можна переходити на studio.html / level.html звичайною навігацією.
+// APK завантажує живий GitHub Pages сайт замість локального знімка.
+// Переваги: оновлюється автоматично при кожному push (без перезбірки APK),
+// AI-генерація працює (той самий домен що й у браузері, без CORS-блоку).
+// Єдина вимога — інтернет (для редактора він і так потрібен).
 const config: CapacitorConfig = {
   appId: 'com.zagaltsi.horugva',
   appName: 'Хоругва',
   webDir: 'dist',
+  server: {
+    url: 'https://ostapkutniak.github.io/zagaltsi/menu.html',
+    cleartext: false,
+  },
   android: {
-    // Дозволяємо мікс http/https (фетч рівнів із GitHub raw тощо)
     allowMixedContent: true,
   },
 };
