@@ -213,7 +213,9 @@
       .mob-panel.on { display: flex; }
       .mob-tool { flex: 0 0 auto; padding: 7px 10px; font-size: 12px; white-space: nowrap; min-height: 34px; }
       .mob-tool.on { background: var(--accent) !important; color: #1b1b1b !important; font-weight: 600; }
-      #mob-aiPrompt { flex: 1; min-width: 130px; height: 36px; background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 12px; resize: none; font-family: inherit; outline: none; }
+      #mob-prompt-row { display: flex; gap: 5px; padding: 4px 6px; border-top: 1px solid var(--line); align-items: center; }
+      #mob-aiPrompt { flex: 1; height: 32px; background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; font-family: inherit; outline: none; }
+      #mob-aiGenBtn { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
       #mob-actions { display: flex; gap: 6px; padding: 5px 6px; border-top: 1px solid var(--line); }
       #mob-actions button { flex: 1; padding: 8px 4px; font-size: 13px; }
 
@@ -227,7 +229,7 @@
 
         /* Вкладки — ПЕРШІ (order:1), без кнопок "Скоро" */
         #topTabs { order: 1; display: flex; gap: 4px; flex-shrink: 0; }
-        #topTabs button { flex: 1; padding: 12px 6px; font-size: 13px; min-height: 44px; }
+        #topTabs button { flex: 1; padding: 7px 4px; font-size: 12px; min-height: 34px; }
         #topTabs button[data-soon] { display: none; }
 
         /* Canvas — займає весь вільний простір */
@@ -607,7 +609,6 @@
         <div id="mob-tabRow">
           <button class="mob-tab on" data-mob-panel="mobTransf">G · R · S</button>
           <button class="mob-tab" data-mob-panel="mobPath">Шлях</button>
-          <button class="mob-tab" data-mob-panel="mobAi">AI</button>
           <button class="mob-tab" data-mob-panel="mobSettings">Налаш.</button>
         </div>
         <div id="mobTransf" class="mob-panel on">
@@ -630,10 +631,6 @@
           <button class="mob-tool" data-mob-mirror="lv-addSpawn">＋ Спавн гравця</button>
           <button class="mob-tool" data-mob-mirror="lv-clearCollider">Очистити все</button>
         </div>
-        <div id="mobAi" class="mob-panel">
-          <textarea id="mob-aiPrompt" placeholder="Опис декорації…"></textarea>
-          <button class="mob-tool" id="mob-aiGenBtn">Створити</button>
-        </div>
         <div id="mobSettings" class="mob-panel">
           <button class="mob-tool" data-mob-mirror="lv-fillBtn">Наповнення</button>
           <button class="mob-tool" data-mob-mirror="lv-planBgBtn">Фонова</button>
@@ -642,6 +639,10 @@
           <button class="mob-tool" data-mob-mirror="lv-zBack">Дальше</button>
           <button class="mob-tool" data-mob-mirror="lv-zFront">Найближче</button>
           <button class="mob-tool" data-mob-mirror="lv-zBottom">Найдальше</button>
+        </div>
+        <div id="mob-prompt-row">
+          <input type="text" id="mob-aiPrompt" placeholder="Опис декорації…">
+          <button id="mob-aiGenBtn">gen</button>
         </div>
         <div id="mob-actions">
           <button id="mob-save">Зберегти</button>
