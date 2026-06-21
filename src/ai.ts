@@ -65,12 +65,12 @@ async function generateImage(prompt: string): Promise<string> {
     return openaiOutToDataUrl(await res.json());
   }
 
-  // Локально: dall-e-3 напряму, фон не вирізається (CORS блокує remove.bg з браузера).
+  // Локально: gpt-image-1 напряму, фон не вирізається (CORS блокує remove.bg з браузера).
   if (!OPENAI_KEY) throw new Error('Немає VITE_FAL_PROXY (деплой) або VITE_OPENAI_KEY (локально)');
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + OPENAI_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'dall-e-3', prompt, size: SIZE, quality: 'hd', response_format: 'b64_json', n: 1 }),
+    body: JSON.stringify({ model: 'gpt-image-1', prompt, size: SIZE, quality: 'high', n: 1 }),
   });
   if (!res.ok) throw new Error(`OpenAI: ${res.status} ${(await res.text()).slice(0, 200)}`);
   return openaiOutToDataUrl(await res.json());
