@@ -495,15 +495,14 @@ export function initLevelEditor(prefix: string): void {
       ctx.font = '11px monospace';
       // Початок (зелена) + фініш-лінії КОЖНОГО шару. Рухається тільки лінія карти (lv.end);
       // решта виводяться з її позиції та дальності шару: чим швидший шар, тим далі фініш.
-      // Паралакс анкериться на лінію «початок» (як у грі, LevelView): на старті всі шари
-      // збігаються; finishX(sf) = (lv.end − кадр)·sf + кадр + start·(1−sf) → для карти (sf=1) = lv.end.
+      //   finishX(sf) = (lv.end − кадр)·sf + кадр  →  для карти (sf=1) = lv.end.
       ctx.strokeStyle = '#5aff8f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
       ctx.fillStyle = '#5aff8f'; ctx.fillText('початок', sx + 3, 14);
       const px = ensureParallax(lv);
       let labelY = 28;
       for (const layer of PARALLAX_LAYERS) {
         const sf = layerScrollFactor(layer, px[layer]);
-        const fx = toScreen((lv.end - GAME_VIEW_W) * sf + GAME_VIEW_W + lv.start * (1 - sf), 0).x;
+        const fx = toScreen((lv.end - GAME_VIEW_W) * sf + GAME_VIEW_W, 0).x;
         const col = LAYER_LINE_COLOR[layer] ?? '#9a9a9a';
         ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
         ctx.beginPath(); ctx.moveTo(fx, 0); ctx.lineTo(fx, canvas.height); ctx.stroke(); ctx.setLineDash([]);

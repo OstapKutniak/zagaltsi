@@ -65,16 +65,15 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
     }
     im.setDepth(depth);
     // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
+    // Анкер (зсув) застосовує GameScene після стабілізації камери — до ФАКТИЧНОЇ scrollX стартового
+    // кадру (камера стоїть там, куди її ставить спавн+зум, не обов'язково на lv.start). Тут лише
+    // тегаємо шар його sf і базовою X, щоб GameScene знав, що і як зсувати.
     if (p.cat in PARALLAX_FALLBACK) {
       const dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
       const sf = layerScrollFactor(p.cat, dist);
       im.setScrollFactor(sf, 1);
-      // Анкер паралаксу — лінія «початок» рівня, а не світовий 0. Phaser центрує паралакс на
-      // scrollX=0, тож на рівні зі start≠0 фон зсувався б уже на старті. Зсуваємо світову X шару
-      // на start·(1−sf): при scrollX=start шар стає рівно там, де намальований у редакторі (плоско),
-      // а далі — нормальний паралакс відносно старту.
-      const startX = doc.start ?? 0;
-      im.x = p.x - startX * (1 - sf);
+      im.setData('plxSf', sf);
+      im.setData('plxBaseX', p.x);
     }
   }
 }
