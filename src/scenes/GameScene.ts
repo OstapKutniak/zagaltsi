@@ -252,8 +252,12 @@ export class GameScene extends Phaser.Scene {
     this.worldH = this.logicalH;
     this.bandBottom = this.worldH - FLOOR_MARGIN;
     this.bandTop = Math.max(this.worldH * 0.28, this.bandBottom - BAND_DEPTH);
-    if (this.levelMode) this.cameras.main.setBounds(this.levelStart, 0, Math.max(1, this.levelEnd - this.levelStart), this.worldH);
-    else this.cameras.main.setBounds(0, 0, WORLD_WIDTH, this.worldH);
+    // Зсув bounds.x на uiOffX компенсує квірк Phaser: при setZoom(RS) ліва межа клемпу =
+    // bounds.x − (camW − displayWidth)/2 = bounds.x − uiOffX, тож камера перескролювала на uiOffX
+    // ЛІВІШЕ за levelStart (показувала долевневий простір, ламала анкер паралаксу). Додаємо uiOffX
+    // → ефективна ліва межа = levelStart, права = levelEnd − кадр. При RS=1 uiOffX=0 (без змін).
+    if (this.levelMode) this.cameras.main.setBounds(this.levelStart + this.uiOffX, 0, Math.max(1, this.levelEnd - this.levelStart), this.worldH);
+    else this.cameras.main.setBounds(this.uiOffX, 0, WORLD_WIDTH, this.worldH);
   }
 
   // Застосувати рівень із редактора: візуал + спавн + межі камери/гравця.
@@ -343,7 +347,7 @@ export class GameScene extends Phaser.Scene {
 
     // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
-    this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
+    this.cameras.main.setBounds(this.levelStart + this.uiOffX, 0, this.levelEnd - this.levelStart, this.worldH);
     void buildLevelView(this, doc, this.bandBottom);
     this.banner.setText('');
   }
