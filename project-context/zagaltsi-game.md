@@ -159,14 +159,14 @@ muted rust-red accents only,
 NO bright colors, NO saturated greens, NO vivid blues or teals,
 colors almost completely washed-out and aged,
 dark oppressive grim atmosphere, high contrast with deep shadow regions and pale highlights,
-isolated on transparent background, no cast shadow on ground, no text, no watermark
+isolated on plain flat solid neutral gray background, no parchment texture behind subject, no cast shadow on ground, no text, no watermark
 ```
 
 **Персонажний (`STYLE_CHAR`)** = `STYLE_BASE` + `', full body character, front-facing or slight 3/4 view, even ambient lighting'` — рівне освітлення, бо спрайт перевертається по X.
 
 **Пропний (`STYLE_PROP`)** = `STYLE_BASE` + `', environment prop or decoration, lit from upper-left, darker right and bottom edges of the object'` — фіксоване освітлення для узгодженості з'яви у сцені.
 
-**Розмір:** `1024x1024`, `background: 'transparent'`, `output_format: 'png'`.
+**Розмір:** `1024x1024`.
 
 **Контекст генерації (`context` у `GenOptions`):** `'char'` → `STYLE_CHAR`; `'prop'` → `STYLE_PROP`. Редактор персонажів передає `'char'`, редактор рівнів — `'prop'`.
 
@@ -175,6 +175,11 @@ isolated on transparent background, no cast shadow on ground, no text, no waterm
 - Рішення: повністю відмовитись від `/images/edits`; тільки `/generations`; реф → лише джерело тематики для `gpt-4o-mini`, не вхід для дифузії.
 - Стиль DD1 потребує явної заборони (`NO bright colors`, `NO saturated greens`...) — без заборон модель підмішує барвистість.
 - `colors almost completely washed-out and aged` — ключова фраза для обезбарвлення.
+- `isolated on transparent background` → **НЕ ВИКОРИСТОВУВАТИ** з `gpt-image-1` через API. Модель не генерує справжню RGBA-прозорість через raw API (ChatGPT-інтерфейс робить це через внутрішній пайплайн). При цій фразі модель малює пергаментний ореол навколо об'єкта (DD1-стиль сам по собі пергаментний), який `remove.bg` не може чисто зняти. Замінено на `isolated on plain flat solid neutral gray background` — рівно-сірий фон чисто знімається `remove.bg`.
+
+**Cloudflare Worker (`serverless/openai-proxy.worker.js`):** воркер НЕ деплоїться автоматично через GitHub Actions — оновлюється вручну через dash.cloudflare.com → Workers & Pages → horugva → Edit code. `OPENAI_KEY` і `REMOVEBG_KEY` (Secret) мають бути в Settings → Variables and Secrets. Пайплайн воркера: `gpt-image-1` (quality:high) → `remove.bg` (`image_file_b64`, size:regular) → прозорий PNG base64. Якщо `REMOVEBG_KEY` відсутній або `remove.bg` впав → fallback: оригінал без вирізу.
+
+**TODO стилістика:** стиль ассетів, що генеруються, ще не відповідає DD1. Промпт потребує тюнінгу — заплановано.
 
 **Де кнопка Gen:**
 - Редактор персонажів desktop: `#aiGenBtn` (textarea `#aiPrompt` + ref drop `#aiRefDrop`).
