@@ -103,6 +103,9 @@ export function initLevelEditor(prefix: string): void {
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
 
+  let _drawRaf = 0;
+  let _panning = false;
+
   // ── Геометрія ізо-ґратки (спільна для draw / прев'ю / кліків) ──
   type Pt = { x: number; y: number };
   // Підлогова клітинка (cx,cy) розміром w×h клітинок → 4 екранні точки.
@@ -287,8 +290,9 @@ export function initLevelEditor(prefix: string): void {
     }
     return out;
   }
-  function draw(): void {
+  function _drawNow(): void {
     if (!canvas.width) return;
+    ctx.imageSmoothingEnabled = !_panning;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const g0 = toScreen(0, 0);
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
@@ -581,6 +585,10 @@ export function initLevelEditor(prefix: string): void {
       ctx.strokeRect(vx, vy, vw, vh); // справжній кадр 20:9 (canvas обріже зайве, пропорції не псуються)
       ctx.setLineDash([]);
     }
+  }
+  function draw(): void {
+    if (_drawRaf) return;
+    _drawRaf = requestAnimationFrame(() => { _drawRaf = 0; _drawNow(); });
   }
 
   const _alphaCache = new Map<HTMLImageElement, Uint8ClampedArray>();
@@ -1212,7 +1220,7 @@ export function initLevelEditor(prefix: string): void {
         const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
         pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
         const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-        touchPanActive = true;
+        touchPanActive = true; _panning = true;
         touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
       }
     }, { passive: false });
@@ -1251,8 +1259,10 @@ export function initLevelEditor(prefix: string): void {
         else if (singleTouchDown && (drag || painting || state.markerDrag)) save();
         drag = null; painting = false; state.markerDrag = null;
         singleTouchDown = false; touchPanActive = false; pinchDist = 0;
+        _panning = false; draw();
       } else if (ev.touches.length === 1 && touchPanActive) {
         touchPanActive = false; pinchDist = 0; singleTouchDown = true;
+        _panning = false; draw();
         const { x, y } = cpos(ev.touches[0]);
         state.mouse = { x, y };
       }
