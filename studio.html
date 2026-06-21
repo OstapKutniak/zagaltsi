@@ -438,13 +438,20 @@
           <button id="lv-raiseBtn" title="Підняти клітинку (1)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 16V8M9 11l3-3 3 3"/><rect x="4" y="18" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
           <button id="lv-lowerBtn" title="Опустити клітинку (2)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v8M9 13l3 3 3-3"/><rect x="4" y="18" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
           <button id="lv-flatBtn" title="Вирівняти клітинку (3)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 9h14M5 15h14"/><rect x="4" y="19" width="16" height="3" rx="1" fill="currentColor" stroke="none" opacity=".6"/></svg></button>
+          <button id="lv-walkBtn" title="Зелений колайдер прохідності (4) — перекриває авто-виріз футпринта ассета" style="color:#5aff8f"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 4l8 4.5v1L12 14 4 9.5v-1z"/><path d="M9 16.5l3 1.7 3-1.7"/></svg></button>
           <button id="lv-erasePathBtn" title="Стерти клітинку шляху (Y)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 20H8L3 15l11-11 7 7-2 3z"/><path d="M7.5 17.5l4-4"/></svg></button>
           <button id="lv-addSpawn" title="Додати стартову локацію (точку спавна, до 5)">＋ Спавн</button>
           <button id="lv-delSpawn" title="Прибрати вибрану точку спавна">－ Спавн</button>
           <button id="lv-enemySpawnBtn" title="Намалювати зону спавна ворогів (червоний 3×3). Ворог зʼявиться у випадковій точці зони.">Спавн ворогів</button>
           <button id="lv-enemyEraseBtn" title="Прибрати зону спавна ворогів під курсором">Прибрати спавн ворогів</button>
           <div id="lv-parallaxRow" style="display:flex;align-items:center;gap:6px;margin-left:auto">
-            <button id="lv-parallaxLayer" title="ЛКМ — перемкнути шар (Фон / Небо)" style="white-space:nowrap">Фон</button>
+            <select id="lv-parallaxLayer" title="Шар для налаштування дальності паралаксу" style="white-space:nowrap;padding:6px 8px;border-radius:8px;background:#4a4a4a;color:var(--ink);border:0;cursor:pointer;font-size:12px;font-weight:600;appearance:none;-webkit-appearance:none">
+              <option value="sky">Небо</option>
+              <option value="clouds">Хмари</option>
+              <option value="bg" selected>Задній фон</option>
+              <option value="frontbg">Передній фон</option>
+              <option value="foreground">Передній план</option>
+            </select>
             <span style="font-size:12px;color:var(--muted);white-space:nowrap">Дальність</span>
             <input type="range" id="lv-parallaxSlider" min="0" max="1" step="0.01" value="0.5" title="0 — разом із картою, 1 — нерухоме (найдальше)" style="width:110px;accent-color:var(--sel)" />
             <span id="lv-parallaxVal" style="font-size:12px;color:var(--muted);width:30px;text-align:right">0.50</span>

@@ -66,6 +66,7 @@ export class GameScene extends Phaser.Scene {
   private floorSet = new Set<string>(); // "cx,cy" намальованих підлогових (h) клітинок — для поклітинкової прохідності
   private cellLevel = new Map<string, number>(); // "cx,cy" → рівень висоти клітинки (0 = земля); елевація px = рівень·gs
   private blockedCells = new Set<string>(); // "cx,cy" вирізані футпринтами ассетів — непрохідні (персонаж обходить, малюється за)
+  private greenCells = new Set<string>(); // "cx,cy" ручні зелені override-клітинки — примусово прохідні (перекривають виріз футпринта)
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
   private hotkeyAnimEnd = 0; // поки simTime < цього — не скидаємо анімацію від хоткея
@@ -275,6 +276,9 @@ export class GameScene extends Phaser.Scene {
     // Формат клітинки: "cx,cy,h" (рівень 0) або "cx,cy,h,L" (піднята платформа L).
     this.floorSet.clear();
     this.cellLevel.clear();
+    // Зелені override-клітинки: ручний колайдер прохідності ("cx,cy,g") — примусово прохідні.
+    this.greenCells.clear();
+    for (const c of this.colliderCells) { const p = c.split(','); if (p[2] === 'g') this.greenCells.add(p[0] + ',' + p[1]); }
     // Compute global fallback band from all cells (used when no cells at player's X)
     this.levelBand = null;
     if (this.colliderCells.length) {
@@ -302,6 +306,8 @@ export class GameScene extends Phaser.Scene {
         const f = fpMap.get(p.asset); if (!f) continue;
         for (const c of footprintWorldCells(f, { x: p.x, y: p.y, scale: p.scale, flip: p.flip, rot: p.rot }, p.x, p.y, gs)) this.blockedCells.add(c);
       }
+      // Зелені override-клітинки перемагають виріз: знімаємо блок і гарантуємо підлогу (рівень 0, якщо ще нема).
+      for (const g of this.greenCells) { this.blockedCells.delete(g); if (!this.floorSet.has(g)) this.floorSet.add(g); }
     }
 
     // Вороги з намальованих зон 3×3: позиція в межах зони — детермінована (однакова

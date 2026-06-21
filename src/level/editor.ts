@@ -64,7 +64,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn' | 'raise' | 'lower' | 'flat',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -355,11 +355,23 @@ export function initLevelEditor(prefix: string): void {
         }
         const kf = gs * Math.SQRT1_2;
         const Pp = (ix: number, iy: number) => toScreen(ix * gs + iy * kf, iy * kf);
+        // Зелені «прохідні» override-клітинки — перекривають виріз: прибираємо їх з помаранчевого.
+        const green = new Set(level().collider.filter((z) => z.split(',')[2] === 'g').map((z) => { const p = z.split(','); return p[0] + ',' + p[1]; }));
+        const cellPath = (cx: number, cy: number): void => {
+          const a = Pp(cx, cy), b = Pp(cx + 1, cy), c = Pp(cx + 1, cy + 1), d = Pp(cx, cy + 1);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+        };
         ctx.fillStyle = 'rgba(255,80,30,0.28)'; ctx.strokeStyle = 'rgba(255,120,40,0.85)'; ctx.lineWidth = 1;
         for (const s of blocked) {
+          if (green.has(s)) continue;
           const [cx, cy] = s.split(',').map(Number);
-          const a = Pp(cx, cy), b = Pp(cx + 1, cy), c = Pp(cx + 1, cy + 1), d = Pp(cx, cy + 1);
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+          cellPath(cx, cy); ctx.fill(); ctx.stroke();
+        }
+        // Зелені override-клітинки поверх усього.
+        ctx.fillStyle = 'rgba(60,255,140,0.30)'; ctx.strokeStyle = 'rgba(90,255,160,0.95)'; ctx.lineWidth = 1.5;
+        for (const s of green) {
+          const [cx, cy] = s.split(',').map(Number);
+          cellPath(cx, cy); ctx.fill(); ctx.stroke();
         }
       }
       // Авто-фаски з висотою: трикутник на внутрішньому куті — вершини підняті
@@ -472,6 +484,8 @@ export function initLevelEditor(prefix: string): void {
             fillStroke(top, 'rgba(255,255,255,0.30)', 'rgba(255,255,255,0.95)', 2.5);
           }
         }
+      } else if (state.pathTool === 'walk') {
+        for (const { cx, cy } of bCells) fillStroke(floorPts(cx, cy), 'rgba(60,255,140,0.30)', 'rgba(90,255,160,0.95)', 2);
       }
     }
 
@@ -647,17 +661,17 @@ export function initLevelEditor(prefix: string): void {
   let parallaxLayer: ParallaxLayer = 'bg';
   function refreshParallaxUI(): void {
     const px = ensureParallax(level());
-    const btn = $<HTMLButtonElement>('parallaxLayer');
+    const sel = $<HTMLSelectElement>('parallaxLayer');
     const sl = $<HTMLInputElement>('parallaxSlider');
     const val = $('parallaxVal');
-    if (btn) btn.textContent = PARALLAX_LABEL[parallaxLayer];
+    if (sel) sel.value = parallaxLayer;
     const v = px[parallaxLayer];
     if (sl) sl.value = String(v);
     if (val) val.textContent = v.toFixed(2);
   }
-  $<HTMLButtonElement>('parallaxLayer')?.addEventListener('click', () => {
-    const i = PARALLAX_LAYERS.indexOf(parallaxLayer);
-    parallaxLayer = PARALLAX_LAYERS[(i + 1) % PARALLAX_LAYERS.length];
+  $<HTMLSelectElement>('parallaxLayer')?.addEventListener('change', () => {
+    const sel = $<HTMLSelectElement>('parallaxLayer');
+    if (PARALLAX_LAYERS.includes(sel.value as ParallaxLayer)) parallaxLayer = sel.value as ParallaxLayer;
     refreshParallaxUI();
   });
   $<HTMLInputElement>('parallaxSlider')?.addEventListener('input', () => {
@@ -793,14 +807,15 @@ export function initLevelEditor(prefix: string): void {
     const backdrop = document.getElementById(prefix + 'fpBackdrop') as HTMLElement;
     const title = document.getElementById(prefix + 'fpTitle');
     if (title) title.textContent = 'Колайдери: ' + a.name;
-    // Габарити за скріншотом: ліворуч = бібліотека, праворуч = під кнопку «Редактор Рівнів»,
-    // вниз ~3 ряди карток.
+    // Габарити: вікно випадає ПРАВОРУЧ від бібліотеки ассетів (ліва грань = права грань
+    // бібліотеки), а права грань — під правим краєм кнопки «Редактор Інтерфейсу».
+    // Вниз ~3 ряди карток.
     const lib = $('library').getBoundingClientRect();
-    const levelTab = document.querySelector('#topTabs button[data-tab="level"]')?.getBoundingClientRect();
+    const uiTab = document.querySelector('#topTabs button[data-soon]')?.getBoundingClientRect();
     const grid = $('libGrid');
     const cardW = (grid.clientWidth - 8) / 2;
-    const left = lib.left, top = lib.top;
-    const right = levelTab ? levelTab.right : lib.right + 360;
+    const left = lib.right + 8, top = lib.top;
+    const right = uiTab ? uiTab.right : lib.right + 520;
     const h = Math.min(window.innerHeight - top - 12, 44 + cardW * 3 + 16);
     modal.style.left = left + 'px'; modal.style.top = top + 'px';
     modal.style.width = (right - left) + 'px'; modal.style.height = h + 'px';
@@ -978,6 +993,7 @@ export function initLevelEditor(prefix: string): void {
     $('raiseBtn')?.classList.toggle('on', state.pathTool === 'raise');
     $('lowerBtn')?.classList.toggle('on', state.pathTool === 'lower');
     $('flatBtn')?.classList.toggle('on', state.pathTool === 'flat');
+    $('walkBtn')?.classList.toggle('on', state.pathTool === 'walk');
     $('enemySpawnBtn')?.classList.toggle('on', state.pathTool === 'enemy');
     $('enemyEraseBtn')?.classList.toggle('on', state.pathTool === 'enemyErase');
     $('addSpawn')?.classList.toggle('on', state.pathTool === 'spawn');
@@ -985,6 +1001,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
   $<HTMLButtonElement>('lowerBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: тапни/тягни на клітинку' : ''); draw(); });
   $<HTMLButtonElement>('flatBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: тапни/тягни на клітинку' : ''); draw(); });
+  $<HTMLButtonElement>('walkBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'walk' ? null : 'walk'; updatePathBtns(); setStatus(state.pathTool ? 'Зелений колайдер (прохідність): малюй поверх вирізу ассета. Колесо — пензель' : ''); draw(); });
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
@@ -1008,8 +1025,12 @@ export function initLevelEditor(prefix: string): void {
     } else {
       for (const cell of brushCells(fl.cx, fl.cy)) {
         const matchH = (p: string[]): boolean => Number(p[0]) === cell.cx && Number(p[1]) === cell.cy && (p[2] ?? 'h') === 'h';
+        const matchG = (p: string[]): boolean => Number(p[0]) === cell.cx && Number(p[1]) === cell.cy && p[2] === 'g';
         if (state.pathTool === 'erase') {
-          lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(matchH(p) || (cell.cx === fl.cx && cell.cy === fl.cy && matchV(p))); });
+          lv.collider = lv.collider.filter((z) => { const p = z.split(','); return !(matchH(p) || matchG(p) || (cell.cx === fl.cx && cell.cy === fl.cy && matchV(p))); });
+        } else if (state.pathTool === 'walk') {
+          // Зелений колайдер: примусово прохідна клітинка, що перекриває авто-виріз футпринта ассета.
+          if (!lv.collider.some((z) => matchG(z.split(',')))) lv.collider.push(`${cell.cx},${cell.cy},g`);
         } else if (state.pathTool === 'h') {
           const existing = lv.collider.find((z) => matchH(z.split(',')));
           const keepL = existing ? (Number(existing.split(',')[3]) || 0) : 0;
@@ -1241,7 +1262,7 @@ export function initLevelEditor(prefix: string): void {
       state.pendingScale = Math.max(0.1, Math.min(10, state.pendingScale * (e.deltaY < 0 ? 1.1 : 0.9)));
       draw(); return;
     }
-    if (['h', 'erase', 'raise', 'lower', 'flat'].includes(state.pathTool ?? '')) {
+    if (['h', 'erase', 'raise', 'lower', 'flat', 'walk'].includes(state.pathTool ?? '')) {
       state.brushSize = Math.max(1, Math.min(9, state.brushSize + (e.deltaY < 0 ? 1 : -1)));
       setStatus(`Пензель: ${state.brushSize}×${state.brushSize}`);
       draw();
@@ -1319,6 +1340,7 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'Digit1') { ev.preventDefault(); state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
     else if (ev.code === 'Digit2') { ev.preventDefault(); state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
     else if (ev.code === 'Digit3') { ev.preventDefault(); state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
+    else if (ev.code === 'Digit4') { ev.preventDefault(); state.pathTool = state.pathTool === 'walk' ? null : 'walk'; updatePathBtns(); setStatus(state.pathTool ? 'Зелений колайдер (прохідність): малюй поверх вирізу ассета. Колесо — пензель' : ''); draw(); }
     else if (ev.code === 'KeyY') { ev.preventDefault(); state.pathTool = state.pathTool === 'erase' ? null : 'erase'; updatePathBtns(); }
     else if (ev.code === 'KeyM') {
       ev.preventDefault();
