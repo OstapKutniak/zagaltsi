@@ -65,7 +65,7 @@ export default {
     const genRes = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + env.OPENAI_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'dall-e-3', prompt, size, quality: 'hd', response_format: 'url', n: 1 }),
+      body: JSON.stringify({ model: 'dall-e-3', prompt, size, quality: 'hd', n: 1 }),
     });
 
     if (!genRes.ok) {
@@ -74,15 +74,20 @@ export default {
     }
 
     const genData = await genRes.json();
-    const imageUrl = genData?.data?.[0]?.url;
-    if (!imageUrl) return jsonResp(cors, 502, { error: 'OpenAI не повернув URL' });
+    const item = genData?.data?.[0];
+    const imageUrl = item?.url;
+    const imageB64 = item?.b64_json;
+    if (!imageUrl && !imageB64) return jsonResp(cors, 502, { error: 'OpenAI не повернув зображення' });
 
     // ── 2. Виріз фону: remove.bg ────────────────────────────────────────────
     if (env.REMOVEBG_KEY) {
+      const rmbgBody = imageUrl
+        ? JSON.stringify({ image_url: imageUrl, size: 'regular' })
+        : JSON.stringify({ image_file_b64: imageB64, size: 'regular' });
       const rmbgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
         headers: { 'X-Api-Key': env.REMOVEBG_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: imageUrl, size: 'regular' }),
+        body: rmbgBody,
       });
 
       if (rmbgRes.ok) {
@@ -92,7 +97,8 @@ export default {
       // remove.bg впав — fallback: повертаємо оригінал (білий фон)
     }
 
-    // ── Fallback: завантажити оригінал і повернути як b64 ──────────────────
+    // ── Fallback (без REMOVEBG_KEY або remove.bg впав) ─────────────────────
+    if (imageB64) return jsonResp(cors, 200, { data: [{ b64_json: imageB64 }] });
     const imgRes = await fetch(imageUrl);
     const imgBuf = await imgRes.arrayBuffer();
     return jsonResp(cors, 200, { data: [{ b64_json: bufToB64(imgBuf) }] });
