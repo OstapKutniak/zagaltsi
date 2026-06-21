@@ -119,7 +119,7 @@ export async function generateGameAsset(opts: GenOptions): Promise<string> {
     // Режим стилізації фото: явно просимо перемалювати форму з рефу.
     // Користувачу достатньо написати назву об'єкта або залишити поле порожнім.
     const subject = userPrompt || 'this object';
-    fullPrompt = `Use this reference only for the general subject and rough composition of "${subject}" — completely reimagine it as a flat 2D hand-drawn illustration with stylized exaggerated proportions, NOT a 3D render, abandon all photorealism, ignore realistic textures and perspective, ${stylePreprompt}`;
+    fullPrompt = `STYLE TRANSFER ONLY — completely ignore all photographic and realistic qualities of the reference image. Use the reference ONLY to identify the subject: "${subject}". Generate a brand new image from scratch in a totally different artistic style: bold flat 2D hand-drawn ink artwork, thick uneven black outlines, stark exaggerated folk-horror silhouette with distorted non-realistic proportions, zero photorealism, zero 3D depth, zero perspective shading, simplified and iconic shapes like a woodcut print. ${stylePreprompt}`;
   } else {
     fullPrompt = userPrompt ? `${userPrompt}, ${stylePreprompt}` : stylePreprompt;
   }
