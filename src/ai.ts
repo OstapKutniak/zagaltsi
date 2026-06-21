@@ -113,7 +113,17 @@ export async function generateGameAsset(opts: GenOptions): Promise<string> {
   const userPrompt = (opts.prompt || '').trim();
   if (!userPrompt && !opts.refDataUrl) throw new Error('Потрібен промпт або реф-зображення');
   const stylePreprompt = opts.context === 'char' ? STYLE_CHAR : STYLE_PROP;
-  const fullPrompt = userPrompt ? `${userPrompt}, ${stylePreprompt}` : stylePreprompt;
+
+  let fullPrompt: string;
+  if (opts.refDataUrl) {
+    // Режим стилізації фото: явно просимо перемалювати форму з рефу.
+    // Користувачу достатньо написати назву об'єкта або залишити поле порожнім.
+    const subject = userPrompt || 'this object';
+    fullPrompt = `Redraw the reference image as "${subject}" — keep the exact silhouette and proportions from the reference, ${stylePreprompt}`;
+  } else {
+    fullPrompt = userPrompt ? `${userPrompt}, ${stylePreprompt}` : stylePreprompt;
+  }
+
   return openaiImage(fullPrompt, opts.refDataUrl);
 }
 
