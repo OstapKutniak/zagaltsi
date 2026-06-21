@@ -618,7 +618,6 @@
           <button class="mob-tool" data-mob-key="KeyS">Масштаб</button>
           <button class="mob-tool" data-mob-key="KeyM">Дзеркало</button>
           <button class="mob-tool" data-mob-key="Delete">Видалити</button>
-          <button class="mob-tool" data-mob-ctrl="KeyZ">Скасувати</button>
         </div>
         <div id="mobPath" class="mob-panel">
           <button class="mob-tool" data-mob-mirror="lv-pathHBtn">Підлога</button>
@@ -646,6 +645,7 @@
           <button id="mob-aiGenBtn">gen</button>
         </div>
         <div id="mob-actions">
+          <button id="mob-undo">Скасувати</button>
           <button id="mob-save">Зберегти</button>
           <button id="mob-publish" class="btn-accent">Оновити гру</button>
         </div>
@@ -723,6 +723,9 @@
       });
 
       // Зберегти / Оновити гру
+      document.getElementById('mob-undo')?.addEventListener('click', function () {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true, bubbles: true }));
+      });
       document.getElementById('mob-save')?.addEventListener('click', function () {
         document.getElementById('lv-mobSave')?.click();
       });
