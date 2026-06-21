@@ -712,6 +712,14 @@ export function initLevelEditor(prefix: string): void {
     inp.addEventListener('mousedown', (e) => e.stopPropagation());
   }
   let _libLastTap = { id: '', time: 0 };
+  // Touch drag from library card to canvas
+  let _libDragId = '';
+  let _libDragSrc = '';
+  let _libDragStartX = 0;
+  let _libDragStartY = 0;
+  let _libDragActive = false;
+  let _libDragGhost: HTMLElement | null = null;
+
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
@@ -747,8 +755,15 @@ export function initLevelEditor(prefix: string): void {
         if (state.pendingAsset) el.classList.add('pending');
         draw();
       });
+      el.addEventListener('touchstart', (ev) => {
+        _libDragId = a.id; _libDragSrc = a.url;
+        _libDragStartX = ev.touches[0].clientX; _libDragStartY = ev.touches[0].clientY;
+        _libDragActive = false;
+      }, { passive: true });
       el.addEventListener('touchend', (ev) => {
         ev.preventDefault();
+        if (_libDragActive) return; // document touchend будує размміщення
+        _libDragId = '';
         const now = Date.now();
         if (now - _libLastTap.time < 300 && _libLastTap.id === a.id) {
           _libLastTap = { id: '', time: 0 };
@@ -912,11 +927,12 @@ export function initLevelEditor(prefix: string): void {
     window.addEventListener('mouseup', () => { fp.painting = false; fp.panning = false; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); fp.zoom = Math.min(4, Math.max(0.3, fp.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); fpRender(); }, { passive: false });
     window.addEventListener('keydown', (e) => { if (fp.asset && e.key === 'Escape') fpClose(true); });
-    // Touch: 2-finger = pan, double-tap+drag = zoom
+    // Touch: 1-finger = paint, 2-finger = pan, double-tap = toggle zoom mode (persistent)
     let _fpTouchPanActive = false;
     let _fpTouchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
     let _fpLastTap = 0;
-    let _fpZoomMode = false;
+    let _fpLastTapWasPaint = false;
+    let _fpZoomMode = false; // persistent: survives finger-lift until two-finger or next double-tap
     let _fpZoomStartY = 0;
     let _fpZoomStart = 1;
     const _fpcpos = (t: Touch) => { const r = cv.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
@@ -924,14 +940,16 @@ export function initLevelEditor(prefix: string): void {
       ev.preventDefault();
       if (ev.touches.length === 1) {
         const now = Date.now(); const { x, y } = _fpcpos(ev.touches[0]);
-        if (now - _fpLastTap < 300) {
-          _fpZoomMode = true; _fpZoomStartY = y; _fpZoomStart = fp.zoom;
-          _fpTouchPanActive = false; _fpLastTap = 0; return;
+        if (now - _fpLastTap < 300 && !_fpLastTapWasPaint) {
+          _fpZoomMode = !_fpZoomMode;
+          if (_fpZoomMode) { _fpZoomStartY = y; _fpZoomStart = fp.zoom; }
+          _fpTouchPanActive = false; fp.painting = false; _fpLastTap = 0; return;
         }
-        _fpLastTap = now; _fpZoomMode = false; _fpTouchPanActive = false;
+        if (_fpZoomMode) { _fpZoomStartY = y; _fpZoomStart = fp.zoom; fp.painting = false; return; }
+        _fpLastTap = now; _fpLastTapWasPaint = false; _fpTouchPanActive = false;
         fp.painting = true; fpPaintAt(x, y);
       } else if (ev.touches.length === 2) {
-        fp.painting = false; _fpZoomMode = false;
+        fp.painting = false; _fpZoomMode = false; _fpLastTap = 0;
         const p1 = _fpcpos(ev.touches[0]), p2 = _fpcpos(ev.touches[1]);
         const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
         _fpTouchPanActive = true;
@@ -951,14 +969,18 @@ export function initLevelEditor(prefix: string): void {
         fp.panY = _fpTouchPanStart.py + (my - _fpTouchPanStart.my);
         _fpTouchPanStart = { mx, my, px: fp.panX, py: fp.panY };
         fpRender();
-      } else if (!_fpTouchPanActive && ev.touches.length === 1 && fp.painting) {
+      } else if (!_fpTouchPanActive && !_fpZoomMode && ev.touches.length === 1 && fp.painting) {
+        _fpLastTapWasPaint = true;
         const { x, y } = _fpcpos(ev.touches[0]); fpPaintAt(x, y);
       }
     }, { passive: false });
     cv.addEventListener('touchend', (ev) => {
       ev.preventDefault();
       fp.painting = false;
-      if (ev.touches.length === 0) { _fpTouchPanActive = false; _fpZoomMode = false; }
+      if (ev.touches.length === 0) {
+        _fpTouchPanActive = false;
+        // _fpZoomMode intentionally NOT reset — persists until two-finger or next double-tap
+      }
     }, { passive: false });
   }
 
@@ -1227,7 +1249,6 @@ export function initLevelEditor(prefix: string): void {
   {
     let touchPanActive = false;
     let touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
-    let pinchDist = 0;
     let singleTouchDown = false;
     const cpos = (t: Touch): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect();
@@ -1268,7 +1289,6 @@ export function initLevelEditor(prefix: string): void {
         if (drag || painting || state.markerDrag) save();
         drag = null; painting = false; state.markerDrag = null;
         const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
-        pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
         const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
         touchPanActive = true; _panning = true;
         touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
@@ -1293,11 +1313,9 @@ export function initLevelEditor(prefix: string): void {
       } else if (ev.touches.length === 2 && touchPanActive) {
         const p1 = cpos(ev.touches[0]), p2 = cpos(ev.touches[1]);
         const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        // pan only, no pinch zoom (consistent with rig editor)
         state.pan.x = touchPanStart.px + (mx - touchPanStart.mx);
         state.pan.y = touchPanStart.py + (my - touchPanStart.my);
-        if (pinchDist > 0) state.zoom = Math.min(3, Math.max(0.15, state.zoom * dist / pinchDist));
-        pinchDist = dist;
         touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
         applyOrigin(); resize(); draw();
       }
@@ -1308,15 +1326,63 @@ export function initLevelEditor(prefix: string): void {
         if (singleTouchDown && state.mode) { state.mode = null; state.orig = null; save(); }
         else if (singleTouchDown && (drag || painting || state.markerDrag)) save();
         drag = null; painting = false; state.markerDrag = null;
-        singleTouchDown = false; touchPanActive = false; pinchDist = 0;
+        singleTouchDown = false; touchPanActive = false;
         _panning = false; draw();
       } else if (ev.touches.length === 1 && touchPanActive) {
-        touchPanActive = false; pinchDist = 0; singleTouchDown = true;
+        touchPanActive = false; singleTouchDown = true;
         _panning = false; draw();
         const { x, y } = cpos(ev.touches[0]);
         state.mouse = { x, y };
       }
     }, { passive: false });
+
+    // Touch drag from library card → drop on canvas to place asset
+    document.addEventListener('touchmove', (ev) => {
+      if (!_libDragId) return;
+      const t = ev.touches[0];
+      if (!_libDragActive && Math.hypot(t.clientX - _libDragStartX, t.clientY - _libDragStartY) > 12) {
+        _libDragActive = true;
+        state.pendingAsset = _libDragId;
+        state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null; state.pathTool = null; updatePathBtns();
+        // floating ghost follows finger
+        _libDragGhost = document.createElement('img');
+        (_libDragGhost as HTMLImageElement).src = _libDragSrc;
+        Object.assign(_libDragGhost.style, { position: 'fixed', width: '56px', height: '56px', objectFit: 'contain', pointerEvents: 'none', opacity: '0.65', zIndex: '200', transform: 'translate(-50%,-50%)', borderRadius: '8px' });
+        document.body.appendChild(_libDragGhost);
+        $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
+      }
+      if (!_libDragActive) return;
+      if (_libDragGhost) { (_libDragGhost as HTMLElement).style.left = t.clientX + 'px'; (_libDragGhost as HTMLElement).style.top = t.clientY + 'px'; }
+      // update mouse position on canvas for white-ghost preview
+      const cr = canvas.getBoundingClientRect();
+      if (t.clientX >= cr.left && t.clientX <= cr.right && t.clientY >= cr.top && t.clientY <= cr.bottom) {
+        state.mouse = { x: t.clientX - cr.left, y: t.clientY - cr.top }; draw();
+      }
+    }, { passive: true });
+
+    document.addEventListener('touchend', (ev) => {
+      if (!_libDragId) return;
+      if (_libDragGhost) { _libDragGhost.remove(); _libDragGhost = null; }
+      if (_libDragActive && state.pendingAsset) {
+        const t = ev.changedTouches[0];
+        const cr = canvas.getBoundingClientRect();
+        if (t.clientX >= cr.left && t.clientX <= cr.right && t.clientY >= cr.top && t.clientY <= cr.bottom) {
+          const x = t.clientX - cr.left, y = t.clientY - cr.top;
+          const a = state.assets.find((x2) => x2.id === state.pendingAsset);
+          if (a) {
+            pushUndo();
+            const w = toWorld(x, y);
+            const p: Placed = { id: 'p' + Date.now(), cat: a.cat, asset: a.id, x: w.x, y: w.y, rot: state.pendingRot, scale: state.pendingScale, flip: state.pendingFlip };
+            level().placed.push(p); state.selected = p.id;
+            state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
+            refreshSel(); draw(); save();
+          }
+        } else {
+          state.pendingAsset = null; draw();
+        }
+      }
+      _libDragId = ''; _libDragActive = false;
+    }, { passive: true });
   }
 
   canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });

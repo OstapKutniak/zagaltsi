@@ -1875,13 +1875,15 @@ window.addEventListener('resize', syncPanelHeights);
   if (tl) new ResizeObserver(syncPanelHeights).observe(tl);
 }
 
-// ─── Touch support for rig canvas (1-finger = drag/bone, 2-finger = pan, double-tap+drag = zoom) ────
+// ─── Touch support (1-finger = drag/bone, 2-finger = pan, double-tap = toggle zoom mode) ────
+// Zoom mode persists across touch-lift: double-tap once → enter, double-tap again / two-finger → exit.
 {
   let _touchPanActive = false;
   let _touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
   let _singleTouchDown = false;
   let _lastTapTime = 0;
-  let _zoomMode = false;
+  let _lastTapWasDrag = false; // suppress double-tap if last tap was used for dragging
+  let _zoomMode = false;       // persistent: survives finger-lift until two-finger or another double-tap
   let _zoomStartY = 0;
   let _zoomStartZoom = 1;
 
@@ -1895,16 +1897,25 @@ window.addEventListener('resize', syncPanelHeights);
     if (ev.touches.length === 1) {
       const now = Date.now();
       const { x, y } = _cpos(ev.touches[0]);
-      if (now - _lastTapTime < 300) {
-        // double-tap: enter zoom-by-drag mode
-        _zoomMode = true; _zoomStartY = y; _zoomStartZoom = state.zoom;
+
+      // Double-tap (no drag between taps) → toggle zoom mode
+      if (now - _lastTapTime < 300 && !_lastTapWasDrag) {
+        _zoomMode = !_zoomMode;
+        if (_zoomMode) { _zoomStartY = y; _zoomStartZoom = state.zoom; }
         _singleTouchDown = false; drag = null; _lastTapTime = 0; return;
       }
-      _lastTapTime = now;
-      _zoomMode = false; _touchPanActive = false; _singleTouchDown = true;
+
+      if (_zoomMode) {
+        // Already in zoom mode: reset anchor for new drag stroke, skip bone picking
+        _zoomStartY = y; _zoomStartZoom = state.zoom;
+        _singleTouchDown = false; drag = null; return;
+      }
+
+      _lastTapTime = now; _lastTapWasDrag = false;
+      _singleTouchDown = true; _touchPanActive = false;
       state.mouse = { x, y };
       const c = { x: mirrorX(x), y };
-      if (state.mode) return; // touchend підтверджує
+      if (state.mode) return;
       if (state.cutMode && state.selected !== 'ref') {
         const loc = curLocal(state.selected, c.x, c.y);
         if (loc) { pushUndo(); state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); }
@@ -1919,7 +1930,8 @@ window.addEventListener('resize', syncPanelHeights);
       const key = hit ?? (state.selected === 'ref' && state.ref.canvas ? 'ref' : null);
       if (key) { state.selected = key; pushUndo(); const t2 = tf(key); drag = { key, sx: c.x, sy: c.y, dx: t2.dx, dy: t2.dy }; refreshUI(); }
     } else if (ev.touches.length === 2) {
-      _singleTouchDown = false; _zoomMode = false; drag = null;
+      _singleTouchDown = false; drag = null;
+      _zoomMode = false; _lastTapTime = 0; // two-finger always exits zoom mode
       const p1 = _cpos(ev.touches[0]), p2 = _cpos(ev.touches[1]);
       const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
       _touchPanActive = true; _rigPanning = true;
@@ -1931,15 +1943,15 @@ window.addEventListener('resize', syncPanelHeights);
     ev.preventDefault();
     if (_zoomMode && ev.touches.length === 1) {
       const { y } = _cpos(ev.touches[0]);
-      // drag up = zoom in; 150px travel = 1.8× zoom
-      const delta = (_zoomStartY - y) / 150;
-      state.zoom = Math.min(3, Math.max(0.3, _zoomStartZoom * Math.pow(1.8, delta)));
+      // drag up = zoom in; 150px = 1.8× change
+      state.zoom = Math.min(3, Math.max(0.3, _zoomStartZoom * Math.pow(1.8, (_zoomStartY - y) / 150)));
       applyOrigin(); resize(); draw();
     } else if (ev.touches.length === 1 && _singleTouchDown && !_touchPanActive) {
       const { x, y } = _cpos(ev.touches[0]);
       state.mouse = { x, y };
       if (state.mode) { applyMode(); draw(); return; }
       if (drag) {
+        _lastTapWasDrag = true;
         const wx = mirrorX(x);
         const pr = drag.key !== 'ref' && PARENT[drag.key] ? worldOf(PARENT[drag.key]!).rot : 0;
         const wdx = wx - drag.sx, wdy = y - drag.sy;
@@ -1964,7 +1976,8 @@ window.addEventListener('resize', syncPanelHeights);
       if (_singleTouchDown && state.mode) endMode(true);
       drag = null;
       _singleTouchDown = false; _touchPanActive = false;
-      _zoomMode = false; _rigPanning = false; draw();
+      // _zoomMode intentionally NOT reset — persists until two-finger or next double-tap
+      _rigPanning = false; draw();
     } else if (ev.touches.length === 1 && _touchPanActive) {
       _touchPanActive = false; _singleTouchDown = true;
       _rigPanning = false; draw();
