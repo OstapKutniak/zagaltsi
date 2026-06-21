@@ -711,6 +711,7 @@ export function initLevelEditor(prefix: string): void {
     inp.addEventListener('click', (e) => e.stopPropagation());
     inp.addEventListener('mousedown', (e) => e.stopPropagation());
   }
+  let _libLastTap = { id: '', time: 0 };
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
@@ -730,6 +731,7 @@ export function initLevelEditor(prefix: string): void {
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
       if (a.footprint?.cells.length) { const dot = document.createElement('div'); dot.className = 'fpDot'; dot.title = 'має колайдери'; el.appendChild(dot); }
       el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
+      el.addEventListener('dblclick', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
       // Перетягування картки в AI-поле (реф) — несемо id ассета.
       el.draggable = true;
       el.addEventListener('dragstart', (ev) => { (ev as DragEvent).dataTransfer?.setData('text/asset-id', a.id); });
@@ -747,6 +749,12 @@ export function initLevelEditor(prefix: string): void {
       });
       el.addEventListener('touchend', (ev) => {
         ev.preventDefault();
+        const now = Date.now();
+        if (now - _libLastTap.time < 300 && _libLastTap.id === a.id) {
+          _libLastTap = { id: '', time: 0 };
+          openFootprintEditor(a); return;
+        }
+        _libLastTap = { id: a.id, time: now };
         const same = state.pendingAsset === a.id;
         state.pendingAsset = same ? null : a.id;
         if (!same) { state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null; state.pathTool = null; updatePathBtns(); }
@@ -817,18 +825,12 @@ export function initLevelEditor(prefix: string): void {
     const backdrop = document.getElementById(prefix + 'fpBackdrop') as HTMLElement;
     const title = document.getElementById(prefix + 'fpTitle');
     if (title) title.textContent = 'Колайдери: ' + a.name;
-    // Габарити: вікно випадає ПРАВОРУЧ від бібліотеки ассетів (ліва грань = права грань
-    // бібліотеки), а права грань — під правим краєм кнопки «Редактор Інтерфейсу».
-    // Вниз ~3 ряди карток.
-    const lib = $('library').getBoundingClientRect();
-    const uiTab = document.querySelector('#topTabs button[data-soon]')?.getBoundingClientRect();
-    const grid = $('libGrid');
-    const cardW = (grid.clientWidth - 8) / 2;
-    const left = lib.right + 8, top = lib.top;
-    const right = uiTab ? uiTab.right : lib.right + 520;
-    const h = Math.min(window.innerHeight - top - 12, 44 + cardW * 3 + 16);
-    modal.style.left = left + 'px'; modal.style.top = top + 'px';
-    modal.style.width = (right - left) + 'px'; modal.style.height = h + 'px';
+    // Вікно центруємо у вьюпорті (зручно і на десктопі, і на мобільному)
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = Math.min(560, vw - 24), mh = Math.min(480, vh - 48);
+    modal.style.left = Math.round((vw - mw) / 2) + 'px';
+    modal.style.top = Math.round((vh - mh) / 2) + 'px';
+    modal.style.width = mw + 'px'; modal.style.height = mh + 'px';
     modal.style.display = 'flex'; backdrop.style.display = 'block';
     fpWire();
     fpSyncToolBtns();
@@ -910,6 +912,54 @@ export function initLevelEditor(prefix: string): void {
     window.addEventListener('mouseup', () => { fp.painting = false; fp.panning = false; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); fp.zoom = Math.min(4, Math.max(0.3, fp.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); fpRender(); }, { passive: false });
     window.addEventListener('keydown', (e) => { if (fp.asset && e.key === 'Escape') fpClose(true); });
+    // Touch: 2-finger = pan, double-tap+drag = zoom
+    let _fpTouchPanActive = false;
+    let _fpTouchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
+    let _fpLastTap = 0;
+    let _fpZoomMode = false;
+    let _fpZoomStartY = 0;
+    let _fpZoomStart = 1;
+    const _fpcpos = (t: Touch) => { const r = cv.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+    cv.addEventListener('touchstart', (ev) => {
+      ev.preventDefault();
+      if (ev.touches.length === 1) {
+        const now = Date.now(); const { x, y } = _fpcpos(ev.touches[0]);
+        if (now - _fpLastTap < 300) {
+          _fpZoomMode = true; _fpZoomStartY = y; _fpZoomStart = fp.zoom;
+          _fpTouchPanActive = false; _fpLastTap = 0; return;
+        }
+        _fpLastTap = now; _fpZoomMode = false; _fpTouchPanActive = false;
+        fp.painting = true; fpPaintAt(x, y);
+      } else if (ev.touches.length === 2) {
+        fp.painting = false; _fpZoomMode = false;
+        const p1 = _fpcpos(ev.touches[0]), p2 = _fpcpos(ev.touches[1]);
+        const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        _fpTouchPanActive = true;
+        _fpTouchPanStart = { mx, my, px: fp.panX, py: fp.panY };
+      }
+    }, { passive: false });
+    cv.addEventListener('touchmove', (ev) => {
+      ev.preventDefault();
+      if (_fpZoomMode && ev.touches.length === 1) {
+        const { y } = _fpcpos(ev.touches[0]);
+        fp.zoom = Math.min(4, Math.max(0.3, _fpZoomStart * Math.pow(1.8, (_fpZoomStartY - y) / 150)));
+        fpRender();
+      } else if (_fpTouchPanActive && ev.touches.length === 2) {
+        const p1 = _fpcpos(ev.touches[0]), p2 = _fpcpos(ev.touches[1]);
+        const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        fp.panX = _fpTouchPanStart.px + (mx - _fpTouchPanStart.mx);
+        fp.panY = _fpTouchPanStart.py + (my - _fpTouchPanStart.my);
+        _fpTouchPanStart = { mx, my, px: fp.panX, py: fp.panY };
+        fpRender();
+      } else if (!_fpTouchPanActive && ev.touches.length === 1 && fp.painting) {
+        const { x, y } = _fpcpos(ev.touches[0]); fpPaintAt(x, y);
+      }
+    }, { passive: false });
+    cv.addEventListener('touchend', (ev) => {
+      ev.preventDefault();
+      fp.painting = false;
+      if (ev.touches.length === 0) { _fpTouchPanActive = false; _fpZoomMode = false; }
+    }, { passive: false });
   }
 
   $<HTMLButtonElement>('loadAsset')?.addEventListener('click', () => $<HTMLInputElement>('fileInput').click());
