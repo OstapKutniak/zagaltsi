@@ -151,10 +151,12 @@ GitHub Pages через Vite build.
 - **Редактор рівнів** (`#lv-aiGenBtn`): wireAiGenerate() — клік → generateGameAsset → imgSrcToWebP →
   додає Asset у бібліотеку під ПОТОЧНОЮ категорією (`state.cat`) → refreshAssets+save. **Повністю робоче.**
 - Drop zone: `.ai-drop-zone`, ПКМ очищає реф.
-- ⚠️ **Лишилось:** (1) на ДЕПЛОЇ (github.io) ключа НЕМА — `deploy.yml` робить `npm run build` без
-  `VITE_FAL_KEY`, тож на живій студії кнопка каже «Нема ключа». Працює лише локально (`npm run dev`).
-  Щоб увімкнути на деплої: GH-секрет у build-крок — АЛЕ ключ запечеться в ПУБЛІЧНИЙ бандл (ризик
-  рахунку Fal). Безпечніше: тримати локально або проксі через serverless. (2) фіналізувати стиль-промпт.
+- **Деплой (github.io) — через ПРОКСІ** (щоб не світити ключ): `ai.ts` дивиться на `VITE_FAL_PROXY`
+  (URL воркера). Заданий → виклики йдуть на воркер `{model, body}`, ключ Fal на сервері. Не заданий →
+  прямий виклик із `VITE_FAL_KEY` (локальна розробка). Воркер: [`serverless/fal-proxy.worker.js`](serverless/fal-proxy.worker.js)
+  (Cloudflare Worker, кроки в коментарях). `deploy.yml` інжектить `VITE_FAL_PROXY` із repo VARIABLE (не secret — це URL).
+- ⚠️ **Лишилось для увімкнення на деплої:** (1) підняти воркер за інструкцією у файлі вище, додати repo
+  variable `VITE_FAL_PROXY`, поставити ЛІМІТ витрат у Fal; (2) фіналізувати стиль-промпт (`STYLE_PREPROMPT`).
 
 ---
 
