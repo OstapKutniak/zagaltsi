@@ -204,7 +204,7 @@
       #lv-libSelect:hover { background: #565656 !important; }
 
       /* ─── Mobile bottom dock ─────────────────────────────────────────── */
-      #mob-dock { display: none; flex-direction: column; flex-shrink: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      #mob-dock { display: none; flex-direction: column; flex-shrink: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 6px; }
       #mob-tabRow { display: flex; }
       .mob-tab { flex: 1; padding: 6px 3px; font-size: 11px; font-weight: 600; border-radius: 0; background: var(--rail); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); cursor: pointer; }
       .mob-tab:last-child { border-right: 0; }
@@ -218,6 +218,11 @@
       #mob-aiGenBtn { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
       #mob-actions { display: flex; gap: 6px; padding: 5px 6px; border-top: 1px solid var(--line); }
       #mob-actions button { flex: 1; padding: 8px 4px; font-size: 13px; }
+      #mob-iconRow { display: flex; gap: 4px; padding: 4px 6px; border-top: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+      #mob-iconRow::-webkit-scrollbar { display: none; }
+      .mob-icon { flex: 0 0 auto; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; background: var(--rail); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); cursor: pointer; padding: 0; }
+      .mob-icon.on { background: var(--accent); border-color: var(--accent); color: #1b1b1b; }
+      .mob-icon svg { width: 17px; height: 17px; pointer-events: none; }
 
       /* ─── Mobile layout (екран < 900px) ──────────────────────────────── */
       @media (max-width: 900px) {
@@ -648,6 +653,15 @@
           <button id="mob-undo">Скасувати</button>
           <button id="mob-save">Зберегти</button>
           <button id="mob-publish" class="btn-accent">Оновити гру</button>
+        </div>
+        <div id="mob-iconRow">
+          <button class="mob-icon" data-mob-mirror="lv-camViewBtn" title="Вид камери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-showColliderBtn" title="Колайдери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-linesBtn" title="Лінії шарів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3v18M18 3v18"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-enemySpawnsViewBtn" title="Спавн ворогів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-playerSpawnsViewBtn" title="Спавн гравців"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c0-3.6 2.9-6.3 6.5-6.3s6.5 2.7 6.5 6.3"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-snapBtn" title="Снеп"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15h12M12 9l-3 3 3 3M12 9v6"/><path d="M3 4v4M21 4v4M3 6h3M18 6h3"/></svg></button>
+          <button class="mob-icon" data-mob-mirror="lv-bwBtn" title="Чорно-біле"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3z" fill="currentColor" stroke="none"/></svg></button>
         </div>
       </div>
     </div>

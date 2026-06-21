@@ -7,7 +7,12 @@ export const LOGICAL_H = 576;
 // камера масштабується тим самим множником → поле огляду те саме (1280×576 світу), але
 // пікселів удвічі більше. Прибирає піксельність на десктопі й розмазування при русі
 // камери (менше суб-піксельного зсуву). Світові координати/швидкості не зачіпає.
-export const RENDER_SCALE = 2;
+// Можна зменшити через налаштування гри (зберігається в localStorage zag_render_scale).
+function _getRenderScale(): number {
+  try { const v = localStorage.getItem('zag_render_scale'); if (v) { const n = Number(v); if (n > 0) return n; } } catch {}
+  return 2;
+}
+export const RENDER_SCALE = _getRenderScale();
 
 // Загальна довжина рівня у світових пікселях (горизонтальний скрол).
 export const WORLD_WIDTH = 2600;
