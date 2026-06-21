@@ -127,6 +127,103 @@ metadata:
 
 **Toolbar C (studio.html):** `lv-spawnInfo` span прибрано (зайвий лічильник спавнів). В level.html його ніколи не було.
 
+---
+
+### AI-генерація ігрових ассетів (src/ai.ts) — АРХІТЕКТУРА + ПРОМПТ
+
+**Модель:** `gpt-image-1` (OpenAI) через `/v1/images/generations` (text-to-image). `/images/edits` ПРИБРАНО НАЗАВЖДИ — він намертво прив'язується до реалістичних пропорцій та деталізації вхідного фото (навіть при стилізувальному промпті виходить фото-реалістичне), що суперечить стилістиці гри.
+
+**Ключ:** `VITE_OPENAI_KEY` у `.env` локально; на деплої — Cloudflare Worker-проксі (`VITE_FAL_PROXY`). Ключ у бандл не потрапляє. `hasFalKey()` перевіряє одне або інше.
+
+**Пайплайн:**
+1. Користувач вводить текстовий промпт (необов'язково) + може кинути реф-зображення (необов'язково).
+2. Якщо є реф БЕЗ тексту → `describeImageSubject(dataUrl)` → `gpt-4o-mini` vision (`/v1/chat/completions`) описує ЛИШЕ СЮЖЕТ (10–15 слів: «що це і яка форма», без кольорів/стилю/фону). Реф у `/generations` НЕ потрапляє.
+3. Якщо є реф І текст → використовується тільки текст (реф ігнорується, не йде в API).
+4. `subject + STYLE_*` → `openaiImage(prompt)` → `/v1/images/generations` → прозорий PNG (base64).
+
+**`describeImageSubject` промпт для gpt-4o-mini:**
+```
+Describe only the main object or subject in this image in 10-15 words.
+Focus on what it IS and its general form/shape.
+No style, no colors, no background — just the subject itself.
+```
+Увага: локально `gpt-4o-mini` доступний тільки якщо є `VITE_OPENAI_KEY`. На деплої (лише проксі без ключа) опис недоступний — тоді якщо реф без тексту → fallback `'folk horror environment prop'`.
+
+**Базовий стиль (`STYLE_BASE`) — точний рядок промпту:**
+```
+video game 2D sprite, Ukrainian folk dark fantasy setting,
+Darkest Dungeon 1 original art style: aggressive crosshatching and hatching,
+thick uneven black ink outlines,
+near-monochrome desaturated palette — charcoal black, ash grey, aged parchment yellow —
+muted rust-red accents only,
+NO bright colors, NO saturated greens, NO vivid blues or teals,
+colors almost completely washed-out and aged,
+dark oppressive grim atmosphere, high contrast with deep shadow regions and pale highlights,
+isolated on transparent background, no cast shadow on ground, no text, no watermark
+```
+
+**Персонажний (`STYLE_CHAR`)** = `STYLE_BASE` + `', full body character, front-facing or slight 3/4 view, even ambient lighting'` — рівне освітлення, бо спрайт перевертається по X.
+
+**Пропний (`STYLE_PROP`)** = `STYLE_BASE` + `', environment prop or decoration, lit from upper-left, darker right and bottom edges of the object'` — фіксоване освітлення для узгодженості з'яви у сцені.
+
+**Розмір:** `1024x1024`, `background: 'transparent'`, `output_format: 'png'`.
+
+**Контекст генерації (`context` у `GenOptions`):** `'char'` → `STYLE_CHAR`; `'prop'` → `STYLE_PROP`. Редактор персонажів передає `'char'`, редактор рівнів — `'prop'`.
+
+**Що не вийшло й чому:**
+- Реалістична фотка церкви як реф + `/images/edits` → результат мав реалістичну архітектуру і надто деталізований рендер; промпт-тюнінг не допоміг (endpoint сам обмежений).
+- Рішення: повністю відмовитись від `/images/edits`; тільки `/generations`; реф → лише джерело тематики для `gpt-4o-mini`, не вхід для дифузії.
+- Стиль DD1 потребує явної заборони (`NO bright colors`, `NO saturated greens`...) — без заборон модель підмішує барвистість.
+- `colors almost completely washed-out and aged` — ключова фраза для обезбарвлення.
+
+**Де кнопка Gen:**
+- Редактор персонажів desktop: `#aiGenBtn` (textarea `#aiPrompt` + ref drop `#aiRefDrop`).
+- Редактор персонажів mobile: `#mob-char-aiGenBtn` (text input `#mob-char-aiPrompt` + ref `#mob-char-aiRefDrop`); при натиску синхронізує значення у desktop-поля і тригерить desktop Gen.
+- Редактор рівнів desktop: `#lv-aiGenBtn` (textarea `#lv-aiPrompt` + ref `#lv-aiRefDrop`).
+- Редактор рівнів mobile: `#mob-aiGenBtn` (text input `#mob-aiPrompt` + ref `#mob-aiRefDrop`); аналогічно синхронізує у `#lv-*`.
+
+---
+
+### Touch-жести (мобільний UX) — rig + level canvas + fpModal
+
+**Rig canvas (`src/rig/main.ts`):**
+- 1 палець = вибір/тягнути кістку.
+- 2 пальці = **пан** (тільки, без пінч-зуму).
+- **Подвійний тап** (< 300мс, без перетягування між) → **ПЕРЕМКНУТИ режим зуму** (`_zoomMode`). Режим зуму персистентний: лишається після підняття пальця, аж до наступного подвійного тапу або 2-пальцевого дотику. У режимі зуму: тягнути вниз = зум ін, вгору = зум аут (`Math.pow(1.8, delta/150)`). 2 пальці завжди виходять із режиму зуму.
+- `_lastTapWasDrag`: захист від хибного подвійного тапу після тягнення кістки.
+
+**Level canvas (`src/level/editor.ts`):**
+- Ідентична схема: `_lvZoomMode` (persistent double-tap toggle), `_lvLastTapTime`, `_lvLastTapWasDrag`.
+- 2 пальці = **пан** (без пінч-зуму, `touchPanActive`).
+- `state.zoom` (min 0.15, max 3).
+
+**fpModal колайдер-редактор:**
+- Та сама схема: `_fpZoomMode` persistent, `_fpLastTapWasPaint` захист від подвійного тапу після малювання.
+- 1 палець = малювати. 2 пальці = пан. Подвійний тап = зум-тогл.
+
+**Drag ассету з бібліотеки на level canvas:**
+- Card `touchstart` → запам'ятати `_libDragId`, `_libDragSrc`, `_libDragStartX/Y`.
+- `document.touchmove` (passive:**false**) → якщо `> 12px`: `_libDragActive = true`, `state.pendingAsset = _libDragId`, float ghost-img (position:fixed, 56×56, opacity 0.65). Якщо `_libDragActive`: `ev.preventDefault()` щоб зупинити скрол бібліотеки.
+- `document.touchend` → якщо над canvas: place asset (pushUndo + `level().placed.push` + save); інакше скасувати.
+- Card `touchend` (passive:false, `ev.preventDefault()`): якщо не drag → single/double-tap logic (pendingAsset або відкрити fpModal).
+
+---
+
+### Виправлення рівня (UI/UX)
+
+**Desktop:**
+- `#mob-char-parts-row { display: none; }` додано **поза** media query — елемент більше не видно на desktop (раніше показувався через `.mode-char #mob-char-parts-row { display: flex !important }` всередині `@media`, але сам елемент без медіа не мав `display:none` зовні).
+- Fill menu: `positionFillMenu()` тепер **bottom-anchored** (відкривається вгору від тулбара): `position:fixed; bottom = (window.innerHeight - toolbarTop + 8)px; top:auto`. Раніше падав у `stage.top + 16` бо `$('preview')` = `$('lv-preview')` якого немає в studio.html.
+- `#lv-levelToolbar`: `align-items: flex-start` → `align-items: stretch` — всі кнопки однієї висоти.
+
+**Toolbar — мерж кнопок:**
+- `lv-addSpawn` + `lv-delSpawn` → одна кнопка **`lv-spawnBtn`** (початковий текст "Додати стартову"). ПКМ → перемикає текст на "Прибрати стартову" і навпаки (`_spawnMode: 'add'|'del'`). ЛКМ → виконує поточний режим.
+- `lv-enemySpawnBtn` + `lv-enemyEraseBtn` → одна кнопка **`lv-enemyBtn`** (початковий текст "Додати ворогів"). ПКМ → перемикає на "Прибрати ворогів" (`_enemyMode: 'add'|'erase'`). ЛКМ → активує `pathTool = 'enemy'` або `'enemyErase'`.
+- "Очистити все" → "Очистити".
+- `updatePathBtns()` оновлено під нові id. `pathBtnIds`/`pathBtnTools` очищено від старих.
+
+**iOS viewport:** `meta[name=viewport]` додано `maximum-scale=1, user-scalable=no, viewport-fit=cover` — виправляє глюки масштабу при кількох зображеннях на iPhone 13 Pro.
+
 ### Відкладено / чекає вводу
 
 - **Колайдери в грі** (ходьба): асиметрія ліво/право, мінора розбіжність editor↔game. Відкладено, вернутись після поточного списку.
