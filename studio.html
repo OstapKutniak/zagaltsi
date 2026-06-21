@@ -203,8 +203,8 @@
       #status { font-size: 12px; color: var(--muted); min-height: 0; }
       #lv-libSelect:hover { background: #565656 !important; }
 
-      /* ─── Mobile bottom dock ─────────────────────────────────────────── */
-      #mob-dock { display: none; flex-direction: column; flex-shrink: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 6px; }
+      /* ─── Mobile bottom docks (level + char) ────────────────────────── */
+      #mob-dock, #mob-char-dock { display: none; flex-direction: column; flex-shrink: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 6px; }
       #mob-tabRow { display: flex; }
       .mob-tab { flex: 1; padding: 6px 3px; font-size: 11px; font-weight: 600; border-radius: 0; background: var(--rail); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); cursor: pointer; }
       .mob-tab:last-child { border-right: 0; }
@@ -250,32 +250,55 @@
         .mode-char #library {
           order: 2; display: flex !important;
           width: 100% !important; flex-direction: row !important; align-items: center;
-          padding: 4px; gap: 4px; min-height: 90px; max-height: 90px;
+          padding: 4px; gap: 4px; min-height: 78px; max-height: 78px;
         }
         .mode-char #libToggle {
-          flex: 0 0 auto; width: auto; min-width: 58px; padding: 8px 6px; font-size: 11px;
+          flex: 0 0 auto; width: auto; min-width: 50px; padding: 6px 5px; font-size: 11px;
         }
         .mode-char #libList {
           flex-direction: row !important; flex-wrap: nowrap !important;
-          overflow-x: auto; overflow-y: hidden; height: 78px; min-height: 78px; gap: 6px !important;
+          overflow-x: auto; overflow-y: hidden; height: 66px; min-height: 66px; gap: 5px !important;
         }
         .mode-char #libList .libCard {
-          flex: 0 0 72px !important; width: 72px !important; min-width: 72px; height: 72px;
+          flex: 0 0 64px !important; width: 64px !important; min-width: 64px; height: 64px;
         }
         .mode-char #libList .libCard::before { display: none; }
         .mode-char #libList .libCard img {
           position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
         }
-        .mode-char #right {
-          order: 6; display: flex !important;
-          width: 100% !important; flex-direction: row !important; align-items: center;
-          min-height: 56px; max-height: 56px; gap: 6px; padding: 4px; overflow: hidden;
+        /* canvas area flex-column */
+        .mode-char #centerMid { display: flex !important; flex-direction: column; order: 3; }
+        .mode-char #stageWrap { position: relative !important; flex: 1; min-height: 0; overflow: hidden; }
+        .mode-char #stageWrap canvas { width: 100%; height: 100%; display: block; }
+        .mode-char #lv-stageWrap { display: none !important; }
+        .mode-char #partsList { display: none !important; }
+        .mode-char #faceList { display: none !important; }
+        /* parts strip row */
+        .mode-char #mob-char-parts { order: 3; display: flex !important; flex-direction: row; align-items: center; }
+        /* timeline hidden */
+        .mode-char #timelineBar { display: none !important; }
+        /* right panel replaced by dock */
+        .mode-char #right { display: none !important; }
+        .mode-char #aiPanel { display: none !important; }
+        /* mob-char-dock visible */
+        .mode-char #mob-char-dock { display: flex; order: 5; }
+        /* mob parts chips */
+        #mob-char-parts-chips, #mob-char-face-chips {
+          display: flex; flex-direction: row; flex-wrap: nowrap;
+          overflow-x: auto; gap: 4px; align-items: center; scrollbar-width: none;
         }
-        .mode-char #preview { display: none !important; }
-        .mode-char #iconBar { flex: 0 0 auto; flex-wrap: nowrap; gap: 4px; padding: 0; }
-        .mode-char #tools { display: none !important; }
-        #charMobileActions { display: none; gap: 6px; flex: 1; }
-        .mode-char #charMobileActions { display: flex !important; }
+        #mob-char-parts-chips::-webkit-scrollbar, #mob-char-face-chips::-webkit-scrollbar { display: none; }
+        #mob-char-parts-chips .chip, #mob-char-face-chips .chip {
+          flex: 0 0 auto; width: 52px !important; min-width: 52px; height: 44px !important;
+          padding: 3px 2px !important; font-size: 10px !important;
+          display: flex !important; align-items: center; justify-content: center; text-align: center;
+          white-space: normal; line-height: 1.2;
+        }
+        /* anim select in dock */
+        #mob-char-anim-row { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; }
+        #mob-char-anim-row select { width: 100%; padding: 7px 8px; border-radius: 8px; background: #4a4a4a; color: var(--ink); border: 0; font-size: 12px; font-weight: 600; }
+        #mob-char-anim-btns { display: flex; gap: 5px; }
+        #mob-char-anim-btns button { flex: 1; padding: 7px 4px; font-size: 12px; }
 
         /* ════ LEVEL EDITOR ══════════════════════════════════════════════ */
 
@@ -664,6 +687,62 @@
           <button class="mob-icon" data-mob-mirror="lv-bwBtn" title="Чорно-біле"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3z" fill="currentColor" stroke="none"/></svg></button>
         </div>
       </div>
+
+      <!-- МОБІЛЬНИЙ ДОКЕР — редактор персонажів -->
+      <div id="mob-char-dock">
+        <div id="mob-char-tabRow">
+          <button class="mob-tab on" data-mob-char-panel="mobCharTransf">G · R · S</button>
+          <button class="mob-tab" data-mob-char-panel="mobCharParts">Частини</button>
+          <button class="mob-tab" data-mob-char-panel="mobCharAnim">Анімація</button>
+        </div>
+        <!-- G/R/S/M/B panel -->
+        <div id="mobCharTransf" class="mob-panel on">
+          <button class="mob-tool" data-mob-key="KeyG">Перемістити</button>
+          <button class="mob-tool" data-mob-key="KeyR">Повернути</button>
+          <button class="mob-tool" data-mob-key="KeyS">Масштаб</button>
+          <button class="mob-tool" data-mob-key="KeyM">Мірор</button>
+          <button class="mob-tool" data-mob-key="KeyB">Згин</button>
+          <button class="mob-tool" data-mob-key="KeyQ">Піовт</button>
+          <button class="mob-tool" data-mob-key="Escape">Скасувати</button>
+          <button class="mob-tool" data-mob-key="Enter">Ок</button>
+        </div>
+        <!-- Parts panel -->
+        <div id="mobCharParts" class="mob-panel">
+          <div id="mob-char-parts-chips"></div>
+        </div>
+        <!-- Anim panel -->
+        <div id="mobCharAnim" class="mob-panel" style="flex-direction:column;padding:4px 6px;gap:4px;min-height:auto">
+          <div id="mob-char-anim-row">
+            <select id="mob-charSel" title="Персонаж"></select>
+            <select id="mob-anim" title="Анімація"></select>
+          </div>
+          <div id="mob-char-anim-btns">
+            <button class="mob-tool" id="mob-char-play" data-mob-key="Space">▶ / ⏸</button>
+            <button class="mob-tool" data-mob-char-click="resetAnim">Скинути</button>
+            <button class="mob-tool" data-mob-char-click="keyBtn">Ключ</button>
+          </div>
+        </div>
+        <!-- AI prompt -->
+        <div id="mob-char-prompt-row" style="display:flex;gap:5px;padding:4px 6px;border-top:1px solid var(--line);align-items:center">
+          <input type="text" id="mob-char-aiPrompt" placeholder="Опис персонажа…" style="flex:1;height:32px;background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;font-family:inherit;outline:none">
+          <button id="mob-char-aiGenBtn" style="flex:0 0 auto;padding:6px 10px;font-size:12px">gen</button>
+        </div>
+        <!-- Actions -->
+        <div id="mob-char-actions" style="display:flex;gap:6px;padding:5px 6px;border-top:1px solid var(--line)">
+          <button id="mob-char-undo" style="flex:1;padding:8px 4px;font-size:13px">Скасувати</button>
+          <button id="mob-char-save" style="flex:1;padding:8px 4px;font-size:13px">Зберегти</button>
+          <button id="mob-char-publish" class="btn-accent" style="flex:1;padding:8px 4px;font-size:13px">Оновити гру</button>
+        </div>
+        <!-- Icon row -->
+        <div id="mob-char-iconRow" class="mob-iconRow" style="display:flex;gap:4px;padding:4px 6px;border-top:1px solid var(--line);overflow-x:auto;scrollbar-width:none">
+          <button class="mob-icon" data-mob-char-toggle="showPivots" title="Піоти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
+          <button class="mob-icon" data-mob-char-toggle="showRef" title="Концепт"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-4 4 3 3-3 6 5"/></svg></button>
+          <button class="mob-icon" data-mob-char-toggle="keyBg" title="Очищати фон"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7z"/></svg></button>
+          <button class="mob-icon" data-mob-char-toggle="bwPreview" title="Ч/Б"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3z" fill="currentColor" stroke="none"/></svg></button>
+          <button class="mob-icon" data-mob-char-click="setHeadLine" title="Лінія висоти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M12 9v9M8 14l4 4 4-4"/></svg></button>
+          <button class="mob-icon" data-mob-char-click="constructorBtn" title="Конструктор"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg></button>
+        </div>
+      </div>
     </div>
 
     <!-- Вікно футпринта ассета (ПКМ на картці в бібліотеці рівнів) -->
@@ -684,33 +763,39 @@
     <script type="module" src="/src/rig/main.ts"></script>
     <script>
     (function () {
-      // Перемикання вкладок доку
-      document.querySelectorAll('.mob-tab').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          document.querySelectorAll('.mob-tab').forEach(function (t) { t.classList.remove('on'); });
-          document.querySelectorAll('.mob-panel').forEach(function (p) { p.classList.remove('on'); });
-          btn.classList.add('on');
-          var panel = document.getElementById(btn.dataset.mobPanel);
-          if (panel) panel.classList.add('on');
+      // ── Загальна утиліта: переключення вкладок всередині конкретного докера ──
+      function setupDock(dockId, panelAttr) {
+        var dock = document.getElementById(dockId); if (!dock) return;
+        dock.querySelectorAll('.mob-tab').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            dock.querySelectorAll('.mob-tab').forEach(function (t) { t.classList.remove('on'); });
+            dock.querySelectorAll('.mob-panel').forEach(function (p) { p.classList.remove('on'); });
+            btn.classList.add('on');
+            var panel = document.getElementById(btn.dataset[panelAttr]);
+            if (panel) panel.classList.add('on');
+          });
         });
-      });
+      }
+      setupDock('mob-dock', 'mobPanel');
+      setupDock('mob-char-dock', 'mobCharPanel');
 
-      // Кнопки що диспатчать keydown (G, R, S, M, Delete …)
+      // ── Keydown dispatch — спільний для обох докерів ──
       document.querySelectorAll('[data-mob-key]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          window.dispatchEvent(new KeyboardEvent('keydown', { code: btn.dataset.mobKey, bubbles: true }));
+          var code = btn.dataset.mobKey;
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: code, bubbles: true, cancelable: true }));
           setTimeout(syncMobState, 50);
         });
       });
 
-      // Ctrl+Z
+      // Ctrl+Z (загальний undo)
       document.querySelectorAll('[data-mob-ctrl]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           window.dispatchEvent(new KeyboardEvent('keydown', { code: btn.dataset.mobCtrl, ctrlKey: true, bubbles: true }));
         });
       });
 
-      // Дзеркальні кнопки — делегують на існуючі десктопні кнопки
+      // ── Level dock: дзеркальні кнопки ──
       document.querySelectorAll('[data-mob-mirror]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var orig = document.getElementById(btn.dataset.mobMirror);
@@ -719,7 +804,7 @@
         });
       });
 
-      // Синхронізація стану on/off з десктопних кнопок на мобільні
+      // Синхронізація on/off для level dock
       function syncMobState() {
         document.querySelectorAll('[data-mob-mirror]').forEach(function (btn) {
           var orig = document.getElementById(btn.dataset.mobMirror);
@@ -728,7 +813,7 @@
       }
       setInterval(syncMobState, 400);
 
-      // AI панель
+      // Level dock AI
       document.getElementById('mob-aiGenBtn')?.addEventListener('click', function () {
         var src = document.getElementById('mob-aiPrompt');
         var dst = document.getElementById('lv-aiPrompt');
@@ -736,7 +821,7 @@
         document.getElementById('lv-aiGenBtn')?.click();
       });
 
-      // Зберегти / Оновити гру
+      // Level dock actions
       document.getElementById('mob-undo')?.addEventListener('click', function () {
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true, bubbles: true }));
       });
@@ -746,6 +831,73 @@
       document.getElementById('mob-publish')?.addEventListener('click', function () {
         document.getElementById('lv-mobPublish')?.click();
       });
+
+      // ── Char dock ──────────────────────────────────────────────────────────
+
+      // Клік по елементу десктопної панелі (char dock)
+      document.querySelectorAll('[data-mob-char-click]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          document.getElementById(btn.dataset.mobCharClick)?.click();
+        });
+      });
+
+      // Toggle (checkbox labels) для char dock
+      function syncCharIconState() {
+        document.querySelectorAll('[data-mob-char-toggle]').forEach(function (btn) {
+          var cb = document.getElementById(btn.dataset.mobCharToggle);
+          if (cb) btn.classList.toggle('on', cb.checked !== undefined ? cb.checked : cb.classList.contains('on'));
+        });
+      }
+      document.querySelectorAll('[data-mob-char-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var cb = document.getElementById(btn.dataset.mobCharToggle);
+          if (!cb) return;
+          if (cb.type === 'checkbox') { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+          else { cb.click(); }
+          setTimeout(syncCharIconState, 50);
+        });
+      });
+      setInterval(syncCharIconState, 400);
+
+      // Char dock: Зберегти / Оновити / Undo
+      document.getElementById('mob-char-undo')?.addEventListener('click', function () {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true, bubbles: true }));
+      });
+      document.getElementById('mob-char-save')?.addEventListener('click', function () {
+        document.getElementById('saveChar')?.click();
+      });
+      document.getElementById('mob-char-publish')?.addEventListener('click', function () {
+        document.getElementById('charMobPublish')?.click();
+      });
+
+      // Char dock: AI
+      document.getElementById('mob-char-aiGenBtn')?.addEventListener('click', function () {
+        var src = document.getElementById('mob-char-aiPrompt');
+        var dst = document.getElementById('aiPrompt');
+        if (src && dst) dst.value = src.value;
+        document.getElementById('aiGenBtn')?.click();
+      });
+
+      // Char dock: anim selects sync
+      function syncCharAnimSelects() {
+        ['charSel', 'anim'].forEach(function (id) {
+          var real = document.getElementById(id);
+          var mob = document.getElementById('mob-' + (id === 'charSel' ? 'charSel' : 'anim'));
+          if (!real || !mob) return;
+          if (mob.childElementCount !== real.childElementCount) mob.innerHTML = real.innerHTML;
+          if (mob.value !== real.value) mob.value = real.value;
+        });
+      }
+      setInterval(syncCharAnimSelects, 250);
+      document.getElementById('mob-charSel')?.addEventListener('change', function () {
+        var real = document.getElementById('charSel');
+        if (real) { real.value = this.value; real.dispatchEvent(new Event('change')); }
+      });
+      document.getElementById('mob-anim')?.addEventListener('change', function () {
+        var real = document.getElementById('anim');
+        if (real) { real.value = this.value; real.dispatchEvent(new Event('change')); }
+      });
+
     })();
     </script>
   </body>

@@ -112,6 +112,8 @@ const state = {
   startMx: 0,
   startMy: 0,
 };
+let _drawRaf = 0;
+let _rigPanning = false;
 for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
@@ -372,7 +374,8 @@ function drawImageAt(sel: string, alpha: number): void {
   }
   ctx.restore();
 }
-function draw(): void {
+function _drawNow(): void {
+  ctx.imageSmoothingEnabled = !_rigPanning;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   // лінія землі — де мають стояти ноги
   const groundUY = -4 + BASE.legs * state.prop.legs;
@@ -455,6 +458,10 @@ function draw(): void {
     const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
+}
+function draw(): void {
+  if (_drawRaf) return;
+  _drawRaf = requestAnimationFrame(() => { _drawRaf = 0; _drawNow(); });
 }
 
 // ---- ghost / first-frame overlay ----
@@ -627,6 +634,11 @@ function refreshChips(): void {
   };
   renderRows($('slotChips'), LIST_ROWS);
   renderRows($('faceChips'), FACE_ROWS);
+  // Mobile dock parts strip (exists only on small screens)
+  const mobParts = document.getElementById('mob-char-parts-chips');
+  if (mobParts) renderRows(mobParts, LIST_ROWS);
+  const mobFace = document.getElementById('mob-char-face-chips');
+  if (mobFace) renderRows(mobFace, FACE_ROWS);
   updateFacePanel();
 }
 function updateFacePanel(): void {
@@ -1814,5 +1826,90 @@ window.addEventListener('resize', syncPanelHeights);
 {
   const tl = document.getElementById('timelineBar');
   if (tl) new ResizeObserver(syncPanelHeights).observe(tl);
+}
+
+// ─── Touch support for rig canvas (1-finger = drag/mode, 2-finger = pan+pinch) ────
+{
+  let _touchPanActive = false;
+  let _touchPanStart = { mx: 0, my: 0, px: 0, py: 0 };
+  let _pinchDist = 0;
+  let _singleTouchDown = false;
+
+  const _cpos = (t: Touch): { x: number; y: number } => {
+    const r = canvas.getBoundingClientRect();
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+
+  canvas.addEventListener('touchstart', (ev) => {
+    ev.preventDefault();
+    if (ev.touches.length === 1) {
+      _singleTouchDown = true; _touchPanActive = false;
+      const { x, y } = _cpos(ev.touches[0]);
+      state.mouse = { x, y };
+      const c = { x: mirrorX(x), y };
+      if (state.mode) return; // touchend підтверджує
+      if (state.cutMode && state.selected !== 'ref') {
+        const loc = curLocal(state.selected, c.x, c.y);
+        if (loc) { pushUndo(); state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); }
+        state.cutMode = false; status('Розріз поставлено.'); refreshUI(); return;
+      }
+      if (state.pivotMode && state.selected !== 'ref') {
+        const loc = curLocal(state.selected, c.x, c.y);
+        if (loc) { pushUndo(); state.slots[state.selected].pivotX = Math.max(0, Math.min(1, loc.lx / loc.iw)); state.slots[state.selected].pivotY = Math.max(0, Math.min(1, loc.ly / loc.ih)); }
+        state.pivotMode = false; refreshUI(); return;
+      }
+      const hit = hitTest(c.x, c.y);
+      const key = hit ?? (state.selected === 'ref' && state.ref.canvas ? 'ref' : null);
+      if (key) { state.selected = key; pushUndo(); const t2 = tf(key); drag = { key, sx: c.x, sy: c.y, dx: t2.dx, dy: t2.dy }; refreshUI(); }
+    } else if (ev.touches.length === 2) {
+      _singleTouchDown = false; drag = null;
+      const p1 = _cpos(ev.touches[0]), p2 = _cpos(ev.touches[1]);
+      _pinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      _touchPanActive = true; _rigPanning = true;
+      _touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (ev) => {
+    ev.preventDefault();
+    if (ev.touches.length === 1 && _singleTouchDown && !_touchPanActive) {
+      const { x, y } = _cpos(ev.touches[0]);
+      state.mouse = { x, y };
+      if (state.mode) { applyMode(); draw(); return; }
+      if (drag) {
+        const wx = mirrorX(x);
+        const pr = drag.key !== 'ref' && PARENT[drag.key] ? worldOf(PARENT[drag.key]!).rot : 0;
+        const wdx = wx - drag.sx, wdy = y - drag.sy;
+        const co = Math.cos(-pr), si = Math.sin(-pr);
+        tf(drag.key).dx = drag.dx + (wdx * co - wdy * si) / s();
+        tf(drag.key).dy = drag.dy + (wdx * si + wdy * co) / s();
+        draw();
+      }
+    } else if (ev.touches.length === 2 && _touchPanActive) {
+      const p1 = _cpos(ev.touches[0]), p2 = _cpos(ev.touches[1]);
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      state.pan.x = _touchPanStart.px + (mx - _touchPanStart.mx);
+      state.pan.y = _touchPanStart.py + (my - _touchPanStart.my);
+      if (_pinchDist > 0) state.zoom = Math.min(3, Math.max(0.3, state.zoom * dist / _pinchDist));
+      _pinchDist = dist;
+      _touchPanStart = { mx, my, px: state.pan.x, py: state.pan.y };
+      applyOrigin(); resize(); draw();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (ev) => {
+    ev.preventDefault();
+    if (ev.touches.length === 0) {
+      if (_singleTouchDown && state.mode) endMode(true);
+      drag = null;
+      _singleTouchDown = false; _touchPanActive = false; _pinchDist = 0;
+      _rigPanning = false; draw();
+    } else if (ev.touches.length === 1 && _touchPanActive) {
+      _touchPanActive = false; _pinchDist = 0; _singleTouchDown = true;
+      _rigPanning = false; draw();
+    }
+  }, { passive: false });
 }
 
