@@ -1,17 +1,16 @@
 // Генерація ігрових ассетів через OpenAI Images (gpt-image-1). Пайплайн:
-//   промпт (+опц. реф-зображення) → gpt-image-1 → прозорий PNG (фон вирізає сама модель).
-// gpt-image-1 уміє background:transparent, тож окремий крок вирізу фону більше не потрібен.
+//   промпт (+ опц. реф-зображення як підказка) → gpt-image-1 generations → прозорий PNG.
+// Важливо: /images/edits НЕ використовується — він "приклеюється" до реалізму вхідного фото.
+// Реф-зображення → gpt-4o-mini описує сюжет → опис іде в text-to-image generations.
 //
 // Ключ: на деплої — у воркері-проксі (секрет OPENAI_KEY), у бандл НЕ потрапляє.
 //       локально — VITE_OPENAI_KEY з .env (ок для особистого інструмента).
 
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY as string | undefined;
-// URL воркера-проксі (Cloudflare). Той самий, що був для fal (repo variable VITE_FAL_PROXY),
-// просто всередині воркер тепер кличе OpenAI. Заданий → усі виклики йдуть через нього (деплой).
+// URL воркера-проксі (Cloudflare). Заданий → усі виклики йдуть через нього (деплой).
 const AI_PROXY = import.meta.env.VITE_FAL_PROXY as string | undefined;
 
 // Спільна основа стилю — Darkest Dungeon 1 ink-wash з обмеженою палітрою.
-// Акцент на "майже монохромний" щоб модель не додавала яскравих кольорів.
 const STYLE_BASE =
   'video game 2D sprite, Ukrainian folk dark fantasy setting, ' +
   'Darkest Dungeon 1 original art style: aggressive crosshatching and hatching, thick uneven black ink outlines, ' +
@@ -33,68 +32,56 @@ const STYLE_PROP =
 const MODEL = 'gpt-image-1';
 const SIZE = '1024x1024';
 
-// dataURL → Blob (для multipart-режиму edits у локальному прямому виклику).
-function dataUrlToBlob(dataUrl: string): Blob {
-  const comma = dataUrl.indexOf(',');
-  const meta = dataUrl.slice(0, comma);
-  const b64 = dataUrl.slice(comma + 1);
-  const mime = (meta.match(/data:([^;]+)/) || [])[1] || 'image/png';
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
 // Відповідь OpenAI Images → dataURL (png). Формат: { data: [{ b64_json }] }.
 function openaiOutToDataUrl(out: unknown): string {
   const o = out as { data?: Array<{ b64_json?: string; url?: string }> };
   const b64 = o?.data?.[0]?.b64_json;
   if (b64) return 'data:image/png;base64,' + b64;
   const url = o?.data?.[0]?.url;
-  if (url) return url; // на випадок, якщо колись повертатимуть URL
+  if (url) return url;
   throw new Error('OpenAI не повернув зображення');
 }
 
-// Один виклик генерації. prompt — повний промпт; refDataUrl — опційний реф (тоді режим edits).
-// Повертає dataURL прозорого PNG.
-async function openaiImage(prompt: string, refDataUrl?: string | null): Promise<string> {
-  // Режим проксі (деплой): шлемо { prompt, size, image? } на воркер, ключ — на сервері.
+// Описати сюжет реф-зображення через gpt-4o-mini vision (локально, лише якщо є OPENAI_KEY).
+// Повертає короткий опис об'єкта (~10-15 слів) або порожній рядок при помилці.
+async function describeImageSubject(dataUrl: string): Promise<string> {
+  if (!OPENAI_KEY) return '';
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + OPENAI_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Describe only the main object or subject in this image in 10-15 words. Focus on what it IS and its general form/shape. No style, no colors, no background — just the subject itself.' },
+          { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } },
+        ]}],
+        max_tokens: 60,
+      }),
+    });
+    if (!res.ok) return '';
+    const d = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return (d.choices?.[0]?.message?.content ?? '').trim();
+  } catch { return ''; }
+}
+
+// Виклик text-to-image (завжди /generations — /edits якорить до реалізму вхідного фото).
+async function openaiImage(prompt: string): Promise<string> {
   if (AI_PROXY) {
     const res = await fetch(AI_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, size: SIZE, image: refDataUrl || undefined }),
+      body: JSON.stringify({ prompt, size: SIZE }),
     });
     if (!res.ok) throw new Error(`Проксі gpt-image: ${res.status} ${(await res.text()).slice(0, 200)}`);
     return openaiOutToDataUrl(await res.json());
   }
 
-  // Прямий виклик із ключем (локальна розробка з .env). На деплої НЕ використовувати — ключ публічний.
   if (!OPENAI_KEY) throw new Error('Немає VITE_FAL_PROXY (деплой) або VITE_OPENAI_KEY (локально)');
 
-  if (refDataUrl) {
-    // image-to-image → /v1/images/edits (multipart/form-data).
-    const fd = new FormData();
-    fd.append('model', MODEL);
-    fd.append('prompt', prompt);
-    fd.append('size', SIZE);
-    fd.append('background', 'transparent');
-    fd.append('output_format', 'png');
-    fd.append('n', '1');
-    fd.append('image', dataUrlToBlob(refDataUrl), 'ref.png');
-    const res = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + OPENAI_KEY },
-      body: fd,
-    });
-    if (!res.ok) throw new Error(`OpenAI edits: ${res.status} ${(await res.text()).slice(0, 200)}`);
-    return openaiOutToDataUrl(await res.json());
-  }
-
-  // text-to-image → /v1/images/generations (JSON).
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + OPENAI_KEY, 'Content-Type': 'application/json' },
+    headers: { Authorization: 'Bearer ' + OPENAI_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: MODEL, prompt, size: SIZE, background: 'transparent', output_format: 'png', n: 1 }),
   });
   if (!res.ok) throw new Error(`OpenAI generations: ${res.status} ${(await res.text()).slice(0, 200)}`);
@@ -103,9 +90,9 @@ async function openaiImage(prompt: string, refDataUrl?: string | null): Promise<
 
 export interface GenOptions {
   prompt: string;
-  refDataUrl?: string | null; // опційний реф (data URL)
+  refDataUrl?: string | null; // опційний реф — використовується для автоопису сюжету, не як вхід для edits
   context?: 'char' | 'prop';  // char = рівне освітлення; prop = світло зверху-зліва
-  removeBg?: boolean;         // лишено для сумісності; gpt-image-1 і так дає прозорий фон (ігнорується)
+  removeBg?: boolean;         // лишено для сумісності; ігнорується
 }
 
 // Згенерувати ассет. Повертає прозорий PNG як dataURL.
@@ -114,17 +101,15 @@ export async function generateGameAsset(opts: GenOptions): Promise<string> {
   if (!userPrompt && !opts.refDataUrl) throw new Error('Потрібен промпт або реф-зображення');
   const stylePreprompt = opts.context === 'char' ? STYLE_CHAR : STYLE_PROP;
 
-  let fullPrompt: string;
-  if (opts.refDataUrl) {
-    // Режим стилізації фото: явно просимо перемалювати форму з рефу.
-    // Користувачу достатньо написати назву об'єкта або залишити поле порожнім.
-    const subject = userPrompt || 'this object';
-    fullPrompt = `STYLE TRANSFER ONLY — completely ignore all photographic and realistic qualities of the reference image. Use the reference ONLY to identify the subject: "${subject}". Generate a brand new image from scratch in a totally different artistic style: bold flat 2D hand-drawn ink artwork, thick uneven black outlines, stark exaggerated folk-horror silhouette with distorted non-realistic proportions, zero photorealism, zero 3D depth, zero perspective shading, simplified and iconic shapes like a woodcut print. ${stylePreprompt}`;
-  } else {
-    fullPrompt = userPrompt ? `${userPrompt}, ${stylePreprompt}` : stylePreprompt;
+  let subject = userPrompt;
+
+  if (opts.refDataUrl && !userPrompt) {
+    // Юзер кинув реф без тексту — описуємо сюжет автоматично через vision.
+    subject = await describeImageSubject(opts.refDataUrl) || 'folk horror environment prop';
   }
 
-  return openaiImage(fullPrompt, opts.refDataUrl);
+  const fullPrompt = subject ? `${subject}, ${stylePreprompt}` : stylePreprompt;
+  return openaiImage(fullPrompt); // завжди text-to-image, реф у /edits не йде
 }
 
 // Чи є чим генерувати (проксі на деплої або ключ локально). Назву лишено для сумісності з editor.ts.
