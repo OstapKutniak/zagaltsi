@@ -68,6 +68,10 @@ const PARALLAX_FALLBACK = { bg: 0.5, sky: 0.8 };
 - Файли в `public/ui/` — білі іконки на прозорому фоні
 - Розмір відображення: 46×46px
 - Завантаження в `BootScene.preload()`
+- **⚠️ Зум суперсемплінгу + scrollFactor(0):** камера має `setZoom(RENDER_SCALE)`, а Phaser масштабує
+  й нерухомі (sf=0) об'єкти навколо центру камери → на рівні зі start≠0 HUD виїжджав за екран.
+  Фікс: `uiOffX/uiOffY = logicalW/H·(RENDER_SCALE−1)/2` додаються до позицій усіх sf=0 UI
+  (HUD/banner/ендгейм-тексти). **Новий sf=0 елемент → ОБОВ'ЯЗКОВО додай uiOffX/uiOffY.**
 
 ---
 
