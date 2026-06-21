@@ -1547,20 +1547,26 @@ export function initLevelEditor(prefix: string): void {
     if (fillOpen && fillMenu) { fillOpen = false; fillMenu.style.display = 'none'; $('fillBtn')?.classList.remove('on'); }
   });
   // Список «Наповнення» — у правій частині вьюпорта: ширина як таб «Історія» (B5),
-  // верх врівень з кнопкою «＋ Новий рівень».
+  // верх врівень з верхом прев'ю (де хелсбари HUD), висота обмежена до верху нижньої
+  // панелі — щоб довгий список (10 категорій) не накладався на тулбар.
   function positionFillMenu(): void {
     if (!fillMenu) return;
     const b5 = document.querySelectorAll('#topTabs button')[4] as HTMLElement | undefined;
-    const d1 = $('secLevels');
+    const preview = $('preview'); // lv-preview — зверху хелсбари гри; вирівнюємо меню по його верху
+    const toolbar = $('levelToolbar'); // нижня панель — нижня межа меню
     const stage = canvas.getBoundingClientRect();
     const w = b5?.offsetWidth || 170;
+    const top = preview ? preview.getBoundingClientRect().top : stage.top + 16;
+    const botLimit = toolbar ? toolbar.getBoundingClientRect().top - 8 : window.innerHeight - 8;
     fillMenu.style.position = 'fixed';
     fillMenu.style.left = (stage.right - w - 16) + 'px';
     fillMenu.style.right = 'auto';
     fillMenu.style.bottom = 'auto';
-    fillMenu.style.top = (d1 ? d1.getBoundingClientRect().top : stage.top + 16) + 'px';
+    fillMenu.style.top = top + 'px';
     fillMenu.style.width = w + 'px';
     fillMenu.style.flexDirection = 'column';
+    fillMenu.style.maxHeight = Math.max(120, botLimit - top) + 'px';
+    fillMenu.style.overflowY = 'auto';
   }
 
   // ── Згортувані секції правої панелі ──

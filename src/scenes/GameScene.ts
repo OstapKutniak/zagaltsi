@@ -95,6 +95,12 @@ export class GameScene extends Phaser.Scene {
   // Логічні розміри кадру (backing у RENDER_SCALE× більший — ділимо, щоб лишити 1280×576).
   private get logicalW(): number { return this.scale.width / RENDER_SCALE; }
   private get logicalH(): number { return this.scale.height / RENDER_SCALE; }
+  // Зсув для UI (scrollFactor(0)) елементів. Камера має setZoom(RENDER_SCALE), а Phaser масштабує
+  // й нерухомі (sf=0) об'єкти НАВКОЛО центру камери → елемент у логічних координатах виїжджає за
+  // екран. Додаємо logicalW·(RS−1)/2 до позиції UI, щоб після зум-навколо-центру він лягав туди ж,
+  // де в логічному кадрі 1280×576. При RS=1 зсув=0 (без змін).
+  private get uiOffX(): number { return this.logicalW * (RENDER_SCALE - 1) / 2; }
+  private get uiOffY(): number { return this.logicalH * (RENDER_SCALE - 1) / 2; }
 
   private get band(): { top: number; bottom: number } {
     return this.levelBand ?? { top: this.bandTop, bottom: this.bandBottom };
@@ -474,7 +480,7 @@ export class GameScene extends Phaser.Scene {
   private onResize(): void {
     this.computeLayout();
     this.repositionWorld();
-    if (this.banner) this.banner.setPosition(this.logicalW / 2, 84);
+    if (this.banner) this.banner.setPosition(this.logicalW / 2 + this.uiOffX, 84 + this.uiOffY);
     this.buildHudLayout();
     this.createHudGraphics();
     this.player?.clampDepth(this.band.top, this.band.bottom);
@@ -509,8 +515,8 @@ export class GameScene extends Phaser.Scene {
     const barYC = 26, barH = 16, arrowW = 12;
     const barY  = barYC - barH / 2;
 
-    // Контури барів
-    this.hudBars = this.add.graphics().setScrollFactor(0).setDepth(10001);
+    // Контури барів (графіку зсуваємо на uiOff — компенсація зуму камери для sf=0)
+    this.hudBars = this.add.graphics().setScrollFactor(0).setDepth(10001).setPosition(this.uiOffX, this.uiOffY);
     this.hudBars.lineStyle(2, 0xffffff, 0.85);
     for (const { barX, barW } of this.hudLayout) {
       this.hudBars.strokePoints([
@@ -525,15 +531,15 @@ export class GameScene extends Phaser.Scene {
     // Іконки
     for (const { iconKey, iconCx } of this.hudLayout) {
       this.hudIcons.push(
-        this.add.image(iconCx, barYC, iconKey)
+        this.add.image(iconCx + this.uiOffX, barYC + this.uiOffY, iconKey)
           .setScrollFactor(0)
           .setDepth(10002)
           .setDisplaySize(46, 46),
       );
     }
 
-    // Заливки (перемальовуються при зміні HP)
-    this.hudFills = this.add.graphics().setScrollFactor(0).setDepth(10000);
+    // Заливки (перемальовуються при зміні HP) — графіку зсуваємо на uiOff
+    this.hudFills = this.add.graphics().setScrollFactor(0).setDepth(10000).setPosition(this.uiOffX, this.uiOffY);
     this.lastHp = -1; // примусове перемалювання
     this.updateHud();
   }
@@ -580,7 +586,7 @@ export class GameScene extends Phaser.Scene {
       [1120, mid],
     ];
     for (const [x, y] of spots) this.enemies.push(new Enemy(this, x, y));
-    this.banner.setPosition(this.logicalW / 2, 84).setText('БИЙСЯ! Зачисти ворогів');
+    this.banner.setPosition(this.logicalW / 2 + this.uiOffX, 84 + this.uiOffY).setText('БИЙСЯ! Зачисти ворогів');
   }
 
   // Phaser викликає update щокадру; ми накопичуємо час і крутимо симуляцію
@@ -645,7 +651,7 @@ export class GameScene extends Phaser.Scene {
       this.cleared = true;
       this.player.maxX = WORLD_WIDTH - 20;
       this.gateLine.setVisible(false);
-      this.banner.setPosition(this.logicalW / 2, 84).setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
+      this.banner.setPosition(this.logicalW / 2 + this.uiOffX, 84 + this.uiOffY).setText('ШЛЯХ ВІЛЬНИЙ! До магазину →');
       this.time.delayedCall(1600, () => this.banner.setText(''));
     }
 
@@ -663,8 +669,8 @@ export class GameScene extends Phaser.Scene {
     this.finished = true;
     void saveValue('level1', 'done'); // прогрес у Telegram CloudStorage
 
-    const cx = this.logicalW / 2;
-    const cy = this.logicalH / 2;
+    const cx = this.logicalW / 2 + this.uiOffX;
+    const cy = this.logicalH / 2 + this.uiOffY;
     this.add
       .text(cx, cy - 20, 'ПИВО ДОБУТО! 🍺', { fontFamily: 'monospace', fontSize: '28px', color: '#ffd000' })
       .setOrigin(0.5)
