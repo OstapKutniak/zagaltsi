@@ -4,6 +4,7 @@ import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
+import { generateGameAsset, hasFalKey } from '../ai';
 
 // ---- Конструктор персонажа, керування у стилі Blender ----
 // Слоти під PNG (цілі кінцівки) + орієнтир-силует (теж трансформовний).
@@ -1792,9 +1793,47 @@ refreshTimeline();
 alignPartsList();
 status('');
 
-// ---- AI панель: drag-and-drop + click для рефу ----
+// ---- AI панель: drag-and-drop + click для рефу; кнопка «Створити» ----
 {
   wireAiDrop('aiRefDrop', 'aiRefInput', 'aiRefImg');
+
+  let _aiBusy = false;
+  const aiBtn = document.getElementById('aiGenBtn') as HTMLButtonElement | null;
+  if (aiBtn) {
+    aiBtn.addEventListener('click', () => {
+      if (_aiBusy) return;
+      const promptEl = document.getElementById('aiPrompt') as HTMLTextAreaElement | null;
+      const refImg = document.getElementById('aiRefImg') as HTMLImageElement | null;
+      const prompt = promptEl?.value.trim() ?? '';
+      const refUrl = refImg && refImg.style.display !== 'none' && refImg.src ? refImg.src : null;
+      if (!hasFalKey()) { status('Нема VITE_FAL_PROXY (деплой) або VITE_OPENAI_KEY (.env)'); return; }
+      if (!prompt && !refUrl) { status('Введи опис або кинь реф-зображення'); return; }
+      _aiBusy = true; const origTxt = aiBtn.textContent; aiBtn.textContent = 'Генерую…'; aiBtn.disabled = true;
+      status('AI генерує персонажа — зачекай 15–30с…');
+      void (async () => {
+        try {
+          const dataUrl = await generateGameAsset({ prompt, refDataUrl: refUrl, context: 'char' });
+          // Завантажуємо як canvas і кладемо в поточний вибраний слот
+          const im = new Image();
+          im.onload = () => {
+            const name = (prompt.slice(0, 24) || 'AI') + '-' + Date.now();
+            const keyBg = $<HTMLInputElement>('keyBg').checked;
+            const cv = keyBg && hasSolidBackground(im) ? keyImage(im) : imageToCanvas(im);
+            pushUndo();
+            state.images.set(name, cv);
+            if (!state.imageNames.includes(name)) state.imageNames.push(name);
+            if (state.selected !== 'ref') assignImage(state.selected, name);
+            refreshUI(); status('✔ Згенеровано — призначено до «' + state.selected + '»');
+          };
+          im.src = dataUrl;
+        } catch (e) {
+          status('AI помилка: ' + ((e as Error)?.message ?? e));
+        } finally {
+          _aiBusy = false; aiBtn.textContent = origTxt; aiBtn.disabled = false;
+        }
+      })();
+    });
+  }
 }
 
 function wireAiDrop(dropId: string, inputId: string, imgId: string) {

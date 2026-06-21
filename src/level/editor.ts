@@ -1920,7 +1920,7 @@ export function initLevelEditor(prefix: string): void {
       setStatus('AI генерує — це може зайняти 10–30с…');
       void (async () => {
         try {
-          const png = await generateGameAsset({ prompt, refDataUrl: refUrl });
+          const png = await generateGameAsset({ prompt, refDataUrl: refUrl, context: 'prop' });
           const url = await imgSrcToWebP(png, CAT_MAX_PX[state.cat] ?? 1024);
           const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: (prompt.trim().slice(0, 24) || 'AI'), url };
           state.assets.push(a); loadImg(a); refreshAssets(); save();

@@ -10,11 +10,25 @@ const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY as string | undefined;
 // просто всередині воркер тепер кличе OpenAI. Заданий → усі виклики йдуть через нього (деплой).
 const AI_PROXY = import.meta.env.VITE_FAL_PROXY as string | undefined;
 
-const STYLE_PREPROMPT =
-  'Ukrainian Cossack folk-art video game asset, hand-painted 2D illustration, ' +
-  'thick dark ink outlines, muted earthy desaturated color palette, moody grim ' +
-  'Darkest Dungeon and Don\'t Starve aesthetic, side view, single object centered, ' +
-  'isolated on a transparent background, even lighting, no cast shadow, no text, no watermark';
+// Спільна основа стилю — Darkest Dungeon 1 ink-wash з обмеженою палітрою.
+// Акцент на "майже монохромний" щоб модель не додавала яскравих кольорів.
+const STYLE_BASE =
+  'video game 2D sprite, Ukrainian folk dark fantasy setting, ' +
+  'Darkest Dungeon 1 original art style: aggressive crosshatching and hatching, thick uneven black ink outlines, ' +
+  'near-monochrome desaturated palette — charcoal black, ash grey, aged parchment yellow — muted rust-red accents only, ' +
+  'NO bright colors, NO saturated greens, NO vivid blues or teals, colors almost completely washed-out and aged, ' +
+  'dark oppressive grim atmosphere, high contrast with deep shadow regions and pale highlights, ' +
+  'isolated on transparent background, no cast shadow on ground, no text, no watermark';
+
+// Персонажі — рівне освітлення (спрайт може перевертатись).
+const STYLE_CHAR =
+  STYLE_BASE + ', ' +
+  'full body character, front-facing or slight 3/4 view, even ambient lighting';
+
+// Декорації/пропси рівня — фіксоване освітлення зверху-зліва для узгодженості сцени.
+const STYLE_PROP =
+  STYLE_BASE + ', ' +
+  'environment prop or decoration, lit from upper-left, darker right and bottom edges of the object';
 
 const MODEL = 'gpt-image-1';
 const SIZE = '1024x1024';
@@ -90,6 +104,7 @@ async function openaiImage(prompt: string, refDataUrl?: string | null): Promise<
 export interface GenOptions {
   prompt: string;
   refDataUrl?: string | null; // опційний реф (data URL)
+  context?: 'char' | 'prop';  // char = рівне освітлення; prop = світло зверху-зліва
   removeBg?: boolean;         // лишено для сумісності; gpt-image-1 і так дає прозорий фон (ігнорується)
 }
 
@@ -97,7 +112,8 @@ export interface GenOptions {
 export async function generateGameAsset(opts: GenOptions): Promise<string> {
   const userPrompt = (opts.prompt || '').trim();
   if (!userPrompt && !opts.refDataUrl) throw new Error('Потрібен промпт або реф-зображення');
-  const fullPrompt = userPrompt ? `${userPrompt}, ${STYLE_PREPROMPT}` : STYLE_PREPROMPT;
+  const stylePreprompt = opts.context === 'char' ? STYLE_CHAR : STYLE_PROP;
+  const fullPrompt = userPrompt ? `${userPrompt}, ${stylePreprompt}` : stylePreprompt;
   return openaiImage(fullPrompt, opts.refDataUrl);
 }
 
