@@ -15,7 +15,7 @@ const STYLE_BASE =
   'near-monochrome desaturated palette — charcoal black, ash grey, aged parchment yellow — muted rust-red accents only, ' +
   'NO bright colors, NO saturated greens, NO vivid blues or teals, colors almost completely washed-out and aged, ' +
   'dark oppressive grim atmosphere, high contrast with deep shadow regions and pale highlights, ' +
-  'isolated on transparent background, no cast shadow on ground, no text, no watermark';
+  'isolated on plain flat solid neutral gray background, no parchment texture behind subject, no cast shadow on ground, no text, no watermark';
 
 const STYLE_CHAR = STYLE_BASE + ', full body character, front-facing or slight 3/4 view, even ambient lighting';
 const STYLE_PROP = STYLE_BASE + ', environment prop or decoration, lit from upper-left, darker right and bottom edges of the object';
