@@ -28,6 +28,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        # URL воркера-проксі для AI-генерації на живій студії. Це лише АДРЕСА (не ключ) — безпечно
+        # в публічному бандлі; ключ Fal тримає сам воркер на сервері. Задається як repo VARIABLE
+        # (Settings → Secrets and variables → Actions → Variables), НЕ secret. Не заданий → генерація вимкнена.
+        env:
+          VITE_FAL_PROXY: ${{ vars.VITE_FAL_PROXY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

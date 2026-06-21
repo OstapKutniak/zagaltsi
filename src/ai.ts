@@ -5,6 +5,9 @@
 // Передпромпт стилю — чернетка під козацький стиль; перепишемо коли визначимось остаточно.
 
 const FAL_KEY = import.meta.env.VITE_FAL_KEY as string | undefined;
+// URL воркера-проксі (Cloudflare/Vercel). Безпечно лежить у бандлі — це лише адреса, ключ Fal
+// тримає сам воркер на сервері. Якщо заданий — усі виклики йдуть через нього (для деплою).
+const FAL_PROXY = import.meta.env.VITE_FAL_PROXY as string | undefined;
 
 const STYLE_PREPROMPT =
   'Ukrainian Cossack folk-art video game asset, hand-painted 2D illustration, ' +
@@ -19,7 +22,18 @@ const REMBG = 'fal-ai/birefnet'; // авто-виріз фону
 interface FalImage { url: string }
 
 async function falRun(model: string, body: Record<string, unknown>): Promise<unknown> {
-  if (!FAL_KEY) throw new Error('Немає VITE_FAL_KEY у .env');
+  // Режим проксі (рекомендовано для деплою): шлемо {model, body} на воркер, ключ — на сервері.
+  if (FAL_PROXY) {
+    const res = await fetch(FAL_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, body }),
+    });
+    if (!res.ok) throw new Error(`Проксі ${model}: ${res.status} ${(await res.text()).slice(0, 200)}`);
+    return res.json();
+  }
+  // Прямий виклик із ключем (локальна розробка з .env). На деплої НЕ використовувати — ключ публічний.
+  if (!FAL_KEY) throw new Error('Немає VITE_FAL_PROXY (деплой) або VITE_FAL_KEY (локально)');
   const res = await fetch('https://fal.run/' + model, {
     method: 'POST',
     headers: { 'Authorization': 'Key ' + FAL_KEY, 'Content-Type': 'application/json' },
@@ -83,4 +97,4 @@ export async function generateGameAsset(opts: GenOptions): Promise<string> {
   return urlToDataUrl(imgUrl);
 }
 
-export const hasFalKey = (): boolean => !!FAL_KEY;
+export const hasFalKey = (): boolean => !!(FAL_PROXY || FAL_KEY);
