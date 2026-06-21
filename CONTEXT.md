@@ -143,24 +143,39 @@ GitHub Pages через Vite build.
 
 ---
 
-## AI генерація (OpenAI gpt-image-1)
-- ⚠️ Раніше була на **fal (flux/dev + birefnet)** — переведено на **OpenAI `gpt-image-1`** (2026-06-21),
-  бо fal-акаунт `84607c5c-…` заблокувався (exhausted balance; той самий ключ палив 3D Hunyuan у Blender-тулзі).
-- `.env` в корені (не в git): `VITE_OPENAI_KEY` (генерація), `VITE_FAL_KEY`/`VITE_LEONARDO_KEY` (лишились, не вживаються студією).
-- `src/ai.ts`: `generateGameAsset()` — промпт(+опц.реф) → `gpt-image-1` → прозорий PNG (фон вирізає сама
-  модель, `background:transparent`; окремий крок birefnet ВИКИНУТО) → dataURL. `STYLE_PREPROMPT` — ЧЕРНЕТКА.
-  text2img → `/v1/images/generations`; img2img (реф) → `/v1/images/edits` (multipart). Розмір `1024x1024`.
-- **Редактор рівнів** (`#lv-aiGenBtn`): wireAiGenerate() — клік → generateGameAsset → imgSrcToWebP →
-  додає Asset у бібліотеку під ПОТОЧНОЮ категорією (`state.cat`) → refreshAssets+save.
-- Drop zone: `.ai-drop-zone`, ПКМ очищає реф.
-- **Деплой (github.io) — через ПРОКСІ** (щоб не світити ключ): `ai.ts` дивиться на `VITE_FAL_PROXY`
-  (історична назва repo variable = URL воркера; лишена щоб не чіпати Actions). Заданий → шле на воркер
-  `{prompt, size, image?}`, ключ OpenAI на сервері. Не заданий → прямий виклик із `VITE_OPENAI_KEY` (локально).
-  Воркер: [`serverless/openai-proxy.worker.js`](serverless/openai-proxy.worker.js) (кроки деплою в коментарях).
-- ✅ **НА ДЕПЛОЇ** (2026-06-21): воркер `horugva.priko1isf.workers.dev` (Cloudflare, акаунт priko1isf).
-  ТРЕБА на воркері: вставити новий код `openai-proxy.worker.js` + додати секрет `OPENAI_KEY` (sk-proj-…).
-  repo variable `VITE_FAL_PROXY` (= URL воркера) лишається без змін. Лишилось: фіналізувати `STYLE_PREPROMPT`;
-  поставити ліміт витрат в OpenAI (platform.openai.com → Billing) — запобіжник проти зловживання відкритим URL.
+## AI генерація (OpenAI gpt-image-1 + remove.bg)
+
+### Пайплайн (станом на 2026-06-22)
+- **Деплой:** `gpt-image-1` (quality:high, без `background:transparent`) → `remove.bg` → прозорий PNG b64 → клієнт.
+  `background:transparent` викинуто — деградує якість стилю. Фон вирізає remove.bg окремо.
+- **Локально:** `gpt-image-1` напряму, фон НЕ вирізається (CORS блокує remove.bg з браузера).
+- `/images/edits` **ПРИБРАНО НАЗАВЖДИ** — прив'язується до реалізму вхідного фото.
+  Реф-зображення → `gpt-4o-mini` описує сюжет (~15 слів) → опис іде в `/v1/images/generations`.
+
+### Ключі та середовище
+- `.env` в корені (не в git): `VITE_OPENAI_KEY` (локально), `VITE_FAL_PROXY` = URL воркера (деплой).
+- Воркер `horugva.priko1isf.workers.dev` (Cloudflare, акаунт priko1isf).
+  Секрети на воркері: `OPENAI_KEY` + `REMOVEBG_KEY` (remove.bg, tD1A…).
+- `VITE_FAL_PROXY` (repo variable, назва лишена стара) → шле `{prompt, size}` на воркер.
+  Воркер: [`serverless/openai-proxy.worker.js`](serverless/openai-proxy.worker.js).
+
+### Промпти (фіналізовані)
+`STYLE_BASE` = DD1 ink-wash: crosshatching, thick black ink outlines, near-monochrome (charcoal/ash/parchment/rust), NO bright colors, isolated on transparent background.
+- `STYLE_CHAR` = BASE + `full body character, front-facing or slight 3/4 view, even ambient lighting`
+- `STYLE_PROP` = BASE + `environment prop or decoration, lit from upper-left, darker right and bottom edges`
+- `GenOptions.context: 'char' | 'prop'` — char = персонажний редактор, prop = рівневий.
+
+### UI
+- Редактор рівнів: `#lv-aiGenBtn`, `#lv-aiPrompt`, `#lv-aiRefDrop`
+- Редактор персонажів: `#aiGenBtn`, `#aiPrompt`, `#aiRefDrop`
+- Drop zone (реф): `.ai-drop-zone`, ПКМ очищає реф.
+
+### ⚠️ Після кожної зміни воркера — оновити вручну
+dash.cloudflare.com → Workers & Pages → horugva → Edit code → вставити `openai-proxy.worker.js` → Deploy.
+(GitHub Actions деплоїть тільки гру на gh-pages, воркер — вручну.)
+
+### TODO
+- Поставити ліміт витрат в OpenAI (platform.openai.com → Billing) і в remove.bg dashboard — URL воркера відкритий.
 
 ---
 
