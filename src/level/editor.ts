@@ -1195,7 +1195,7 @@ export function initLevelEditor(prefix: string): void {
             refreshSel(); draw(); save(); return;
           }
         }
-        if (state.mode) { state.mode = null; state.orig = null; save(); return; }
+        if (state.mode) return; // touchmove відстежує позицію, touchend підтверджує
         if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
         if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
         if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
@@ -1219,6 +1219,7 @@ export function initLevelEditor(prefix: string): void {
       if (ev.touches.length === 1 && singleTouchDown && !touchPanActive) {
         const { x, y } = cpos(ev.touches[0]);
         state.mouse = { x, y };
+        if (state.mode) { applyMode(); draw(); return; }
         if (state.markerDrag) {
           const w = toWorld(x, y); const lv = level();
           if (state.markerDrag === 'start') lv.start = w.x;
@@ -1244,7 +1245,8 @@ export function initLevelEditor(prefix: string): void {
     canvas.addEventListener('touchend', (ev) => {
       ev.preventDefault();
       if (ev.touches.length === 0) {
-        if (singleTouchDown && (drag || painting || state.markerDrag)) save();
+        if (singleTouchDown && state.mode) { state.mode = null; state.orig = null; save(); }
+        else if (singleTouchDown && (drag || painting || state.markerDrag)) save();
         drag = null; painting = false; state.markerDrag = null;
         singleTouchDown = false; touchPanActive = false; pinchDist = 0;
       } else if (ev.touches.length === 1 && touchPanActive) {

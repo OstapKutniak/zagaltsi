@@ -203,6 +203,20 @@
       #status { font-size: 12px; color: var(--muted); min-height: 0; }
       #lv-libSelect:hover { background: #565656 !important; }
 
+      /* ─── Mobile bottom dock ─────────────────────────────────────────── */
+      #mob-dock { display: none; flex-direction: column; flex-shrink: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      #mob-tabRow { display: flex; }
+      .mob-tab { flex: 1; padding: 6px 3px; font-size: 11px; font-weight: 600; border-radius: 0; background: var(--rail); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+      .mob-tab:last-child { border-right: 0; }
+      .mob-tab.on { background: var(--accent); color: #1b1b1b; border-bottom-color: var(--accent); }
+      .mob-panel { display: none; flex-direction: row; gap: 5px; padding: 5px 6px; overflow-x: auto; align-items: center; min-height: 50px; }
+      .mob-panel.on { display: flex; }
+      .mob-tool { flex: 0 0 auto; padding: 7px 10px; font-size: 12px; white-space: nowrap; min-height: 34px; }
+      .mob-tool.on { background: var(--accent) !important; color: #1b1b1b !important; font-weight: 600; }
+      #mob-aiPrompt { flex: 1; min-width: 130px; height: 36px; background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 12px; resize: none; font-family: inherit; outline: none; }
+      #mob-actions { display: flex; gap: 6px; padding: 5px 6px; border-top: 1px solid var(--line); }
+      #mob-actions button { flex: 1; padding: 8px 4px; font-size: 13px; }
+
       /* ─── Mobile layout (екран < 900px) ──────────────────────────────── */
       @media (max-width: 900px) {
         html, body { overflow: hidden; }
@@ -321,15 +335,21 @@
           line-height: 1.2; text-align: center;
         }
 
-        .mode-level #lv-right {
-          order: 6;
-          width: 100% !important; flex-direction: row !important; align-items: center;
-          min-height: 56px; max-height: 56px; gap: 6px; padding: 4px; overflow: hidden;
-        }
-        .mode-level #lv-preview { display: none !important; }
-        .mode-level #lv-right > .pane { display: none !important; }
-        .mode-level #lv-right > div:not(.pane) { flex: 0 0 auto; flex-wrap: wrap; padding: 0; }
-        .mode-level #lv-mobileActions { display: flex !important; }
+        /* Mob dock — показуємо в режимі рівнів */
+        .mode-level #mob-dock { display: flex; order: 5; }
+        /* Ховаємо старий тулбар і праву панель — замінені доком */
+        .mode-level #lv-levelToolbar { display: none !important; }
+        .mode-level #lv-right { display: none !important; }
+
+        /* Звужуємо смугу рівнів */
+        .mode-level #lv-levelBar { min-height: 44px !important; max-height: 44px !important; }
+        #lv-levelBarList .lvCard { height: 32px !important; }
+        #lv-levelBarAdd { height: 32px !important; width: 32px !important; }
+
+        /* Звужуємо бібліотеку тайлів */
+        .mode-level #lv-library { min-height: 68px !important; max-height: 68px !important; padding: 3px 4px !important; }
+        .mode-level #lv-libGrid { height: 60px !important; min-height: 60px !important; }
+        .mode-level #lv-libGrid .libCard { flex: 0 0 56px !important; width: 56px !important; min-width: 56px !important; height: 56px !important; }
       }
     </style>
   </head>
@@ -582,6 +602,52 @@
         </div>
       </aside>
 
+      <!-- МОБІЛЬНИЙ ДОКЕР — видний лише на телефоні в режимі рівнів -->
+      <div id="mob-dock">
+        <div id="mob-tabRow">
+          <button class="mob-tab on" data-mob-panel="mobTransf">G · R · S</button>
+          <button class="mob-tab" data-mob-panel="mobPath">Шлях</button>
+          <button class="mob-tab" data-mob-panel="mobAi">AI</button>
+          <button class="mob-tab" data-mob-panel="mobSettings">Налаш.</button>
+        </div>
+        <div id="mobTransf" class="mob-panel on">
+          <button class="mob-tool" data-mob-key="KeyG">Перемістити</button>
+          <button class="mob-tool" data-mob-key="KeyR">Повернути</button>
+          <button class="mob-tool" data-mob-key="KeyS">Масштаб</button>
+          <button class="mob-tool" data-mob-key="KeyM">Дзеркало</button>
+          <button class="mob-tool" data-mob-key="Delete">Видалити</button>
+          <button class="mob-tool" data-mob-ctrl="KeyZ">Скасувати</button>
+        </div>
+        <div id="mobPath" class="mob-panel">
+          <button class="mob-tool" data-mob-mirror="lv-pathHBtn">Підлога</button>
+          <button class="mob-tool" data-mob-mirror="lv-raiseBtn">Підняти</button>
+          <button class="mob-tool" data-mob-mirror="lv-lowerBtn">Опустити</button>
+          <button class="mob-tool" data-mob-mirror="lv-flatBtn">Вирівняти</button>
+          <button class="mob-tool" data-mob-mirror="lv-walkBtn" style="color:#5aff8f">Зел.колайдер</button>
+          <button class="mob-tool" data-mob-mirror="lv-erasePathBtn">Стерти шлях</button>
+          <button class="mob-tool" data-mob-mirror="lv-enemySpawnBtn">Спавн ворогів</button>
+          <button class="mob-tool" data-mob-mirror="lv-enemyEraseBtn">Прибрати спавн</button>
+          <button class="mob-tool" data-mob-mirror="lv-addSpawn">＋ Спавн гравця</button>
+          <button class="mob-tool" data-mob-mirror="lv-clearCollider">Очистити все</button>
+        </div>
+        <div id="mobAi" class="mob-panel">
+          <textarea id="mob-aiPrompt" placeholder="Опис декорації…"></textarea>
+          <button class="mob-tool" id="mob-aiGenBtn">Створити</button>
+        </div>
+        <div id="mobSettings" class="mob-panel">
+          <button class="mob-tool" data-mob-mirror="lv-fillBtn">Наповнення</button>
+          <button class="mob-tool" data-mob-mirror="lv-planBgBtn">Фонова</button>
+          <button class="mob-tool" data-mob-mirror="lv-planGameBtn">Ігрова</button>
+          <button class="mob-tool" data-mob-mirror="lv-zForward">Ближче</button>
+          <button class="mob-tool" data-mob-mirror="lv-zBack">Дальше</button>
+          <button class="mob-tool" data-mob-mirror="lv-zFront">Найближче</button>
+          <button class="mob-tool" data-mob-mirror="lv-zBottom">Найдальше</button>
+        </div>
+        <div id="mob-actions">
+          <button id="mob-save">Зберегти</button>
+          <button id="mob-publish" class="btn-accent">Оновити гру</button>
+        </div>
+      </div>
     </div>
 
     <!-- Вікно футпринта ассета (ПКМ на картці в бібліотеці рівнів) -->
@@ -600,5 +666,68 @@
     </div>
 
     <script type="module" src="/src/rig/main.ts"></script>
+    <script>
+    (function () {
+      // Перемикання вкладок доку
+      document.querySelectorAll('.mob-tab').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          document.querySelectorAll('.mob-tab').forEach(function (t) { t.classList.remove('on'); });
+          document.querySelectorAll('.mob-panel').forEach(function (p) { p.classList.remove('on'); });
+          btn.classList.add('on');
+          var panel = document.getElementById(btn.dataset.mobPanel);
+          if (panel) panel.classList.add('on');
+        });
+      });
+
+      // Кнопки що диспатчать keydown (G, R, S, M, Delete …)
+      document.querySelectorAll('[data-mob-key]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: btn.dataset.mobKey, bubbles: true }));
+          setTimeout(syncMobState, 50);
+        });
+      });
+
+      // Ctrl+Z
+      document.querySelectorAll('[data-mob-ctrl]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: btn.dataset.mobCtrl, ctrlKey: true, bubbles: true }));
+        });
+      });
+
+      // Дзеркальні кнопки — делегують на існуючі десктопні кнопки
+      document.querySelectorAll('[data-mob-mirror]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var orig = document.getElementById(btn.dataset.mobMirror);
+          if (orig) orig.click();
+          setTimeout(syncMobState, 50);
+        });
+      });
+
+      // Синхронізація стану on/off з десктопних кнопок на мобільні
+      function syncMobState() {
+        document.querySelectorAll('[data-mob-mirror]').forEach(function (btn) {
+          var orig = document.getElementById(btn.dataset.mobMirror);
+          btn.classList.toggle('on', orig ? orig.classList.contains('on') : false);
+        });
+      }
+      setInterval(syncMobState, 400);
+
+      // AI панель
+      document.getElementById('mob-aiGenBtn')?.addEventListener('click', function () {
+        var src = document.getElementById('mob-aiPrompt');
+        var dst = document.getElementById('lv-aiPrompt');
+        if (src && dst) dst.value = src.value;
+        document.getElementById('lv-aiGenBtn')?.click();
+      });
+
+      // Зберегти / Оновити гру
+      document.getElementById('mob-save')?.addEventListener('click', function () {
+        document.getElementById('lv-mobSave')?.click();
+      });
+      document.getElementById('mob-publish')?.addEventListener('click', function () {
+        document.getElementById('lv-mobPublish')?.click();
+      });
+    })();
+    </script>
   </body>
 </html>
