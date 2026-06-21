@@ -50,6 +50,13 @@ jobs:
       - name: Sync web assets
         run: npx cap sync android
 
+      # Повноекранний режим — прибираємо сіру смужку статус-бару
+      - name: Patch fullscreen theme
+        run: |
+          for f in android/app/src/main/res/values/styles.xml android/app/src/main/res/values-night/styles.xml; do
+            [ -f "$f" ] && sed -i 's|</style>|    <item name="android:windowFullscreen">true</item>\n</style>|' "$f" || true
+          done
+
       - name: Build debug APK
         run: |
           cd android
