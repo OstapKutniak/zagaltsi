@@ -762,6 +762,10 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTab
   if (tab) { b.addEventListener('click', () => setMode(tab)); }
   else if (b.hasAttribute('data-soon')) { b.disabled = true; b.title = 'Скоро'; }
 }
+// «Грати» — запускає саму гру (зручно перевіряти після оновлення)
+document.getElementById('playTab')?.addEventListener('click', () => {
+  window.location.href = 'index.html';
+});
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
 

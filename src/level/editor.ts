@@ -1411,6 +1411,11 @@ export function initLevelEditor(prefix: string): void {
     else window.location.href = 'studio.html';
   });
 
+  // «Грати» — запустити саму гру (зручно перевіряти після оновлення; standalone level.html)
+  document.getElementById(prefix + 'playGame')?.addEventListener('click', () => {
+    window.location.href = 'index.html';
+  });
+
   // Preview expand/collapse — same behaviour as char editor
   const lvPreviewBox = $<HTMLElement>('preview');
   const lvPreviewFrame = $<HTMLIFrameElement>('previewFrame');

@@ -442,7 +442,7 @@
           <button data-tab="level">Редактор Рівнів</button>
           <button data-soon>Редактор Інтерфейсу</button>
           <button data-soon>Редактор Звуку</button>
-          <button data-soon>Редактор Історії</button>
+          <button id="playTab" class="btn-accent" title="Запустити гру">▶ Грати</button>
         </div>
         <!-- Мобільна смуга вибору рівня (між вкладками і бібліотекою тайлів) -->
         <div id="lv-levelBar" style="display:none">
@@ -808,7 +808,6 @@
           btn.classList.toggle('on', orig ? orig.classList.contains('on') : false);
         });
       }
-      setInterval(syncMobState, 400);
 
       // Level dock AI
       document.getElementById('mob-aiGenBtn')?.addEventListener('click', function () {
@@ -854,7 +853,6 @@
           setTimeout(syncCharIconState, 50);
         });
       });
-      setInterval(syncCharIconState, 400);
 
       // Char dock: Зберегти / Оновити / Undo
       document.getElementById('mob-char-undo')?.addEventListener('click', function () {
@@ -885,7 +883,6 @@
           if (mob.value !== real.value) mob.value = real.value;
         });
       }
-      setInterval(syncCharAnimSelects, 250);
       document.getElementById('mob-charSel')?.addEventListener('change', function () {
         var real = document.getElementById('charSel');
         if (real) { real.value = this.value; real.dispatchEvent(new Event('change')); }
@@ -894,6 +891,24 @@
         var real = document.getElementById('anim');
         if (real) { real.value = this.value; real.dispatchEvent(new Event('change')); }
       });
+
+      // ── Полінг синхронізації докерів — лише на мобільному ──────────────────
+      // На десктопі докери приховані, тож постійні reflow зайві (гальмують слабке залізо).
+      var _mq = window.matchMedia('(max-width: 900px)');
+      var _slowTimer = null, _fastTimer = null;
+      function _startPolling() {
+        if (_slowTimer) return;
+        _slowTimer = setInterval(function () { syncMobState(); syncCharIconState(); }, 400);
+        _fastTimer = setInterval(syncCharAnimSelects, 250);
+      }
+      function _stopPolling() {
+        if (_slowTimer) { clearInterval(_slowTimer); _slowTimer = null; }
+        if (_fastTimer) { clearInterval(_fastTimer); _fastTimer = null; }
+      }
+      function _applyPolling() { if (_mq.matches) _startPolling(); else _stopPolling(); }
+      if (_mq.addEventListener) _mq.addEventListener('change', _applyPolling);
+      else if (_mq.addListener) _mq.addListener(_applyPolling);
+      _applyPolling();
 
     })();
     </script>
