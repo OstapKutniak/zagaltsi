@@ -2,14 +2,14 @@ name: Build Android APK
 
 # Збирає Android APK (Хоругва) через Capacitor.
 # Запуск вручну: вкладка Actions → "Build Android APK" → Run workflow.
-# Готовий APK з'явиться внизу сторінки запуску в розділі Artifacts (horugva-apk).
-# Завантаж його на телефон і встанови (дозволь установку з невідомих джерел).
+# Готовий APK публікується як GitHub Release → завантажити можна без логіну.
+# Також лежить у Artifacts (horugva-apk) унизу сторінки запуску.
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -31,7 +31,6 @@ jobs:
 
       # Домашній екран APK = меню (Грати / Редактор).
       # У вебі index.html — це гра; в APK index.html стає меню, а гра переїжджає в game.html
-      # (код навігації це враховує через наявність Capacitor).
       - name: Prepare app entry (menu)
         run: |
           mv dist/index.html dist/game.html
@@ -57,8 +56,31 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
 
+      - name: Copy APK with friendly name
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk horugva.apk
+
+      # Artifact (для завантаження через сторінку Actions)
       - uses: actions/upload-artifact@v4
         with:
           name: horugva-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: horugva.apk
           if-no-files-found: error
+
+      # GitHub Release — публічне посилання без логіну в GitHub
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="android-latest"
+          # Видаляємо старий реліз, якщо є
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+          gh release create "$TAG" horugva.apk \
+            --title "Хоругва Android APK (остання збірка)" \
+            --notes "Debug APK — встановити без Google Play.
+
+          ⚠️ Для встановлення: Налаштування → Безпека → **Дозволити встановлення з невідомих джерел**
+
+          Автоматично зібрано через GitHub Actions." \
+            --latest
