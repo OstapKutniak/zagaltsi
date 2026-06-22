@@ -1,5 +1,6 @@
 import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
+import { initWorldEditor } from '../world/editor';
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
@@ -756,6 +757,7 @@ function setMode(mode: string): void {
     b.classList.toggle('light', b.getAttribute('data-tab') === mode);
   });
   if (mode === 'level') window.dispatchEvent(new CustomEvent('levelTabActivated'));
+  else if (mode === 'world') window.dispatchEvent(new CustomEvent('worldTabActivated'));
   else { window.dispatchEvent(new CustomEvent('levelTabDeactivated')); if (mode === 'char') requestAnimationFrame(() => { resize(); draw(); }); }
 }
 for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
@@ -773,6 +775,8 @@ document.getElementById('playTab')?.addEventListener('click', () => {
 });
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
+// Initialize world map editor
+initWorldEditor('wld-');
 
 // On mobile — auto-switch to level editor as default starting mode
 if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
