@@ -13,6 +13,7 @@ import {
   getPlayerId, getPlayerName, type PlayerState,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
+import type { NodeGraph } from '../node-editor';
 
 interface Remote {
   container: CutoutCharacter | null;
@@ -344,6 +345,8 @@ export class GameScene extends Phaser.Scene {
           toAttach.forEach(({ enemy, charId }, i) => {
             const d = docById(this.lib, charId);
             if (d) void enemy.attachChar(d, `npc_${i}_`);
+            // нодова поведінка цього ворога (1 крок = 1 клітинка колайдера = gs px)
+            void idbGet<NodeGraph>('zag_behavior_' + charId).then((bg) => enemy.setBehavior(bg ?? null, gs)).catch(() => {});
           });
         });
       }

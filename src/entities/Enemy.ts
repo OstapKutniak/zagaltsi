@@ -3,6 +3,7 @@ import { Actor } from './Actor';
 import { ENEMY } from '../config';
 import type { Player } from './Player';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
+import type { NodeGraph, GraphNode } from '../node-editor';
 
 interface Band {
   top: number;
@@ -15,8 +16,19 @@ export class Enemy extends Actor {
   private immuneUntil = 0;
   private character: CutoutCharacter | null = null;
 
+  // Нодова поведінка (необовʼязкова). cellSize = розмір клітинки колайдера в px
+  // («1 крок = 1 клітинка»). maxHp — для умови «здоровʼя нижче %».
+  private behavior: NodeGraph | null = null;
+  private cellSize = 48;
+  private readonly maxHp = ENEMY.hp;
+
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'enemy', ENEMY.hp);
+  }
+
+  setBehavior(g: NodeGraph | null, cellSize: number): void {
+    this.behavior = g && g.nodes && g.nodes.length ? g : null;
+    if (cellSize > 0) this.cellSize = cellSize;
   }
 
   async attachChar(doc: CharDoc, keyPrefix: string): Promise<void> {
@@ -25,6 +37,59 @@ export class Enemy extends Actor {
     this.character = c;
     this.scene.add.existing(c);
     this.setVisible(false);
+  }
+
+  // Обираний цього кадру вузол-дію за нодовим деревом (або null → стояти).
+  private pickAction(player: Player): GraphNode | null {
+    const g = this.behavior!;
+    const byId = (id: string): GraphNode | undefined => g.nodes.find((n) => n.id === id);
+    const edgeFrom = (id: string, port: number) => g.edges.find((e) => e.fromId === id && e.fromPort === port);
+
+    let current: GraphNode | undefined;
+    const root = g.nodes.find((n) => n.cat === 'root');
+    if (root) { const e = edgeFrom(root.id, 0); current = e ? byId(e.toId) : undefined; }
+    else current = g.nodes.find((n) => n.cat !== 'root' && !g.edges.some((e) => e.toId === n.id));
+
+    let lastBehavior: GraphNode | null = null;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      if (current.cat === 'behavior') {
+        lastBehavior = current;
+        const e = edgeFrom(current.id, 0); current = e ? byId(e.toId) : undefined;
+      } else if (current.cat === 'reroute' || current.type === 'then_next') {
+        const e = edgeFrom(current.id, 0); current = e ? byId(e.toId) : undefined;
+      } else if (current.cat === 'condition') {
+        const port = this.evalCond(current, player);
+        const e = edgeFrom(current.id, port); current = e ? byId(e.toId) : undefined;
+      } else break;
+    }
+    return lastBehavior;
+  }
+
+  // Повертає індекс вихідного порту, яким іти далі.
+  private evalCond(node: GraphNode, player: Player): number {
+    const dx = player.floorX - this.fx, dy = player.floorY - this.fy;
+    switch (node.type) {
+      case 'player_distance': {
+        const steps = Math.hypot(dx, dy) / this.cellSize;
+        return steps <= Number(node.config.steps ?? 3) ? 0 : 1; // 0=Так, 1=Ні
+      }
+      case 'health_below': {
+        const pct = (this.hp / this.maxHp) * 100;
+        return pct < Number(node.config.percent ?? 30) ? 0 : 1;
+      }
+      case 'sees_player': return 0; // поки що завжди бачить
+      case 'time_of_day':  return 0; // поки що завжди «День»
+      default: return 0;
+    }
+  }
+
+  private moveToward(dx: number, dy: number, speed: number, dt: number, band: Band): void {
+    const len = Math.hypot(dx, dy) || 1;
+    this.fx += (dx / len) * speed * dt;
+    this.fy += (dy / len) * speed * dt;
+    this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
   }
 
   // Повертає шкоду, завдану гравцеві цього кроку (0, якщо не вдарив).
@@ -36,26 +101,29 @@ export class Enemy extends Actor {
     let anim = 'walk';
     let damage = 0;
 
+    const attack = (): void => { if (time >= this.nextAttackAt) { this.nextAttackAt = time + ENEMY.attackCooldown; damage = ENEMY.damage; } };
+
     if (time < this.immuneUntil) {
       anim = 'hurt';
-      this.stepZ(dt);
-      this.sync();
-    } else if (Math.abs(dx) <= ENEMY.attackRange && Math.abs(dy) <= ENEMY.attackDepth) {
-      anim = 'idle';
-      this.stepZ(dt);
-      this.sync();
-      if (time >= this.nextAttackAt) {
-        this.nextAttackAt = time + ENEMY.attackCooldown;
-        damage = ENEMY.damage;
+    } else if (this.behavior) {
+      // Режим нодової поведінки: дія = найглибша досягнута поведінка.
+      const act = this.pickAction(player);
+      switch (act?.type) {
+        case 'run_to_player':  anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed, dt, band); break;
+        case 'walk_to_player': anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed * 0.5, dt, band); break;
+        case 'wait':           anim = 'idle'; break;
+        case 'melee_attack':
+        case 'range_attack':   anim = 'idle'; attack(); break;
+        default:               anim = 'idle'; break; // нічого не обрано — стоїть
       }
+    } else if (Math.abs(dx) <= ENEMY.attackRange && Math.abs(dy) <= ENEMY.attackDepth) {
+      anim = 'idle'; attack();
     } else {
-      const len = Math.hypot(dx, dy) || 1;
-      this.fx += (dx / len) * ENEMY.speed * dt;
-      this.fy += (dy / len) * ENEMY.speed * dt;
-      this.fy = Phaser.Math.Clamp(this.fy, band.top, band.bottom);
-      this.stepZ(dt);
-      this.sync();
+      anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed, dt, band);
     }
+
+    this.stepZ(dt);
+    this.sync();
 
     if (this.character) {
       this.character.setAnim(anim);
