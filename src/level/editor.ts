@@ -43,13 +43,13 @@ const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
+interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
+  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -64,7 +64,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'neutral' | 'neutralErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -89,12 +89,14 @@ export function initLevelEditor(prefix: string): void {
     pendingFlip: 1,   // 1 або -1 (M = дзеркало)
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     pendingEnemy: null as string | null,          // id ворога що зараз виставляється
+    pendingNeutral: null as string | null,        // id нейтрала що зараз виставляється
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
   };
 
-  // Неігрові персонажі (вороги) з бібліотеки персонажів + кеш червоних тонованих мініатюр.
+  // Неігрові персонажі (вороги/нейтрали) з бібліотеки персонажів + кеш тонованих мініатюр.
   let npcLib: LibItem[] = [];
   const npcTinted = new Map<string, HTMLCanvasElement>();
+  const npcNeutralTinted = new Map<string, HTMLCanvasElement>();
   const npcImages = new Map<string, HTMLImageElement>();
 
   const level = (): Level => state.levels[state.cur];
@@ -242,6 +244,7 @@ export function initLevelEditor(prefix: string): void {
       if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
       if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // міграція: один спавн -> масив
       if (!lv.enemySpawns) lv.enemySpawns = []; // міграція: зони спавна ворогів
+      if (!lv.neutralSpawns) lv.neutralSpawns = []; // міграція: зони спавна нейтралів
       if (typeof lv.start !== 'number') lv.start = 0;
       if (typeof lv.end !== 'number') lv.end = 2400;
       if (typeof lv.grid !== 'number') lv.grid = 32; // міграція: всі рівні на gs=32
@@ -442,6 +445,33 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
+    // Зони спавна нейтралів — фіолетові.
+    if (state.showEnemySpawns) {
+      const gs = state.grid, k2 = gs * Math.SQRT1_2;
+      const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
+      const mfc = state.pendingNeutral ? floorCellAt(state.mouse.x, state.mouse.y) : null;
+      for (const z of level().neutralSpawns) {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); const neutralId = p[2];
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const hovered = mfc ? (mfc.cx >= acx && mfc.cx <= acx + 2 && mfc.cy >= acy && mfc.cy <= acy + 2) : false;
+        const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+        ctx.fillStyle = hovered ? 'rgba(160,40,255,0.55)' : 'rgba(160,40,255,0.20)'; ctx.fill();
+        ctx.strokeStyle = hovered ? 'rgba(190,80,255,1)' : 'rgba(160,40,255,0.9)'; ctx.lineWidth = hovered ? 3 : 2; ctx.stroke();
+        const ctr = Pf(acx + 1.5, acy + 1.5);
+        const tint = neutralId ? npcNeutralTinted.get(neutralId) : null;
+        if (tint) {
+          const zh = Math.abs(d.y - a.y) * 1.3 || 64;
+          const zw = zh * (tint.width / tint.height);
+          ctx.globalAlpha = 0.72;
+          ctx.drawImage(tint, ctr.x - zw / 2, ctr.y - zh * 0.78, zw, zh);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = 'rgba(160,40,255,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+
     // Прев'ю під курсором для активного інструмента — видно ДЕ ляже дія до кліку.
     if (state.pathTool) {
       const c = floorCellAt(state.mouse.x, state.mouse.y);
@@ -449,6 +479,8 @@ export function initLevelEditor(prefix: string): void {
         level().collider.some((z) => { const p = z.split(','); return Number(p[0]) === cx && Number(p[1]) === cy && (p[2] ?? 'h') === t; });
       const zoneAt = (cx: number, cy: number): string | undefined =>
         level().enemySpawns.find((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return cx >= acx && cx <= acx + 2 && cy >= acy && cy <= acy + 2; });
+      const neutralZoneAt = (cx: number, cy: number): string | undefined =>
+        level().neutralSpawns.find((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return cx >= acx && cx <= acx + 2 && cy >= acy && cy <= acy + 2; });
       const bCells = brushCells(c.cx, c.cy);
       if (state.pathTool === 'h') {
         const { present, lvlOf } = levelMaps();
@@ -482,6 +514,10 @@ export function initLevelEditor(prefix: string): void {
         const hit = zoneAt(c.cx, c.cy);
         if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(255,40,40,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
         if (state.pathTool === 'enemy') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(255,40,40,0.18)', 'rgba(255,40,40,0.9)', 2);
+      } else if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') {
+        const hit = neutralZoneAt(c.cx, c.cy);
+        if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(160,40,255,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
+        if (state.pathTool === 'neutral') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(160,40,255,0.18)', 'rgba(160,40,255,0.9)', 2);
       } else if (state.pathTool === 'raise' || state.pathTool === 'lower' || state.pathTool === 'flat') {
         const { present, lvlOf } = levelMaps();
         for (const { cx, cy } of bCells) {
@@ -554,6 +590,20 @@ export function initLevelEditor(prefix: string): void {
 
     if (state.pendingEnemy) {
       const pimg = npcImages.get(state.pendingEnemy);
+      if (pimg?.complete && pimg.naturalWidth) {
+        const mx = state.mouse.x, my = state.mouse.y;
+        const gh = 80 * sc();
+        const gw = gh * (pimg.naturalWidth / pimg.naturalHeight);
+        ctx.save();
+        ctx.globalAlpha = 0.88;
+        ctx.filter = 'brightness(1000) saturate(0)';
+        ctx.drawImage(pimg, mx - gw / 2, my - gh * 0.9, gw, gh);
+        ctx.restore();
+      }
+    }
+
+    if (state.pendingNeutral) {
+      const pimg = npcImages.get(state.pendingNeutral);
       if (pimg?.complete && pimg.naturalWidth) {
         const mx = state.mouse.x, my = state.mouse.y;
         const gh = 80 * sc();
@@ -1027,7 +1077,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; draw(); save(); });
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; draw(); save(); });
   const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
   const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
   for (const id of pathBtnIds) {
@@ -1077,6 +1127,7 @@ export function initLevelEditor(prefix: string): void {
     $('flatBtn')?.classList.toggle('on', state.pathTool === 'flat');
     $('walkBtn')?.classList.toggle('on', state.pathTool === 'walk');
     $('enemyBtn')?.classList.toggle('on', state.pathTool === 'enemy' || state.pathTool === 'enemyErase');
+    $('neutralBtn')?.classList.toggle('on', state.pathTool === 'neutral' || state.pathTool === 'neutralErase');
     $('spawnBtn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
   $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
@@ -1165,6 +1216,23 @@ export function initLevelEditor(prefix: string): void {
     }
     draw();
   }
+  // Зона спавна нейтралів — 3×3 підлогових клітинки, фіолетова.
+  function neutralAt(sx: number, sy: number): void {
+    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
+    const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+    if (!Number.isFinite(fcx) || !Number.isFinite(fcy)) return;
+    const lv = level();
+    if (state.pathTool === 'neutralErase') {
+      lv.neutralSpawns = lv.neutralSpawns.filter((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+      });
+    } else {
+      const key = (fcx - 1) + ',' + (fcy - 1);
+      if (!lv.neutralSpawns.includes(key)) lv.neutralSpawns.push(key);
+    }
+    draw();
+  }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
@@ -1197,6 +1265,22 @@ export function initLevelEditor(prefix: string): void {
       $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
       draw(); return;
     }
+    // Pending-нейтрал: ЛКМ виставляє нейтрала у зону спавна під курсором
+    if (ev.button === 0 && state.pendingNeutral) {
+      const w = toWorld(x, y); const gs = state.grid, k = gs * Math.SQRT1_2;
+      const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+      const lv = level();
+      const idx = lv.neutralSpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
+      if (idx >= 0) {
+        pushUndo();
+        const p = lv.neutralSpawns[idx].split(',');
+        lv.neutralSpawns[idx] = `${Number(p[0])},${Number(p[1])},${state.pendingNeutral}`;
+        save(); draw(); setStatus('Нейтрала виставлено'); return;
+      }
+      state.pendingNeutral = null;
+      $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+      draw(); return;
+    }
     // Pending-ассет: ЛКМ підтверджує transform-режим або розміщує ассет
     if (ev.button === 0 && !state.pathTool && state.pendingAsset) {
       if (state.pendingTransMode) { state.pendingTransMode = null; draw(); return; }
@@ -1214,6 +1298,7 @@ export function initLevelEditor(prefix: string): void {
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
+    if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { pushUndo(); neutralAt(x, y); save(); return; }
     if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
     const hit = hitTest(x, y);
     state.selected = hit;
@@ -1240,7 +1325,7 @@ export function initLevelEditor(prefix: string): void {
       draw(); return;
     }
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
-    else if (state.pathTool || state.pendingAsset || state.pendingEnemy) draw(); // оновити прев'ю інструмента або ghost під курсором
+    else if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
   window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
 
@@ -1503,6 +1588,10 @@ export function initLevelEditor(prefix: string): void {
         state.pendingEnemy = null;
         $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
         draw();
+      } else if (state.pendingNeutral) {
+        state.pendingNeutral = null;
+        $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+        draw();
       } else if (state.pendingAsset) {
         state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
@@ -1752,9 +1841,22 @@ export function initLevelEditor(prefix: string): void {
       const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
       const c = cv.getContext('2d'); if (!c) return;
       c.drawImage(img, 0, 0);
-      c.globalCompositeOperation = 'source-atop'; // тонувати лише непрозорі пікселі
+      c.globalCompositeOperation = 'source-atop';
       c.fillStyle = 'rgba(220,30,30,0.72)'; c.fillRect(0, 0, cv.width, cv.height);
       npcTinted.set(item.id, cv); draw();
+    };
+    img.src = item.thumb;
+  }
+  function buildNpcNeutralTint(item: LibItem): void { // фіолетова тонована мініатюра
+    if (!item.thumb || npcNeutralTinted.has(item.id)) return;
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+      const c = cv.getContext('2d'); if (!c) return;
+      c.drawImage(img, 0, 0);
+      c.globalCompositeOperation = 'source-atop';
+      c.fillStyle = 'rgba(140,30,220,0.72)'; c.fillRect(0, 0, cv.width, cv.height);
+      npcNeutralTinted.set(item.id, cv); draw();
     };
     img.src = item.thumb;
   }
@@ -1771,7 +1873,32 @@ export function initLevelEditor(prefix: string): void {
     if (!npcList) return;
     npcList.innerHTML = '';
     if (npcCatVal === 'neutral') {
-      const e = document.createElement('div'); e.className = 'npcEmpty'; e.textContent = 'Нейтрали — поки заглушка'; npcList.appendChild(e); return;
+      const neutrals = npcLib.filter((x) => x.cat === 'neutral');
+      if (!neutrals.length) {
+        const e = document.createElement('div'); e.className = 'npcEmpty';
+        e.textContent = 'Немає нейтралів. Створи персонажа з категорією «Нейтрали» у редакторі персонажів.';
+        npcList.appendChild(e); return;
+      }
+      for (const it of neutrals) {
+        buildNpcNeutralTint(it);
+        if (it.thumb && !npcImages.has(it.id)) {
+          const img = new Image(); img.src = it.thumb; npcImages.set(it.id, img);
+        }
+        const card = document.createElement('div'); card.className = 'npcCard'; card.title = it.name; card.draggable = true;
+        if (state.pendingNeutral === it.id) card.classList.add('pending');
+        if (it.thumb) { const im = document.createElement('img'); im.src = it.thumb; card.appendChild(im); }
+        const nm = document.createElement('div'); nm.className = 'npcName'; nm.textContent = it.name; card.appendChild(nm);
+        card.addEventListener('dragstart', (e) => { (e as DragEvent).dataTransfer?.setData('text/neutral-id', it.id); });
+        card.addEventListener('click', () => {
+          const active = state.pendingNeutral === it.id;
+          state.pendingNeutral = active ? null : it.id;
+          npcList.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
+          if (!active) card.classList.add('pending');
+          draw();
+        });
+        npcList.appendChild(card);
+      }
+      return;
     }
     const enemies = npcLib.filter((x) => x.cat === 'enemy');
     if (!enemies.length) {
@@ -1781,7 +1908,6 @@ export function initLevelEditor(prefix: string): void {
     }
     for (const it of enemies) {
       buildNpcTint(it);
-      // передзавантажити зображення для ghost
       if (it.thumb && !npcImages.has(it.id)) {
         const img = new Image(); img.src = it.thumb; npcImages.set(it.id, img);
       }
@@ -1802,22 +1928,31 @@ export function initLevelEditor(prefix: string): void {
   }
   loadCharLibrary().then((lib) => { npcLib = lib; renderNpc(); }).catch(() => {});
 
-  // Drag ворога з бібліотеки → призначити зоні спавна під курсором.
+  // Drag ворога / нейтрала з бібліотеки → призначити зоні спавна під курсором.
   canvas.addEventListener('dragover', (e) => e.preventDefault());
   canvas.addEventListener('drop', (e) => {
     e.preventDefault();
-    const id = (e as DragEvent).dataTransfer?.getData('text/enemy-id');
-    if (!id) return;
+    const enemyId = (e as DragEvent).dataTransfer?.getData('text/enemy-id');
+    const neutralId = (e as DragEvent).dataTransfer?.getData('text/neutral-id');
     const w = toWorld((e as DragEvent).offsetX, (e as DragEvent).offsetY);
     const gs = state.grid, k = gs * Math.SQRT1_2;
     const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
     const lv = level();
-    const idx = lv.enemySpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
-    if (idx < 0) { setStatus('Кинь на червону зону спавна'); return; }
-    pushUndo();
-    const p = lv.enemySpawns[idx].split(',');
-    lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${id}`;
-    save(); draw(); setStatus('Ворога призначено зоні');
+    if (enemyId) {
+      const idx = lv.enemySpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
+      if (idx < 0) { setStatus('Кинь на червону зону спавна'); return; }
+      pushUndo();
+      const p = lv.enemySpawns[idx].split(',');
+      lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${enemyId}`;
+      save(); draw(); setStatus('Ворога призначено зоні');
+    } else if (neutralId) {
+      const idx = lv.neutralSpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
+      if (idx < 0) { setStatus('Кинь на фіолетову зону спавна'); return; }
+      pushUndo();
+      const p = lv.neutralSpawns[idx].split(',');
+      lv.neutralSpawns[idx] = `${Number(p[0])},${Number(p[1])},${neutralId}`;
+      save(); draw(); setStatus('Нейтрала призначено зоні');
+    }
   });
 
   // ── Плановість: перемикач Фонова / Ігрова ──
@@ -1920,13 +2055,31 @@ export function initLevelEditor(prefix: string): void {
         updatePathBtns();
       });
     }
+    // Neutral button: LMB = act current mode, RMB = toggle label
+    const neutralBtn = $<HTMLButtonElement>('neutralBtn');
+    let _neutralMode: 'add' | 'erase' = 'add';
+    if (neutralBtn) {
+      neutralBtn.textContent = 'Додати нейтрала';
+      neutralBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        _neutralMode = _neutralMode === 'add' ? 'erase' : 'add';
+        neutralBtn.textContent = _neutralMode === 'add' ? 'Додати нейтрала' : 'Прибрати нейтрала';
+        neutralBtn.classList.remove('on');
+        if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { state.pathTool = null; updatePathBtns(); draw(); }
+      });
+      neutralBtn.addEventListener('click', () => {
+        const tool: 'neutral' | 'neutralErase' = _neutralMode === 'add' ? 'neutral' : 'neutralErase';
+        state.pathTool = state.pathTool === tool ? null : tool;
+        updatePathBtns();
+      });
+    }
     refreshSpawnUI();
   }
 
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
     idbSet('zag_level', buildLevelDoc())

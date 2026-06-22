@@ -27,7 +27,8 @@
       .mode-level #timelineBar { display: none; }
       .mode-level #stageWrap { display: none; }
       #lv-levelToolbar { display: none; flex: 0 0 auto; height: 56px; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: center; }
-      #lv-spawnBtn, #lv-enemyBtn { flex: 1; height: 36px; }
+      #wld-toolbar, #loc-toolbar { flex: 0 0 auto; height: 56px; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: center; }
+      #lv-spawnBtn, #lv-enemyBtn, #lv-neutralBtn { flex: 1; height: 36px; }
       #lv-parallaxRow select { height: 36px; }
       .mode-level #lv-levelToolbar { display: flex; }
       /* ── mode-world ── */
@@ -88,7 +89,7 @@
 
       /* ---- ліва бібліотека (ширша) ---- */
       #library { width: 280px; flex: 0 0 auto; padding: 8px; }
-      #libToggle { width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+      #libCatSel { width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
       #libList { flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
       .libCard { position: relative; width: calc(50% - 4px); background: #4a4a4a; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; overflow: hidden; }
       .libCard::before { content: ''; display: block; padding-top: 100%; } /* квадрат: у flex % padding надійно бере ширину картки */
@@ -292,7 +293,7 @@
           width: 100% !important; flex-direction: row !important; align-items: center;
           padding: 4px; gap: 4px; min-height: 78px; max-height: 78px;
         }
-        .mode-char #libToggle {
+        .mode-char #libCatSel {
           flex: 0 0 auto; width: auto; min-width: 50px; padding: 6px 5px; font-size: 11px;
         }
         .mode-char #libList {
@@ -436,7 +437,11 @@
     <div id="app" class="mode-char">
       <!-- ЛІВА БІБЛІОТЕКА — редактор персонажів -->
       <aside id="library" class="col pane">
-        <button id="libToggle" class="light">Герої</button>
+        <select id="libCatSel" class="light" style="width:100%;padding:10px;border-radius:8px;font-size:13px;font-weight:600;background:#4a4a4a;color:var(--ink);border:0;cursor:pointer;appearance:none;-webkit-appearance:none;text-align:center">
+          <option value="char">Герої</option>
+          <option value="enemy">Вороги</option>
+          <option value="neutral">Нейтрали</option>
+        </select>
         <div id="libList"></div>
         <div id="aiPanel" style="flex:none;display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--line)">
           <textarea id="aiPrompt" placeholder="Опис персонажа…" style="flex:1;width:100%;background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px;resize:none;font-family:inherit;outline:none"></textarea>
@@ -547,6 +552,7 @@
           <button id="lv-erasePathBtn" title="Стерти клітинку шляху (Y)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 20H8L3 15l11-11 7 7-2 3z"/><path d="M7.5 17.5l4-4"/></svg></button>
           <button id="lv-spawnBtn" title="ЛКМ — додати/прибрати стартову · ПКМ — змінити режим">Додати стартову</button>
           <button id="lv-enemyBtn" title="ЛКМ — ввімкнути режим · ПКМ — змінити між додати/прибрати ворогів">Додати ворогів</button>
+          <button id="lv-neutralBtn" title="ЛКМ — ввімкнути режим · ПКМ — змінити між додати/прибрати нейтралів">Додати нейтрала</button>
           <div id="lv-parallaxRow" style="display:flex;align-items:center;gap:6px;margin-left:auto">
             <select id="lv-parallaxLayer" title="Шар для налаштування дальності паралаксу" style="white-space:nowrap;padding:6px 8px;border-radius:8px;background:#4a4a4a;color:var(--ink);border:0;cursor:pointer;font-size:12px;font-weight:600;appearance:none;-webkit-appearance:none">
               <option value="sky">Небо</option>
