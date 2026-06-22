@@ -758,8 +758,9 @@ const tlBar = document.getElementById('timelineBar');
 const tlCollapseBtn = $<HTMLButtonElement>('tlCollapseBtn');
 tlCollapseBtn?.addEventListener('click', () => {
   const collapsed = tlBar?.classList.toggle('tl-collapsed');
-  if (tlCollapseBtn) tlCollapseBtn.textContent = collapsed ? '▶' : '▼';
-  requestAnimationFrame(() => { syncPanelHeights(); });
+  if (tlCollapseBtn) tlCollapseBtn.textContent = collapsed ? '▲' : '▼';
+  // Sync heights only when EXPANDING — keeps AI panel size when collapsing
+  if (!collapsed) requestAnimationFrame(() => { syncPanelHeights(); });
 });
 
 // ---- верхні таби розділів — перемикання панелей всередині однієї сторінки ----
