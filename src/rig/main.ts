@@ -772,7 +772,13 @@ const appEl = document.getElementById('app')!;
 let lastPanelH = 0;
 function syncPanelHeights(): void {
   const tl = document.getElementById('timelineBar');
-  if (tl && tl.offsetHeight > 0) lastPanelH = tl.offsetHeight;
+  if (tl) {
+    // Always measure the FULL expanded height — temporarily remove collapse class if needed
+    const wasCollapsed = tl.classList.contains('tl-collapsed');
+    if (wasCollapsed) tl.classList.remove('tl-collapsed');
+    if (tl.offsetHeight > 0) lastPanelH = tl.offsetHeight;
+    if (wasCollapsed) tl.classList.add('tl-collapsed');
+  }
   if (lastPanelH > 0) document.documentElement.style.setProperty('--panel-h', lastPanelH + 'px');
 }
 function setMode(mode: string): void {
