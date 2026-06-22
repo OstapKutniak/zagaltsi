@@ -18,6 +18,7 @@
       /* Level editor panels: hidden by default (char mode) */
       #lv-library, #lv-right { display: none; }
       #lv-stageWrap { display: none; }
+      #wld-library, #loc-library { display: none; }
       /* When level mode: show level panels, hide char panels */
       .mode-level #lv-library { display: flex; }
       .mode-level #lv-right { display: flex; }
@@ -27,6 +28,7 @@
       .mode-level #timelineBar { display: none; }
       .mode-level #stageWrap { display: none; }
       #lv-levelToolbar { display: none; flex: 0 0 auto; height: 56px; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: center; }
+      #wld-toolbar, #loc-toolbar { flex: 0 0 auto; height: 56px; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: center; }
       #lv-spawnBtn, #lv-enemyBtn { flex: 1; height: 36px; }
       #lv-parallaxRow select { height: 36px; }
       .mode-level #lv-levelToolbar { display: flex; }
@@ -42,6 +44,7 @@
       .mode-world #wld-toolbar { display: flex !important; }
       .mode-world #library { display: none; }
       .mode-world #lv-library { display: none; }
+      .mode-world #wld-library { display: flex !important; }
       .mode-world #lv-levelBar { display: none; }
       .mode-world #partsList { display: none !important; }
       .mode-world #faceList { display: none !important; }
@@ -61,6 +64,7 @@
       .mode-location #loc-toolbar { display: flex !important; }
       .mode-location #library { display: none; }
       .mode-location #lv-library { display: none; }
+      .mode-location #loc-library { display: flex !important; }
       .mode-location #lv-levelBar { display: none; }
       .mode-location #partsList { display: none !important; }
       .mode-location #faceList { display: none !important; }
@@ -163,6 +167,7 @@
       #preview.big { position: fixed; top: 8px; right: 8px; aspect-ratio: auto; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
       #lv-preview { flex: 0 0 auto; position: relative; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; z-index: 1; }
       #lv-preview.big { position: fixed; top: 8px; right: 8px; aspect-ratio: auto; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+      #wld-preview, #loc-preview { flex: 0 0 auto; position: relative; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; z-index: 1; }
       #preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
       #previewHint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; pointer-events: none; }
       #previewClick { position: absolute; inset: 0; z-index: 5; cursor: default; }
@@ -475,6 +480,18 @@
         </div>
       </aside>
 
+      <!-- ЛІВА БІБЛІОТЕКА — редактор карти -->
+      <aside id="wld-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px">
+        <button id="wld-addWorld" class="btn-accent" style="width:100%;padding:10px;flex:0 0 auto">＋ Нова карта</button>
+        <div id="wld-worldList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:8px"></div>
+      </aside>
+
+      <!-- ЛІВА БІБЛІОТЕКА — редактор локацій -->
+      <aside id="loc-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px">
+        <button id="loc-addLoc" class="btn-accent" style="width:100%;padding:10px;flex:0 0 auto">＋ Нова локація</button>
+        <div id="loc-locList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:8px"></div>
+      </aside>
+
       <!-- ЦЕНТР -->
       <section id="center" class="col">
         <div id="topTabs">
@@ -562,7 +579,7 @@
           <button id="lv-clearCollider" title="Очистити всі шляхи">Очистити</button>
         </div>
         <!-- WORLD MAP EDITOR TOOLBAR — visible in mode-world -->
-        <div id="wld-toolbar" class="pane" style="display:none;gap:4px;flex-wrap:wrap">
+        <div id="wld-toolbar" class="pane" style="display:none">
           <button id="wld-tool-select" class="on" title="Вибір та переміщення (V)">Вибір</button>
           <button id="wld-tool-node" title="Додати вузол-локацію (N)">＋ Локацію</button>
           <button id="wld-tool-edge" title="Зʼєднати два вузли (E)">Зʼєднання</button>
@@ -571,10 +588,9 @@
           <button id="wld-bgBtn" title="Завантажити фонову карту (PNG)">Фон</button>
           <input type="file" id="wld-bgInput" accept="image/*" style="display:none">
           <button id="wld-bgClearBtn" title="Прибрати фон">Прибрати фон</button>
-          <button id="wld-exportBtn" title="Завантажити worlds.json" style="margin-left:auto">Експорт JSON</button>
         </div>
         <!-- LOCATION EDITOR TOOLBAR — visible in mode-location -->
-        <div id="loc-toolbar" class="pane" style="display:none;gap:4px;flex-wrap:wrap">
+        <div id="loc-toolbar" class="pane" style="display:none">
           <button id="loc-tool-select" class="on" title="Вибір та переміщення (V)">Вибір</button>
           <button id="loc-tool-zone" title="Намалювати активну зону (Z)">＋ Зона</button>
           <button id="loc-deleteBtn" title="Видалити вибране (Del)">Видалити</button>
@@ -585,7 +601,6 @@
           <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
           <button id="loc-assetBtn" title="Додати будівлю або декор (PNG)">＋ Будівлю</button>
           <input type="file" id="loc-assetInput" accept="image/*" multiple style="display:none">
-          <button id="loc-exportBtn" title="Завантажити locations.json" style="margin-left:auto">Експорт JSON</button>
         </div>
       </section>
 
@@ -712,80 +727,77 @@
       </aside>
 
       <!-- ПРАВА ПАНЕЛЬ — редактор карти -->
-      <aside id="wld-right" class="col" style="display:none;width:260px;flex:0 0 260px">
-        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0">
-          <!-- Карти -->
-          <button class="header secToggle open">Карти</button>
-          <div class="secBody" style="display:flex;flex-direction:column;gap:6px;padding:8px">
-            <button id="wld-addWorld" class="btn-accent" style="width:100%;padding:6px">＋ Нова карта</button>
-            <div id="wld-worldList" style="display:flex;flex-direction:column;gap:3px"></div>
-          </div>
-          <!-- Властивості -->
+      <aside id="wld-right" class="col" style="display:none;width:480px;flex:0 0 auto">
+        <div id="wld-preview">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Попередній перегляд</div>
+        </div>
+        <div style="display:flex;gap:6px;padding:2px">
+          <button class="iconToggle" id="wld-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
+          <button class="iconToggle on" id="wld-labelsBtn" title="Підписи вузлів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h2M11 12h6"/></svg></button>
+          <button class="iconToggle on" id="wld-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+          <button class="iconToggle" id="wld-fitBtn" title="Вписати в екран"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+        </div>
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
           <button class="header secToggle open">Властивості</button>
-          <div class="secBody" style="display:flex;flex-direction:column;gap:8px;padding:8px">
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px">
             <div id="wld-noProps" style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Виберіть вузол або зʼєднання</div>
-            <!-- Node properties -->
             <div id="wld-nodeProps" style="display:none;flex-direction:column;gap:6px">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Назва</label>
               <input id="wld-nodeName" type="text" placeholder="Назва локації" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Тип</label>
               <div style="display:flex;gap:12px">
-                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
-                  <input type="radio" id="wld-nodeTypeLocation" name="wld-nodeType" value="location"> Локація
-                </label>
-                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
-                  <input type="radio" id="wld-nodeTypeRegion" name="wld-nodeType" value="region"> Регіон
-                </label>
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeLocation" name="wld-nodeType" value="location"> Локація</label>
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeRegion" name="wld-nodeType" value="region"> Регіон</label>
               </div>
               <div id="wld-nodeRegionRow" style="display:none;flex-direction:column;gap:4px">
                 <label style="font-size:12px;color:var(--muted)">id вкладеної карти</label>
                 <input id="wld-nodeRegionId" type="text" placeholder="map_id" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
               </div>
             </div>
-            <!-- Edge properties -->
             <div id="wld-edgeProps" style="display:none;flex-direction:column;gap:6px">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр (id)</label>
               <input id="wld-edgeLevelId" type="text" placeholder="village1, forest1 …" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:monospace;outline:none;width:100%;box-sizing:border-box">
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" id="wld-edgeTwoWay"> Двосторонній шлях
-              </label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wld-edgeTwoWay"> Двосторонній шлях</label>
             </div>
           </div>
-          <div style="padding:8px;margin-top:auto">
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
+            <hr style="border:0;border-top:1px solid var(--line)">
+            <button id="wld-exportBtn" class="btn-accent" style="width:100%">Експорт JSON</button>
             <div id="wld-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>
       </aside>
 
       <!-- ПРАВА ПАНЕЛЬ — редактор локацій -->
-      <aside id="loc-right" class="col" style="display:none;width:260px;flex:0 0 260px">
-        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0">
-          <!-- Локації -->
-          <button class="header secToggle open">Локації</button>
-          <div class="secBody" style="display:flex;flex-direction:column;gap:6px;padding:8px">
-            <button id="loc-addLoc" class="btn-accent" style="width:100%;padding:6px">＋ Нова локація</button>
-            <div id="loc-locList" style="display:flex;flex-direction:column;gap:3px"></div>
-          </div>
-          <!-- Властивості -->
+      <aside id="loc-right" class="col" style="display:none;width:480px;flex:0 0 auto">
+        <div id="loc-preview">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Попередній перегляд</div>
+        </div>
+        <div style="display:flex;gap:6px;padding:2px">
+          <button class="iconToggle" id="loc-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
+          <button class="iconToggle on" id="loc-zonesBtn" title="Показати зони дій"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
+          <button class="iconToggle on" id="loc-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+          <button class="iconToggle" id="loc-fitBtn" title="Вписати в екран"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+        </div>
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
           <button class="header secToggle open">Властивості</button>
-          <div class="secBody" style="display:flex;flex-direction:column;gap:8px;padding:8px">
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px">
             <div id="loc-noProps" style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Виберіть будівлю або зону</div>
-            <!-- Asset properties -->
             <div id="loc-assetProps" style="display:none;flex-direction:column;gap:6px">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Назва ассету</label>
               <input id="loc-assetName" type="text" placeholder="назва" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
               <div style="font-size:11px;color:var(--muted)">G — перемістити · R — повернути · S — масштаб · M — дзеркало</div>
             </div>
-            <!-- Zone properties -->
             <div id="loc-zoneProps" style="display:none;flex-direction:column;gap:6px">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Дія</label>
               <select id="loc-zoneAction" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
               <label style="font-size:12px;color:var(--muted);font-weight:600">Підпис</label>
               <input id="loc-zoneLabel" type="text" placeholder="підпис зони" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
-              <div style="font-size:11px;color:var(--muted)">🟡 Магазин · 🔵 Апгрейд · 🟠 Кузня · 🟢 Відпочинок · 🟣 Квести</div>
             </div>
           </div>
-          <div style="padding:8px;margin-top:auto">
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
+            <hr style="border:0;border-top:1px solid var(--line)">
+            <button id="loc-exportBtn" class="btn-accent" style="width:100%">Експорт JSON</button>
             <div id="loc-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>

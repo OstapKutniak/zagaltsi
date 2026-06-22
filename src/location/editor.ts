@@ -72,6 +72,8 @@ export function initLocationEditor(prefix: string): void {
     pan: { x: 0, y: 0 },
     mouse: { x: 0, y: 0 },
     undoStack: [] as string[],
+    showZones: true,
+    showGrid: true,
   };
 
   const loc = (): LocationDoc => state.locs[state.cur];
@@ -166,18 +168,20 @@ export function initLocationEditor(prefix: string): void {
       const p = toScreen(0, 0);
       ctx.drawImage(state.bgImg, p.x, p.y, state.bgImg.naturalWidth * sc(), state.bgImg.naturalHeight * sc());
     } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Тягни PNG будівель/фону сюди', w / 2, h / 2);
+    }
+
+    if (state.showGrid) {
       ctx.strokeStyle = '#282828'; ctx.lineWidth = 1;
       const gs = 60 * sc();
       const ox = ((w / 2 + state.pan.x) % gs + gs) % gs;
       const oy = ((h / 2 + state.pan.y) % gs + gs) % gs;
       for (let x = ox; x < w; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
       for (let y = oy; y < h; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-      ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('Тягни PNG будівель/фону сюди', w / 2, h / 2);
     }
 
-    // Zones (below assets)
-    for (const z of loc().zones) {
+    if (state.showZones) for (const z of loc().zones) {
       const tl = toScreen(z.x, z.y);
       const sw = z.w * sc(), sh = z.h * sc();
       const isSel = state.sel === z.id;
@@ -362,6 +366,22 @@ export function initLocationEditor(prefix: string): void {
   $('tool-select')?.addEventListener('click', () => setTool('select'));
   $('tool-zone')?.addEventListener('click', () => setTool('zone'));
   $('deleteBtn')?.addEventListener('click', deleteSelected);
+
+  $('undoBtn')?.addEventListener('click', undo);
+
+  const zonesBtn = $('zonesBtn');
+  zonesBtn?.addEventListener('click', () => {
+    state.showZones = !state.showZones;
+    zonesBtn.classList.toggle('on', state.showZones);
+  });
+
+  const gridBtn = $('gridBtn');
+  gridBtn?.addEventListener('click', () => {
+    state.showGrid = !state.showGrid;
+    gridBtn.classList.toggle('on', state.showGrid);
+  });
+
+  $('fitBtn')?.addEventListener('click', () => { state.zoom = 1; state.pan = { x: 0, y: 0 }; });
 
   // ── Background + assets ───────────────────────────────────────────────────
 

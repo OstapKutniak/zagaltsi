@@ -55,6 +55,8 @@ export function initWorldEditor(prefix: string): void {
     panning: false,
     panStart: { mx: 0, my: 0, px: 0, py: 0 },
     undoStack: [] as string[],
+    showLabels: true,
+    showGrid: true,
   };
 
   const world = (): WorldDoc => state.worlds[state.cur];
@@ -153,6 +155,13 @@ export function initWorldEditor(prefix: string): void {
       const p = toScreen(0, 0);
       ctx.drawImage(state.bgImg, p.x, p.y, state.bgImg.naturalWidth * sc(), state.bgImg.naturalHeight * sc());
     } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Тягни PNG карти сюди або клацни «Фон»', w / 2, h / 2);
+    }
+
+    if (state.showGrid) {
       ctx.strokeStyle = '#282828';
       ctx.lineWidth = 1;
       const gs = 60 * sc();
@@ -160,10 +169,6 @@ export function initWorldEditor(prefix: string): void {
       const oy = ((h / 2 + state.pan.y) % gs + gs) % gs;
       for (let x = ox; x < w; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
       for (let y = oy; y < h; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-      ctx.fillStyle = 'rgba(255,255,255,0.07)';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Тягни PNG карти сюди або клацни «Фон»', w / 2, h / 2);
     }
 
     const nm = new Map(world().nodes.map(n => [n.id, n]));
@@ -228,10 +233,12 @@ export function initWorldEditor(prefix: string): void {
       ctx.lineWidth = isSel ? 2.5 : 1.5;
       ctx.beginPath(); ctx.arc(p.x, p.y, NODE_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(n.label, p.x, p.y + NODE_R + 13);
+      if (state.showLabels) {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, p.x, p.y + NODE_R + 13);
+      }
     }
 
     requestAnimationFrame(draw);
@@ -373,6 +380,22 @@ export function initWorldEditor(prefix: string): void {
   $('tool-node')?.addEventListener('click', () => setTool('node'));
   $('tool-edge')?.addEventListener('click', () => setTool('edge'));
   $('deleteBtn')?.addEventListener('click', deleteSelected);
+
+  $('undoBtn')?.addEventListener('click', undo);
+
+  const labelsBtn = $('labelsBtn');
+  labelsBtn?.addEventListener('click', () => {
+    state.showLabels = !state.showLabels;
+    labelsBtn.classList.toggle('on', state.showLabels);
+  });
+
+  const gridBtn = $('gridBtn');
+  gridBtn?.addEventListener('click', () => {
+    state.showGrid = !state.showGrid;
+    gridBtn.classList.toggle('on', state.showGrid);
+  });
+
+  $('fitBtn')?.addEventListener('click', () => { state.zoom = 1; state.pan = { x: 0, y: 0 }; });
 
   // ── Background ────────────────────────────────────────────────────────────
 
