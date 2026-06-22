@@ -1129,7 +1129,11 @@ function renderLibrary(): void {
     const img = document.createElement('img'); img.src = c.thumb; img.draggable = false;
     const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = c.name;
     const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕';
-    card.onclick = () => { currentCharId = c.id; loadCharFromDoc(c.doc); refreshCharSel(); status(`Завантажено: ${c.name}`); };
+    card.onclick = () => {
+      currentCharId = c.id; loadCharFromDoc(c.doc); refreshCharSel(); status(`Завантажено: ${c.name}`);
+      // якщо редактор нодів уже відкритий — перемкнути дерево поведінки на цього НПС
+      if (isNpc && document.getElementById('nodeEditorPanel')?.style.display === 'flex') openCharBehavior(c.id, c.name);
+    };
     del.onclick = (e) => { e.stopPropagation(); storeLib(loadLib().filter((x) => x.id !== c.id)); renderLibrary(); };
     if (isNpc) {
       card.draggable = true;
@@ -1170,23 +1174,16 @@ $<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => {
   updateBehaviorRow();
 });
 
-// Char behavior node editor (enemy / neutral)
-const _charBehaviorGraphs: Record<string, NodeGraph> = {};
+// Char behavior node editor — дерево поведінки ПЕР-ПЕРСОНАЖА (за id ворога/нейтрала).
+function openCharBehavior(charId: string, name: string): void {
+  const key = 'zag_behavior_' + charId;
+  const open = (g: NodeGraph) => openNodePanel(g, ['condition', 'behavior'], (ng) => { idbSet(key, ng).catch(() => {}); }, 'Поведінка: ' + name);
+  idbGet<NodeGraph>(key).then(saved => open(saved ?? { nodes: [], edges: [] })).catch(() => open({ nodes: [], edges: [] }));
+}
 document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
-  const key = 'zag_behavior_' + libCat;
-  const catLabel = libCat === 'enemy' ? 'Вороги' : 'Нейтрали';
-  const open = (g: NodeGraph) => {
-    _charBehaviorGraphs[libCat] = g;
-    openNodePanel(g, ['condition', 'behavior'], (ng) => {
-      _charBehaviorGraphs[libCat] = ng;
-      idbSet(key, ng).catch(() => {});
-    }, 'Поведінка: ' + catLabel);
-  };
-  if (_charBehaviorGraphs[libCat]) {
-    open(_charBehaviorGraphs[libCat]);
-  } else {
-    idbGet<NodeGraph>(key).then(saved => open(saved ?? { nodes: [], edges: [] })).catch(() => open({ nodes: [], edges: [] }));
-  }
+  const item = loadLib().find((x) => x.id === currentCharId && (x.cat ?? 'char') === libCat);
+  if (!item) { status(`Спершу вибери ${libCat === 'enemy' ? 'ворога' : 'нейтрала'} з бібліотеки`); return; }
+  openCharBehavior(item.id, item.name);
 });
 
 async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {

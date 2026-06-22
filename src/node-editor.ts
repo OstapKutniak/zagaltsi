@@ -130,6 +130,8 @@ export class NodeEditor {
 
   // dragging an edge: from output (reverse=false) or from input (reverse=true)
   private de: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; mx: number; my: number; detached?: boolean } | null = null;
+  // звʼязок, кинутий у порожнечу: чекає вибір вузла в меню, щоб одразу під'єднатися
+  private pendingDe: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; detached?: boolean } | null = null;
   private drag: { ids: string[]; orig: Map<string, { x: number; y: number }>; wx0: number; wy0: number; moved: boolean } | null = null;
   private grab: { ids: string[]; orig: Map<string, { x: number; y: number }>; ax: number; ay: number } | null = null;
   private box: { sx: number; sy: number } | null = null;
@@ -536,8 +538,13 @@ export class NodeEditor {
         let connected = false;
         if (!this.de.reverse) { const ip = this.iPA(sx, sy); if (ip) { this.connect(this.de.fromId!, this.de.fromPort!, ip.n.id, ip.i); connected = true; } }
         else { const op = this.oPA(sx, sy); if (op) { this.connect(op.n.id, op.i, this.de.toId!, this.de.toPort!); connected = true; } }
-        // відчепили звʼязок і кинули в порожнечу — зберегти видалення
-        if (!connected && this.de.detached) this.onChange?.(this.graph);
+        if (!connected) {
+          // кинули в порожнечу — меню вибору вузла, у який одразу під'єднати (як link-drag у Blender)
+          const pend = this.de; this.de = null;
+          this.openMenu(sx, sy, e.clientX, e.clientY);
+          this.pendingDe = pend;
+          return;
+        }
         this.de = null; return;
       }
       if (this.box) {
@@ -699,12 +706,21 @@ export class NodeEditor {
     const config: Record<string, string | number> = {};
     if (def.config) for (const [k, cd] of Object.entries(def.config)) config[k] = cd.default;
     const dummy = { id: '', type, cat: def.cat, label: def.label, x: 0, y: 0, config } as GraphNode;
-    this.graph.nodes.push({ id: this.uid(), type, cat: def.cat, label: def.label, x: wx - NW / 2, y: wy - nodeH(dummy) / 2, config });
+    const id = this.uid();
+    this.graph.nodes.push({ id, type, cat: def.cat, label: def.label, x: wx - NW / 2, y: wy - nodeH(dummy) / 2, config });
+    // якщо вузол створено через link-drag — одразу під'єднуємо кинутий звʼязок
+    if (this.pendingDe) {
+      const pd = this.pendingDe; this.pendingDe = null;
+      if (!pd.reverse) this.connect(pd.fromId!, pd.fromPort!, id, 0);
+      else this.connect(id, 0, pd.toId!, pd.toPort!);
+    }
     this.onChange?.(this.graph);
   }
 
   closeMenu(): void {
     if (this._menuClose) { document.removeEventListener('mousedown', this._menuClose); this._menuClose = null; }
     if (this.menuEl) { this.menuEl.remove(); this.menuEl = null; }
+    // меню закрили без вибору — кинутий звʼязок відкидаємо (і зберігаємо відчеплення)
+    if (this.pendingDe) { const pd = this.pendingDe; this.pendingDe = null; if (pd.detached) this.onChange?.(this.graph); }
   }
 }

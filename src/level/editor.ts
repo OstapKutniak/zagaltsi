@@ -1909,6 +1909,8 @@ export function initLevelEditor(prefix: string): void {
         card.addEventListener('click', () => {
           const active = state.pendingNeutral === it.id;
           state.pendingNeutral = active ? null : it.id;
+          state.pendingEnemy = null; state.pendingAsset = null;
+          if (!active) { state.pathTool = null; updatePathBtns(); } // вибір з бібліотеки вимикає інструменти (спавн-зони тощо)
           npcList.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
           if (!active) card.classList.add('pending');
           draw();
@@ -1936,6 +1938,8 @@ export function initLevelEditor(prefix: string): void {
       card.addEventListener('click', () => {
         const active = state.pendingEnemy === it.id;
         state.pendingEnemy = active ? null : it.id;
+        state.pendingNeutral = null; state.pendingAsset = null;
+        if (!active) { state.pathTool = null; updatePathBtns(); } // вибір з бібліотеки вимикає інструменти (спавн-зони тощо)
         npcList.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
         if (!active) card.classList.add('pending');
         draw();
