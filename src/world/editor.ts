@@ -6,7 +6,7 @@ interface WorldNode {
   id: string;
   label: string;
   x: number; y: number;
-  type: 'location' | 'region';
+  type: 'location' | 'region' | 'stop';
   regionId?: string;
 }
 
@@ -62,6 +62,9 @@ export function initWorldEditor(prefix: string): void {
     cutting: false,
     cutStart: { x: 0, y: 0 },
     cutEnd: { x: 0, y: 0 },
+    roading: false,            // Shift+LMB — прокладання дороги з перехрестями-зупинками
+    roadStart: { x: 0, y: 0 }, // екранні координати
+    roadEnd: { x: 0, y: 0 },
   };
 
   const world = (): WorldDoc => state.worlds[state.cur];
@@ -228,16 +231,40 @@ export function initWorldEditor(prefix: string): void {
     }
 
     // Nodes
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 480); // дихання для зупинок
     for (const n of world().nodes) {
       const p = toScreen(n.x, n.y);
       const isSel = state.sel === n.id;
-      ctx.shadowColor = isSel ? '#ffcc00' : 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = isSel ? 14 : 6;
-      ctx.fillStyle = n.type === 'region' ? '#5577dd' : '#c89030';
-      ctx.strokeStyle = isSel ? '#ffcc00' : '#ffffff';
-      ctx.lineWidth = isSel ? 2.5 : 1.5;
-      ctx.beginPath(); ctx.arc(p.x, p.y, NODE_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
+      if (n.type === 'stop') {
+        // Привал на перехресті — намет, що підсвічується (пульсує)
+        ctx.shadowColor = isSel ? '#ffcc00' : '#3fe6c0';
+        ctx.shadowBlur = isSel ? 16 : 8 + pulse * 12;
+        ctx.fillStyle = '#2fa890';
+        ctx.strokeStyle = isSel ? '#ffcc00' : '#dffff4';
+        ctx.lineWidth = isSel ? 2.5 : 1.5;
+        const r = NODE_R - 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - r);
+        ctx.lineTo(p.x + r, p.y + r * 0.8);
+        ctx.lineTo(p.x - r, p.y + r * 0.8);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
+        // вхід намету
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - r * 0.2);
+        ctx.lineTo(p.x + r * 0.32, p.y + r * 0.8);
+        ctx.lineTo(p.x - r * 0.32, p.y + r * 0.8);
+        ctx.closePath(); ctx.fill();
+      } else {
+        ctx.shadowColor = isSel ? '#ffcc00' : 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = isSel ? 14 : 6;
+        ctx.fillStyle = n.type === 'region' ? '#5577dd' : '#c89030';
+        ctx.strokeStyle = isSel ? '#ffcc00' : '#ffffff';
+        ctx.lineWidth = isSel ? 2.5 : 1.5;
+        ctx.beginPath(); ctx.arc(p.x, p.y, NODE_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
       if (state.showLabels) {
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 11px sans-serif';
@@ -267,6 +294,21 @@ export function initWorldEditor(prefix: string): void {
       ctx.lineTo(state.cutEnd.x, state.cutEnd.y); ctx.stroke(); ctx.setLineDash([]);
     }
 
+    if (state.roading) {
+      ctx.strokeStyle = '#3fe6c0'; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+      ctx.beginPath(); ctx.moveTo(state.roadStart.x, state.roadStart.y);
+      ctx.lineTo(state.roadEnd.x, state.roadEnd.y); ctx.stroke(); ctx.setLineDash([]);
+      // позначки перетинів з наявними шляхами
+      const S = toWorld(state.roadStart.x, state.roadStart.y);
+      const E = toWorld(state.roadEnd.x, state.roadEnd.y);
+      const nm2 = new Map(world().nodes.map(n => [n.id, n]));
+      for (const e of world().edges) {
+        const a = nm2.get(e.from), b = nm2.get(e.to); if (!a || !b) continue;
+        const h = segHit(S.x, S.y, E.x, E.y, a.x, a.y, b.x, b.y);
+        if (h) { const ps = toScreen(h.x, h.y); ctx.fillStyle = '#3fe6c0'; ctx.beginPath(); ctx.arc(ps.x, ps.y, 5, 0, Math.PI * 2); ctx.fill(); }
+      }
+    }
+
     requestAnimationFrame(draw);
   }
 
@@ -280,6 +322,11 @@ export function initWorldEditor(prefix: string): void {
 
     if (state.cutting) {
       state.cutEnd = { x: state.mouse.x, y: state.mouse.y };
+      return;
+    }
+
+    if (state.roading) {
+      state.roadEnd = { x: state.mouse.x, y: state.mouse.y };
       return;
     }
 
@@ -308,6 +355,66 @@ export function initWorldEditor(prefix: string): void {
     return t > 0 && t < 1 && u > 0 && u < 1;
   }
 
+  // Точка перетину відрізка A-B з відрізком C-D; повертає параметр t уздовж A-B та координати.
+  function segHit(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): { t: number; x: number; y: number } | null {
+    const d1x = bx - ax, d1y = by - ay, d2x = dx - cx, d2y = dy - cy;
+    const cross = d1x * d2y - d1y * d2x;
+    if (Math.abs(cross) < 1e-10) return null;
+    const t = ((cx - ax) * d2y - (cy - ay) * d2x) / cross;
+    const u = ((cx - ax) * d1y - (cy - ay) * d1x) / cross;
+    if (t > 0 && t < 1 && u > 0 && u < 1) return { t, x: ax + t * d1x, y: ay + t * d1y };
+    return null;
+  }
+
+  // Shift+LMB: проводимо дорогу. На кожному перетині з наявним шляхом створюється
+  // вузол-зупинка (привал), що розрізає той шлях; нова дорога зшиває все в перехрестя.
+  function finalizeRoad(): void {
+    const S = toWorld(state.roadStart.x, state.roadStart.y);
+    const E = toWorld(state.roadEnd.x, state.roadEnd.y);
+    if (Math.hypot(state.roadEnd.x - state.roadStart.x, state.roadEnd.y - state.roadStart.y) < 6) return;
+    const w = world();
+    const nm = new Map(w.nodes.map(n => [n.id, n]));
+    const snapR = HIT_R / sc(); // радіус прилипання у світових одиницях
+    const nearNode = (px: number, py: number): WorldNode | null => {
+      let best: WorldNode | null = null, bd = snapR * snapR;
+      for (const n of w.nodes) { const dd = (n.x - px) ** 2 + (n.y - py) ** 2; if (dd <= bd) { bd = dd; best = n; } }
+      return best;
+    };
+    const mkStop = (px: number, py: number): WorldNode => {
+      const n: WorldNode = { id: uid(), label: 'Привал', x: px, y: py, type: 'stop' };
+      w.nodes.push(n); return n;
+    };
+
+    pushUndo();
+    // Перетини з наявними шляхами → зупинки + розрізання
+    const hits: { t: number; node: WorldNode }[] = [];
+    for (const e of [...w.edges]) {
+      const a = nm.get(e.from), b = nm.get(e.to);
+      if (!a || !b) continue;
+      const h = segHit(S.x, S.y, E.x, E.y, a.x, a.y, b.x, b.y);
+      if (!h) continue;
+      const stop = mkStop(h.x, h.y);
+      w.edges = w.edges.filter(x => x.id !== e.id);
+      w.edges.push({ id: uid(), from: e.from, to: stop.id, levelId: '', twoWay: e.twoWay });
+      w.edges.push({ id: uid(), from: stop.id, to: e.to, levelId: '', twoWay: e.twoWay });
+      hits.push({ t: h.t, node: stop });
+    }
+    hits.sort((p, q) => p.t - q.t);
+
+    // Кінці: прилипають до наявного вузла, інакше — нова зупинка
+    const startNode = nearNode(S.x, S.y) ?? mkStop(S.x, S.y);
+    const endNode = nearNode(E.x, E.y) ?? mkStop(E.x, E.y);
+    const seq = [startNode, ...hits.map(h => h.node), endNode];
+    for (let i = 0; i < seq.length - 1; i++) {
+      const f = seq[i], t = seq[i + 1];
+      if (f.id === t.id) continue;
+      const dup = w.edges.some(e => (e.from === f.id && e.to === t.id) || (e.from === t.id && e.to === f.id));
+      if (!dup) w.edges.push({ id: uid(), from: f.id, to: t.id, levelId: '', twoWay: false });
+    }
+    save();
+    setStatus(hits.length ? `Перехрестя: +${hits.length} зупинок` : 'Дорогу прокладено');
+  }
+
   canvas.addEventListener('mousedown', e => {
     const mx = e.clientX - rect().left;
     const my = e.clientY - rect().top;
@@ -317,6 +424,14 @@ export function initWorldEditor(prefix: string): void {
       state.cutting = true;
       state.cutStart = { x: mx, y: my };
       state.cutEnd = { x: mx, y: my };
+      return;
+    }
+
+    if (e.button === 0 && e.shiftKey && state.tool === 'select') {
+      e.preventDefault();
+      state.roading = true;
+      state.roadStart = { x: mx, y: my };
+      state.roadEnd = { x: mx, y: my };
       return;
     }
 
@@ -376,6 +491,11 @@ export function initWorldEditor(prefix: string): void {
   });
 
   canvas.addEventListener('mouseup', e => {
+    if (state.roading) {
+      state.roading = false;
+      finalizeRoad();
+      return;
+    }
     if (state.cutting) {
       state.cutting = false;
       const nm = new Map(world().nodes.map(n => [n.id, n]));
@@ -599,6 +719,7 @@ export function initWorldEditor(prefix: string): void {
       ($<HTMLInputElement>('nodeName')).value = n.label;
       ($<HTMLInputElement>('nodeTypeLocation')).checked = n.type === 'location';
       ($<HTMLInputElement>('nodeTypeRegion')).checked = n.type === 'region';
+      ($<HTMLInputElement>('nodeTypeStop')).checked = n.type === 'stop';
       $('nodeRegionRow').style.display = n.type === 'region' ? 'flex' : 'none';
       if (n.regionId) ($<HTMLInputElement>('nodeRegionId')).value = n.regionId;
     }
@@ -618,11 +739,11 @@ export function initWorldEditor(prefix: string): void {
     if (n) { n.label = this.value; save(); }
   });
 
-  for (const t of ['Location', 'Region'] as const) {
+  for (const t of ['Location', 'Region', 'Stop'] as const) {
     $<HTMLInputElement>(`nodeType${t}`)?.addEventListener('change', function () {
       if (!this.checked) return;
       const n = nodeById(state.sel!);
-      if (n) { n.type = t.toLowerCase() as 'location' | 'region'; updateProps(); save(); }
+      if (n) { n.type = t.toLowerCase() as 'location' | 'region' | 'stop'; updateProps(); save(); }
     });
   }
 

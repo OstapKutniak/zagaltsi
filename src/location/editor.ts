@@ -76,6 +76,8 @@ export function initLocationEditor(prefix: string): void {
     showZones: true,
     showGrid: true,
     showCamView: false,
+    hoverPlaced: null as string | null,
+    hoverScale: new Map<string, number>(),
   };
 
   const loc = (): LocationDoc => state.locs[state.cur];
@@ -211,22 +213,30 @@ export function initLocationEditor(prefix: string): void {
       ctx.setLineDash([4, 3]); ctx.strokeRect(tl2.x, tl2.y, zw * sc(), zh * sc()); ctx.setLineDash([]);
     }
 
-    // Placed assets
+    // Placed assets (будівлі) — hover: білий контур + плавний масштаб (як у Гамлеті DD1)
     for (const p of loc().placed) {
       const img = state.images.get(p.id);
       if (!img?.complete || !img.naturalWidth) continue;
-      const ps = toScreen(p.x, p.y);
-      const iw = img.naturalWidth * p.scale * sc();
-      const ih = img.naturalHeight * p.scale * sc();
       const isSel = state.sel === p.id;
+      const hv = state.tool === 'select' && state.hoverPlaced === p.id && !state.dragPlaced && !state.mode;
+      const cur = state.hoverScale.get(p.id) ?? 1;
+      const target = hv ? 1.08 : 1;
+      let hs = cur + (target - cur) * 0.18;
+      if (Math.abs(hs - target) < 0.002) hs = target;
+      state.hoverScale.set(p.id, hs);
+      const ps = toScreen(p.x, p.y);
+      const iw = img.naturalWidth * p.scale * sc() * hs;
+      const ih = img.naturalHeight * p.scale * sc() * hs;
       ctx.save();
       ctx.translate(ps.x, ps.y);
       ctx.rotate(p.rot * Math.PI / 180);
       ctx.scale(p.flip, 1);
       if (isSel) { ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 14; }
+      else if (hs > 1.005) { ctx.shadowColor = 'rgba(255,255,255,0.6)'; ctx.shadowBlur = 12; }
       ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);
       ctx.shadowBlur = 0;
-      if (isSel) { ctx.strokeStyle = '#ffcc00'; ctx.lineWidth = 2 / sc(); ctx.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+      if (isSel) { ctx.strokeStyle = '#ffcc00'; ctx.lineWidth = 2; ctx.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+      else if (hs > 1.005) { ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.strokeRect(-iw / 2, -ih / 2, iw, ih); }
       ctx.restore();
     }
 
@@ -279,6 +289,15 @@ export function initLocationEditor(prefix: string): void {
     if (state.mode === 'S' && state.sel && state.modeOrig) {
       const p = placedById(state.sel);
       if (p) { const d = Math.hypot(state.mouse.x - state.modeStartX, state.mouse.y - state.modeStartY); p.scale = Math.max(0.02, state.modeOrig.scale * (d / 120)); }
+    }
+
+    // Hover-підсвітка будівель (тільки у режимі вибору, без перетягування/трансформації)
+    if (state.tool === 'select' && !state.mode && !state.dragPlaced && !state.panning) {
+      const h = placedAt(state.mouse.x, state.mouse.y);
+      state.hoverPlaced = h?.id ?? null;
+      canvas.style.cursor = h ? 'pointer' : 'default';
+    } else if (state.tool === 'select') {
+      state.hoverPlaced = null;
     }
   });
 
@@ -440,8 +459,16 @@ export function initLocationEditor(prefix: string): void {
   canvas.addEventListener('dragover', e => e.preventDefault());
   canvas.addEventListener('drop', e => {
     e.preventDefault();
-    const file = e.dataTransfer?.files[0]; if (!file?.type.startsWith('image/')) return;
     const mx = e.clientX - rect().left, my = e.clientY - rect().top;
+    // Картка з бібліотеки споруд
+    const burl = e.dataTransfer?.getData('text/building-url');
+    if (burl) {
+      const bname = e.dataTransfer?.getData('text/building-name') || 'Споруда';
+      const wp0 = toWorld(mx, my);
+      dropAsset(burl, bname, wp0.x, wp0.y);
+      return;
+    }
+    const file = e.dataTransfer?.files[0]; if (!file?.type.startsWith('image/')) return;
     const wp = toWorld(mx, my);
     const r = new FileReader();
     r.onload = () => {
@@ -597,6 +624,57 @@ export function initLocationEditor(prefix: string): void {
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
+  // ── Бібліотека споруд (поки що 9 процедурних карток-заглушок) ──────────────
+  const buildingLib: { id: string; name: string; url: string }[] = [];
+  function genBuilding(i: number): string {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+    const x = c.getContext('2d'); if (!x) return '';
+    const hue = (i * 41) % 360;
+    const bw = 56 + (i % 3) * 12;
+    const bh = 46 + ((i >> 1) % 3) * 12;
+    const bx = 64 - bw / 2, by = 112 - bh;
+    // стіни
+    x.fillStyle = `hsl(${hue},30%,58%)`;
+    x.fillRect(bx, by, bw, bh);
+    x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 2; x.strokeRect(bx, by, bw, bh);
+    // дах
+    x.fillStyle = `hsl(${hue},38%,38%)`;
+    const overhang = 8;
+    x.beginPath();
+    x.moveTo(bx - overhang, by);
+    x.lineTo(64, by - 24 - (i % 2) * 8);
+    x.lineTo(bx + bw + overhang, by);
+    x.closePath(); x.fill(); x.stroke();
+    // двері
+    x.fillStyle = `hsl(${hue},42%,26%)`;
+    x.fillRect(64 - 7, 112 - 22, 14, 22);
+    // вікна
+    x.fillStyle = 'hsl(48,80%,75%)';
+    x.fillRect(bx + 6, by + 8, 10, 10);
+    x.fillRect(bx + bw - 16, by + 8, 10, 10);
+    return c.toDataURL();
+  }
+  function buildBuildingLib(): void {
+    for (let i = 0; i < 9; i++) buildingLib.push({ id: 'b' + i, name: 'Споруда ' + (i + 1), url: genBuilding(i) });
+  }
+  function renderBuildingLib(): void {
+    const grid = $('buildingGrid'); if (!grid) return;
+    grid.innerHTML = '';
+    for (const b of buildingLib) {
+      const card = document.createElement('div');
+      card.style.cssText = 'position:relative;width:calc(33.33% - 6px);aspect-ratio:1;background:#3a3a3a;border:1px solid var(--line);border-radius:8px;cursor:grab;overflow:hidden;display:flex;align-items:center;justify-content:center';
+      card.title = b.name; card.draggable = true;
+      const im = document.createElement('img'); im.src = b.url; im.draggable = false;
+      im.style.cssText = 'width:80%;height:80%;object-fit:contain;pointer-events:none';
+      card.appendChild(im);
+      card.addEventListener('dragstart', (e) => {
+        (e as DragEvent).dataTransfer?.setData('text/building-url', b.url);
+        (e as DragEvent).dataTransfer?.setData('text/building-name', b.name);
+      });
+      grid.appendChild(card);
+    }
+  }
+
   // ── Status + persistence ──────────────────────────────────────────────────
 
   function setStatus(msg: string) { const el = $('statusBar'); if (el) el.textContent = msg; }
@@ -611,5 +689,6 @@ export function initLocationEditor(prefix: string): void {
     canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
   });
 
+  buildBuildingLib(); renderBuildingLib();
   load(); draw(); setTool('select');
 }

@@ -764,6 +764,7 @@
               <div style="display:flex;gap:12px">
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeLocation" name="wld-nodeType" value="location"> Локація</label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeRegion" name="wld-nodeType" value="region"> Регіон</label>
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeStop" name="wld-nodeType" value="stop"> Зупинка</label>
               </div>
               <div id="wld-nodeRegionRow" style="display:none;flex-direction:column;gap:4px">
                 <label style="font-size:12px;color:var(--muted)">id вкладеної карти</label>
@@ -813,6 +814,11 @@
               <label style="font-size:12px;color:var(--muted);font-weight:600">Підпис</label>
               <input id="loc-zoneLabel" type="text" placeholder="підпис зони" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
             </div>
+          </div>
+          <button class="header secToggle open" style="margin-top:6px">Бібліотека споруд</button>
+          <div class="secBody">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Перетягни картку у вьюпорт — стане будівлею</div>
+            <div id="loc-buildingGrid" style="display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start"></div>
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)">
