@@ -46,6 +46,25 @@
       .mode-world #partsList { display: none !important; }
       .mode-world #faceList { display: none !important; }
       .mode-world #mob-char-parts-row { display: none !important; }
+      /* ── mode-location ── */
+      .mode-location #stageWrap { display: none; }
+      .mode-location #lv-stageWrap { display: none; }
+      .mode-location #wld-stageWrap { display: none; }
+      .mode-location #loc-stageWrap { display: block; }
+      .mode-location #right { display: none; }
+      .mode-location #lv-right { display: none; }
+      .mode-location #wld-right { display: none; }
+      .mode-location #loc-right { display: flex; }
+      .mode-location #timelineBar { display: none; }
+      .mode-location #lv-levelToolbar { display: none; }
+      .mode-location #wld-toolbar { display: none; }
+      .mode-location #loc-toolbar { display: flex; }
+      .mode-location #library { display: none; }
+      .mode-location #lv-library { display: none; }
+      .mode-location #lv-levelBar { display: none; }
+      .mode-location #partsList { display: none !important; }
+      .mode-location #faceList { display: none !important; }
+      .mode-location #mob-char-parts-row { display: none !important; }
       /* AI-панелі (опис персонажа / декорації) тієї ж висоти, що й таймлайн — спільне --panel-h */
       #aiPanel, #lv-aiPanel { height: var(--panel-h, 220px); }
       .mode-level #partsList { display: none !important; }
@@ -462,7 +481,7 @@
           <button class="light" data-tab="char">Редактор Персонажів</button>
           <button data-tab="level">Редактор Мандр</button>
           <button data-tab="world">Редактор Карти</button>
-          <button data-soon>Редактор Локацій</button>
+          <button data-tab="location">Редактор Локацій</button>
           <button id="playTab" class="btn-accent" title="Запустити гру">▶ Грати</button>
         </div>
         <!-- Мобільна смуга вибору рівня (між вкладками і бібліотекою тайлів) -->
@@ -478,6 +497,7 @@
           <div id="stageWrap"><canvas id="stage"></canvas></div>
           <div id="lv-stageWrap" style="position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="lv-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни ассет · <b>G/R/S/M</b> · <b>Shift+D</b> дублювати · <b>H/V</b> шлях · <b>Y</b> стерти шлях · <b>J</b> снеп · <b>Del</b> · <b>Ctrl+Z</b> · колесо — зум</div></div>
           <div id="wld-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="wld-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap"><b>V</b> вибір · <b>N</b> вузол · <b>E</b> зʼєднання · <b>Del</b> видалити · <b>Alt+тягни</b> пан · колесо — зум</div></div>
+          <div id="loc-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="loc-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни PNG будівлі/фону · <b>V</b> вибір · <b>Z</b> зона · <b>G/R/S/M</b> · <b>Del</b> · <b>Alt+тягни</b> пан · колесо — зум</div></div>
           <div id="partsList" style="display:none"><div id="slotChips"></div></div>
           <div id="faceList"><div id="faceChips"></div></div>
           <div id="lv-fillMenu" style="display:none"></div>
@@ -552,6 +572,20 @@
           <input type="file" id="wld-bgInput" accept="image/*" style="display:none">
           <button id="wld-bgClearBtn" title="Прибрати фон">Прибрати фон</button>
           <button id="wld-exportBtn" title="Завантажити worlds.json" style="margin-left:auto">Експорт JSON</button>
+        </div>
+        <!-- LOCATION EDITOR TOOLBAR — visible in mode-location -->
+        <div id="loc-toolbar" class="pane" style="display:none;gap:4px;flex-wrap:wrap">
+          <button id="loc-tool-select" class="on" title="Вибір та переміщення (V)">Вибір</button>
+          <button id="loc-tool-zone" title="Намалювати активну зону (Z)">＋ Зона</button>
+          <button id="loc-deleteBtn" title="Видалити вибране (Del)">Видалити</button>
+          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
+          <button id="loc-bgBtn" title="Завантажити фон локації (PNG)">Фон</button>
+          <input type="file" id="loc-bgInput" accept="image/*" style="display:none">
+          <button id="loc-bgClearBtn" title="Прибрати фон">Прибрати фон</button>
+          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
+          <button id="loc-assetBtn" title="Додати будівлю або декор (PNG)">＋ Будівлю</button>
+          <input type="file" id="loc-assetInput" accept="image/*" multiple style="display:none">
+          <button id="loc-exportBtn" title="Завантажити locations.json" style="margin-left:auto">Експорт JSON</button>
         </div>
       </section>
 
@@ -719,6 +753,40 @@
           </div>
           <div style="padding:8px;margin-top:auto">
             <div id="wld-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ПРАВА ПАНЕЛЬ — редактор локацій -->
+      <aside id="loc-right" class="col" style="display:none;width:260px;flex:0 0 260px">
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0">
+          <!-- Локації -->
+          <button class="header secToggle open">Локації</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:6px;padding:8px">
+            <button id="loc-addLoc" class="btn-accent" style="width:100%;padding:6px">＋ Нова локація</button>
+            <div id="loc-locList" style="display:flex;flex-direction:column;gap:3px"></div>
+          </div>
+          <!-- Властивості -->
+          <button class="header secToggle open">Властивості</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px;padding:8px">
+            <div id="loc-noProps" style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Виберіть будівлю або зону</div>
+            <!-- Asset properties -->
+            <div id="loc-assetProps" style="display:none;flex-direction:column;gap:6px">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Назва ассету</label>
+              <input id="loc-assetName" type="text" placeholder="назва" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
+              <div style="font-size:11px;color:var(--muted)">G — перемістити · R — повернути · S — масштаб · M — дзеркало</div>
+            </div>
+            <!-- Zone properties -->
+            <div id="loc-zoneProps" style="display:none;flex-direction:column;gap:6px">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Дія</label>
+              <select id="loc-zoneAction" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Підпис</label>
+              <input id="loc-zoneLabel" type="text" placeholder="підпис зони" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
+              <div style="font-size:11px;color:var(--muted)">🟡 Магазин · 🔵 Апгрейд · 🟠 Кузня · 🟢 Відпочинок · 🟣 Квести</div>
+            </div>
+          </div>
+          <div style="padding:8px;margin-top:auto">
+            <div id="loc-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>
       </aside>
