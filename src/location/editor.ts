@@ -366,6 +366,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   window.addEventListener('keydown', e => {
     const app = document.getElementById('app');
     if (!app?.className.includes('mode-location')) return;
+    // нодова панель відкрита — клавіші належать редактору нодів, не сцені локації
+    if (document.getElementById('nodeEditorPanel')?.style.display === 'flex') return;
     const active = document.activeElement;
     const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement
       || (active instanceof HTMLElement && active.contentEditable === 'true');

@@ -1009,6 +1009,8 @@ window.addEventListener('keydown', (ev) => {
     refreshUI(); return;
   }
   if (previewBig) return; // превью розгорнуто — хоткеї студії вимкнені, гра отримує клаву
+  // нодова панель відкрита — клавіші (G/Shift+D/Del/Esc) належать редактору нодів
+  if (document.getElementById('nodeEditorPanel')?.style.display === 'flex') return;
   const tag = (document.activeElement?.tagName ?? '').toUpperCase();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (ev.ctrlKey && ev.code === 'KeyZ') { ev.preventDefault(); undo(); return; }
@@ -1134,6 +1136,7 @@ function renderLibrary(): void {
       card.addEventListener('dragstart', (e) => {
         e.dataTransfer?.setData('text/npc-id', c.id);
         e.dataTransfer?.setData('text/npc-name', c.name);
+        e.dataTransfer?.setData('text/npc-thumb', c.thumb); // портрет для кореневого вузла
       });
     }
     card.appendChild(img); card.appendChild(nm); card.appendChild(del); box.appendChild(card);

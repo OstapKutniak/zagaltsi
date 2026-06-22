@@ -1,6 +1,8 @@
 // src/node-editor.ts — Shared canvas node editor (location building logic + NPC behavior)
+// Blender-подібна взаємодія: G — рух, Shift+D — дублювати, ЛКМ-рамка — виділення,
+// Ctrl+ЛКМ — ніж (різати звʼязки), Shift+ЛКМ — reroute-вузол, тягни з будь-якого порту.
 
-export type NodeCat = 'root' | 'condition' | 'behavior' | 'function';
+export type NodeCat = 'root' | 'condition' | 'behavior' | 'function' | 'reroute';
 
 interface PortDef { label: string }
 interface ConfigDef { type: 'number' | 'text'; label: string; default: string | number }
@@ -17,10 +19,15 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
     config: { steps: { type: 'number', label: 'Кроків', default: 3 } },
   },
-  run_to_player:  { cat: 'behavior', label: 'Бігти на гравця',  color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Готово' }] },
-  walk_to_player: { cat: 'behavior', label: 'Йти на гравця',    color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Готово' }] },
-  range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Готово' }] },
-  melee_attack:   { cat: 'behavior', label: 'Ближня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Готово' }] },
+  run_to_player:  { cat: 'behavior', label: 'Бігти на гравця',  color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  walk_to_player: { cat: 'behavior', label: 'Йти на гравця',    color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  melee_attack:   { cat: 'behavior', label: 'Ближня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  wait: {
+    cat: 'behavior', label: 'Очікування', color: '#7a2e00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }],
+    config: { sec: { type: 'number', label: 'Сек', default: 1 } },
+  },
   dialog_menu: {
     cat: 'function', label: 'Діалогове меню', color: '#1a6e3a',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Варіант 1' }, { label: 'Варіант 2' }],
@@ -30,13 +37,14 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
   { id: 'condition', label: 'Умови',     types: ['player_distance'] },
-  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'range_attack', 'melee_attack'] },
+  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
 ];
 
 export interface GraphNode {
   id: string; type: string; cat: NodeCat; label: string;
   x: number; y: number; config: Record<string, string | number>;
+  thumb?: string; // дата-URL портрета для кореневого (персонаж/будівля) вузла
 }
 export interface GraphEdge { fromId: string; fromPort: number; toId: string; toPort: number; }
 export interface NodeGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
@@ -44,22 +52,54 @@ export interface NodeGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
 // ── Layout constants ────────────────────────────────────────────────────────────
 const NW = 168;
 const HDR = 26;
-const PR = PORT_ROW_H_CONST();
+const PR = 20;
 const PR_R = 5;
 const PAD_T = 8;
 const PAD_B = 8;
 const CFG_H = 22;
+const THUMB = 58;      // висота портрета в кореневому вузлі
+const RR = 24;         // розмір reroute-вузла
 
-function PORT_ROW_H_CONST() { return 20; }
+// Порти будь-якого вузла (узагальнення NODE_TYPES + спец-випадки root/reroute).
+function outLabels(n: GraphNode): string[] {
+  if (n.cat === 'root') return ['Поведінка'];
+  if (n.cat === 'reroute') return ['▶'];
+  return NODE_TYPES[n.type]?.outPorts.map(p => p.label) ?? [];
+}
+function inLabels(n: GraphNode): string[] {
+  if (n.cat === 'root') return [];
+  if (n.cat === 'reroute') return ['▶'];
+  return NODE_TYPES[n.type]?.inPorts.map(p => p.label) ?? [];
+}
+function nodeW(n: GraphNode): number { return n.cat === 'reroute' ? RR : NW; }
 
-function bodyH(type: string): number {
-  const def = NODE_TYPES[type]; if (!def) return 24;
+function bodyH(n: GraphNode): number {
+  if (n.cat === 'root') return PAD_T + THUMB + PR + PAD_B;
+  const def = NODE_TYPES[n.type]; if (!def) return 24;
   return PAD_T + Math.max(def.inPorts.length, def.outPorts.length) * PR
     + (def.config ? Object.keys(def.config).length : 0) * CFG_H + PAD_B;
 }
-function nodeH(n: GraphNode): number { return n.cat === 'root' ? HDR + 8 : HDR + bodyH(n.type); }
-function iPP(n: GraphNode, i: number) { return { x: n.x, y: n.y + HDR + PAD_T + i * PR + PR / 2 }; }
-function oPP(n: GraphNode, i: number) { return { x: n.x + NW, y: n.y + HDR + PAD_T + i * PR + PR / 2 }; }
+function nodeH(n: GraphNode): number {
+  if (n.cat === 'reroute') return RR;
+  return HDR + bodyH(n);
+}
+// Y центру i-го порту (root: один порт під портретом; reroute: центр; решта — рядки).
+function portY(n: GraphNode, i: number): number {
+  if (n.cat === 'reroute') return n.y + RR / 2;
+  if (n.cat === 'root') return n.y + HDR + PAD_T + THUMB + PR / 2;
+  return n.y + HDR + PAD_T + i * PR + PR / 2;
+}
+function iPP(n: GraphNode, i: number) { return { x: n.x, y: portY(n, i) }; }
+function oPP(n: GraphNode, i: number) { return { x: n.x + nodeW(n), y: portY(n, i) }; }
+
+// Перетин відрізків (для ножа).
+function segInt(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): boolean {
+  const d = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+  if (Math.abs(d) < 1e-6) return false;
+  const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / d;
+  const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / d;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
 
 export class NodeEditor {
   private cvs: HTMLCanvasElement;
@@ -70,17 +110,26 @@ export class NodeEditor {
   private pan = { x: 80, y: 40 };
   private zoom = 1;
 
-  private dn: { id: string; ox: number; oy: number; wx0: number; wy0: number } | null = null;
-  private de: { fromId: string; fromPort: number; mx: number; my: number } | null = null;
+  // dragging an edge: from output (reverse=false) or from input (reverse=true)
+  private de: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; mx: number; my: number; detached?: boolean } | null = null;
+  private drag: { ids: string[]; orig: Map<string, { x: number; y: number }>; wx0: number; wy0: number; moved: boolean } | null = null;
+  private grab: { ids: string[]; orig: Map<string, { x: number; y: number }>; ax: number; ay: number } | null = null;
+  private box: { sx: number; sy: number } | null = null;
+  private knife: { x: number; y: number }[] | null = null;
   private pan0: { mx: number; my: number; px: number; py: number } | null = null;
 
+  private selected = new Set<string>();
+  private mouse = { sx: 0, sy: 0 };
+
   private menuEl: HTMLElement | null = null;
+  private _menuClose: ((e: MouseEvent) => void) | null = null;
   private pWx = 0; private pWy = 0;
 
   allowedCats: string[];
   private _uid = Date.now();
   private uid = (): string => (++this._uid).toString(36);
 
+  private thumbs = new Map<string, HTMLImageElement>();
   private _raf = 0; private _running = false;
   private _ac = new AbortController();
 
@@ -112,16 +161,16 @@ export class NodeEditor {
     this.draw();
   }
 
-  acceptDrop(label: string, type: string, clientX: number, clientY: number): void {
+  acceptDrop(label: string, type: string, clientX: number, clientY: number, thumb?: string): void {
     const r = this.cvs.getBoundingClientRect();
     const wx = (clientX - r.left - this.pan.x) / this.zoom;
     const wy = (clientY - r.top - this.pan.y) / this.zoom;
-    this.graph.nodes.push({ id: this.uid(), type, cat: 'root', label, x: wx - NW / 2, y: wy - HDR / 2, config: {} });
+    this.graph.nodes.push({ id: this.uid(), type, cat: 'root', label, x: wx - NW / 2, y: wy - HDR / 2, config: {}, thumb });
     this.draw(); this.onChange?.(this.graph);
   }
 
   getGraph(): NodeGraph { return JSON.parse(JSON.stringify(this.graph)); }
-  loadGraph(g: NodeGraph): void { this.graph = JSON.parse(JSON.stringify(g)); this.draw(); }
+  loadGraph(g: NodeGraph): void { this.graph = JSON.parse(JSON.stringify(g)); this.selected.clear(); this.draw(); }
 
   // ── transforms ───────────────────────────────────────────────────────────────
   private sw(wx: number) { return wx * this.zoom + this.pan.x; }
@@ -134,33 +183,35 @@ export class NodeEditor {
   private nodeAt(sx: number, sy: number): GraphNode | null {
     const wx = this.ww(sx), wy = this.wh(sy);
     for (const n of [...this.graph.nodes].reverse())
-      if (wx >= n.x && wx <= n.x + NW && wy >= n.y && wy <= n.y + nodeH(n)) return n;
+      if (wx >= n.x && wx <= n.x + nodeW(n) && wy >= n.y && wy <= n.y + nodeH(n)) return n;
     return null;
   }
   private oPA(sx: number, sy: number): { n: GraphNode; i: number } | null {
     for (const n of this.graph.nodes) {
-      const def = NODE_TYPES[n.type]; if (!def) continue;
-      for (let i = 0; i < def.outPorts.length; i++) {
+      const labels = outLabels(n);
+      for (let i = 0; i < labels.length; i++) {
         const p = oPP(n, i);
-        if (Math.hypot(sx - this.sw(p.x), sy - this.sh(p.y)) <= PR_R * this.zoom + 5) return { n, i };
+        if (Math.hypot(sx - this.sw(p.x), sy - this.sh(p.y)) <= PR_R * this.zoom + 6) return { n, i };
       }
     }
     return null;
   }
   private iPA(sx: number, sy: number): { n: GraphNode; i: number } | null {
     for (const n of this.graph.nodes) {
-      const def = NODE_TYPES[n.type]; if (!def) continue;
-      for (let i = 0; i < def.inPorts.length; i++) {
+      const labels = inLabels(n);
+      for (let i = 0; i < labels.length; i++) {
         const p = iPP(n, i);
-        if (Math.hypot(sx - this.sw(p.x), sy - this.sh(p.y)) <= PR_R * this.zoom + 5) return { n, i };
+        if (Math.hypot(sx - this.sw(p.x), sy - this.sh(p.y)) <= PR_R * this.zoom + 6) return { n, i };
       }
     }
     return null;
   }
   private closeAt(sx: number, sy: number): GraphNode | null {
     const wx = this.ww(sx), wy = this.wh(sy);
-    for (const n of this.graph.nodes)
-      if (wx >= n.x + NW - 20 && wx <= n.x + NW - 4 && wy >= n.y + 4 && wy <= n.y + 20) return n;
+    for (const n of this.graph.nodes) {
+      if (n.cat === 'reroute') continue;
+      if (wx >= n.x + nodeW(n) - 20 && wx <= n.x + nodeW(n) - 4 && wy >= n.y + 4 && wy <= n.y + 20) return n;
+    }
     return null;
   }
   private cfgAt(sx: number, sy: number): { n: GraphNode; key: string } | null {
@@ -177,6 +228,14 @@ export class NodeEditor {
   }
 
   // ── draw ──────────────────────────────────────────────────────────────────────
+  private edgeAnchors(e: GraphEdge): { fx: number; fy: number; tx: number; ty: number } | null {
+    const fn = this.graph.nodes.find(n => n.id === e.fromId);
+    const tn = this.graph.nodes.find(n => n.id === e.toId);
+    if (!fn || !tn) return null;
+    const fp = oPP(fn, e.fromPort), tp = iPP(tn, e.toPort);
+    return { fx: this.sw(fp.x), fy: this.sh(fp.y), tx: this.sw(tp.x), ty: this.sh(tp.y) };
+  }
+
   draw(): void {
     const c = this.cvs, x = this.ctx, w = c.width, h = c.height;
     x.clearRect(0, 0, w, h);
@@ -189,31 +248,42 @@ export class NodeEditor {
     for (let gy = goy; gy < h; gy += gs) { x.beginPath(); x.moveTo(0, gy); x.lineTo(w, gy); x.stroke(); }
 
     for (const e of this.graph.edges) {
-      const fn = this.graph.nodes.find(n => n.id === e.fromId);
-      const tn = this.graph.nodes.find(n => n.id === e.toId);
-      if (!fn || !tn) continue;
-      const fp = oPP(fn, e.fromPort), tp = iPP(tn, e.toPort);
-      const fsx = this.sw(fp.x), fsy = this.sh(fp.y), tsx = this.sw(tp.x), tsy = this.sh(tp.y);
-      x.strokeStyle = (NODE_TYPES[fn.type]?.color ?? '#666') + 'cc'; x.lineWidth = 2; x.setLineDash([]);
-      x.beginPath(); x.moveTo(fsx, fsy);
-      const mx = (fsx + tsx) / 2;
-      x.bezierCurveTo(mx, fsy, mx, tsy, tsx, tsy); x.stroke();
+      const a = this.edgeAnchors(e); if (!a) continue;
+      const fn = this.graph.nodes.find(n => n.id === e.fromId)!;
+      x.strokeStyle = (this.colorOf(fn)) + 'cc'; x.lineWidth = 2; x.setLineDash([]);
+      x.beginPath(); x.moveTo(a.fx, a.fy);
+      const mx = (a.fx + a.tx) / 2;
+      x.bezierCurveTo(mx, a.fy, mx, a.ty, a.tx, a.ty); x.stroke();
     }
 
     if (this.de) {
-      const fn = this.graph.nodes.find(n => n.id === this.de!.fromId);
-      if (fn) {
-        const fp = oPP(fn, this.de.fromPort);
-        x.strokeStyle = (NODE_TYPES[fn.type]?.color ?? '#666') + '77'; x.lineWidth = 2;
-        x.setLineDash([5, 4]);
-        x.beginPath(); x.moveTo(this.sw(fp.x), this.sh(fp.y));
-        const mx = (this.sw(fp.x) + this.de.mx) / 2;
-        x.bezierCurveTo(mx, this.sh(fp.y), mx, this.de.my, this.de.mx, this.de.my);
-        x.stroke(); x.setLineDash([]);
+      let ax: number, ay: number;
+      if (!this.de.reverse) {
+        const fn = this.graph.nodes.find(n => n.id === this.de!.fromId);
+        if (!fn) { /* skip */ } else { const fp = oPP(fn, this.de.fromPort!); ax = this.sw(fp.x); ay = this.sh(fp.y); this.tempWire(ax, ay, this.de.mx, this.de.my, this.colorOf(fn)); }
+      } else {
+        const tn = this.graph.nodes.find(n => n.id === this.de!.toId);
+        if (tn) { const tp = iPP(tn, this.de.toPort!); ax = this.sw(tp.x); ay = this.sh(tp.y); this.tempWire(this.de.mx, this.de.my, ax, ay, '#888'); }
       }
     }
 
     for (const n of this.graph.nodes) this.drawNode(n);
+
+    // рамка виділення
+    if (this.box) {
+      const x0 = Math.min(this.box.sx, this.mouse.sx), y0 = Math.min(this.box.sy, this.mouse.sy);
+      const ww = Math.abs(this.mouse.sx - this.box.sx), hh = Math.abs(this.mouse.sy - this.box.sy);
+      x.fillStyle = 'rgba(255,154,31,0.12)'; x.fillRect(x0, y0, ww, hh);
+      x.strokeStyle = '#ff9a1f'; x.lineWidth = 1; x.setLineDash([4, 3]); x.strokeRect(x0, y0, ww, hh); x.setLineDash([]);
+    }
+
+    // ніж
+    if (this.knife && this.knife.length > 1) {
+      x.strokeStyle = '#ff4040'; x.lineWidth = 2; x.setLineDash([]);
+      x.beginPath(); x.moveTo(this.knife[0].x, this.knife[0].y);
+      for (const p of this.knife) x.lineTo(p.x, p.y);
+      x.stroke();
+    }
 
     if (!this.graph.nodes.length) {
       x.fillStyle = 'rgba(255,255,255,0.18)';
@@ -222,51 +292,87 @@ export class NodeEditor {
     }
   }
 
+  private colorOf(n: GraphNode): string {
+    if (n.cat === 'root') return '#3d6b8f';
+    if (n.cat === 'reroute') return '#777';
+    return NODE_TYPES[n.type]?.color ?? '#454545';
+  }
+
+  private tempWire(fx: number, fy: number, tx: number, ty: number, color: string): void {
+    const x = this.ctx;
+    x.strokeStyle = color + '99'; x.lineWidth = 2; x.setLineDash([5, 4]);
+    x.beginPath(); x.moveTo(fx, fy);
+    const mx = (fx + tx) / 2;
+    x.bezierCurveTo(mx, fy, mx, ty, tx, ty); x.stroke(); x.setLineDash([]);
+  }
+
+  private getThumb(src: string): HTMLImageElement {
+    let img = this.thumbs.get(src);
+    if (!img) { img = new Image(); img.onload = () => this.draw(); img.src = src; this.thumbs.set(src, img); }
+    return img;
+  }
+
   private drawNode(n: GraphNode): void {
     const x = this.ctx;
-    const def = NODE_TYPES[n.type];
-    const nh = nodeH(n);
+    const nh = nodeH(n), nw = nodeW(n);
     const sx = this.sw(n.x), sy = this.sh(n.y);
-    const sw = NW * this.zoom, sh = nh * this.zoom;
-    const hcol = n.cat === 'root' ? '#454545' : (def?.color ?? '#454545');
+    const sw = nw * this.zoom, sh = nh * this.zoom;
+    const sel = this.selected.has(n.id);
     const r = Math.max(2, 7 * this.zoom);
 
+    // reroute — маленький кружок-перехідник
+    if (n.cat === 'reroute') {
+      x.fillStyle = '#3a3a3a'; this.rr(sx, sy, sw, sh, r, r, r, r); x.fill();
+      x.strokeStyle = sel ? '#ff9a1f' : 'rgba(255,255,255,0.25)'; x.lineWidth = sel ? 2 : 1; this.rr(sx, sy, sw, sh, r, r, r, r); x.stroke();
+      this.drawPorts(n);
+      return;
+    }
+
+    const hcol = this.colorOf(n);
     x.fillStyle = hcol;
     this.rr(sx, sy, sw, HDR * this.zoom, r, r, 0, 0); x.fill();
     x.fillStyle = '#2a2a2a';
     this.rr(sx, sy + HDR * this.zoom, sw, (nh - HDR) * this.zoom, 0, 0, r, r); x.fill();
-    x.strokeStyle = 'rgba(255,255,255,0.1)'; x.lineWidth = 1;
+    x.strokeStyle = sel ? '#ff9a1f' : 'rgba(255,255,255,0.1)'; x.lineWidth = sel ? 2 : 1;
     this.rr(sx, sy, sw, sh, r, r, r, r); x.stroke();
 
     const fs = Math.max(9, Math.round(11 * this.zoom));
     x.fillStyle = '#fff'; x.font = `600 ${fs}px system-ui, sans-serif`; x.textAlign = 'left';
     x.fillText(n.label, sx + 8 * this.zoom, sy + HDR * this.zoom * 0.68);
 
+    // кнопка ×
     const bx = sx + sw - 20 * this.zoom, by = sy + 5 * this.zoom, bs = 14 * this.zoom;
     x.fillStyle = 'rgba(255,255,255,0.15)';
     this.rr(bx, by, bs, bs, 3, 3, 3, 3); x.fill();
     x.fillStyle = '#bbb'; x.font = `${Math.max(8, Math.round(10 * this.zoom))}px system-ui, sans-serif`; x.textAlign = 'center';
     x.fillText('×', bx + bs / 2, by + bs * 0.76);
 
-    if (!def) return;
-
-    const pfs = Math.max(8, Math.round(9 * this.zoom));
-    for (let i = 0; i < def.inPorts.length; i++) {
-      const p = iPP(n, i), px = this.sw(p.x), py = this.sh(p.y);
-      x.fillStyle = '#444'; x.beginPath(); x.arc(px, py, PR_R * this.zoom, 0, Math.PI * 2); x.fill();
-      x.strokeStyle = '#888'; x.lineWidth = 1.5; x.stroke();
-      x.fillStyle = 'rgba(255,255,255,0.55)'; x.textAlign = 'left'; x.font = `${pfs}px system-ui, sans-serif`;
-      x.fillText(def.inPorts[i].label, px + (PR_R + 3) * this.zoom, py + 4 * this.zoom);
+    // портрет кореневого вузла (персонаж/будівля)
+    if (n.cat === 'root') {
+      const tw = THUMB * this.zoom, pad = PAD_T * this.zoom;
+      const tx = sx + (sw - tw) / 2, ty = sy + HDR * this.zoom + pad;
+      x.fillStyle = '#1c1c1c'; this.rr(tx, ty, tw, tw, 4, 4, 4, 4); x.fill();
+      if (n.thumb) {
+        const img = this.getThumb(n.thumb);
+        if (img.complete && img.naturalWidth) {
+          x.save(); this.rr(tx, ty, tw, tw, 4, 4, 4, 4); x.clip();
+          const k = Math.min(tw / img.naturalWidth, tw / img.naturalHeight);
+          const dw = img.naturalWidth * k, dh = img.naturalHeight * k;
+          x.drawImage(img, tx + (tw - dw) / 2, ty + (tw - dh) / 2, dw, dh);
+          x.restore();
+        }
+      } else {
+        x.fillStyle = 'rgba(255,255,255,0.25)'; x.font = `${Math.round(20 * this.zoom)}px system-ui`; x.textAlign = 'center';
+        x.fillText('☻', tx + tw / 2, ty + tw * 0.62);
+      }
+      x.strokeStyle = 'rgba(255,255,255,0.12)'; x.lineWidth = 1; this.rr(tx, ty, tw, tw, 4, 4, 4, 4); x.stroke();
     }
-    for (let i = 0; i < def.outPorts.length; i++) {
-      const p = oPP(n, i), px = this.sw(p.x), py = this.sh(p.y);
-      x.fillStyle = hcol; x.beginPath(); x.arc(px, py, PR_R * this.zoom, 0, Math.PI * 2); x.fill();
-      x.strokeStyle = '#ccc'; x.lineWidth = 1.5; x.stroke();
-      x.fillStyle = 'rgba(255,255,255,0.85)'; x.textAlign = 'right'; x.font = `${pfs}px system-ui, sans-serif`;
-      x.fillText(def.outPorts[i].label, px - (PR_R + 3) * this.zoom, py + 4 * this.zoom);
-    }
 
-    if (def.config) {
+    this.drawPorts(n);
+
+    // конфіг-рядки
+    const def = NODE_TYPES[n.type];
+    if (def?.config) {
       let cy = n.y + HDR + PAD_T + Math.max(def.inPorts.length, def.outPorts.length) * PR;
       for (const [key, cd] of Object.entries(def.config)) {
         const psx = this.sw(n.x + 6), psy = this.sh(cy);
@@ -281,6 +387,26 @@ export class NodeEditor {
     }
   }
 
+  private drawPorts(n: GraphNode): void {
+    const x = this.ctx;
+    const hcol = this.colorOf(n);
+    const pfs = Math.max(8, Math.round(9 * this.zoom));
+    const showLbl = n.cat !== 'reroute';
+    const ins = inLabels(n), outs = outLabels(n);
+    for (let i = 0; i < ins.length; i++) {
+      const p = iPP(n, i), px = this.sw(p.x), py = this.sh(p.y);
+      x.fillStyle = '#444'; x.beginPath(); x.arc(px, py, PR_R * this.zoom, 0, Math.PI * 2); x.fill();
+      x.strokeStyle = '#888'; x.lineWidth = 1.5; x.stroke();
+      if (showLbl) { x.fillStyle = 'rgba(255,255,255,0.55)'; x.textAlign = 'left'; x.font = `${pfs}px system-ui, sans-serif`; x.fillText(ins[i], px + (PR_R + 3) * this.zoom, py + 4 * this.zoom); }
+    }
+    for (let i = 0; i < outs.length; i++) {
+      const p = oPP(n, i), px = this.sw(p.x), py = this.sh(p.y);
+      x.fillStyle = hcol; x.beginPath(); x.arc(px, py, PR_R * this.zoom, 0, Math.PI * 2); x.fill();
+      x.strokeStyle = '#ccc'; x.lineWidth = 1.5; x.stroke();
+      if (showLbl) { x.fillStyle = 'rgba(255,255,255,0.85)'; x.textAlign = 'right'; x.font = `${pfs}px system-ui, sans-serif`; x.fillText(outs[i], px - (PR_R + 3) * this.zoom, py + 4 * this.zoom); }
+    }
+  }
+
   private rr(x: number, y: number, w: number, h: number, tl: number, tr: number, br: number, bl: number): void {
     const c = this.ctx;
     c.beginPath();
@@ -292,6 +418,16 @@ export class NodeEditor {
     c.closePath();
   }
 
+  // ── edge helpers ───────────────────────────────────────────────────────────────
+  private connect(fromId: string, fromPort: number, toId: string, toPort: number): void {
+    if (fromId === toId) return;
+    const toNode = this.graph.nodes.find(n => n.id === toId);
+    // звичайний вхід приймає один звʼязок; reroute — кілька (щоб злити кілька шляхів в один вхід)
+    if (toNode?.cat !== 'reroute') this.graph.edges = this.graph.edges.filter(ed => !(ed.toId === toId && ed.toPort === toPort));
+    this.graph.edges.push({ fromId, fromPort, toId, toPort });
+    this.onChange?.(this.graph);
+  }
+
   // ── events ───────────────────────────────────────────────────────────────────
   private wire(): void {
     const cvs = this.cvs;
@@ -299,6 +435,9 @@ export class NodeEditor {
 
     cvs.addEventListener('mousedown', (e) => {
       const { x: sx, y: sy } = this.exy(e);
+      this.mouse = { sx, sy };
+      // завершити активний grab/duplicate кліком
+      if (this.grab) { this.grab = null; this.onChange?.(this.graph); return; }
       if (e.button === 1 || (e.button === 0 && e.altKey)) {
         e.preventDefault();
         this.pan0 = { mx: e.clientX, my: e.clientY, px: this.pan.x, py: this.pan.y }; return;
@@ -306,40 +445,93 @@ export class NodeEditor {
       if (e.button === 2) { e.preventDefault(); this.openMenu(sx, sy, e.clientX, e.clientY); return; }
       if (e.button !== 0) return;
       this.closeMenu();
-      const cn = this.closeAt(sx, sy); if (cn) { this.delNode(cn.id); return; }
-      const op = this.oPA(sx, sy); if (op) { this.de = { fromId: op.n.id, fromPort: op.i, mx: sx, my: sy }; return; }
+
+      // Ctrl — ніж (різати звʼязки)
+      if (e.ctrlKey) { this.knife = [{ x: sx, y: sy }]; return; }
+
+      // порти спершу (щоб не плутати з тілом вузла)
+      const op = this.oPA(sx, sy);
+      if (op) { this.de = { reverse: false, fromId: op.n.id, fromPort: op.i, mx: sx, my: sy }; return; }
+      const ip = this.iPA(sx, sy);
+      if (ip) {
+        // якщо у вхід уже входить звʼязок — відчепити його й тягнути від джерела (як у Blender)
+        const ex = this.graph.edges.find(ed => ed.toId === ip.n.id && ed.toPort === ip.i);
+        if (ex) {
+          this.graph.edges = this.graph.edges.filter(ed => ed !== ex);
+          this.de = { reverse: false, fromId: ex.fromId, fromPort: ex.fromPort, mx: sx, my: sy, detached: true };
+        } else {
+          this.de = { reverse: true, toId: ip.n.id, toPort: ip.i, mx: sx, my: sy };
+        }
+        return;
+      }
+
+      const cn = this.closeAt(sx, sy); if (cn) { this.delNodes([cn.id]); return; }
       const cf = this.cfgAt(sx, sy); if (cf) { this.editCfg(cf.n, cf.key); return; }
+
+      // Shift на порожньому — reroute-вузол, який одразу тягнемо
+      if (e.shiftKey && !this.nodeAt(sx, sy)) {
+        const wx = this.ww(sx), wy = this.wh(sy);
+        const id = this.uid();
+        this.graph.nodes.push({ id, type: 'reroute', cat: 'reroute', label: '', x: wx - RR / 2, y: wy - RR / 2, config: {} });
+        this.selected = new Set([id]);
+        this.drag = { ids: [id], orig: new Map([[id, { x: wx - RR / 2, y: wy - RR / 2 }]]), wx0: wx, wy0: wy, moved: true };
+        this.onChange?.(this.graph);
+        return;
+      }
+
       const dn = this.nodeAt(sx, sy);
-      if (dn) this.dn = { id: dn.id, ox: dn.x, oy: dn.y, wx0: this.ww(sx), wy0: this.wh(sy) };
+      if (dn) {
+        if (!this.selected.has(dn.id)) this.selected = new Set([dn.id]);
+        const ids = [...this.selected];
+        const orig = new Map(ids.map(id => { const nn = this.graph.nodes.find(n => n.id === id)!; return [id, { x: nn.x, y: nn.y }]; }));
+        this.drag = { ids, orig, wx0: this.ww(sx), wy0: this.wh(sy), moved: false };
+      } else {
+        // порожнє — рамкове виділення
+        this.box = { sx, sy };
+        if (!e.shiftKey) this.selected.clear();
+      }
     }, sig);
 
     cvs.addEventListener('mousemove', (e) => {
       const { x: sx, y: sy } = this.exy(e);
-      if (this.pan0) {
-        this.pan.x = this.pan0.px + e.clientX - this.pan0.mx;
-        this.pan.y = this.pan0.py + e.clientY - this.pan0.my;
-        this.draw(); return;
+      this.mouse = { sx, sy };
+      if (this.pan0) { this.pan.x = this.pan0.px + e.clientX - this.pan0.mx; this.pan.y = this.pan0.py + e.clientY - this.pan0.my; return; }
+      if (this.knife) {
+        this.knife.push({ x: sx, y: sy });
+        this.cutAlong(this.knife[this.knife.length - 2], this.knife[this.knife.length - 1]);
+        return;
       }
-      if (this.de) { this.de.mx = sx; this.de.my = sy; this.draw(); return; }
-      if (this.dn) {
-        const n = this.graph.nodes.find(nd => nd.id === this.dn!.id);
-        if (n) { n.x = this.dn.ox + this.ww(sx) - this.dn.wx0; n.y = this.dn.oy + this.wh(sy) - this.dn.wy0; this.draw(); }
+      if (this.grab) { this.applyMove(this.grab.ids, this.grab.orig, this.ww(sx) - this.grab.ax, this.wh(sy) - this.grab.ay); return; }
+      if (this.de) { this.de.mx = sx; this.de.my = sy; return; }
+      if (this.drag) {
+        const dxw = this.ww(sx) - this.drag.wx0, dyw = this.wh(sy) - this.drag.wy0;
+        if (Math.abs(dxw) > 2 || Math.abs(dyw) > 2) this.drag.moved = true;
+        if (this.drag.moved) this.applyMove(this.drag.ids, this.drag.orig, dxw, dyw);
       }
     }, sig);
 
     cvs.addEventListener('mouseup', (e) => {
       const { x: sx, y: sy } = this.exy(e);
       this.pan0 = null;
+      if (this.knife) { this.knife = null; return; }
       if (this.de) {
-        const ip = this.iPA(sx, sy);
-        if (ip && ip.n.id !== this.de.fromId) {
-          this.graph.edges = this.graph.edges.filter(ed => !(ed.toId === ip.n.id && ed.toPort === ip.i));
-          this.graph.edges.push({ fromId: this.de.fromId, fromPort: this.de.fromPort, toId: ip.n.id, toPort: ip.i });
-          this.onChange?.(this.graph);
-        }
-        this.de = null; this.draw();
+        let connected = false;
+        if (!this.de.reverse) { const ip = this.iPA(sx, sy); if (ip) { this.connect(this.de.fromId!, this.de.fromPort!, ip.n.id, ip.i); connected = true; } }
+        else { const op = this.oPA(sx, sy); if (op) { this.connect(op.n.id, op.i, this.de.toId!, this.de.toPort!); connected = true; } }
+        // відчепили звʼязок і кинули в порожнечу — зберегти видалення
+        if (!connected && this.de.detached) this.onChange?.(this.graph);
+        this.de = null; return;
       }
-      if (this.dn) { this.dn = null; this.onChange?.(this.graph); }
+      if (this.box) {
+        const x0 = Math.min(this.box.sx, sx), y0 = Math.min(this.box.sy, sy);
+        const x1 = Math.max(this.box.sx, sx), y1 = Math.max(this.box.sy, sy);
+        for (const n of this.graph.nodes) {
+          const nsx = this.sw(n.x), nsy = this.sh(n.y), nsw = nodeW(n) * this.zoom, nsh = nodeH(n) * this.zoom;
+          if (nsx + nsw >= x0 && nsx <= x1 && nsy + nsh >= y0 && nsy <= y1) this.selected.add(n.id);
+        }
+        this.box = null; return;
+      }
+      if (this.drag) { if (this.drag.moved) this.onChange?.(this.graph); this.drag = null; }
     }, sig);
 
     cvs.addEventListener('wheel', (e) => {
@@ -349,7 +541,6 @@ export class NodeEditor {
       const wx = this.ww(sx), wy = this.wh(sy);
       this.zoom = Math.max(0.3, Math.min(2.5, this.zoom * f));
       this.pan.x = sx - wx * this.zoom; this.pan.y = sy - wy * this.zoom;
-      this.draw();
     }, { passive: false, signal: this._ac.signal });
 
     cvs.addEventListener('contextmenu', e => e.preventDefault(), sig);
@@ -359,21 +550,83 @@ export class NodeEditor {
       const bid = e.dataTransfer?.getData('text/building-id');
       if (bid) { this.acceptDrop(e.dataTransfer?.getData('text/building-name') || 'Споруда', 'building', e.clientX, e.clientY); return; }
       const npcId = e.dataTransfer?.getData('text/npc-id');
-      if (npcId) { this.acceptDrop(e.dataTransfer?.getData('text/npc-name') || 'НПС', 'npc:' + npcId, e.clientX, e.clientY); }
+      if (npcId) { this.acceptDrop(e.dataTransfer?.getData('text/npc-name') || 'НПС', 'npc:' + npcId, e.clientX, e.clientY, e.dataTransfer?.getData('text/npc-thumb') || undefined); }
     }, sig);
+
+    // Клавіатура — лише поки панель активна (host-редактори при відкритій панелі мовчать)
+    window.addEventListener('keydown', (e) => {
+      if (!this._running) return;
+      const tag = (document.activeElement?.tagName ?? '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.code === 'KeyG') { e.preventDefault(); this.startGrab(); return; }
+      if (e.shiftKey && e.code === 'KeyD') { e.preventDefault(); this.duplicateSelected(); return; }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (this.selected.size) this.delNodes([...this.selected]); return; }
+      if (e.code === 'Escape') {
+        if (this.grab) { this.applyMove(this.grab.ids, this.grab.orig, 0, 0); this.grab = null; }
+        this.de = null; this.box = null; this.knife = null;
+      }
+    }, sig);
+  }
+
+  private applyMove(ids: string[], orig: Map<string, { x: number; y: number }>, dx: number, dy: number): void {
+    for (const id of ids) { const n = this.graph.nodes.find(nd => nd.id === id); const o = orig.get(id); if (n && o) { n.x = o.x + dx; n.y = o.y + dy; } }
+  }
+
+  private startGrab(): void {
+    if (!this.selected.size) { const n = this.nodeAt(this.mouse.sx, this.mouse.sy); if (n) this.selected = new Set([n.id]); }
+    if (!this.selected.size) return;
+    const ids = [...this.selected];
+    const orig = new Map(ids.map(id => { const n = this.graph.nodes.find(nd => nd.id === id)!; return [id, { x: n.x, y: n.y }]; }));
+    this.grab = { ids, orig, ax: this.ww(this.mouse.sx), ay: this.wh(this.mouse.sy) };
+  }
+
+  private duplicateSelected(): void {
+    if (!this.selected.size) return;
+    const map = new Map<string, string>();
+    const dups: GraphNode[] = [];
+    for (const id of this.selected) {
+      const n = this.graph.nodes.find(nd => nd.id === id); if (!n) continue;
+      const nid = this.uid(); map.set(id, nid);
+      dups.push({ ...n, id: nid, config: { ...n.config }, x: n.x + 24, y: n.y + 24 });
+    }
+    // звʼязки всередині виділення копіюються теж
+    for (const e of this.graph.edges) if (map.has(e.fromId) && map.has(e.toId)) this.graph.edges.push({ fromId: map.get(e.fromId)!, fromPort: e.fromPort, toId: map.get(e.toId)!, toPort: e.toPort });
+    this.graph.nodes.push(...dups);
+    this.selected = new Set(dups.map(d => d.id));
+    this.onChange?.(this.graph);
+    this.startGrab();
+  }
+
+  private cutAlong(a: { x: number; y: number }, b: { x: number; y: number }): void {
+    const before = this.graph.edges.length;
+    this.graph.edges = this.graph.edges.filter(e => {
+      const an = this.edgeAnchors(e); if (!an) return true;
+      let px = an.fx, py = an.fy; const mx = (an.fx + an.tx) / 2;
+      for (let s = 1; s <= 12; s++) {
+        const t = s / 12, it = 1 - t;
+        const bx = it * it * it * an.fx + 3 * it * it * t * mx + 3 * it * t * t * mx + t * t * t * an.tx;
+        const by = it * it * it * an.fy + 3 * it * it * t * an.fy + 3 * it * t * t * an.ty + t * t * t * an.ty;
+        if (segInt(a.x, a.y, b.x, b.y, px, py, bx, by)) return false;
+        px = bx; py = by;
+      }
+      return true;
+    });
+    if (this.graph.edges.length !== before) this.onChange?.(this.graph);
   }
 
   private editCfg(n: GraphNode, key: string): void {
     const def = NODE_TYPES[n.type]?.config?.[key]; if (!def) return;
     const inp = prompt(`${def.label}:`, String(n.config[key] ?? def.default)); if (inp === null) return;
     n.config[key] = def.type === 'number' ? (parseFloat(inp) || def.default) : inp;
-    this.draw(); this.onChange?.(this.graph);
+    this.onChange?.(this.graph);
   }
 
-  private delNode(id: string): void {
-    this.graph.nodes = this.graph.nodes.filter(n => n.id !== id);
-    this.graph.edges = this.graph.edges.filter(e => e.fromId !== id && e.toId !== id);
-    this.draw(); this.onChange?.(this.graph);
+  private delNodes(ids: string[]): void {
+    const set = new Set(ids);
+    this.graph.nodes = this.graph.nodes.filter(n => !set.has(n.id));
+    this.graph.edges = this.graph.edges.filter(e => !set.has(e.fromId) && !set.has(e.toId));
+    for (const id of ids) this.selected.delete(id);
+    this.onChange?.(this.graph);
   }
 
   private openMenu(sx: number, sy: number, clientX: number, clientY: number): void {
@@ -402,7 +655,8 @@ export class NodeEditor {
 
     showCats();
     document.body.appendChild(el);
-    const close = (ev: MouseEvent) => { if (!el.contains(ev.target as Node)) { this.closeMenu(); document.removeEventListener('mousedown', close); } };
+    const close = (ev: MouseEvent) => { if (!el.contains(ev.target as Node)) this.closeMenu(); };
+    this._menuClose = close;
     setTimeout(() => document.addEventListener('mousedown', close), 0);
   }
 
@@ -428,8 +682,11 @@ export class NodeEditor {
     if (def.config) for (const [k, cd] of Object.entries(def.config)) config[k] = cd.default;
     const dummy = { id: '', type, cat: def.cat, label: def.label, x: 0, y: 0, config } as GraphNode;
     this.graph.nodes.push({ id: this.uid(), type, cat: def.cat, label: def.label, x: wx - NW / 2, y: wy - nodeH(dummy) / 2, config });
-    this.draw(); this.onChange?.(this.graph);
+    this.onChange?.(this.graph);
   }
 
-  closeMenu(): void { if (this.menuEl) { this.menuEl.remove(); this.menuEl = null; } }
+  closeMenu(): void {
+    if (this._menuClose) { document.removeEventListener('mousedown', this._menuClose); this._menuClose = null; }
+    if (this.menuEl) { this.menuEl.remove(); this.menuEl = null; }
+  }
 }
