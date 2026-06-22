@@ -1148,11 +1148,11 @@ function saveCharacter(): void {
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
 function updateBehaviorRow(): void {
-  const keysRow = document.getElementById('tl-keysRow');
+  // Для ворогів/нейтралів змінюється ЛИШЕ одна кнопка: Хоткей → Поведінка.
+  // Другий рядок тулбару (ключі) і висота панелі лишаються як у персонажів.
   const hotkeyBtn = document.getElementById('hotkeyBtn');
   const behaviorBtn = document.getElementById('charBehaviorBtn');
   const isNpc = libCat === 'enemy' || libCat === 'neutral';
-  if (keysRow) keysRow.style.display = isNpc ? 'none' : '';
   if (hotkeyBtn) hotkeyBtn.style.display = isNpc ? 'none' : '';
   if (behaviorBtn) behaviorBtn.style.display = isNpc ? '' : 'none';
 }
