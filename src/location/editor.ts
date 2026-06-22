@@ -1,5 +1,6 @@
 // Location editor — статична сцена хабу: будівлі-ассети + активні зони-дії.
 import { idbGet, idbSet } from '../store';
+import { ghCommit } from '../github';
 
 interface PlacedAsset {
   id: string; url: string; name: string;
@@ -333,6 +334,7 @@ export function initLocationEditor(prefix: string): void {
     if (e.ctrlKey || e.shiftKey || typing) return;
 
     if (e.code === 'Escape') {
+      if (previewBig) { setPreviewBig(false); return; }
       if (state.mode && state.modeOrig && state.sel) {
         const p = placedById(state.sel);
         if (p) Object.assign(p, state.modeOrig);
@@ -511,12 +513,65 @@ export function initLocationEditor(prefix: string): void {
     const z = zoneById(state.sel!); if (z) { z.label = this.value; save(); }
   });
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  // ── Preview expand/collapse ───────────────────────────────────────────────
+
+  const previewBox = $<HTMLElement>('preview');
+  const previewFrame = $<HTMLIFrameElement>('previewFrame');
+  const previewBackdrop = document.createElement('div');
+  previewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
+  document.body.appendChild(previewBackdrop);
+  let previewBig = false;
+
+  function setPreviewBig(on: boolean): void {
+    previewBig = on;
+    const pc = $<HTMLElement>('previewClick');
+    if (on && previewBox) {
+      const lib = document.getElementById('loc-library');
+      const w = Math.max(360, window.innerWidth - 8 - ((lib?.getBoundingClientRect().right ?? 300) + 12));
+      previewBox.classList.add('big');
+      previewBox.style.width = w + 'px';
+      previewBox.style.height = Math.round((w * 9) / 20) + 'px';
+      if (pc) pc.style.pointerEvents = 'none';
+      previewBackdrop.style.display = 'block';
+      previewFrame?.contentWindow?.focus();
+    } else if (previewBox) {
+      previewBox.classList.remove('big');
+      previewBox.style.width = ''; previewBox.style.height = '';
+      if (pc) pc.style.pointerEvents = '';
+      previewBackdrop.style.display = 'none';
+    }
+  }
+
+  previewBackdrop.addEventListener('click', () => setPreviewBig(false));
+  $('previewClick')?.addEventListener('click', () => setPreviewBig(!previewBig));
+  $('previewClick')?.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    previewFrame?.contentWindow?.focus();
+    if (previewBox) {
+      previewBox.style.boxShadow = '0 0 0 2px var(--accent)';
+      const restore = (): void => { if (previewBox) previewBox.style.boxShadow = ''; window.removeEventListener('focus', restore); };
+      window.addEventListener('focus', restore);
+    }
+  });
+  window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
+
+  // ── Publish to game ───────────────────────────────────────────────────────
 
   $('exportBtn')?.addEventListener('click', () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, locations: state.locs }, null, 2)], { type: 'application/json' }));
-    a.download = 'locations.json'; a.click();
+    const btn = $<HTMLButtonElement>('exportBtn');
+    if (!btn) return;
+    btn.disabled = true;
+    const orig = btn.textContent!;
+    btn.textContent = 'Публікую...';
+    const json = JSON.stringify({ version: 1, locations: state.locs }, null, 2);
+    ghCommit({ 'public/studio-data/locations.json': json }, 'studio: update locations')
+      .then(() => {
+        btn.textContent = 'Оновлено!';
+        setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
+        if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
+      })
+      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
+      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
   // ── Status + persistence ──────────────────────────────────────────────────

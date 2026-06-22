@@ -1,5 +1,6 @@
 // World map editor — намальований фон + вузли-локації + лінії-переходи між ними.
 import { idbGet, idbSet } from '../store';
+import { ghCommit } from '../github';
 
 interface WorldNode {
   id: string;
@@ -358,7 +359,10 @@ export function initWorldEditor(prefix: string): void {
       if (e.code === 'KeyV') setTool('select');
       if (e.code === 'KeyN') setTool('node');
       if (e.code === 'KeyE') setTool('edge');
-      if (e.code === 'Escape') { state.edgeStart = null; setTool('select'); setStatus(''); }
+      if (e.code === 'Escape') {
+        if (previewBig) { setPreviewBig(false); return; }
+        state.edgeStart = null; setTool('select'); setStatus('');
+      }
     }
   });
 
@@ -562,14 +566,65 @@ export function initWorldEditor(prefix: string): void {
     if (e) { e.twoWay = this.checked; save(); }
   });
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  // ── Preview expand/collapse ───────────────────────────────────────────────
+
+  const previewBox = $<HTMLElement>('preview');
+  const previewFrame = $<HTMLIFrameElement>('previewFrame');
+  const previewBackdrop = document.createElement('div');
+  previewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
+  document.body.appendChild(previewBackdrop);
+  let previewBig = false;
+
+  function setPreviewBig(on: boolean): void {
+    previewBig = on;
+    const pc = $<HTMLElement>('previewClick');
+    if (on && previewBox) {
+      const lib = document.getElementById('wld-library');
+      const w = Math.max(360, window.innerWidth - 8 - ((lib?.getBoundingClientRect().right ?? 300) + 12));
+      previewBox.classList.add('big');
+      previewBox.style.width = w + 'px';
+      previewBox.style.height = Math.round((w * 9) / 20) + 'px';
+      if (pc) pc.style.pointerEvents = 'none';
+      previewBackdrop.style.display = 'block';
+      previewFrame?.contentWindow?.focus();
+    } else if (previewBox) {
+      previewBox.classList.remove('big');
+      previewBox.style.width = ''; previewBox.style.height = '';
+      if (pc) pc.style.pointerEvents = '';
+      previewBackdrop.style.display = 'none';
+    }
+  }
+
+  previewBackdrop.addEventListener('click', () => setPreviewBig(false));
+  $('previewClick')?.addEventListener('click', () => setPreviewBig(!previewBig));
+  $('previewClick')?.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    previewFrame?.contentWindow?.focus();
+    if (previewBox) {
+      previewBox.style.boxShadow = '0 0 0 2px var(--accent)';
+      const restore = (): void => { if (previewBox) previewBox.style.boxShadow = ''; window.removeEventListener('focus', restore); };
+      window.addEventListener('focus', restore);
+    }
+  });
+  window.addEventListener('resize', () => { if (previewBig) setPreviewBig(true); });
+
+  // ── Publish to game ───────────────────────────────────────────────────────
 
   $('exportBtn')?.addEventListener('click', () => {
+    const btn = $<HTMLButtonElement>('exportBtn');
+    if (!btn) return;
+    btn.disabled = true;
+    const orig = btn.textContent!;
+    btn.textContent = 'Публікую...';
     const json = JSON.stringify({ version: 1, worlds: state.worlds }, null, 2);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-    a.download = 'worlds.json';
-    a.click();
+    ghCommit({ 'public/studio-data/worlds.json': json }, 'studio: update worlds')
+      .then(() => {
+        btn.textContent = 'Оновлено!';
+        setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
+        if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
+      })
+      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
+      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
   // ── Status + persistence ──────────────────────────────────────────────────

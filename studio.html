@@ -168,6 +168,7 @@
       #lv-preview { flex: 0 0 auto; position: relative; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; z-index: 1; }
       #lv-preview.big { position: fixed; top: 8px; right: 8px; aspect-ratio: auto; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
       #wld-preview, #loc-preview { flex: 0 0 auto; position: relative; aspect-ratio: 20 / 9; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; z-index: 1; }
+      #wld-preview.big, #loc-preview.big { position: fixed; top: 8px; right: 8px; aspect-ratio: auto; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
       #preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
       #previewHint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; pointer-events: none; }
       #previewClick { position: absolute; inset: 0; z-index: 5; cursor: default; }
@@ -729,7 +730,9 @@
       <!-- ПРАВА ПАНЕЛЬ — редактор карти -->
       <aside id="wld-right" class="col" style="display:none;width:480px;flex:0 0 auto">
         <div id="wld-preview">
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Попередній перегляд</div>
+          <iframe id="wld-previewFrame" src="index.html" title="Превʼю гри" style="position:absolute;inset:0;width:100%;height:100%;border:0;display:block"></iframe>
+          <div id="wld-previewHint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Превʼю гри 20:9</div>
+          <div id="wld-previewClick" style="position:absolute;inset:0;z-index:5;cursor:default" title="Клік — активувати / розгорнути"></div>
         </div>
         <div style="display:flex;gap:6px;padding:2px">
           <button class="iconToggle" id="wld-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
@@ -762,7 +765,7 @@
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)">
-            <button id="wld-exportBtn" class="btn-accent" style="width:100%">Експорт JSON</button>
+            <button id="wld-exportBtn" class="btn-accent" style="width:100%">Оновити гру</button>
             <div id="wld-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>
@@ -771,7 +774,9 @@
       <!-- ПРАВА ПАНЕЛЬ — редактор локацій -->
       <aside id="loc-right" class="col" style="display:none;width:480px;flex:0 0 auto">
         <div id="loc-preview">
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Попередній перегляд</div>
+          <iframe id="loc-previewFrame" src="index.html" title="Превʼю гри" style="position:absolute;inset:0;width:100%;height:100%;border:0;display:block"></iframe>
+          <div id="loc-previewHint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none">Превʼю гри 20:9</div>
+          <div id="loc-previewClick" style="position:absolute;inset:0;z-index:5;cursor:default" title="Клік — активувати / розгорнути"></div>
         </div>
         <div style="display:flex;gap:6px;padding:2px">
           <button class="iconToggle" id="loc-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
@@ -797,7 +802,7 @@
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)">
-            <button id="loc-exportBtn" class="btn-accent" style="width:100%">Експорт JSON</button>
+            <button id="loc-exportBtn" class="btn-accent" style="width:100%">Оновити гру</button>
             <div id="loc-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>
