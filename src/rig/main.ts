@@ -1083,10 +1083,10 @@ function composeThumb(w: number, h: number): string {
 }
 
 // ---- бібліотека персонажів (IndexedDB — необмежений обсяг) ----
-interface LibItem { id: string; name: string; cat: 'char' | 'enemy'; doc: ReturnType<typeof buildDoc>; thumb: string }
+interface LibItem { id: string; name: string; cat: 'char' | 'enemy' | 'neutral'; doc: ReturnType<typeof buildDoc>; thumb: string }
 const LIB_KEY = 'zag_char_lib'; // IDB key (нова назва, щоб не плутати зі старим localStorage)
 let _lib: LibItem[] = [];
-let libCat: 'char' | 'enemy' = 'char';
+let libCat: 'char' | 'enemy' | 'neutral' = 'char';
 const loadLib = (): LibItem[] => _lib;
 const storeLib = (lib: LibItem[]): void => {
   _lib = lib;
@@ -1094,10 +1094,6 @@ const storeLib = (lib: LibItem[]): void => {
 };
 const LIB_MIN = 18; // мінімум слотів (з пустими) — щоб видно сітку/скрол
 function renderLibrary(): void {
-  // одна кнопка-тогл: показує поточний розділ; Герої = світла, Вороги = темна
-  const tog = $<HTMLButtonElement>('libToggle');
-  tog.textContent = libCat === 'char' ? 'Герої' : 'Вороги';
-  tog.classList.toggle('light', libCat === 'char');
   const box = $('libList'); box.innerHTML = '';
   const lib = loadLib().filter((c) => (c.cat ?? 'char') === libCat);
   for (const c of lib) {
@@ -1112,8 +1108,9 @@ function renderLibrary(): void {
   for (let i = lib.length; i < LIB_MIN; i++) { const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e); }
 }
 function saveCharacter(): void {
-  const what = libCat === 'enemy' ? 'ворога' : 'персонажа';
-  const name = prompt(`Назва ${what}:`, libCat === 'enemy' ? 'Ворог' : 'Остап'); if (!name) return;
+  const what = libCat === 'enemy' ? 'ворога' : libCat === 'neutral' ? 'нейтрала' : 'персонажа';
+  const def = libCat === 'enemy' ? 'Ворог' : libCat === 'neutral' ? 'Нейтрал' : 'Остап';
+  const name = prompt(`Назва ${what}:`, def); if (!name) return;
   const lib = loadLib();
   const item: LibItem = { id: 'c' + Date.now(), name, cat: libCat, doc: buildDoc(), thumb: composeThumb(150, 190) };
   const i = lib.findIndex((x) => x.name === name && (x.cat ?? 'char') === libCat); // та сама назва В ЦІЙ вкладці -> заміна
@@ -1122,7 +1119,7 @@ function saveCharacter(): void {
   storeLib(lib); currentCharId = item.id; renderLibrary(); refreshCharSel();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
-$<HTMLButtonElement>('libToggle').addEventListener('click', () => { libCat = libCat === 'char' ? 'enemy' : 'char'; renderLibrary(); });
+$<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => { libCat = (e.target as HTMLSelectElement).value as 'char' | 'enemy' | 'neutral'; renderLibrary(); });
 
 async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {
   btn.disabled = true;
