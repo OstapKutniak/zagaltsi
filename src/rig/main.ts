@@ -1149,10 +1149,12 @@ function saveCharacter(): void {
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
 function updateBehaviorRow(): void {
   const keysRow = document.getElementById('tl-keysRow');
-  const behaviorRow = document.getElementById('tl-behaviorRow');
+  const hotkeyBtn = document.getElementById('hotkeyBtn');
+  const behaviorBtn = document.getElementById('charBehaviorBtn');
   const isNpc = libCat === 'enemy' || libCat === 'neutral';
   if (keysRow) keysRow.style.display = isNpc ? 'none' : '';
-  if (behaviorRow) behaviorRow.style.display = isNpc ? '' : 'none';
+  if (hotkeyBtn) hotkeyBtn.style.display = isNpc ? 'none' : '';
+  if (behaviorBtn) behaviorBtn.style.display = isNpc ? '' : 'none';
 }
 $<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => {
   libCat = (e.target as HTMLSelectElement).value as 'char' | 'enemy' | 'neutral';

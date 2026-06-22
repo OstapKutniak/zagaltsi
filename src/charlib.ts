@@ -24,7 +24,8 @@ export async function loadCharLibrary(force = false): Promise<LibItem[]> {
     if (r.ok) { const j = await r.json(); if (Array.isArray(j)) remote = j as LibItem[]; }
   } catch { /* offline / нема файлу */ }
   let local: LibItem[] = [];
-  try { const l = await idbGet<LibItem[]>('ostap_library'); if (Array.isArray(l)) local = l; } catch { /* ignore */ }
+  try { const l = await idbGet<LibItem[]>('zag_char_lib'); if (Array.isArray(l)) local = l; } catch { /* ignore */ }
+  try { const l = await idbGet<LibItem[]>('ostap_library'); if (Array.isArray(l)) local = mergeById(local, l); } catch { /* ignore */ }
   cache = mergeById(remote, local);
   return cache;
 }
