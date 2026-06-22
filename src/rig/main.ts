@@ -783,6 +783,7 @@ function syncPanelHeights(): void {
   if (lastPanelH > 0) document.documentElement.style.setProperty('--panel-h', lastPanelH + 'px');
 }
 function setMode(mode: string): void {
+  closeNodePanel(); // нодове дерево належить конкретному редактору — закриваємо при зміні вкладки
   if (mode === 'level') syncPanelHeights(); // зміряти поки timelineBar ще видимий
   appEl.className = 'mode-' + mode;
   document.querySelectorAll<HTMLButtonElement>('#topTabs button[data-tab]').forEach(b => {
@@ -816,14 +817,18 @@ function openNodePanel(graph: NodeGraph, cats: string[], onChange: (g: NodeGraph
   _sharedNE = new NodeEditor(canvas, cats, onChange);
   _sharedNE.loadGraph(graph);
   document.getElementById('nodeEditorTitle')!.textContent = title;
+  // Стикуємо дерево в нижню половину вьюпорта (центру) — не overlay поверх усього.
+  document.getElementById('centerMid')?.classList.add('nodes-open');
   panel.style.display = 'flex';
   requestAnimationFrame(() => { _sharedNE?.resize(); _sharedNE?.start(); });
 }
 
-document.getElementById('nodeEditorClose')?.addEventListener('click', () => {
+function closeNodePanel(): void {
   if (_sharedNE) { _sharedNE.stop(); _sharedNE = null; }
   document.getElementById('nodeEditorPanel')!.style.display = 'none';
-});
+  document.getElementById('centerMid')?.classList.remove('nodes-open');
+}
+document.getElementById('nodeEditorClose')?.addEventListener('click', closeNodePanel);
 
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');

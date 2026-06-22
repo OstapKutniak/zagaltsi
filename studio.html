@@ -125,7 +125,14 @@
       #timelineBar { flex: 0 0 auto; padding: 8px; }
       #timelineBar.tl-collapsed .tlrow:nth-child(2),
       #timelineBar.tl-collapsed #tlWrapper { display: none; }
-      #nodeEditorPanel { display: none; position: fixed; bottom: 0; left: 0; right: 0; height: 50vh; z-index: 200; background: var(--panel); border-top: 2px solid var(--line); flex-direction: column; }
+      /* Нодове дерево стикується в нижню половину вьюпорта (центру), не накладається поверх бічних панелей */
+      #nodeEditorPanel { display: none; position: absolute; bottom: 0; left: 0; right: 0; height: 50%; z-index: 50; background: var(--panel); border-top: 2px solid var(--line); border-radius: 0 0 12px 12px; flex-direction: column; box-shadow: 0 -8px 24px rgba(0,0,0,.45); }
+      #centerMid.nodes-open #stageWrap,
+      #centerMid.nodes-open #lv-stageWrap,
+      #centerMid.nodes-open #wld-stageWrap,
+      #centerMid.nodes-open #loc-stageWrap { bottom: 50% !important; }
+      #loc-buildingGrid { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; max-height: 340px; overflow-y: auto; }
+      #loc-buildingGrid .libCard.dropping { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
       #tlCollapseBtn { margin-left: auto; width: 28px; height: 28px; padding: 0; font-size: 13px; background: transparent; border: 0; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; flex-shrink: 0; }
       #tlCollapseBtn:hover { background: #3a3a3a; color: var(--ink); }
       .tlrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
@@ -528,6 +535,14 @@
           <div id="partsList" style="display:none"><div id="slotChips"></div></div>
           <div id="faceList"><div id="faceChips"></div></div>
           <div id="lv-fillMenu" style="display:none"></div>
+          <!-- NODE EDITOR PANEL — стикується в нижню половину вьюпорта -->
+          <div id="nodeEditorPanel">
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--rail);border-bottom:1px solid var(--line);flex-shrink:0">
+              <span id="nodeEditorTitle" style="font-weight:600;font-size:13px;flex:1">Нодове дерево</span>
+              <button id="nodeEditorClose" style="padding:4px 12px;font-size:12px">Закрити ✕</button>
+            </div>
+            <canvas id="nodeEditorCanvas" style="flex:1;width:100%;display:block"></canvas>
+          </div>
         </div>
         <div id="timelineBar" class="pane tl-collapsed">
           <div class="tlrow">
@@ -821,8 +836,9 @@
           </div>
           <button class="header secToggle open" style="margin-top:6px">Бібліотека споруд</button>
           <div class="secBody">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Перетягни картку у вьюпорт — стане будівлею</div>
-            <div id="loc-buildingGrid" style="display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start"></div>
+            <button id="loc-addBuilding" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Створити будівлю</button>
+            <div style="font-size:11px;color:var(--muted);margin:6px 0">Клік — нодове дерево · тягни у вьюпорт · кинь PNG на картку</div>
+            <div id="loc-buildingGrid"></div>
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)">
@@ -953,15 +969,6 @@
       <div style="flex:1;min-height:0;position:relative;background:var(--bg)">
         <canvas id="lv-fpCanvas" style="display:block;width:100%;height:100%"></canvas>
       </div>
-    </div>
-
-    <!-- NODE EDITOR PANEL (fixed overlay, shared by location + char editors) -->
-    <div id="nodeEditorPanel">
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--rail);border-bottom:1px solid var(--line);flex-shrink:0">
-        <span id="nodeEditorTitle" style="font-weight:600;font-size:13px;flex:1">Нодове дерево</span>
-        <button id="nodeEditorClose" style="padding:4px 12px;font-size:12px">Закрити ✕</button>
-      </div>
-      <canvas id="nodeEditorCanvas" style="flex:1;width:100%;display:block"></canvas>
     </div>
 
     <script type="module" src="/src/rig/main.ts"></script>

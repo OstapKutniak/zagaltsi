@@ -476,11 +476,11 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     e.preventDefault();
     const mx = e.clientX - rect().left, my = e.clientY - rect().top;
     // Картка з бібліотеки споруд
-    const burl = e.dataTransfer?.getData('text/building-url');
-    if (burl) {
-      const bname = e.dataTransfer?.getData('text/building-name') || 'Споруда';
-      const wp0 = toWorld(mx, my);
-      dropAsset(burl, bname, wp0.x, wp0.y);
+    const bid = e.dataTransfer?.getData('text/building-id');
+    if (bid) {
+      const b = buildings.find(x => x.id === bid);
+      if (b?.png) { const wp0 = toWorld(mx, my); dropAsset(b.png, b.name, wp0.x, wp0.y); }
+      else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
       return;
     }
     const file = e.dataTransfer?.files[0]; if (!file?.type.startsWith('image/')) return;
@@ -639,55 +639,118 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
   });
 
-  // ── Бібліотека споруд (поки що 9 процедурних карток-заглушок) ──────────────
-  const buildingLib: { id: string; name: string; url: string }[] = [];
-  function genBuilding(i: number): string {
-    const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  // ── Бібліотека споруд ──────────────────────────────────────────────────────
+  // Будівля = тип з PNG-візуалом + власним нодовим деревом. Палітра спільна для
+  // всіх локацій, зберігається в IDB. Клік по картці — нодове дерево цього типу;
+  // тягни картку — постав копію у вьюпорт; кинь PNG на картку — задай/заміни візуал.
+  interface Building { id: string; name: string; png: string; nodeGraph?: NodeGraph }
+  let buildings: Building[] = [];
+
+  // Заглушка-силует для порожньої (без PNG) будівлі.
+  let _placeholder = '';
+  function placeholderHouse(): string {
+    if (_placeholder) return _placeholder;
+    const c = document.createElement('canvas'); c.width = 96; c.height = 96;
     const x = c.getContext('2d'); if (!x) return '';
-    const hue = (i * 41) % 360;
-    const bw = 56 + (i % 3) * 12;
-    const bh = 46 + ((i >> 1) % 3) * 12;
-    const bx = 64 - bw / 2, by = 112 - bh;
-    // стіни
-    x.fillStyle = `hsl(${hue},30%,58%)`;
-    x.fillRect(bx, by, bw, bh);
-    x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 2; x.strokeRect(bx, by, bw, bh);
-    // дах
-    x.fillStyle = `hsl(${hue},38%,38%)`;
-    const overhang = 8;
+    x.fillStyle = 'rgba(255,255,255,0.22)';
     x.beginPath();
-    x.moveTo(bx - overhang, by);
-    x.lineTo(64, by - 24 - (i % 2) * 8);
-    x.lineTo(bx + bw + overhang, by);
-    x.closePath(); x.fill(); x.stroke();
-    // двері
-    x.fillStyle = `hsl(${hue},42%,26%)`;
-    x.fillRect(64 - 7, 112 - 22, 14, 22);
-    // вікна
-    x.fillStyle = 'hsl(48,80%,75%)';
-    x.fillRect(bx + 6, by + 8, 10, 10);
-    x.fillRect(bx + bw - 16, by + 8, 10, 10);
-    return c.toDataURL();
+    x.moveTo(48, 16); x.lineTo(82, 46); x.lineTo(72, 46); x.lineTo(72, 80);
+    x.lineTo(24, 80); x.lineTo(24, 46); x.lineTo(14, 46); x.closePath(); x.fill();
+    return (_placeholder = c.toDataURL());
   }
-  function buildBuildingLib(): void {
-    for (let i = 0; i < 9; i++) buildingLib.push({ id: 'b' + i, name: 'Споруда ' + (i + 1), url: genBuilding(i) });
+
+  // Гарна «біла альфа» drag-image — силует за альфою PNG, замість сирої картинки.
+  function makeDragGhost(imgEl: HTMLImageElement): HTMLCanvasElement {
+    const max = 100;
+    const iw = imgEl.naturalWidth || 64, ih = imgEl.naturalHeight || 64;
+    const k = Math.min(max / iw, max / ih, 1);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(iw * k)); c.height = Math.max(1, Math.round(ih * k));
+    const x = c.getContext('2d'); if (!x) return c;
+    try {
+      x.drawImage(imgEl, 0, 0, c.width, c.height);
+      x.globalCompositeOperation = 'source-atop';
+      x.fillStyle = 'rgba(255,255,255,0.9)';
+      x.fillRect(0, 0, c.width, c.height);
+    } catch { /* зображення ще не завантажене — порожній ghost */ }
+    return c;
   }
+
   function renderBuildingLib(): void {
     const grid = $('buildingGrid'); if (!grid) return;
     grid.innerHTML = '';
-    for (const b of buildingLib) {
+    for (const b of buildings) {
       const card = document.createElement('div');
-      card.style.cssText = 'position:relative;width:calc(33.33% - 6px);aspect-ratio:1;background:#3a3a3a;border:1px solid var(--line);border-radius:8px;cursor:grab;overflow:hidden;display:flex;align-items:center;justify-content:center';
+      card.className = 'libCard' + (b.png ? '' : ' empty');
       card.title = b.name; card.draggable = true;
-      const im = document.createElement('img'); im.src = b.url; im.draggable = false;
-      im.style.cssText = 'width:80%;height:80%;object-fit:contain;pointer-events:none';
+
+      const im = document.createElement('img');
+      im.src = b.png || placeholderHouse(); im.draggable = false;
+      if (!b.png) im.style.opacity = '0.5';
       card.appendChild(im);
-      card.addEventListener('dragstart', (e) => {
-        (e as DragEvent).dataTransfer?.setData('text/building-url', b.url);
-        (e as DragEvent).dataTransfer?.setData('text/building-name', b.name);
+
+      const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = b.name;
+      card.appendChild(nm);
+
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕'; del.title = 'Видалити';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        buildings = buildings.filter(x => x.id !== b.id); void saveBuildings(); renderBuildingLib();
       });
+      card.appendChild(del);
+
+      // Клік — нодове дерево цього типу будівлі (спільне для всіх копій).
+      card.addEventListener('click', () => {
+        if (!onOpenNodes) return;
+        onOpenNodes(
+          b.nodeGraph ?? { nodes: [], edges: [] },
+          ['condition', 'behavior', 'function'],
+          (g) => { b.nodeGraph = g; void saveBuildings(); },
+          'Будівля: ' + b.name,
+        );
+      });
+
+      // Drag → біла альфа-силует drag-image, несемо id будівлі.
+      card.addEventListener('dragstart', (e) => {
+        const dt = (e as DragEvent).dataTransfer; if (!dt) return;
+        dt.setData('text/building-id', b.id);
+        dt.setData('text/building-name', b.name);
+        const ghost = makeDragGhost(im);
+        ghost.style.cssText = 'position:fixed;top:-1000px;left:-1000px;pointer-events:none';
+        document.body.appendChild(ghost);
+        dt.setDragImage(ghost, ghost.width / 2, ghost.height / 2);
+        setTimeout(() => ghost.remove(), 0);
+      });
+
+      // Кинути PNG на картку → задати/замінити візуал цієї будівлі.
+      card.addEventListener('dragover', (e) => {
+        if ((e as DragEvent).dataTransfer?.types.includes('Files')) { e.preventDefault(); card.classList.add('dropping'); }
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('dropping'));
+      card.addEventListener('drop', (e) => {
+        card.classList.remove('dropping');
+        const file = (e as DragEvent).dataTransfer?.files[0];
+        if (!file?.type.startsWith('image/')) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = new FileReader();
+        r.onload = () => { b.png = r.result as string; void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
+        r.readAsDataURL(file);
+      });
+
       grid.appendChild(card);
     }
+  }
+
+  $('addBuilding')?.addEventListener('click', () => {
+    buildings.push({ id: 'bld' + uid(), name: 'Споруда ' + (buildings.length + 1), png: '' });
+    void saveBuildings(); renderBuildingLib(); setStatus('Будівлю створено — кинь PNG на картку');
+  });
+
+  async function saveBuildings(): Promise<void> { await idbSet('zag_buildings', buildings); }
+  async function loadBuildings(): Promise<void> {
+    const saved = await idbGet<Building[]>('zag_buildings');
+    buildings = Array.isArray(saved) ? saved : [];
+    renderBuildingLib();
   }
 
   // ── Status + persistence ──────────────────────────────────────────────────
@@ -704,6 +767,6 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
   });
 
-  buildBuildingLib(); renderBuildingLib();
+  void loadBuildings();
   load(); draw(); setTool('select');
 }

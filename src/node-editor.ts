@@ -356,8 +356,8 @@ export class NodeEditor {
     cvs.addEventListener('dragover',  e => e.preventDefault(), sig);
     cvs.addEventListener('drop', e => {
       e.preventDefault();
-      const burl = e.dataTransfer?.getData('text/building-url');
-      if (burl) { this.acceptDrop(e.dataTransfer?.getData('text/building-name') || 'Споруда', 'building', e.clientX, e.clientY); return; }
+      const bid = e.dataTransfer?.getData('text/building-id');
+      if (bid) { this.acceptDrop(e.dataTransfer?.getData('text/building-name') || 'Споруда', 'building', e.clientX, e.clientY); return; }
       const npcId = e.dataTransfer?.getData('text/npc-id');
       if (npcId) { this.acceptDrop(e.dataTransfer?.getData('text/npc-name') || 'НПС', 'npc:' + npcId, e.clientX, e.clientY); }
     }, sig);

@@ -2134,7 +2134,13 @@ export function initLevelEditor(prefix: string): void {
   // Висоту тулбару/AI-панелей задає ЄДИНИЙ писар у rig/main.ts через CSS-змінну
   // --panel-h (вимірює видимий таймлайн і застосовує до всіх панелей). Тут лише
   // ре-рендер канви при зміні видимості/розміру.
-  window.addEventListener('levelTabActivated', () => { resize(); draw(); });
+  window.addEventListener('levelTabActivated', () => {
+    resize(); draw();
+    // Бібліотека НПС кешується в пам'яті й вантажиться раз на старті. Якщо створили
+    // ворога/нейтрала в редакторі персонажів у цій же сесії — форсуємо перечитування,
+    // інакше список лишається стабільно порожнім до перезавантаження сторінки.
+    loadCharLibrary(true).then((lib) => { npcLib = lib; renderNpc(); }).catch(() => {});
+  });
   window.addEventListener('resize', () => { resize(); draw(); });
 
   load().then(() => {
