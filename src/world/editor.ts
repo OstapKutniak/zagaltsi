@@ -58,6 +58,10 @@ export function initWorldEditor(prefix: string): void {
     undoStack: [] as string[],
     showLabels: true,
     showGrid: true,
+    showCamView: false,
+    cutting: false,
+    cutStart: { x: 0, y: 0 },
+    cutEnd: { x: 0, y: 0 },
   };
 
   const world = (): WorldDoc => state.worlds[state.cur];
@@ -242,6 +246,27 @@ export function initWorldEditor(prefix: string): void {
       }
     }
 
+    if (state.showCamView) {
+      const vw = 1280 * sc(); const vh = 576 * sc();
+      const vx = (w - vw) / 2; const vy = (h - vh) / 2;
+      const cx0 = Math.max(0, vx), cy0 = Math.max(0, vy);
+      const cx1 = Math.min(w, vx + vw), cy1 = Math.min(h, vy + vh);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      if (cy0 > 0) ctx.fillRect(0, 0, w, cy0);
+      if (cy1 < h) ctx.fillRect(0, cy1, w, h - cy1);
+      if (cx0 > 0) ctx.fillRect(0, cy0, cx0, cy1 - cy0);
+      if (cx1 < w) ctx.fillRect(cx1, cy0, w - cx1, cy1 - cy0);
+      ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.strokeRect(vx, vy, vw, vh);
+      ctx.setLineDash([]);
+    }
+
+    if (state.cutting) {
+      ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(state.cutStart.x, state.cutStart.y);
+      ctx.lineTo(state.cutEnd.x, state.cutEnd.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+
     requestAnimationFrame(draw);
   }
 
@@ -252,6 +277,11 @@ export function initWorldEditor(prefix: string): void {
   canvas.addEventListener('mousemove', e => {
     state.mouse.x = e.clientX - rect().left;
     state.mouse.y = e.clientY - rect().top;
+
+    if (state.cutting) {
+      state.cutEnd = { x: state.mouse.x, y: state.mouse.y };
+      return;
+    }
 
     if (state.panning) {
       state.pan.x = state.panStart.px + e.clientX - state.panStart.mx;
@@ -269,9 +299,26 @@ export function initWorldEditor(prefix: string): void {
     }
   });
 
+  function segIntersects(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): boolean {
+    const d1x = bx - ax, d1y = by - ay, d2x = dx - cx, d2y = dy - cy;
+    const cross = d1x * d2y - d1y * d2x;
+    if (Math.abs(cross) < 1e-10) return false;
+    const t = ((cx - ax) * d2y - (cy - ay) * d2x) / cross;
+    const u = ((cx - ax) * d1y - (cy - ay) * d1x) / cross;
+    return t > 0 && t < 1 && u > 0 && u < 1;
+  }
+
   canvas.addEventListener('mousedown', e => {
     const mx = e.clientX - rect().left;
     const my = e.clientY - rect().top;
+
+    if (e.button === 0 && e.ctrlKey && state.tool === 'select') {
+      e.preventDefault();
+      state.cutting = true;
+      state.cutStart = { x: mx, y: my };
+      state.cutEnd = { x: mx, y: my };
+      return;
+    }
 
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       e.preventDefault();
@@ -329,6 +376,27 @@ export function initWorldEditor(prefix: string): void {
   });
 
   canvas.addEventListener('mouseup', e => {
+    if (state.cutting) {
+      state.cutting = false;
+      const nm = new Map(world().nodes.map(n => [n.id, n]));
+      const ax = state.cutStart.x, ay = state.cutStart.y;
+      const bx = state.cutEnd.x, by = state.cutEnd.y;
+      if (Math.hypot(bx - ax, by - ay) > 4) {
+        const toDelete = world().edges.filter(edge => {
+          const a = nm.get(edge.from), b = nm.get(edge.to); if (!a || !b) return false;
+          const pa = toScreen(a.x, a.y), pb = toScreen(b.x, b.y);
+          return segIntersects(ax, ay, bx, by, pa.x, pa.y, pb.x, pb.y);
+        });
+        if (toDelete.length > 0) {
+          pushUndo();
+          const ids = new Set(toDelete.map(e => e.id));
+          world().edges = world().edges.filter(e => !ids.has(e.id));
+          deselect(); save();
+          setStatus(`Розрізано ${toDelete.length} зʼєднань`);
+        }
+      }
+      return;
+    }
     if (e.button === 1 || state.panning) state.panning = false;
     if (state.dragNode) {
       if (state.wasDrag) save();
@@ -352,7 +420,8 @@ export function initWorldEditor(prefix: string): void {
     const app = document.getElementById('app');
     if (!app?.className.includes('mode-world')) return;
     const active = document.activeElement;
-    const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+    const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+      || (active instanceof HTMLElement && active.contentEditable === 'true');
     if (e.key === 'Delete' || e.key === 'Backspace') { if (!typing) { e.preventDefault(); deleteSelected(); } }
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(); }
     if (!e.ctrlKey && !e.shiftKey && !typing) {
@@ -397,6 +466,12 @@ export function initWorldEditor(prefix: string): void {
   gridBtn?.addEventListener('click', () => {
     state.showGrid = !state.showGrid;
     gridBtn.classList.toggle('on', state.showGrid);
+  });
+
+  const camViewBtn = $('camViewBtn');
+  camViewBtn?.addEventListener('click', () => {
+    state.showCamView = !state.showCamView;
+    camViewBtn.classList.toggle('on', state.showCamView);
   });
 
   $('fitBtn')?.addEventListener('click', () => { state.zoom = 1; state.pan = { x: 0, y: 0 }; });

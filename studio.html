@@ -123,6 +123,10 @@
 
       /* ---- таймлайн знизу (нейтральний, без піктограм) ---- */
       #timelineBar { flex: 0 0 auto; padding: 8px; }
+      #timelineBar.tl-collapsed .tlrow:nth-child(2),
+      #timelineBar.tl-collapsed #tlWrapper { display: none; }
+      #tlCollapseBtn { margin-left: auto; width: 28px; height: 28px; padding: 0; font-size: 13px; background: transparent; border: 0; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; flex-shrink: 0; }
+      #tlCollapseBtn:hover { background: #3a3a3a; color: var(--ink); }
       .tlrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
       .tlrow select { background: var(--rail); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; }
       .tlrow button { font-size: 12px; }
@@ -520,7 +524,7 @@
           <div id="faceList"><div id="faceChips"></div></div>
           <div id="lv-fillMenu" style="display:none"></div>
         </div>
-        <div id="timelineBar" class="pane">
+        <div id="timelineBar" class="pane tl-collapsed">
           <div class="tlrow">
             <select id="charSel" title="Персонаж (свій набір анімацій)" style="flex:1.2;min-width:0"></select>
             <select id="anim" style="flex:2;min-width:0"></select>
@@ -530,6 +534,7 @@
             <button id="resetAnim">Скинути</button>
             <button id="delAnimBtn">Видалити</button>
             <button id="hotkeyBtn" title="Призначити клавішу-тригер для цієї анімації у грі">Хоткей (-)</button>
+            <button id="tlCollapseBtn" title="Розгорнути/згорнути таймлайн">▶</button>
           </div>
           <div class="tlrow">
             <button id="keyBtn">Ключ (K)</button>
@@ -618,6 +623,7 @@
           <label class="iconToggle" title="Чистити фон при завантаженні"><input type="checkbox" id="keyBg" checked /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7zM18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z"/></svg></label>
           <label class="iconToggle" title="Чорно-біле превʼю (тон без кольору)"><input type="checkbox" id="bwPreview" /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3z" fill="currentColor" stroke="none"/></svg></label>
           <button class="iconToggle" id="setHeadLine" title="Лінію висоти — на маківку цього персонажа"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M12 9v9M8 14l4 4 4-4"/></svg></button>
+          <button class="iconToggle on" id="gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
           <button class="iconToggle" id="constructorBtn" title="Конструктор — коди елементів UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg></button>
         </div>
         <div id="tools" class="pane">
@@ -660,6 +666,7 @@
         </div>
         <div style="display:flex;gap:6px;padding:2px">
           <button class="iconToggle" id="lv-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
+          <button class="iconToggle" id="lv-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
           <button class="iconToggle" id="lv-showColliderBtn" title="Показати/сховати колайдери"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
           <button class="iconToggle on" id="lv-linesBtn" title="Показати/сховати лінії початку і фінішу шарів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3v18M18 3v18"/></svg></button>
           <button class="iconToggle on" id="lv-enemySpawnsViewBtn" title="Показати/сховати точки спавну ворогів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg></button>
@@ -735,6 +742,7 @@
           <div id="wld-previewClick" style="position:absolute;inset:0;z-index:5;cursor:default" title="Клік — активувати / розгорнути"></div>
         </div>
         <div style="display:flex;gap:6px;padding:2px">
+          <button class="iconToggle" id="wld-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
           <button class="iconToggle" id="wld-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
           <button class="iconToggle on" id="wld-labelsBtn" title="Підписи вузлів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h2M11 12h6"/></svg></button>
           <button class="iconToggle on" id="wld-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
@@ -779,6 +787,7 @@
           <div id="loc-previewClick" style="position:absolute;inset:0;z-index:5;cursor:default" title="Клік — активувати / розгорнути"></div>
         </div>
         <div style="display:flex;gap:6px;padding:2px">
+          <button class="iconToggle" id="loc-camViewBtn" title="Накласти вид камери 20:9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5V3M17 5V3M7 19v2M17 19v2"/></svg></button>
           <button class="iconToggle" id="loc-undoBtn" title="Скасувати (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17A9 9 0 0 0 6.5 8.5L3 13"/></svg></button>
           <button class="iconToggle on" id="loc-zonesBtn" title="Показати зони дій"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
           <button class="iconToggle on" id="loc-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>

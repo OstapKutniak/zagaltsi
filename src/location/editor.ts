@@ -75,6 +75,7 @@ export function initLocationEditor(prefix: string): void {
     undoStack: [] as string[],
     showZones: true,
     showGrid: true,
+    showCamView: false,
   };
 
   const loc = (): LocationDoc => state.locs[state.cur];
@@ -229,6 +230,21 @@ export function initLocationEditor(prefix: string): void {
       ctx.restore();
     }
 
+    if (state.showCamView) {
+      const vw = 1280 * sc(); const vh = 576 * sc();
+      const vx = (w - vw) / 2; const vy = (h - vh) / 2;
+      const cx0 = Math.max(0, vx), cy0 = Math.max(0, vy);
+      const cx1 = Math.min(w, vx + vw), cy1 = Math.min(h, vy + vh);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      if (cy0 > 0) ctx.fillRect(0, 0, w, cy0);
+      if (cy1 < h) ctx.fillRect(0, cy1, w, h - cy1);
+      if (cx0 > 0) ctx.fillRect(0, cy0, cx0, cy1 - cy0);
+      if (cx1 < w) ctx.fillRect(cx1, cy0, w - cx1, cy1 - cy0);
+      ctx.strokeStyle = '#ff9a1f'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.strokeRect(vx, vy, vw, vh);
+      ctx.setLineDash([]);
+    }
+
     requestAnimationFrame(draw);
   }
 
@@ -328,7 +344,8 @@ export function initLocationEditor(prefix: string): void {
     const app = document.getElementById('app');
     if (!app?.className.includes('mode-location')) return;
     const active = document.activeElement;
-    const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement;
+    const typing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement
+      || (active instanceof HTMLElement && active.contentEditable === 'true');
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) { e.preventDefault(); deleteSelected(); return; }
     if (e.ctrlKey || e.shiftKey || typing) return;
@@ -381,6 +398,12 @@ export function initLocationEditor(prefix: string): void {
   gridBtn?.addEventListener('click', () => {
     state.showGrid = !state.showGrid;
     gridBtn.classList.toggle('on', state.showGrid);
+  });
+
+  const camViewBtn = $('camViewBtn');
+  camViewBtn?.addEventListener('click', () => {
+    state.showCamView = !state.showCamView;
+    camViewBtn.classList.toggle('on', state.showCamView);
   });
 
   $('fitBtn')?.addEventListener('click', () => { state.zoom = 1; state.pan = { x: 0, y: 0 }; });

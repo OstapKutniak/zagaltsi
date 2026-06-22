@@ -380,6 +380,16 @@ function drawImageAt(sel: string, alpha: number): void {
 function _drawNow(): void {
   ctx.imageSmoothingEnabled = !_rigPanning;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (showGrid) {
+    ctx.strokeStyle = '#282828'; ctx.lineWidth = 1;
+    const gs = 60 * s();
+    const ox = (state.origin.x % gs + gs) % gs;
+    const oy = (state.origin.y % gs + gs) % gs;
+    for (let x = ox; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+    for (let y = oy; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+  }
   // лінія землі — де мають стояти ноги
   const groundUY = -4 + BASE.legs * state.prop.legs;
   const groundY = toPx(0, groundUY).y;
@@ -730,6 +740,10 @@ $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.sel
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('showRef').addEventListener('change', (e) => { state.showRef = (e.target as HTMLInputElement).checked; draw(); });
+let showGrid = true;
+const gridBtn = $<HTMLButtonElement>('gridBtn');
+gridBtn?.classList.add('on');
+gridBtn?.addEventListener('click', () => { showGrid = !showGrid; gridBtn.classList.toggle('on', showGrid); draw(); });
 $<HTMLButtonElement>('faceBtn').addEventListener('click', () => { state.facing *= -1; refreshUI(); });
 $<HTMLButtonElement>('animDirBtn').addEventListener('click', () => { state.animDir *= -1; refreshUI(); });
 $<HTMLButtonElement>('refBtn').addEventListener('click', () => $<HTMLInputElement>('refInput').click());
@@ -737,6 +751,15 @@ $<HTMLButtonElement>('refClear').addEventListener('click', () => { pushUndo(); s
 $<HTMLInputElement>('refInput').addEventListener('change', (ev) => {
   const f = (ev.target as HTMLInputElement).files?.[0]; if (!f) return;
   const img = new Image(); img.onload = () => { state.ref.canvas = imageToCanvas(img); state.selected = 'ref'; refreshUI(); }; img.src = URL.createObjectURL(f);
+});
+
+// ---- таймлайн collapse / expand ----
+const tlBar = document.getElementById('timelineBar');
+const tlCollapseBtn = $<HTMLButtonElement>('tlCollapseBtn');
+tlCollapseBtn?.addEventListener('click', () => {
+  const collapsed = tlBar?.classList.toggle('tl-collapsed');
+  if (tlCollapseBtn) tlCollapseBtn.textContent = collapsed ? '▶' : '▼';
+  requestAnimationFrame(() => { syncPanelHeights(); });
 });
 
 // ---- верхні таби розділів — перемикання панелей всередині однієї сторінки ----

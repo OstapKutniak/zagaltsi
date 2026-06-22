@@ -70,6 +70,7 @@ export function initLevelEditor(prefix: string): void {
     markerDrag: null as null | 'spawn' | 'start' | 'end',
     spawnSel: 0, // який зі спавнів зараз вибраний/тягнеться
     camView: false,
+    showGrid: false,
     grid: 48,
     snap: true,
     showCollider: true,
@@ -294,6 +295,16 @@ export function initLevelEditor(prefix: string): void {
     if (!canvas.width) return;
     ctx.imageSmoothingEnabled = !_panning;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (state.showGrid) {
+      ctx.strokeStyle = '#282828'; ctx.lineWidth = 1;
+      const gs = 60 * sc();
+      const ox = (state.origin.x % gs + gs) % gs;
+      const oy = (state.origin.y % gs + gs) % gs;
+      for (let x = ox; x < canvas.width; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+      for (let y = oy; y < canvas.height; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+    }
     const g0 = toScreen(0, 0);
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(0, g0.y); ctx.lineTo(canvas.width, g0.y); ctx.stroke();
@@ -1603,6 +1614,12 @@ export function initLevelEditor(prefix: string): void {
   window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && lvPreviewBig) setLvPreviewBig(false); });
   window.addEventListener('resize', () => { if (lvPreviewBig) setLvPreviewBig(true); });
 
+  const lv_gridBtn = $<HTMLButtonElement>('gridBtn');
+  lv_gridBtn?.addEventListener('click', () => {
+    state.showGrid = !state.showGrid;
+    lv_gridBtn.classList.toggle('on', state.showGrid);
+    draw();
+  });
   const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
   showColliderBtn?.addEventListener('click', () => {
     state.showCollider = !state.showCollider;
