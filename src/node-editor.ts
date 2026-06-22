@@ -19,6 +19,24 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
     config: { steps: { type: 'number', label: 'Кроків', default: 3 } },
   },
+  health_below: {
+    cat: 'condition', label: 'Здоровʼя нижче', color: '#1e5a9e',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+    config: { percent: { type: 'number', label: '%', default: 30 } },
+  },
+  sees_player: {
+    cat: 'condition', label: 'Бачить гравця', color: '#1e5a9e',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
+  time_of_day: {
+    cat: 'condition', label: 'Час доби', color: '#1e5a9e',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'День' }, { label: 'Ніч' }],
+  },
+  // «Потім» — вузол-перехід: після виконаної гілки веде до наступної умови.
+  then_next: {
+    cat: 'condition', label: 'Потім', color: '#5a5a5a',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }],
+  },
   run_to_player:  { cat: 'behavior', label: 'Бігти на гравця',  color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   walk_to_player: { cat: 'behavior', label: 'Йти на гравця',    color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
@@ -36,7 +54,7 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
 };
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: 'condition', label: 'Умови',     types: ['player_distance'] },
+  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next'] },
   { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
 ];
