@@ -24,6 +24,16 @@ export async function idbGet<T>(key: string): Promise<T | null> {
   });
 }
 
+// Перелік усіх ключів (потрібно, щоб зібрати всі zag_behavior_* графи для публікації).
+export async function idbKeys(): Promise<string[]> {
+  const d = await openDb();
+  return new Promise((res, rej) => {
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE).getAllKeys();
+    req.onsuccess = () => res((req.result as IDBValidKey[]).map(String));
+    req.onerror = () => rej(req.error);
+  });
+}
+
 export async function idbSet(key: string, val: unknown): Promise<void> {
   const d = await openDb();
   return new Promise((res, rej) => {

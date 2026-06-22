@@ -44,6 +44,33 @@ export function requireToken(): string {
   return tok;
 }
 
+// Створити blob із ретраєм. Великі ассети (base64 PNG) + кілька файлів за раз
+// ловлять secondary rate limit GitHub (403/429) — тому послідовно й з беком.
+async function createBlob(path: string, content: string, h: HeadersInit): Promise<string> {
+  const MAX = 5;
+  let lastErr = '';
+  for (let attempt = 0; attempt < MAX; attempt++) {
+    const r = await fetch(`${API}/repos/${OWNER}/${REPO}/git/blobs`, {
+      method: 'POST', headers: h,
+      body: JSON.stringify({ content: toBase64(content), encoding: 'base64' }),
+    });
+    if (r.ok) {
+      const { sha } = await r.json() as { sha: string };
+      return sha;
+    }
+    lastErr = `${r.status}`;
+    // 403/429 = rate limit (зокрема secondary), 5xx = транзієнтна — чекаємо й пробуємо ще.
+    if (r.status === 403 || r.status === 429 || r.status >= 500) {
+      const ra = Number(r.headers.get('retry-after'));
+      const waitMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * (attempt + 1);
+      await new Promise((res) => setTimeout(res, waitMs));
+      continue;
+    }
+    break; // інші коди (401/404/422) — ретрай не допоможе
+  }
+  throw new Error(`GitHub blob помилка: ${path} (${lastErr})`);
+}
+
 // Push multiple files in one commit using Git Data API (handles large files)
 export async function ghCommit(files: Record<string, string>, message: string): Promise<void> {
   const token = requireToken();
@@ -59,16 +86,13 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   if (!commitRes.ok) throw new Error(`GitHub ${commitRes.status}: commits`);
   const { tree: { sha: baseSha } } = await commitRes.json() as { tree: { sha: string } };
 
-  // 3. create blobs
-  const treeItems = await Promise.all(Object.entries(files).map(async ([path, content]) => {
-    const r = await fetch(`${API}/repos/${OWNER}/${REPO}/git/blobs`, {
-      method: 'POST', headers: h,
-      body: JSON.stringify({ content: toBase64(content), encoding: 'base64' }),
-    });
-    if (!r.ok) throw new Error(`GitHub blob помилка: ${path}`);
-    const { sha } = await r.json() as { sha: string };
-    return { path, mode: '100644' as const, type: 'blob' as const, sha };
-  }));
+  // 3. create blobs — ПОСЛІДОВНО (паралельні POST-и великих ассетів ловлять
+  //    secondary rate limit GitHub → 403). З ретраєм на транзієнтних помилках.
+  const treeItems: Array<{ path: string; mode: '100644'; type: 'blob'; sha: string }> = [];
+  for (const [path, content] of Object.entries(files)) {
+    const sha = await createBlob(path, content, h);
+    treeItems.push({ path, mode: '100644', type: 'blob', sha });
+  }
 
   // 4. new tree
   const treeRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/trees`, {

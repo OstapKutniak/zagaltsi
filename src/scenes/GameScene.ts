@@ -8,6 +8,7 @@ import { buildLevelView, type LevelDoc } from '../level/LevelView';
 import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
+import { loadPublishedBehaviors } from '../behaviors';
 import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
@@ -341,12 +342,17 @@ export class GameScene extends Phaser.Scene {
         if (p[2]) toAttach.push({ enemy, charId: p[2] });
       }
       if (toAttach.length) {
-        void (this.libReady ?? Promise.resolve()).then(() => {
+        void (this.libReady ?? Promise.resolve()).then(async () => {
+          // Опубліковані поведінки з репо (працюють на всіх пристроях/коопі), один раз.
+          const pub = await loadPublishedBehaviors();
           toAttach.forEach(({ enemy, charId }, i) => {
             const d = docById(this.lib, charId);
             if (d) void enemy.attachChar(d, `npc_${i}_`);
-            // нодова поведінка цього ворога (1 крок = 1 клітинка колайдера = gs px)
-            void idbGet<NodeGraph>('zag_behavior_' + charId).then((bg) => enemy.setBehavior(bg ?? null, gs)).catch(() => {});
+            // нодова поведінка цього ворога (1 крок = 1 клітинка колайдера = gs px):
+            // спершу локальна IDB (свіжі правки автора), фолбек — опублікований граф.
+            void idbGet<NodeGraph>('zag_behavior_' + charId)
+              .then((bg) => enemy.setBehavior(bg ?? pub[charId] ?? null, gs))
+              .catch(() => enemy.setBehavior(pub[charId] ?? null, gs));
           });
         });
       }

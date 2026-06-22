@@ -4,6 +4,7 @@ import { ghCommit } from '../github';
 import { pullLevelData, mergeLevelAssets } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
+import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -2121,13 +2122,17 @@ export function initLevelEditor(prefix: string): void {
     btn.textContent = 'Публікую...';
     idbSet('zag_level', level).catch(() => {});
     const character: unknown = (() => { try { const s = localStorage.getItem('zag_game_char'); return s ? JSON.parse(s) : null; } catch { return null; } })();
-    const files: Record<string, string> = {
-      'public/level.json': JSON.stringify(level),
-      'public/studio-data/level-assets.json': JSON.stringify(state.assets),
-      'public/studio-data/level-layouts.json': JSON.stringify({ levels: state.levels, cur: state.cur }),
-    };
-    if (character) files['public/character.json'] = JSON.stringify(character);
-    ghCommit(files, 'studio: publish to game')
+    void gatherBehaviors().then((behaviors) => {
+      const files: Record<string, string> = {
+        'public/level.json': JSON.stringify(level),
+        'public/studio-data/level-assets.json': JSON.stringify(state.assets),
+        'public/studio-data/level-layouts.json': JSON.stringify({ levels: state.levels, cur: state.cur }),
+        // Поведінки НПС — щоб дерева ворогів цього рівня працювали на всіх пристроях.
+        'public/studio-data/behaviors.json': JSON.stringify(behaviors),
+      };
+      if (character) files['public/character.json'] = JSON.stringify(character);
+      return ghCommit(files, 'studio: publish to game');
+    })
       .then(() => { btn.textContent = 'Оновлено!'; setStatus('✔ Оновлено! Telegram підтягне за ~1 хв.'); })
       .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
       .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });

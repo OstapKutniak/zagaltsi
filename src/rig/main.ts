@@ -6,6 +6,7 @@ import { NodeEditor, NodeGraph } from '../node-editor';
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
+import { gatherBehaviors } from '../behaviors';
 import { toggleConstructor } from '../ui-constructor';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -1194,9 +1195,12 @@ async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => vo
     const character = buildDoc();
     try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
     const level = await idbGet<unknown>('zag_level');
+    const behaviors = await gatherBehaviors();
     const files: Record<string, string> = {
       'public/character.json': JSON.stringify(character),
       'public/studio-data/char-library.json': JSON.stringify(loadLib()),
+      // Поведінки НПС — щоб дерева працювали на інших пристроях/коопі, не лише локально.
+      'public/studio-data/behaviors.json': JSON.stringify(behaviors),
     };
     if (level) files['public/level.json'] = JSON.stringify(level);
     await ghCommit(files, 'studio: publish to game');
