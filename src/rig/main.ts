@@ -2,6 +2,7 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
 import { initWorldEditor } from '../world/editor';
 import { initLocationEditor } from '../location/editor';
+import { NodeEditor, NodeGraph } from '../node-editor';
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
@@ -805,12 +806,31 @@ const GAME_URL = (window as unknown as { Capacitor?: unknown }).Capacitor ? 'gam
 document.getElementById('playTab')?.addEventListener('click', () => {
   window.location.href = GAME_URL;
 });
+// ---- Node editor panel (shared canvas, location + char behavior) ----
+let _sharedNE: NodeEditor | null = null;
+
+function openNodePanel(graph: NodeGraph, cats: string[], onChange: (g: NodeGraph) => void, title: string): void {
+  const panel = document.getElementById('nodeEditorPanel')!;
+  const canvas = document.getElementById('nodeEditorCanvas') as HTMLCanvasElement;
+  if (_sharedNE) { _sharedNE.stop(); _sharedNE = null; }
+  _sharedNE = new NodeEditor(canvas, cats, onChange);
+  _sharedNE.loadGraph(graph);
+  document.getElementById('nodeEditorTitle')!.textContent = title;
+  panel.style.display = 'flex';
+  requestAnimationFrame(() => { _sharedNE?.resize(); _sharedNE?.start(); });
+}
+
+document.getElementById('nodeEditorClose')?.addEventListener('click', () => {
+  if (_sharedNE) { _sharedNE.stop(); _sharedNE = null; }
+  document.getElementById('nodeEditorPanel')!.style.display = 'none';
+});
+
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
 // Initialize world map editor
 initWorldEditor('wld-');
 // Initialize location editor
-initLocationEditor('loc-');
+initLocationEditor('loc-', openNodePanel);
 
 // On mobile — auto-switch to level editor as default starting mode
 if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
@@ -1096,6 +1116,7 @@ const LIB_MIN = 18; // мінімум слотів (з пустими) — що�
 function renderLibrary(): void {
   const box = $('libList'); box.innerHTML = '';
   const lib = loadLib().filter((c) => (c.cat ?? 'char') === libCat);
+  const isNpc = libCat === 'enemy' || libCat === 'neutral';
   for (const c of lib) {
     const card = document.createElement('div'); card.className = 'libCard';
     const img = document.createElement('img'); img.src = c.thumb; img.draggable = false;
@@ -1103,6 +1124,13 @@ function renderLibrary(): void {
     const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕';
     card.onclick = () => { currentCharId = c.id; loadCharFromDoc(c.doc); refreshCharSel(); status(`Завантажено: ${c.name}`); };
     del.onclick = (e) => { e.stopPropagation(); storeLib(loadLib().filter((x) => x.id !== c.id)); renderLibrary(); };
+    if (isNpc) {
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        e.dataTransfer?.setData('text/npc-id', c.id);
+        e.dataTransfer?.setData('text/npc-name', c.name);
+      });
+    }
     card.appendChild(img); card.appendChild(nm); card.appendChild(del); box.appendChild(card);
   }
   for (let i = lib.length; i < LIB_MIN; i++) { const e = document.createElement('div'); e.className = 'libCard empty'; box.appendChild(e); }
@@ -1119,7 +1147,37 @@ function saveCharacter(): void {
   storeLib(lib); currentCharId = item.id; renderLibrary(); refreshCharSel();
 }
 $<HTMLButtonElement>('saveChar').addEventListener('click', saveCharacter);
-$<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => { libCat = (e.target as HTMLSelectElement).value as 'char' | 'enemy' | 'neutral'; renderLibrary(); });
+function updateBehaviorRow(): void {
+  const keysRow = document.getElementById('tl-keysRow');
+  const behaviorRow = document.getElementById('tl-behaviorRow');
+  const isNpc = libCat === 'enemy' || libCat === 'neutral';
+  if (keysRow) keysRow.style.display = isNpc ? 'none' : '';
+  if (behaviorRow) behaviorRow.style.display = isNpc ? '' : 'none';
+}
+$<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => {
+  libCat = (e.target as HTMLSelectElement).value as 'char' | 'enemy' | 'neutral';
+  renderLibrary();
+  updateBehaviorRow();
+});
+
+// Char behavior node editor (enemy / neutral)
+const _charBehaviorGraphs: Record<string, NodeGraph> = {};
+document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
+  const key = 'zag_behavior_' + libCat;
+  const catLabel = libCat === 'enemy' ? 'Вороги' : 'Нейтрали';
+  const open = (g: NodeGraph) => {
+    _charBehaviorGraphs[libCat] = g;
+    openNodePanel(g, ['condition', 'behavior'], (ng) => {
+      _charBehaviorGraphs[libCat] = ng;
+      idbSet(key, ng).catch(() => {});
+    }, 'Поведінка: ' + catLabel);
+  };
+  if (_charBehaviorGraphs[libCat]) {
+    open(_charBehaviorGraphs[libCat]);
+  } else {
+    idbGet<NodeGraph>(key).then(saved => open(saved ?? { nodes: [], edges: [] })).catch(() => open({ nodes: [], edges: [] }));
+  }
+});
 
 async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {
   btn.disabled = true;

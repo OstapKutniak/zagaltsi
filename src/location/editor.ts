@@ -1,6 +1,7 @@
 // Location editor — статична сцена хабу: будівлі-ассети + активні зони-дії.
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
+import type { NodeGraph } from '../node-editor';
 
 interface PlacedAsset {
   id: string; url: string; name: string;
@@ -17,6 +18,7 @@ interface LocationDoc {
   id: string; name: string; bg: string;
   placed: PlacedAsset[];
   zones: ActionZone[];
+  nodeGraph?: NodeGraph;
 }
 
 const ZONE_COLORS: Record<string, string> = {
@@ -39,8 +41,10 @@ const ZONE_ACTIONS = [
 
 type GMode = 'G' | 'R' | 'S' | null;
 
+export type OpenNodesFn = (graph: NodeGraph, cats: string[], onChange: (g: NodeGraph) => void, title: string) => void;
+
 let _init = false;
-export function initLocationEditor(prefix: string): void {
+export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): void {
   if (_init) return; _init = true;
 
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(prefix + id) as T;
@@ -455,6 +459,17 @@ export function initLocationEditor(prefix: string): void {
     this.value = '';
   });
   $('assetBtn')?.addEventListener('click', () => $<HTMLInputElement>('assetInput').click());
+
+  $('nodesBtn')?.addEventListener('click', () => {
+    if (!onOpenNodes) return;
+    const l = loc();
+    onOpenNodes(
+      l.nodeGraph ?? { nodes: [], edges: [] },
+      ['condition', 'behavior', 'function'],
+      (g) => { l.nodeGraph = g; void save(); },
+      'Ноди: ' + l.name,
+    );
+  });
 
   canvas.addEventListener('dragover', e => e.preventDefault());
   canvas.addEventListener('drop', e => {
