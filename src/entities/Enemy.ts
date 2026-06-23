@@ -104,6 +104,7 @@ export class Enemy extends Actor {
         const pass1 = n1 && e1 ? this.evalCond(n1, player) === e1.fromPort : true;
         return (pass0 && pass1) ? 0 : 1; // 0=Так, 1=Ні
       }
+      case 'dialog_done': return this.dialogTriggered ? 0 : 1; // 0=Так якщо вже поговорили
       case 'sees_player': return 0; // поки що завжди бачить
       case 'time_of_day':  return 0; // поки що завжди «День»
       default: return 0;

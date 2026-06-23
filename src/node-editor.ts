@@ -51,6 +51,11 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     cat: 'condition', label: 'Потім', color: '#5a5a5a',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }],
   },
+  // «Діалог завершено» — Так якщо ворог вже поговорив із гравцем.
+  dialog_done: {
+    cat: 'condition', label: 'Діалог завершено', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
   // «І (AND)» — обидва підключених джерела А і В мають вернути потрібний вихід.
   and_cond: {
     cat: 'condition', label: 'І (AND)', color: '#1e5a9e',
@@ -88,7 +93,7 @@ export function dialogAnswers(n: GraphNode): string[] {
 }
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond'] },
+  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done'] },
   { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
   { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
@@ -173,6 +178,8 @@ export class NodeEditor {
   private pendingDe: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; detached?: boolean } | null = null;
   // RMB по лінії зв'язку — вставити ноду між двома кінцями.
   private pendingInsert: GraphEdge | null = null;
+  // Лінія, на яку зараз наводить курсор (підсвічується).
+  private hoveredEdge: GraphEdge | null = null;
   private drag: { ids: string[]; orig: Map<string, { x: number; y: number }>; wx0: number; wy0: number; moved: boolean } | null = null;
   private grab: { ids: string[]; orig: Map<string, { x: number; y: number }>; ax: number; ay: number } | null = null;
   private box: { sx: number; sy: number } | null = null;
@@ -311,7 +318,16 @@ export class NodeEditor {
     for (const e of this.graph.edges) {
       const a = this.edgeAnchors(e); if (!a) continue;
       const fn = this.graph.nodes.find(n => n.id === e.fromId)!;
-      x.strokeStyle = (this.colorOf(fn)) + 'cc'; x.lineWidth = 2; x.setLineDash([]);
+      const hov = e === this.hoveredEdge;
+      // Підсвічена лінія: спершу малюємо товстий білий ореол, потім тонку кольорову поверх.
+      if (hov) {
+        x.strokeStyle = 'rgba(255,255,255,0.55)'; x.lineWidth = 6; x.setLineDash([]);
+        x.beginPath(); x.moveTo(a.fx, a.fy);
+        const mx2 = (a.fx + a.tx) / 2;
+        x.bezierCurveTo(mx2, a.fy, mx2, a.ty, a.tx, a.ty); x.stroke();
+      }
+      x.strokeStyle = hov ? '#ffffff' : (this.colorOf(fn)) + 'cc';
+      x.lineWidth = hov ? 2.5 : 2; x.setLineDash([]);
       x.beginPath(); x.moveTo(a.fx, a.fy);
       const mx = (a.fx + a.tx) / 2;
       x.bezierCurveTo(mx, a.fy, mx, a.ty, a.tx, a.ty); x.stroke();
@@ -510,9 +526,7 @@ export class NodeEditor {
       }
       if (e.button === 2) {
         e.preventDefault();
-        const hitEdge = this.edgeAt(sx, sy);
-        if (hitEdge) this.pendingInsert = hitEdge;
-        this.openMenu(sx, sy, e.clientX, e.clientY);
+        this.openMenu(sx, sy, e.clientX, e.clientY, this.edgeAt(sx, sy) ?? undefined);
         return;
       }
       if (e.button !== 0) return;
@@ -567,6 +581,12 @@ export class NodeEditor {
     cvs.addEventListener('mousemove', (e) => {
       const { x: sx, y: sy } = this.exy(e);
       this.mouse = { sx, sy };
+      // Hover по лінії — підсвічуємо лише коли нічого не тягнемо.
+      if (!this.de && !this.drag && !this.grab && !this.knife && !this.pan0) {
+        this.hoveredEdge = this.edgeAt(sx, sy);
+      } else {
+        this.hoveredEdge = null;
+      }
       if (this.pan0) { this.pan.x = this.pan0.px + e.clientX - this.pan0.mx; this.pan.y = this.pan0.py + e.clientY - this.pan0.my; return; }
       if (this.knife) {
         this.knife.push({ x: sx, y: sy });
@@ -745,9 +765,10 @@ export class NodeEditor {
     this.onChange?.(this.graph);
   }
 
-  private openMenu(sx: number, sy: number, clientX: number, clientY: number): void {
-    this.closeMenu();
+  private openMenu(sx: number, sy: number, clientX: number, clientY: number, insertEdge?: GraphEdge): void {
+    this.closeMenu(); // скидає pendingInsert — тому встановлюємо після
     this.pWx = this.ww(sx); this.pWy = this.wh(sy);
+    if (insertEdge) this.pendingInsert = insertEdge; // встановити ПІСЛЯ closeMenu
     const cats = NODE_CATEGORIES.filter(c => this.allowedCats.includes(c.id));
 
     const el = document.createElement('div');
