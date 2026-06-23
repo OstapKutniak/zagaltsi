@@ -1178,7 +1178,7 @@ $<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => {
 // Char behavior node editor — дерево поведінки ПЕР-ПЕРСОНАЖА (за id ворога/нейтрала).
 function openCharBehavior(charId: string, name: string): void {
   const key = 'zag_behavior_' + charId;
-  const open = (g: NodeGraph) => openNodePanel(g, ['condition', 'behavior'], (ng) => { idbSet(key, ng).catch(() => {}); }, 'Поведінка: ' + name);
+  const open = (g: NodeGraph) => openNodePanel(g, ['condition', 'behavior', 'dialog'], (ng) => { idbSet(key, ng).catch(() => {}); }, 'Поведінка: ' + name);
   idbGet<NodeGraph>(key).then(saved => open(saved ?? { nodes: [], edges: [] })).catch(() => open({ nodes: [], edges: [] }));
 }
 document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {

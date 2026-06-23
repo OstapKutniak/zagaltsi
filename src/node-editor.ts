@@ -2,10 +2,12 @@
 // Blender-подібна взаємодія: G — рух, Shift+D — дублювати, ЛКМ-рамка — виділення,
 // Ctrl+ЛКМ — ніж (різати звʼязки), Shift+ЛКМ — reroute-вузол, тягни з будь-якого порту.
 
-export type NodeCat = 'root' | 'condition' | 'behavior' | 'function' | 'reroute';
+export type NodeCat = 'root' | 'condition' | 'behavior' | 'function' | 'reroute' | 'dialog';
 
 interface PortDef { label: string }
-interface ConfigDef { type: 'number' | 'text'; label: string; default: string | number }
+interface SelectOption { value: string; label: string; short?: string }
+// 'select' — випадайка варіантів; 'list' — рядок «a|b|c» (керує динамічними виходами діалогу).
+interface ConfigDef { type: 'number' | 'text' | 'select' | 'list'; label: string; default: string | number; options?: SelectOption[] }
 
 export interface NodeTypeDef {
   cat: NodeCat; label: string; color: string;
@@ -17,7 +19,19 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
   player_distance: {
     cat: 'condition', label: 'Гравець на відстані', color: '#1e5a9e',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
-    config: { steps: { type: 'number', label: 'Кроків', default: 3 } },
+    config: {
+      cmp: {
+        type: 'select', label: 'Умова', default: 'lte',
+        options: [
+          { value: 'lte', short: '≤', label: '≤  менше або дорівнює' },
+          { value: 'gte', short: '≥', label: '≥  більше або дорівнює' },
+          { value: 'eq',  short: '=', label: '=  дорівнює' },
+          { value: 'lt',  short: '<', label: '<  менше' },
+          { value: 'gt',  short: '>', label: '>  більше' },
+        ],
+      },
+      steps: { type: 'number', label: 'Кроків', default: 3 },
+    },
   },
   health_below: {
     cat: 'condition', label: 'Здоровʼя нижче', color: '#1e5a9e',
@@ -51,11 +65,27 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Варіант 1' }, { label: 'Варіант 2' }],
     config: { buttons: { type: 'number', label: 'Варіантів', default: 2 } },
   },
+  // «Почати діалог» — ворог каже фразу; виходи = варіанти відповіді (кожен веде до
+  // наступної діалог-ноди). Кількість виходів динамічна — з поля «Відповіді» («a|b|c»).
+  dialog: {
+    cat: 'dialog', label: 'Діалог', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [],
+    config: {
+      text: { type: 'text', label: 'Фраза', default: 'Гей, чужинцю!' },
+      answers: { type: 'list', label: 'Відповіді', default: 'Привіт|Геть з дороги' },
+    },
+  },
 };
+
+// Варіанти відповіді діалог-ноди (керують її динамічними виходами).
+export function dialogAnswers(n: GraphNode): string[] {
+  return String(n.config.answers ?? '').split('|').map((s) => s.trim()).filter(Boolean);
+}
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
   { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next'] },
   { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
+  { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
 ];
 
@@ -82,6 +112,8 @@ const RR = 24;         // розмір reroute-вузла
 function outLabels(n: GraphNode): string[] {
   if (n.cat === 'root') return ['Поведінка'];
   if (n.cat === 'reroute') return ['▶'];
+  // Діалог: виходи = варіанти відповіді (динамічні). Без відповідей — один вихід «Далі».
+  if (n.type === 'dialog') { const a = dialogAnswers(n); return a.length ? a : ['Далі']; }
   return NODE_TYPES[n.type]?.outPorts.map(p => p.label) ?? [];
 }
 function inLabels(n: GraphNode): string[] {
@@ -90,11 +122,13 @@ function inLabels(n: GraphNode): string[] {
   return NODE_TYPES[n.type]?.inPorts.map(p => p.label) ?? [];
 }
 function nodeW(n: GraphNode): number { return n.cat === 'reroute' ? RR : NW; }
+// Кількість рядків портів (макс зі входів/виходів) — спільне для геометрії й конфіг-рядків.
+function portRows(n: GraphNode): number { return Math.max(inLabels(n).length, outLabels(n).length); }
 
 function bodyH(n: GraphNode): number {
   if (n.cat === 'root') return PAD_T + THUMB + PR + PAD_B;
   const def = NODE_TYPES[n.type]; if (!def) return 24;
-  return PAD_T + Math.max(def.inPorts.length, def.outPorts.length) * PR
+  return PAD_T + portRows(n) * PR
     + (def.config ? Object.keys(def.config).length : 0) * CFG_H + PAD_B;
 }
 function nodeH(n: GraphNode): number {
@@ -238,7 +272,7 @@ export class NodeEditor {
     const wx = this.ww(sx), wy = this.wh(sy);
     for (const n of this.graph.nodes) {
       const def = NODE_TYPES[n.type]; if (!def?.config) continue;
-      let cy = n.y + HDR + PAD_T + Math.max(def.inPorts.length, def.outPorts.length) * PR;
+      let cy = n.y + HDR + PAD_T + portRows(n) * PR;
       for (const key of Object.keys(def.config)) {
         if (wx >= n.x + 4 && wx <= n.x + NW - 4 && wy >= cy && wy <= cy + CFG_H) return { n, key };
         cy += CFG_H;
@@ -393,15 +427,20 @@ export class NodeEditor {
     // конфіг-рядки
     const def = NODE_TYPES[n.type];
     if (def?.config) {
-      let cy = n.y + HDR + PAD_T + Math.max(def.inPorts.length, def.outPorts.length) * PR;
+      let cy = n.y + HDR + PAD_T + portRows(n) * PR;
       for (const [key, cd] of Object.entries(def.config)) {
         const psx = this.sw(n.x + 6), psy = this.sh(cy);
         const cfs = Math.max(8, Math.round(9 * this.zoom));
         x.fillStyle = 'rgba(255,255,255,0.4)'; x.font = `${cfs}px system-ui, sans-serif`; x.textAlign = 'left';
         const lbl = cd.label + ': ';
         x.fillText(lbl, psx, psy + 14 * this.zoom);
+        // select — показуємо короткий гліф/мітку обраного варіанта; інше — як є (обрізаємо довге).
+        let shown = String(n.config[key] ?? cd.default);
+        if (cd.type === 'select') { const o = cd.options?.find((op) => op.value === shown); shown = o?.short ?? o?.label ?? shown; }
+        const maxW = (NW - 12) * this.zoom - x.measureText(lbl).width;
+        while (shown.length > 1 && x.measureText(shown).width > maxW) shown = shown.slice(0, -1);
         x.fillStyle = '#fff'; x.font = `600 ${cfs}px system-ui, sans-serif`;
-        x.fillText(String(n.config[key] ?? cd.default), psx + x.measureText(lbl).width, psy + 14 * this.zoom);
+        x.fillText(shown, psx + x.measureText(lbl).width, psy + 14 * this.zoom);
         cy += CFG_H;
       }
     }
@@ -486,7 +525,7 @@ export class NodeEditor {
       }
 
       const cn = this.closeAt(sx, sy); if (cn) { this.delNodes([cn.id]); return; }
-      const cf = this.cfgAt(sx, sy); if (cf) { this.editCfg(cf.n, cf.key); return; }
+      const cf = this.cfgAt(sx, sy); if (cf) { this.editCfg(cf.n, cf.key, e.clientX, e.clientY); return; }
 
       // Shift на порожньому — reroute-вузол, який одразу тягнемо
       if (e.shiftKey && !this.nodeAt(sx, sy)) {
@@ -639,11 +678,30 @@ export class NodeEditor {
     if (this.graph.edges.length !== before) this.onChange?.(this.graph);
   }
 
-  private editCfg(n: GraphNode, key: string): void {
+  private editCfg(n: GraphNode, key: string, clientX: number, clientY: number): void {
     const def = NODE_TYPES[n.type]?.config?.[key]; if (!def) return;
-    const inp = prompt(`${def.label}:`, String(n.config[key] ?? def.default)); if (inp === null) return;
+    if (def.type === 'select') { this.openSelect(n, key, def.options ?? [], clientX, clientY); return; }
+    const hint = def.type === 'list' ? `${def.label} (через | ):` : `${def.label}:`;
+    const inp = prompt(hint, String(n.config[key] ?? def.default)); if (inp === null) return;
     n.config[key] = def.type === 'number' ? (parseFloat(inp) || def.default) : inp;
     this.onChange?.(this.graph);
+  }
+
+  // Випадайка варіантів для config-поля типу 'select'.
+  private openSelect(n: GraphNode, key: string, options: SelectOption[], clientX: number, clientY: number): void {
+    this.closeMenu();
+    const el = document.createElement('div');
+    const lx = Math.min(clientX, window.innerWidth - 220), ly = Math.min(clientY, window.innerHeight - (options.length * 32 + 16));
+    el.style.cssText = `position:fixed;left:${lx}px;top:${ly}px;background:#2d2d2d;border:1px solid #4a4a4a;border-radius:8px;padding:4px;z-index:9999;min-width:200px;box-shadow:0 6px 20px rgba(0,0,0,.7)`;
+    this.menuEl = el;
+    const cur = String(n.config[key] ?? '');
+    for (const opt of options) {
+      this.mBtn(el, opt.label, () => { n.config[key] = opt.value; this.onChange?.(this.graph); this.closeMenu(); }, opt.value === cur ? '#ff9a1f' : undefined);
+    }
+    document.body.appendChild(el);
+    const close = (ev: MouseEvent) => { if (!el.contains(ev.target as Node)) this.closeMenu(); };
+    this._menuClose = close;
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
   }
 
   private delNodes(ids: string[]): void {

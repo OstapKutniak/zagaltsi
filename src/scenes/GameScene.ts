@@ -9,6 +9,7 @@ import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
 import { loadPublishedBehaviors } from '../behaviors';
+import { openDialog, isDialogActive } from '../dialogUI';
 import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
@@ -254,6 +255,14 @@ export class GameScene extends Phaser.Scene {
     // Реакція на зміну розміру вікна Telegram / браузера
     this.scale.on('resize', this.onResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
+
+    // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку.
+    const onDialog = (d: { graph: NodeGraph; nodeId: string }): void => {
+      if (isDialogActive()) return;
+      openDialog(d.graph, d.nodeId);
+    };
+    this.events.on('enemyDialog', onDialog);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off('enemyDialog', onDialog));
   }
 
   // Рахує смугу підлоги під поточний розмір екрана (без зуму: 1 світ = 1 піксель,

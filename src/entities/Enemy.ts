@@ -21,6 +21,7 @@ export class Enemy extends Actor {
   private behavior: NodeGraph | null = null;
   private cellSize = 48;
   private readonly maxHp = ENEMY.hp;
+  private dialogTriggered = false; // діалог «Почати діалог» спрацьовує один раз на ворога
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'enemy', ENEMY.hp);
@@ -54,7 +55,10 @@ export class Enemy extends Actor {
     const seen = new Set<string>();
     while (current && !seen.has(current.id)) {
       seen.add(current.id);
-      if (current.cat === 'behavior') {
+      if (current.cat === 'dialog') {
+        // Діалог — термінальна дія: повертаємо її (виходи = відповіді, не потік поведінки).
+        return current;
+      } else if (current.cat === 'behavior') {
         lastBehavior = current;
         const e = edgeFrom(current.id, 0); current = e ? byId(e.toId) : undefined;
       } else if (current.cat === 'reroute' || current.type === 'then_next') {
@@ -73,7 +77,16 @@ export class Enemy extends Actor {
     switch (node.type) {
       case 'player_distance': {
         const steps = Math.hypot(dx, dy) / this.cellSize;
-        return steps <= Number(node.config.steps ?? 3) ? 0 : 1; // 0=Так, 1=Ні
+        const target = Number(node.config.steps ?? 3);
+        let pass: boolean;
+        switch (String(node.config.cmp ?? 'lte')) {
+          case 'gte': pass = steps >= target; break;
+          case 'lt':  pass = steps < target; break;
+          case 'gt':  pass = steps > target; break;
+          case 'eq':  pass = Math.round(steps) === Math.round(target); break;
+          default:    pass = steps <= target; break; // lte
+        }
+        return pass ? 0 : 1; // 0=Так, 1=Ні
       }
       case 'health_below': {
         const pct = (this.hp / this.maxHp) * 100;
@@ -108,12 +121,18 @@ export class Enemy extends Actor {
     } else if (this.behavior) {
       // Режим нодової поведінки: дія = найглибша досягнута поведінка.
       const act = this.pickAction(player);
-      switch (act?.type) {
-        case 'run_to_player':  anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed, dt, band); break;
+      if (act?.cat === 'dialog') {
+        anim = 'idle';
+        if (!this.dialogTriggered) {
+          this.dialogTriggered = true;
+          this.scene.events.emit('enemyDialog', { graph: this.behavior, nodeId: act.id });
+        }
+      } else switch (act?.type) {
+        case 'run_to_player':  anim = 'run';  this.moveToward(dx, dy, ENEMY.speed, dt, band); break;
         case 'walk_to_player': anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed * 0.5, dt, band); break;
         case 'wait':           anim = 'idle'; break;
         case 'melee_attack':
-        case 'range_attack':   anim = 'idle'; attack(); break;
+        case 'range_attack':   anim = 'attack'; attack(); break;
         default:               anim = 'idle'; break; // нічого не обрано — стоїть
       }
     } else if (Math.abs(dx) <= ENEMY.attackRange && Math.abs(dy) <= ENEMY.attackDepth) {
