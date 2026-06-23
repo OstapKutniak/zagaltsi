@@ -575,20 +575,28 @@ function slotForName(name: string): string | null {
 const cutField = (n: 1|2|3): string => n === 1 ? 'cut' : n === 2 ? 'cut2' : 'cut3';
 const bendField = (n: 1|2|3): string => n === 1 ? 'bend' : n === 2 ? 'bend2' : 'bend3';
 const flipField = (n: 1|2|3): string => n === 1 ? 'bendFlip' : n === 2 ? 'bendFlip2' : 'bendFlip3';
-function toggleCut(): void {
+function startCut(n: 1 | 2 | 3 = state.activeCut): void {
+  if (state.selected === 'ref') return;
+  const slot = state.slots[state.selected];
+  if (!slot.image) { status('Спершу признач картинку частині'); return; }
+  state.activeCut = n; state.cutMode = true;
+  status(`РОЗРІЗ ${n}: клікни де різати (E${n} — прибрати)`);
+  refreshUI();
+}
+function removeCut(n: 1 | 2 | 3 = state.activeCut): void {
+  if (state.selected === 'ref') return;
+  const slot = state.slots[state.selected];
+  pushUndo();
+  (slot as any)[cutField(n)] = null; (slot as any)[bendField(n)] = 0;
+  state.cutMode = false; status(`Розріз ${n} прибрано`);
+  refreshUI();
+}
+function toggleCut(): void { // залишаємо для кнопки в UI — ставить або прибирає активний
   if (state.selected === 'ref') return;
   const slot = state.slots[state.selected];
   if (!slot.image) { status('Спершу признач картинку частині'); return; }
   const n = state.activeCut;
-  const cf = cutField(n);
-  pushUndo();
-  if ((slot as any)[cf] != null) {
-    (slot as any)[cf] = null; (slot as any)[bendField(n)] = 0;
-    state.cutMode = false; status(`Розріз ${n} прибрано`);
-  } else {
-    state.cutMode = true; status(`РОЗРІЗ ${n}: клікни де різати (лікоть/коліно/…)`);
-  }
-  refreshUI();
+  if ((slot as any)[cutField(n)] != null) removeCut(n); else startCut(n);
 }
 function addImageFile(file: File, fallbackToSelected: boolean): void {
   const keyBg = $<HTMLInputElement>('keyBg').checked;
@@ -745,7 +753,7 @@ function refreshUI(): void {
   $<HTMLInputElement>('bend').value = String(ss ? activeBend : 0);
   $('bendV').textContent = String(Math.round(ss ? activeBend : 0));
   const thisCutSet = ss && (ss as any)[cutField(state.activeCut)] != null;
-  $<HTMLButtonElement>('cutBtn').textContent = state.cutMode ? `Розріз ${state.activeCut}: клікни…` : thisCutSet ? `Розріз ${state.activeCut}: прибрати (D)` : `Розріз ${state.activeCut} (D)`;
+  $<HTMLButtonElement>('cutBtn').textContent = state.cutMode ? `Розріз ${state.activeCut}: клікни…` : thisCutSet ? `Розріз ${state.activeCut}: прибрати (E)` : `Розріз ${state.activeCut} (D)`;
   $<HTMLButtonElement>('cutBtn').classList.toggle('light', !!(thisCutSet || state.cutMode));
   $<HTMLButtonElement>('bendFlipBtn').textContent = `Напрям ${state.activeCut > 1 ? state.activeCut : ''}(F)`.trim();
   $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', activeBendFlip);
@@ -1066,13 +1074,13 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.code === 'KeyB') { ev.preventDefault(); startMode('B'); } // B — bend interactive
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
   else if (ev.code === 'KeyF') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; const ff = flipField(state.activeCut); (sl as any)[ff] = !(sl as any)[ff]; refreshUI(); } } // F — bendFlip (напрям)
-  else if (ev.code === 'KeyD') { ev.preventDefault(); state.activeCut = 1; lastDTime = Date.now(); toggleCut(); }
+  else if (ev.code === 'KeyD') { ev.preventDefault(); lastDTime = Date.now(); startCut(1); }
+  else if (ev.code === 'KeyE') { ev.preventDefault(); lastDTime = Date.now(); removeCut(state.activeCut); }
   else if ((ev.code === 'Digit1' || ev.code === 'Digit2' || ev.code === 'Digit3') && (state.cutMode || Date.now() - lastDTime < 800)) {
     ev.preventDefault();
     const n = (ev.code === 'Digit1' ? 1 : ev.code === 'Digit2' ? 2 : 3) as (1 | 2 | 3);
-    state.activeCut = n;
-    if (!state.cutMode) state.cutMode = true;
-    status(`РОЗРІЗ ${n}: клікни де різати`); refreshUI();
+    if (state.cutMode) { state.activeCut = n; status(`РОЗРІЗ ${n}: клікни де різати`); refreshUI(); }
+    else { removeCut(n); } // E+1/2/3 — прибрати конкретний
   }
   else if (ev.code === 'KeyK') {
     ev.preventDefault();
