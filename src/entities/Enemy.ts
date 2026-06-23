@@ -93,10 +93,27 @@ export class Enemy extends Actor {
         const pct = (this.hp / this.maxHp) * 100;
         return pct < Number(node.config.percent ?? 30) ? 0 : 1;
       }
+      case 'and_cond': {
+        const g = this.behavior!;
+        const inEdge = (port: number) => g.edges.find((e) => e.toId === node.id && e.toPort === port);
+        const inNode = (port: number) => { const e = inEdge(port); return e ? g.nodes.find((n) => n.id === e!.fromId) : undefined; };
+        const e0 = inEdge(0), e1 = inEdge(1);
+        const n0 = inNode(0), n1 = inNode(1);
+        // pass = джерело вивело б той самий порт, яким воно під'єднане до AND
+        const pass0 = n0 && e0 ? this.evalCond(n0, player) === e0.fromPort : true;
+        const pass1 = n1 && e1 ? this.evalCond(n1, player) === e1.fromPort : true;
+        return (pass0 && pass1) ? 0 : 1; // 0=Так, 1=Ні
+      }
       case 'sees_player': return 0; // поки що завжди бачить
       case 'time_of_day':  return 0; // поки що завжди «День»
       default: return 0;
     }
+  }
+
+  // Приблизні світові координати голови (для позиціонування діалогової кульки).
+  headWorldPos(): { wx: number; wy: number } {
+    const fo = this.character?.feetOffset() ?? 200;
+    return { wx: this.fx, wy: this.fy - fo * 2.4 };
   }
 
   private moveToward(dx: number, dy: number, speed: number, dt: number, band: Band): void {
@@ -126,7 +143,8 @@ export class Enemy extends Actor {
         anim = 'idle';
         if (!this.dialogTriggered) {
           this.dialogTriggered = true;
-          this.scene.events.emit('enemyDialog', { graph: this.behavior, nodeId: act.id });
+          const { wx, wy } = this.headWorldPos();
+          this.scene.events.emit('enemyDialog', { graph: this.behavior, nodeId: act.id, wx, wy });
         }
       } else switch (act?.type) {
         case 'run_to_player':  anim = 'run';  this.moveToward(dx, dy, ENEMY.speed, dt, band); break;

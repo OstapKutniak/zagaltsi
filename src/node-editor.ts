@@ -51,6 +51,11 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     cat: 'condition', label: 'Потім', color: '#5a5a5a',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }],
   },
+  // «І (AND)» — обидва підключених джерела А і В мають вернути потрібний вихід.
+  and_cond: {
+    cat: 'condition', label: 'І (AND)', color: '#1e5a9e',
+    inPorts: [{ label: 'А' }, { label: 'В' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
   run_to_player:  { cat: 'behavior', label: 'Бігти на гравця',  color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   walk_to_player: { cat: 'behavior', label: 'Йти на гравця',    color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
@@ -83,7 +88,7 @@ export function dialogAnswers(n: GraphNode): string[] {
 }
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next'] },
+  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond'] },
   { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
   { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
@@ -166,6 +171,8 @@ export class NodeEditor {
   private de: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; mx: number; my: number; detached?: boolean } | null = null;
   // звʼязок, кинутий у порожнечу: чекає вибір вузла в меню, щоб одразу під'єднатися
   private pendingDe: { reverse: boolean; fromId?: string; fromPort?: number; toId?: string; toPort?: number; detached?: boolean } | null = null;
+  // RMB по лінії зв'язку — вставити ноду між двома кінцями.
+  private pendingInsert: GraphEdge | null = null;
   private drag: { ids: string[]; orig: Map<string, { x: number; y: number }>; wx0: number; wy0: number; moved: boolean } | null = null;
   private grab: { ids: string[]; orig: Map<string, { x: number; y: number }>; ax: number; ay: number } | null = null;
   private box: { sx: number; sy: number } | null = null;
@@ -501,7 +508,13 @@ export class NodeEditor {
         e.preventDefault();
         this.pan0 = { mx: e.clientX, my: e.clientY, px: this.pan.x, py: this.pan.y }; return;
       }
-      if (e.button === 2) { e.preventDefault(); this.openMenu(sx, sy, e.clientX, e.clientY); return; }
+      if (e.button === 2) {
+        e.preventDefault();
+        const hitEdge = this.edgeAt(sx, sy);
+        if (hitEdge) this.pendingInsert = hitEdge;
+        this.openMenu(sx, sy, e.clientX, e.clientY);
+        return;
+      }
       if (e.button !== 0) return;
       this.closeMenu();
 
@@ -661,6 +674,26 @@ export class NodeEditor {
     this.startGrab();
   }
 
+  // Повертає зв'язок, найближчий до екранної точки (у межах 10 px), або null.
+  private edgeAt(sx: number, sy: number): GraphEdge | null {
+    const THRESH = 10;
+    for (const e of this.graph.edges) {
+      const a = this.edgeAnchors(e); if (!a) continue;
+      const mx = (a.fx + a.tx) / 2;
+      let px = a.fx, py = a.fy;
+      for (let s = 1; s <= 24; s++) {
+        const t = s / 24, it = 1 - t;
+        const bx = it * it * it * a.fx + 3 * it * it * t * mx + 3 * it * t * t * mx + t * t * t * a.tx;
+        const by = it * it * it * a.fy + 3 * it * it * t * a.fy + 3 * it * t * t * a.ty + t * t * t * a.ty;
+        if (Math.hypot(sx - bx, sy - by) <= THRESH) return e;
+        // також перевіряємо сегмент між двома сусідніми семплами (заповнюємо пропуски)
+        if (s > 1 && segInt(sx - THRESH, sy, sx + THRESH, sy, px, py, bx, by)) return e;
+        px = bx; py = by;
+      }
+    }
+    return null;
+  }
+
   private cutAlong(a: { x: number; y: number }, b: { x: number; y: number }): void {
     const before = this.graph.edges.length;
     this.graph.edges = this.graph.edges.filter(e => {
@@ -772,6 +805,13 @@ export class NodeEditor {
       if (!pd.reverse) this.connect(pd.fromId!, pd.fromPort!, id, 0);
       else this.connect(id, 0, pd.toId!, pd.toPort!);
     }
+    // якщо вузол вставлено по RMB на лінію — розриваємо зв'язок і вставляємо нову ноду між кінцями
+    if (this.pendingInsert) {
+      const pe = this.pendingInsert; this.pendingInsert = null;
+      this.graph.edges = this.graph.edges.filter((ed) => ed !== pe);
+      this.connect(pe.fromId, pe.fromPort, id, 0);       // джерело → вхід 0 нової ноди
+      this.connect(id, 0, pe.toId, pe.toPort);            // вихід 0 нової ноди → ціль
+    }
     this.onChange?.(this.graph);
   }
 
@@ -780,5 +820,6 @@ export class NodeEditor {
     if (this.menuEl) { this.menuEl.remove(); this.menuEl = null; }
     // меню закрили без вибору — кинутий звʼязок відкидаємо (і зберігаємо відчеплення)
     if (this.pendingDe) { const pd = this.pendingDe; this.pendingDe = null; if (pd.detached) this.onChange?.(this.graph); }
+    this.pendingInsert = null; // скасовуємо вставку якщо ноду не обрали
   }
 }
