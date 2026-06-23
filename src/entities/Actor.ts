@@ -41,6 +41,7 @@ export class Actor extends Phaser.GameObjects.Sprite {
   get airHeight(): number {
     return this.hz; // абсолютна висота (для синхронізації стрибка/платформ у кооп)
   }
+  get jumpVel(): number { return this.airVel; }
 
   // Затиснути позицію в смугу підлоги (після зміни розміру екрана).
   clampDepth(top: number, bottom: number): void {
