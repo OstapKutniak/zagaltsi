@@ -223,6 +223,32 @@ function animBend(name: string, t: number, key: string, ctx: AnimCtx = {}): numb
   return 0;
 }
 
+// Перекат стопи (cut2 = гомілковостоп, cut3 = пальці) — дзеркало логіки тулзи.
+function pbump(u: number, c: number, w: number): number {
+  let d = Math.abs(u - c); d = Math.min(d, 1 - d);
+  return Math.exp(-(d * d) / (2 * w * w));
+}
+function footPhaseU(name: string, t: number, key: string, ctx: AnimCtx): number {
+  const spd = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
+  const ph = t * spd + (key === 'leg_front' ? Math.PI : 0);
+  return ((ph / (Math.PI * 2)) % 1 + 1) % 1;
+}
+function animBend2(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
+    const u = footPhaseU(name, t, key, ctx);
+    const dorsiSwing = pbump(u, 0.18, 0.13), dorsiHeel = pbump(u, 0.46, 0.05), plantar = pbump(u, 0.93, 0.06);
+    return (dorsiSwing * 14 + dorsiHeel * 8 - plantar * 26) * (name === 'run' ? 1.3 : 1);
+  }
+  return 0;
+}
+function animBend3(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
+    const u = footPhaseU(name, t, key, ctx);
+    return pbump(u, 0.90, 0.05) * 20 * (name === 'run' ? 1.3 : 1);
+  }
+  return 0;
+}
+
 function loadTextures(scene: Phaser.Scene, images: Record<string, string>, prefix: string): Promise<unknown> {
   return Promise.all(Object.entries(images).map(([name, data]) => new Promise<void>((res) => {
     const key = prefix + name;
@@ -398,7 +424,8 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         const W = im.width, H = im.height;
         const cut2Px = sl.cut2 * H;
         const bend1Val = lo ? (lp.bend + (authored ? 0 : animBend(this.anim, this.t, d.key, ctx) * this.animDir)) * (sl.bendFlip ? -1 : 1) : 0;
-        const bend2Val = (lp.bend2) * (sl.bendFlip2 ? -1 : 1);
+        const proc2 = authored ? 0 : animBend2(this.anim, this.t, d.key, ctx) * this.animDir;
+        const bend2Val = ((lp.bend2 ?? 0) + proc2) * (sl.bendFlip2 ? -1 : 1);
         let j1x: number, j1y: number;
         if (lo && sl.cut != null) {
           const jfx1 = (0.5 - sl.pivotX) * W * flip * scX, jfy1 = (sl.cut - sl.pivotY) * H * scY;
@@ -419,9 +446,12 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       if (sl.cut3 != null && lo3 && sl.cut2 != null) {
         const W = im.width, H = im.height;
         const cut3Px = sl.cut3 * H;
-        const bend1Val = (lp.bend) * (sl.bendFlip ? -1 : 1);
-        const bend2Val = (lp.bend2 ?? 0) * (sl.bendFlip2 ? -1 : 1);
-        const bend3Val = (lp.bend3 ?? 0) * (sl.bendFlip3 ? -1 : 1);
+        const p1 = authored ? 0 : animBend(this.anim, this.t, d.key, ctx) * this.animDir;
+        const p2 = authored ? 0 : animBend2(this.anim, this.t, d.key, ctx) * this.animDir;
+        const p3 = authored ? 0 : animBend3(this.anim, this.t, d.key, ctx) * this.animDir;
+        const bend1Val = (lp.bend + p1) * (sl.bendFlip ? -1 : 1);
+        const bend2Val = ((lp.bend2 ?? 0) + p2) * (sl.bendFlip2 ? -1 : 1);
+        const bend3Val = ((lp.bend3 ?? 0) + p3) * (sl.bendFlip3 ? -1 : 1);
         const jfx1 = (0.5 - sl.pivotX) * W * flip * scX, jfy1 = (sl.cut != null ? (sl.cut - sl.pivotY) : -sl.pivotY) * H * scY;
         const co = Math.cos(wt.rot), si = Math.sin(wt.rot);
         const j1x = wt.x + jfx1 * co - jfy1 * si, j1y = wt.y + jfx1 * si + jfy1 * co;

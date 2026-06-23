@@ -287,6 +287,51 @@ function animBend(name: string, t: number, key: string): number {
   return 0;
 }
 
+// Період повного циклу процедурних анімацій (сек) — таймлайн зациклюється рівно тут,
+// без стрибка (бо всі sin/abs(sin) кратні цьому періоду повертаються у вихідну фазу).
+const TWO_PI = Math.PI * 2;
+const PROC_PERIOD: Record<string, number> = {
+  idle: TWO_PI / 1.8,
+  walk: TWO_PI / 5.5,
+  run: TWO_PI / 9,
+  jump: 1.6,
+  attack: 0.7,
+  hurt: 0.6,
+};
+
+// Перекат стопи (cut2 = гомілковостоп, cut3 = плюснофаланговий/пальці) у ходьбі/бігу.
+// Фаза u∈[0,1) та сама, що в коліна (animBend): мах u∈(0,0.5), удар п'яти u≈0.5,
+// стійка u∈(0.5,1), відштовхування u→1.
+function pbump(u: number, c: number, w: number): number { // періодичний «горбик» по колу
+  let d = Math.abs(u - c); d = Math.min(d, 1 - d);
+  return Math.exp(-(d * d) / (2 * w * w));
+}
+function footPhaseU(name: string, t: number, key: string): number {
+  const spd = name === 'run' ? 9 : 5.5;
+  const ph = t * spd + (key === 'leg_front' ? Math.PI : 0);
+  return ((ph / TWO_PI) % 1 + 1) % 1;
+}
+// гомілковостоп: тил-флексія (носок угору) в махі та перед ударом п'яти,
+// підошовна (носок донизу) на відштовхуванні
+function animBend2(name: string, t: number, key: string): number {
+  if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
+    const u = footPhaseU(name, t, key);
+    const dorsiSwing = pbump(u, 0.18, 0.13); // носок угору — кліренс у махі
+    const dorsiHeel = pbump(u, 0.46, 0.05);  // легка тил-флексія перед ударом п'яти
+    const plantar = pbump(u, 0.93, 0.06);    // підошовна на відштовхуванні
+    return (dorsiSwing * 14 + dorsiHeel * 8 - plantar * 26) * (name === 'run' ? 1.3 : 1);
+  }
+  return 0;
+}
+// пальці: згинаються на відштовхуванні (перекат через носок)
+function animBend3(name: string, t: number, key: string): number {
+  if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
+    const u = footPhaseU(name, t, key);
+    return pbump(u, 0.90, 0.05) * 20 * (name === 'run' ? 1.3 : 1);
+  }
+  return 0;
+}
+
 // ---- undo ----
 const undoStack: string[] = [];
 const snapshot = (): string => JSON.stringify({ prop: state.prop, slots: state.slots, ref: { rot: state.ref.rot, scale: state.ref.scale, dx: state.ref.dx, dy: state.ref.dy, flip: state.ref.flip }, sel: state.selected, clips: state.clips });
@@ -360,22 +405,22 @@ function drawImageAt(sel: string, alpha: number): void {
   ctx.scale(t.flip * scx, scy); // flip<0 — дзеркало по X навколо півота
   if (sel !== 'ref' && !_ghostDraw) accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
 
-  // build sorted list of active cuts for this slot
+  // список активних розрізів: кожен суглоб бере СВІЙ процедурний згин
+  // (cut→animBend коліно/лікоть, cut2→animBend2 гомілковостоп, cut3→animBend3 пальці)
   interface CutEntry { pos: number; bend: number; bendFlip: boolean }
+  const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length));
+  const an = state.anim as string;
+  const pB = (fn: (n: string, t: number, k: string) => number): number => proc ? fn(an, state.animT, sel) * state.animDir : 0;
   const activeCuts: CutEntry[] = [];
-  if (slot && slot.cut != null) activeCuts.push({ pos: slot.cut, bend: slot.bend, bendFlip: slot.bendFlip });
-  if (slot && slot.cut2 != null) activeCuts.push({ pos: slot.cut2, bend: slot.bend2 ?? 0, bendFlip: slot.bendFlip2 ?? false });
-  if (slot && slot.cut3 != null) activeCuts.push({ pos: slot.cut3, bend: slot.bend3 ?? 0, bendFlip: slot.bendFlip3 ?? false });
+  if (slot && slot.cut != null) activeCuts.push({ pos: slot.cut, bend: slot.bend + pB(animBend), bendFlip: slot.bendFlip });
+  if (slot && slot.cut2 != null) activeCuts.push({ pos: slot.cut2, bend: (slot.bend2 ?? 0) + pB(animBend2), bendFlip: slot.bendFlip2 ?? false });
+  if (slot && slot.cut3 != null) activeCuts.push({ pos: slot.cut3, bend: (slot.bend3 ?? 0) + pB(animBend3), bendFlip: slot.bendFlip3 ?? false });
   activeCuts.sort((a, b) => a.pos - b.pos);
 
   if (activeCuts.length > 0) {
     const jx = ox + 0.5 * w;
-    const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length));
     const sign = slot!.flip < 0 ? -1 : 1;
-    const bendVals = activeCuts.map((c, idx) => {
-      const proc0 = idx === 0 && proc;
-      return (c.bend + (proc0 ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * sign * (c.bendFlip ? -1 : 1);
-    });
+    const bendVals = activeCuts.map((c) => c.bend * sign * (c.bendFlip ? -1 : 1));
     // Segment 0: above first cut
     ctx.save();
     ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, activeCuts[0].pos * h + 4); ctx.clip();
@@ -1332,8 +1377,9 @@ function snapPose(): Record<string, KeyPose> {
   return pose;
 }
 function fitDuration(): void {
-  const clip = curClip(); if (!clip || !clip.keys.length) return;
-  clip.duration = Math.max(1 / FPS, clip.keys[clip.keys.length - 1].t);
+  const clip = curClip(); if (!clip) return;
+  if (clip.keys.length) clip.duration = Math.max(1 / FPS, clip.keys[clip.keys.length - 1].t);
+  else if (state.anim && PROC_PERIOD[state.anim]) clip.duration = PROC_PERIOD[state.anim]; // процедурна — рівно період циклу
 }
 function setKey(): void {
   const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
@@ -1390,7 +1436,7 @@ function bakeProcedural(): void {
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
-      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: sl.bend + animBend(state.anim, t, d.key) * state.animDir, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: sl.bend + animBend(state.anim, t, d.key) * state.animDir, bend2: (sl.bend2 ?? 0) + animBend2(state.anim, t, d.key) * state.animDir, bend3: (sl.bend3 ?? 0) + animBend3(state.anim, t, d.key) * state.animDir };
     }
     clip.keys.push({ t, interp: 'linear', pose });
   }
@@ -1411,7 +1457,7 @@ function convertToKeys(): void {
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
-      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: (sl.bend ?? 0) + animBend(state.anim, t, d.key) * state.animDir, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: (sl.bend ?? 0) + animBend(state.anim, t, d.key) * state.animDir, bend2: (sl.bend2 ?? 0) + animBend2(state.anim, t, d.key) * state.animDir, bend3: (sl.bend3 ?? 0) + animBend3(state.anim, t, d.key) * state.animDir };
     }
     clip.keys.push({ t, interp: 'smooth', pose });
   }
@@ -1787,7 +1833,7 @@ function refreshAnimOptions(): void {
 }
 function selectAnim(name: string | null): void {
   play(false);
-  if (name) { state.anim = name; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshAnimOptions(); refreshTimeline(); refreshUI(); play(true); }
+  if (name) { state.anim = name; enterClip(); fitDuration(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshAnimOptions(); refreshTimeline(); refreshUI(); play(true); }
   else { state.anim = null; exitClip(); refreshAnimOptions(); refreshTimeline(); refreshUI(); }
 }
 // «Зберегти анімацію» — зберегти поточні КЛЮЧІ як НОВУ іменовану анімацію
