@@ -40,35 +40,36 @@ export class Enemy extends Actor {
     this.setVisible(false);
   }
 
-  // Обираний цього кадру вузол-дію за нодовим деревом (або null → стояти).
+  // Обирана цього кадру дія: DFS усіма гілками від кореня. Умови маршрутизують
+  // (Так/Ні), дії/діалог — термінали. З-поміж усіх досягнутих обираємо НАЙГЛИБШУ
+  // (щоб гілки «близько→атака» та «далеко→діалог» від одного кореня працювали обидві).
   private pickAction(player: Player): GraphNode | null {
     const g = this.behavior!;
     const byId = (id: string): GraphNode | undefined => g.nodes.find((n) => n.id === id);
-    const edgeFrom = (id: string, port: number) => g.edges.find((e) => e.fromId === id && e.fromPort === port);
+    const edgesFrom = (id: string, port: number) => g.edges.filter((e) => e.fromId === id && e.fromPort === port);
 
-    let current: GraphNode | undefined;
+    let best: GraphNode | null = null;
+    let bestDepth = -1;
+    const visit = (node: GraphNode | undefined, depth: number, seen: Set<string>): void => {
+      if (!node || seen.has(node.id)) return;
+      const s2 = new Set(seen); s2.add(node.id);
+      if (node.cat === 'dialog' || node.cat === 'behavior') {
+        if (depth > bestDepth) { best = node; bestDepth = depth; }
+        if (node.cat === 'dialog') return; // діалог — термінал (виходи = відповіді)
+        for (const e of edgesFrom(node.id, 0)) visit(byId(e.toId), depth + 1, s2);
+      } else if (node.cat === 'reroute' || node.type === 'then_next') {
+        for (const e of edgesFrom(node.id, 0)) visit(byId(e.toId), depth + 1, s2);
+      } else if (node.cat === 'condition') {
+        const port = this.evalCond(node, player);
+        for (const e of edgesFrom(node.id, port)) visit(byId(e.toId), depth + 1, s2);
+      }
+    };
+
     const root = g.nodes.find((n) => n.cat === 'root');
-    if (root) { const e = edgeFrom(root.id, 0); current = e ? byId(e.toId) : undefined; }
-    else current = g.nodes.find((n) => n.cat !== 'root' && !g.edges.some((e) => e.toId === n.id));
-
-    let lastBehavior: GraphNode | null = null;
     const seen = new Set<string>();
-    while (current && !seen.has(current.id)) {
-      seen.add(current.id);
-      if (current.cat === 'dialog') {
-        // Діалог — термінальна дія: повертаємо її (виходи = відповіді, не потік поведінки).
-        return current;
-      } else if (current.cat === 'behavior') {
-        lastBehavior = current;
-        const e = edgeFrom(current.id, 0); current = e ? byId(e.toId) : undefined;
-      } else if (current.cat === 'reroute' || current.type === 'then_next') {
-        const e = edgeFrom(current.id, 0); current = e ? byId(e.toId) : undefined;
-      } else if (current.cat === 'condition') {
-        const port = this.evalCond(current, player);
-        const e = edgeFrom(current.id, port); current = e ? byId(e.toId) : undefined;
-      } else break;
-    }
-    return lastBehavior;
+    if (root) { for (const e of edgesFrom(root.id, 0)) visit(byId(e.toId), 0, seen); }
+    else for (const n of g.nodes.filter((n) => n.cat !== 'root' && !g.edges.some((e) => e.toId === n.id))) visit(n, 0, seen);
+    return best;
   }
 
   // Повертає індекс вихідного порту, яким іти далі.
