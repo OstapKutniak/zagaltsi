@@ -1277,6 +1277,10 @@ function snapPose(): Record<string, KeyPose> {
   for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; pose[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend }; }
   return pose;
 }
+function fitDuration(): void {
+  const clip = curClip(); if (!clip || !clip.keys.length) return;
+  clip.duration = Math.max(1 / FPS, clip.keys[clip.keys.length - 1].t);
+}
 function setKey(): void {
   const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
   // Якщо вибрана конкретна кістка — ключ тільки для неї; без вибору — загальний
@@ -1288,12 +1292,12 @@ function setKey(): void {
   const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
   if (i >= 0) { clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: bonePose }; }
   else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: bonePose } }); clip.keys.sort((a, b) => a.t - b.t); }
-  refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
+  fitDuration(); refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
 }
 function delKey(): void {
   const clip = curClip(); if (!clip) return;
   pushUndo(); clip.keys = clip.keys.filter((k) => Math.abs(k.t - state.animT) >= 0.02);
-  state.selKeys = []; refreshTimeline();
+  state.selKeys = []; fitDuration(); refreshTimeline();
 }
 function setKeyAt(t: number, bone: string | null): void {
   const clip = curClip(); if (!clip) { status('Вибери кліп у таймлайні'); return; }
@@ -1304,7 +1308,7 @@ function setKeyAt(t: number, bone: string | null): void {
   const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
   if (i >= 0) clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: pose };
   else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: pose } }); clip.keys.sort((a, b) => a.t - b.t); }
-  refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
+  fitDuration(); refreshTimeline(); status(`⬤ Ключ «${bone}» кадр ${Math.round(t * FPS)}`);
 }
 function delKeyAt(t: number): void {
   const clip = curClip(); if (!clip) return;
@@ -1314,7 +1318,7 @@ function delKeyAt(t: number): void {
   const f = Math.round(clip.keys[i].t * FPS);
   clip.keys.splice(i, 1);
   state.selKeys = state.selKeys.filter((x) => x !== i).map((x) => (x > i ? x - 1 : x));
-  refreshTimeline(); status(`✕ Ключ кадр ${f} видалено`);
+  fitDuration(); refreshTimeline(); status(`✕ Ключ кадр ${f} видалено`);
 }
 function resetAnim(): void {
   const clip = curClip(); if (!clip) return;
@@ -1596,7 +1600,7 @@ function pasteKeys(): void {
   }
   clip.keys.sort((a, b) => a.t - b.t);
   state.selKeys = pasted.map((k) => clip.keys.indexOf(k)).filter((i) => i >= 0);
-  loadFrame(state.animT); refreshTimeline(); refreshUI();
+  fitDuration(); loadFrame(state.animT); refreshTimeline(); refreshUI();
   status(`Вставлено ключів: ${pasted.length}`);
 }
 function scrubTo(clientX: number): void {
@@ -1766,7 +1770,7 @@ $<HTMLSelectElement>('anim').addEventListener('change', (e) => {
   const v = (e.target as HTMLSelectElement).value; // ВАЖЛИВО: зчитати ДО play(false) — play()→refreshTimeline() скидає цей select назад на state.anim (тоді ще порожній) і вибір губився
   (e.target as HTMLSelectElement).blur(); // зняти фокус, інакше Пробіл відкриває список замість плей/пауза
   play(false);
-  if (v) { state.anim = v; enterClip(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
+  if (v) { state.anim = v; enterClip(); fitDuration(); state.animT = 0; state.selKeys = []; loadFrame(0); refreshTimeline(); refreshUI(); play(true); } // вибрав анімацію — одразу програється
   else { state.anim = null; exitClip(); refreshTimeline(); refreshUI(); }
 });
 function setAllKey(): void {
@@ -1775,7 +1779,7 @@ function setAllKey(): void {
   const t = state.animT; const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
   if (i >= 0) clip.keys[i].pose = snapPose();
   else { clip.keys.push({ t, interp: 'linear', pose: snapPose() }); clip.keys.sort((a, b) => a.t - b.t); }
-  refreshTimeline(); status('⬤ Загальний ключ поставлено');
+  fitDuration(); refreshTimeline(); status('⬤ Загальний ключ поставлено');
 }
 function invertAnim(): void {
   const clip = curClip();
