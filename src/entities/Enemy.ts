@@ -4,6 +4,7 @@ import { ENEMY } from '../config';
 import type { Player } from './Player';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import type { NodeGraph, GraphNode } from '../node-editor';
+import { isDialogActive } from '../dialogUI';
 
 interface Band {
   top: number;
@@ -138,6 +139,10 @@ export class Enemy extends Actor {
     if (time < this.immuneUntil) {
       anim = 'hurt';
     } else if (this.behavior) {
+      // Поки діалог відкритий — ворог стоїть (щоб не атакував під час розмови).
+      if (isDialogActive()) {
+        anim = 'idle';
+      } else {
       // Режим нодової поведінки: дія = найглибша досягнута поведінка.
       const act = this.pickAction(player);
       if (act?.cat === 'dialog') {
@@ -155,6 +160,7 @@ export class Enemy extends Actor {
         case 'range_attack':   anim = 'attack'; attack(); break;
         default:               anim = 'idle'; break; // нічого не обрано — стоїть
       }
+      } // end else (isDialogActive)
     } else if (Math.abs(dx) <= ENEMY.attackRange && Math.abs(dy) <= ENEMY.attackDepth) {
       anim = 'idle'; attack();
     } else {
