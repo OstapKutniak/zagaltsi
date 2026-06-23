@@ -19,10 +19,10 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
 interface Tf { rot: number; scale: number; dx: number; dy: number; flip: number; sx: number; sy: number; gscale: number }
-interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number; bendFlip: boolean }
+interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number; cut: number | null; bend: number; bendFlip: boolean; cut2: number | null; bend2: number; bendFlip2: boolean; cut3: number | null; bend3: number; bendFlip3: boolean }
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
-interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
+interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number; bend2: number; bend3: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
 interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
 
@@ -101,6 +101,7 @@ const state = {
   showPivots: true,
   pivotMode: false,
   cutMode: false,
+  activeCut: 1 as (1 | 2 | 3),
   zoom: 1,
   pan: { x: 0, y: 0 },
   facing: 1, // 1 праворуч, -1 ліворуч — ДЗЕРКАЛИТЬ АРТ (кнопка «Лицем»)
@@ -119,7 +120,8 @@ const state = {
 };
 let _drawRaf = 0;
 let _rigPanning = false;
-for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false };
+let lastDTime = 0;
+for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false, cut2: null, bend2: 0, bendFlip2: false, cut3: null, bend3: 0, bendFlip3: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
 const s = (): number => state.viewScale * state.prop.overall;
@@ -358,22 +360,40 @@ function drawImageAt(sel: string, alpha: number): void {
   ctx.scale(t.flip * scx, scy); // flip<0 — дзеркало по X навколо півота
   if (sel !== 'ref' && !_ghostDraw) accumBounds(a, worldRot(sel), t.flip * scx, scy, ox, oy, w, h);
 
-  if (slot && slot.cut != null) {
-    const cutY = oy + slot.cut * h; // лінія розрізу в локальних координатах
-    const jx = ox + 0.5 * w; // суглоб згину — по центру вздовж кістки
-    // верхня частина
+  // build sorted list of active cuts for this slot
+  interface CutEntry { pos: number; bend: number; bendFlip: boolean }
+  const activeCuts: CutEntry[] = [];
+  if (slot && slot.cut != null) activeCuts.push({ pos: slot.cut, bend: slot.bend, bendFlip: slot.bendFlip });
+  if (slot && slot.cut2 != null) activeCuts.push({ pos: slot.cut2, bend: slot.bend2 ?? 0, bendFlip: slot.bendFlip2 ?? false });
+  if (slot && slot.cut3 != null) activeCuts.push({ pos: slot.cut3, bend: slot.bend3 ?? 0, bendFlip: slot.bendFlip3 ?? false });
+  activeCuts.sort((a, b) => a.pos - b.pos);
+
+  if (activeCuts.length > 0) {
+    const jx = ox + 0.5 * w;
+    const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length));
+    const sign = slot!.flip < 0 ? -1 : 1;
+    const bendVals = activeCuts.map((c, idx) => {
+      const proc0 = idx === 0 && proc;
+      return (c.bend + (proc0 ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * sign * (c.bendFlip ? -1 : 1);
+    });
+    // Segment 0: above first cut
     ctx.save();
-    ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, slot.cut * h + 4); ctx.clip();
+    ctx.beginPath(); ctx.rect(ox - 2, oy - 2, w + 4, activeCuts[0].pos * h + 4); ctx.clip();
     ctx.drawImage(img, ox, oy);
     ctx.restore();
-    // нижня частина — обертається на bend навколо суглоба (інверсія при дзеркаленні)
-    const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length)); // згин процедурно — і на паузі (скраб)
-    const bendVal = (slot.bend + (proc ? animBend(state.anim as string, state.animT, sel) * state.animDir : 0)) * (slot.flip < 0 ? -1 : 1) * (slot.bendFlip ? -1 : 1);
-    ctx.save();
-    ctx.translate(jx, cutY); ctx.rotate(rad(bendVal)); ctx.translate(-jx, -cutY);
-    ctx.beginPath(); ctx.rect(ox - 2, cutY, w + 4, (oy + h) - cutY + 2); ctx.clip();
-    ctx.drawImage(img, ox, oy);
-    ctx.restore();
+    // Segment i+1: below cut[i], with cumulative bends 0..i
+    for (let i = 0; i < activeCuts.length; i++) {
+      const segTop = oy + activeCuts[i].pos * h;
+      const segBot = i + 1 < activeCuts.length ? oy + activeCuts[i + 1].pos * h : oy + h;
+      ctx.save();
+      for (let j = 0; j <= i; j++) {
+        const jy = oy + activeCuts[j].pos * h;
+        ctx.translate(jx, jy); ctx.rotate(rad(bendVals[j])); ctx.translate(-jx, -jy);
+      }
+      ctx.beginPath(); ctx.rect(ox - 2, segTop, w + 4, segBot - segTop + 4); ctx.clip();
+      ctx.drawImage(img, ox, oy);
+      ctx.restore();
+    }
   } else {
     ctx.drawImage(img, ox, oy);
   }
@@ -470,7 +490,7 @@ function _drawNow(): void {
   // mode hint text (after ctx.restore so it's not mirrored)
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
-    const txt = state.cutMode ? 'РОЗРІЗ: клікни, де різати (лікоть/коліно)' : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    const txt = state.cutMode ? `РОЗРІЗ ${state.activeCut}: клікни, де різати (лікоть/коліно)` : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
@@ -552,13 +572,22 @@ function slotForName(name: string): string | null {
   return null;
 }
 
+const cutField = (n: 1|2|3): string => n === 1 ? 'cut' : n === 2 ? 'cut2' : 'cut3';
+const bendField = (n: 1|2|3): string => n === 1 ? 'bend' : n === 2 ? 'bend2' : 'bend3';
+const flipField = (n: 1|2|3): string => n === 1 ? 'bendFlip' : n === 2 ? 'bendFlip2' : 'bendFlip3';
 function toggleCut(): void {
   if (state.selected === 'ref') return;
   const slot = state.slots[state.selected];
   if (!slot.image) { status('Спершу признач картинку частині'); return; }
+  const n = state.activeCut;
+  const cf = cutField(n);
   pushUndo();
-  if (slot.cut != null) { slot.cut = null; slot.bend = 0; state.cutMode = false; status('Розріз прибрано'); }
-  else { state.cutMode = true; status('Клікни на частині, де різати (лікоть/коліно)'); }
+  if ((slot as any)[cf] != null) {
+    (slot as any)[cf] = null; (slot as any)[bendField(n)] = 0;
+    state.cutMode = false; status(`Розріз ${n} прибрано`);
+  } else {
+    state.cutMode = true; status(`РОЗРІЗ ${n}: клікни де різати (лікоть/коліно/…)`);
+  }
   refreshUI();
 }
 function addImageFile(file: File, fallbackToSelected: boolean): void {
@@ -587,7 +616,7 @@ function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
   const t = tf(state.selected);
   state.mode = m; state.pivotMode = false; state.axis = null;
   state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy, gscale: t.gscale };
-  if (m === 'B') state.origBend = state.slots[state.selected]?.bend ?? 0;
+  if (m === 'B') { const bn = bendField(state.activeCut); state.origBend = (state.slots[state.selected] as any)?.[bn] ?? 0; }
   const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x);
   state.startMx = mx; state.startMy = state.mouse.y;
@@ -613,7 +642,7 @@ function applyMode(): void {
     else if (state.axis === 'z') t.sy = Math.max(0.02, state.orig.sy * ratio);
     else t.gscale = Math.max(0.02, state.orig.gscale * ratio); // уніформний масштаб поширюється на дітей
   } else if (state.mode === 'B') {
-    const sl = state.slots[state.selected]; if (sl) sl.bend = Math.max(-150, Math.min(150, state.origBend + (mx - state.startMx) * 0.8));
+    const sl = state.slots[state.selected]; if (sl) { const bn = bendField(state.activeCut); (sl as any)[bn] = Math.max(-150, Math.min(150, state.origBend + (mx - state.startMx) * 0.8)); }
   }
   draw();
 }
@@ -621,7 +650,7 @@ function endMode(commit: boolean): void {
   if (!state.mode) return;
   if (!commit) {
     if (state.orig) Object.assign(tf(state.selected), state.orig);
-    if (state.mode === 'B') { const sl = state.slots[state.selected]; if (sl) sl.bend = state.origBend; }
+    if (state.mode === 'B') { const sl = state.slots[state.selected]; if (sl) { const bn = bendField(state.activeCut); (sl as any)[bn] = state.origBend; } }
   }
   state.mode = null; state.orig = null; state.axis = null; refreshUI();
 }
@@ -711,12 +740,15 @@ function refreshUI(): void {
   $<HTMLButtonElement>('setPivot').textContent = state.pivotMode ? 'Клікни…' : 'Півот (Q)';
   $<HTMLButtonElement>('setPivot').classList.toggle('light', state.pivotMode);
   const ss = state.selected !== 'ref' ? state.slots[state.selected] : null;
-  $<HTMLInputElement>('bend').value = String(ss ? ss.bend : 0);
-  $('bendV').textContent = String(Math.round(ss ? ss.bend : 0));
-  $<HTMLButtonElement>('cutBtn').textContent = ss && ss.cut != null ? 'Прибрати розріз (D)' : 'Розріз (D)';
-  $<HTMLButtonElement>('cutBtn').classList.toggle('light', !!(ss && ss.cut != null));
-  $<HTMLButtonElement>('bendFlipBtn').textContent = 'Напрям (F)';
-  $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', !!(ss && ss.bendFlip));
+  const activeBend = (ss as any)?.[bendField(state.activeCut)] ?? 0;
+  const activeBendFlip = (ss as any)?.[flipField(state.activeCut)] ?? false;
+  $<HTMLInputElement>('bend').value = String(ss ? activeBend : 0);
+  $('bendV').textContent = String(Math.round(ss ? activeBend : 0));
+  const thisCutSet = ss && (ss as any)[cutField(state.activeCut)] != null;
+  $<HTMLButtonElement>('cutBtn').textContent = state.cutMode ? `Розріз ${state.activeCut}: клікни…` : thisCutSet ? `Розріз ${state.activeCut}: прибрати (D)` : `Розріз ${state.activeCut} (D)`;
+  $<HTMLButtonElement>('cutBtn').classList.toggle('light', !!(thisCutSet || state.cutMode));
+  $<HTMLButtonElement>('bendFlipBtn').textContent = `Напрям ${state.activeCut > 1 ? state.activeCut : ''}(F)`.trim();
+  $<HTMLButtonElement>('bendFlipBtn').classList.toggle('light', activeBendFlip);
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
   refreshBoneLabels();
@@ -731,12 +763,13 @@ $<HTMLInputElement>('rot').addEventListener('input', (e) => { tf(state.selected)
 $<HTMLInputElement>('scale').addEventListener('pointerdown', pushUndo);
 $<HTMLInputElement>('scale').addEventListener('input', (e) => { tf(state.selected).scale = Number((e.target as HTMLInputElement).value); draw(); });
 $<HTMLInputElement>('bend').addEventListener('pointerdown', pushUndo);
-$<HTMLInputElement>('bend').addEventListener('input', (e) => { if (state.selected !== 'ref') { state.slots[state.selected].bend = Number((e.target as HTMLInputElement).value); $('bendV').textContent = (e.target as HTMLInputElement).value; draw(); } });
+$<HTMLInputElement>('bend').addEventListener('input', (e) => { if (state.selected !== 'ref') { const bn = bendField(state.activeCut); (state.slots[state.selected] as any)[bn] = Number((e.target as HTMLInputElement).value); $('bendV').textContent = (e.target as HTMLInputElement).value; draw(); } });
 $<HTMLButtonElement>('cutBtn').addEventListener('click', toggleCut);
 $<HTMLButtonElement>('bendFlipBtn').addEventListener('click', () => {
   if (state.selected === 'ref') return;
-  pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip;
-  status(sl.bendFlip ? 'Згин цієї кістки — навпаки' : 'Згин цієї кістки — нормальний'); refreshUI();
+  pushUndo(); const sl = state.slots[state.selected]; const ff = flipField(state.activeCut);
+  (sl as any)[ff] = !(sl as any)[ff];
+  status(`Напрям ${state.activeCut > 1 ? state.activeCut + ' ' : ''}${(sl as any)[ff] ? 'навпаки' : 'нормальний'}`); refreshUI();
 });
 $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } });
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
@@ -966,8 +999,12 @@ canvas.addEventListener('mousedown', (ev) => {
   if (state.mode) { endMode(ev.button === 0); return; }
   if (state.cutMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
-    if (loc) { pushUndo(); state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); }
-    state.cutMode = false; status('Розріз поставлено. Крути «Згин».'); refreshUI(); return;
+    if (loc) {
+      pushUndo();
+      const n = state.activeCut; const cf = cutField(n);
+      (state.slots[state.selected] as any)[cf] = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih));
+    }
+    state.cutMode = false; status(`Розріз ${state.activeCut} поставлено. B = згин, F = напрям.`); refreshUI(); return;
   }
   if (state.pivotMode && state.selected !== 'ref') {
     const loc = curLocal(state.selected, c.x, c.y);
@@ -1028,8 +1065,15 @@ window.addEventListener('keydown', (ev) => {
   if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') { ev.preventDefault(); startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
   else if (ev.code === 'KeyB') { ev.preventDefault(); startMode('B'); } // B — bend interactive
   else if (ev.code === 'KeyM') { ev.preventDefault(); pushUndo(); const t = tf(state.selected); t.flip *= -1; refreshUI(); }
-  else if (ev.code === 'KeyF') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; sl.bendFlip = !sl.bendFlip; refreshUI(); } } // F — bendFlip (напрям)
-  else if (ev.code === 'KeyD') { ev.preventDefault(); toggleCut(); }
+  else if (ev.code === 'KeyF') { ev.preventDefault(); if (state.selected !== 'ref') { pushUndo(); const sl = state.slots[state.selected]; const ff = flipField(state.activeCut); (sl as any)[ff] = !(sl as any)[ff]; refreshUI(); } } // F — bendFlip (напрям)
+  else if (ev.code === 'KeyD') { ev.preventDefault(); state.activeCut = 1; lastDTime = Date.now(); toggleCut(); }
+  else if ((ev.code === 'Digit1' || ev.code === 'Digit2' || ev.code === 'Digit3') && (state.cutMode || Date.now() - lastDTime < 800)) {
+    ev.preventDefault();
+    const n = (ev.code === 'Digit1' ? 1 : ev.code === 'Digit2' ? 2 : 3) as (1 | 2 | 3);
+    state.activeCut = n;
+    if (!state.cutMode) state.cutMode = true;
+    status(`РОЗРІЗ ${n}: клікни де різати`); refreshUI();
+  }
   else if (ev.code === 'KeyK') {
     ev.preventDefault();
     if (state.anim) {
@@ -1231,6 +1275,7 @@ function exitClip(): void {
     const su = state.setup[k]; if (!su) continue;
     const sl = state.slots[k];
     sl.rot = su.rot; sl.dx = su.dx; sl.dy = su.dy; sl.scale = su.scale; sl.bend = su.bend;
+    sl.bend2 = su.bend2 ?? 0; sl.bend3 = su.bend3 ?? 0;
   }
   state.setup = null;
 }
@@ -1239,14 +1284,14 @@ function rigForExport(): Record<string, Slot> {
   const bind = rigSlots();
   const out: Record<string, Slot> = {};
   for (const k of Object.keys(state.slots)) {
-    out[k] = { ...state.slots[k], rot: bind[k].rot, dx: bind[k].dx, dy: bind[k].dy, scale: bind[k].scale, bend: bind[k].bend };
+    out[k] = { ...state.slots[k], rot: bind[k].rot, dx: bind[k].dx, dy: bind[k].dy, scale: bind[k].scale, bend: bind[k].bend, bend2: bind[k].bend2 ?? 0, bend3: bind[k].bend3 ?? 0 };
   }
   return out;
 }
 
 function sampleClip(clip: Clip, t: number, sel: string): KeyPose {
   const su = rigSlots()[sel];
-  const base: KeyPose = { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend };
+  const base: KeyPose = { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend, bend2: su.bend2 ?? 0, bend3: su.bend3 ?? 0 };
   const ks = clip.keys;
   if (!ks.length) return base;
   if (t <= ks[0].t) return ks[0].pose[sel] ?? base;
@@ -1259,7 +1304,7 @@ function sampleClip(clip: Clip, t: number, sel: string): KeyPose {
       if (a.interp === 'smooth') f = SMOOTH(f);
       const pa = a.pose[sel] ?? base, pb = b.pose[sel] ?? base;
       const L = (x: number, y: number): number => x + (y - x) * f;
-      return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend) };
+      return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend), bend2: L(pa.bend2 ?? 0, pb.bend2 ?? 0), bend3: L(pa.bend3 ?? 0, pb.bend3 ?? 0) };
     }
   }
   return base;
@@ -1270,11 +1315,12 @@ function loadFrame(t: number): void {
   if (clip) for (const d of SLOT_DEFS) {
     const sp = sampleClip(clip, t, d.key); const sl = state.slots[d.key];
     sl.rot = sp.rot; sl.dx = sp.dx; sl.dy = sp.dy; sl.scale = sp.scale; sl.bend = sp.bend;
+    sl.bend2 = sp.bend2 ?? 0; sl.bend3 = sp.bend3 ?? 0;
   }
 }
 function snapPose(): Record<string, KeyPose> {
   const pose: Record<string, KeyPose> = {};
-  for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; pose[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend }; }
+  for (const d of SLOT_DEFS) { const sl = state.slots[d.key]; pose[d.key] = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 }; }
   return pose;
 }
 function fitDuration(): void {
@@ -1288,7 +1334,7 @@ function setKey(): void {
   pushUndo();
   const t = state.animT; const bone = state.selected;
   const sl = state.slots[bone];
-  const bonePose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend };
+  const bonePose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
   const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
   if (i >= 0) { clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: bonePose }; }
   else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: bonePose } }); clip.keys.sort((a, b) => a.t - b.t); }
@@ -1304,7 +1350,7 @@ function setKeyAt(t: number, bone: string | null): void {
   if (!bone || bone === 'ref') return;
   pushUndo();
   const sl = state.slots[bone]; if (!sl) return;
-  const pose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend ?? 0 };
+  const pose: KeyPose = { rot: sl.rot, dx: sl.dx, dy: sl.dy, scale: sl.scale, flip: sl.flip, bend: sl.bend ?? 0, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
   const i = clip.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
   if (i >= 0) clip.keys[i].pose = { ...clip.keys[i].pose, [bone]: pose };
   else { clip.keys.push({ t, interp: 'linear', pose: { [bone]: pose } }); clip.keys.sort((a, b) => a.t - b.t); }
@@ -1336,7 +1382,7 @@ function bakeProcedural(): void {
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
-      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: sl.bend + animBend(state.anim, t, d.key) * state.animDir };
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: sl.bend + animBend(state.anim, t, d.key) * state.animDir, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
     }
     clip.keys.push({ t, interp: 'linear', pose });
   }
@@ -1357,7 +1403,7 @@ function convertToKeys(): void {
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
-      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: (sl.bend ?? 0) + animBend(state.anim, t, d.key) * state.animDir };
+      pose[d.key] = { rot: sl.rot + o.drot * state.animDir, dx, dy, scale: sl.scale, flip: sl.flip, bend: (sl.bend ?? 0) + animBend(state.anim, t, d.key) * state.animDir, bend2: sl.bend2 ?? 0, bend3: sl.bend3 ?? 0 };
     }
     clip.keys.push({ t, interp: 'smooth', pose });
   }
@@ -2026,8 +2072,12 @@ window.addEventListener('resize', syncPanelHeights);
       if (state.mode) return;
       if (state.cutMode && state.selected !== 'ref') {
         const loc = curLocal(state.selected, c.x, c.y);
-        if (loc) { pushUndo(); state.slots[state.selected].cut = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih)); }
-        state.cutMode = false; status('Розріз поставлено.'); refreshUI(); return;
+        if (loc) {
+          pushUndo();
+          const n = state.activeCut; const cf = cutField(n);
+          (state.slots[state.selected] as any)[cf] = Math.max(0.05, Math.min(0.95, loc.ly / loc.ih));
+        }
+        state.cutMode = false; status(`Розріз ${state.activeCut} поставлено. B = згин, F = напрям.`); refreshUI(); return;
       }
       if (state.pivotMode && state.selected !== 'ref') {
         const loc = curLocal(state.selected, c.x, c.y);

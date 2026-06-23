@@ -18,8 +18,8 @@ const SLOT_DEFS = [
 ] as const;
 const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 
-interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number; cut?: number | null; bendFlip?: boolean; sx?: number; sy?: number; gscale?: number }
-interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number }
+interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number; cut?: number | null; bendFlip?: boolean; sx?: number; sy?: number; gscale?: number; cut2?: number | null; bend2?: number; bendFlip2?: boolean; cut3?: number | null; bend3?: number; bendFlip3?: boolean }
+interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number; bend2?: number; bend3?: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
 interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
 export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }
@@ -239,6 +239,8 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private slots: Record<string, Slot>;
   private parts: Record<string, Phaser.GameObjects.Image> = {};
   private lower: Record<string, Phaser.GameObjects.Image> = {}; // нижня частина розрізаної кінцівки (за суглобом)
+  private lower2: Record<string, Phaser.GameObjects.Image> = {};
+  private lower3: Record<string, Phaser.GameObjects.Image> = {};
   private anim = 'idle';
   private t = 0;
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
@@ -257,7 +259,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   // вибірка авторського кліпу в момент t для слота (локальний трансформ)
   private sampleClip(clip: Clip, t: number, sel: string): KeyPose {
     const su = this.slots[sel];
-    const base: KeyPose = su ? { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend ?? 0 } : { rot: 0, dx: 0, dy: 0, scale: 1, flip: 1, bend: 0 };
+    const base: KeyPose = su ? { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend ?? 0, bend2: su.bend2 ?? 0, bend3: su.bend3 ?? 0 } : { rot: 0, dx: 0, dy: 0, scale: 1, flip: 1, bend: 0, bend2: 0, bend3: 0 };
     const ks = clip.keys;
     if (!ks.length) return base;
     if (t <= ks[0].t) return ks[0].pose[sel] ?? base;
@@ -270,7 +272,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         if (a.interp === 'smooth') f = f * f * (3 - 2 * f);
         const pa = a.pose[sel] ?? base, pb = b.pose[sel] ?? base;
         const L = (x: number, y: number): number => x + (y - x) * f;
-        return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend) };
+        return { rot: L(pa.rot, pb.rot), dx: L(pa.dx, pb.dx), dy: L(pa.dy, pb.dy), scale: L(pa.scale, pb.scale), flip: pa.flip, bend: L(pa.bend, pb.bend), bend2: L(pa.bend2 ?? 0, pb.bend2 ?? 0), bend3: L(pa.bend3 ?? 0, pb.bend3 ?? 0) };
       }
     }
     return base;
@@ -301,6 +303,14 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         c.add(lo);
         c.lower[d.key] = lo;
       }
+      if (sl.cut2 != null) {
+        const lo2 = scene.add.image(0, 0, key).setOrigin(0.5, sl.cut2);
+        c.add(lo2); c.lower2[d.key] = lo2;
+      }
+      if (sl.cut3 != null) {
+        const lo3 = scene.add.image(0, 0, key).setOrigin(0.5, sl.cut3);
+        c.add(lo3); c.lower3[d.key] = lo3;
+      }
     }
     return c;
   }
@@ -326,13 +336,13 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     const authored = !!(clip && clip.keys.length); // є авторська анімація -> грати її
     const ct = authored ? this.t % clip!.duration : 0;
     // локальний трансформ слота (авторський семпл АБО процедурний) + згин
-    const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number; bend: number } => {
+    const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number; bend: number; bend2: number; bend3: number } => {
       const sl = this.slots[sel];
-      if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale, bend: sp.bend }; }
+      if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale, bend: sp.bend, bend2: sp.bend2 ?? 0, bend3: sp.bend3 ?? 0 }; }
       const o = animOff(this.anim, this.t, sel, ctx);
       let dx = (sl?.dx ?? 0) + o.ddx, dy = (sl?.dy ?? 0) + o.ddy;
       if (!PARENT[sel]) { const ar = animRoot(this.anim, this.t, ctx); dx += ar.ddx; dy += ar.ddy; }
-      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1, bend: sl?.bend ?? 0 };
+      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1, bend: sl?.bend ?? 0, bend2: sl?.bend2 ?? 0, bend3: sl?.bend3 ?? 0 };
     };
     // світовий трансформ слота в локалі контейнера (ієрархія); gs — накопичений масштаб (gscale батька -> дітям)
     const cache: Record<string, { x: number; y: number; rot: number; gs: number }> = {};
@@ -382,6 +392,49 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       } else {
         im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
         if (hurt) im.setTint(0xff5555); else im.clearTint();
+      }
+      const lo2 = this.lower2[d.key];
+      if (sl.cut2 != null && lo2) {
+        const W = im.width, H = im.height;
+        const cut2Px = sl.cut2 * H;
+        const bend1Val = lo ? (lp.bend + (authored ? 0 : animBend(this.anim, this.t, d.key, ctx) * this.animDir)) * (sl.bendFlip ? -1 : 1) : 0;
+        const bend2Val = (lp.bend2) * (sl.bendFlip2 ? -1 : 1);
+        let j1x: number, j1y: number;
+        if (lo && sl.cut != null) {
+          const jfx1 = (0.5 - sl.pivotX) * W * flip * scX, jfy1 = (sl.cut - sl.pivotY) * H * scY;
+          const co1 = Math.cos(wt.rot), si1 = Math.sin(wt.rot);
+          j1x = wt.x + jfx1 * co1 - jfy1 * si1; j1y = wt.y + jfx1 * si1 + jfy1 * co1;
+        } else {
+          j1x = wt.x; j1y = wt.y;
+        }
+        const r1 = wt.rot + rad(bend1Val);
+        const dist = (sl.cut2 - (sl.cut ?? 0)) * H * scY;
+        const j2x = j1x - dist * Math.sin(r1), j2y = j1y + dist * Math.cos(r1);
+        lo2.setOrigin(0.5, sl.cut2); lo2.setPosition(j2x, j2y);
+        lo2.setRotation(wt.rot + rad(bend1Val) + rad(bend2Val)); lo2.setScale(flip * scX, scY);
+        lo2.setCrop(0, cut2Px, W, H - cut2Px);
+        if (hurt) lo2.setTint(0xff5555); else lo2.clearTint();
+      }
+      const lo3 = this.lower3[d.key];
+      if (sl.cut3 != null && lo3 && sl.cut2 != null) {
+        const W = im.width, H = im.height;
+        const cut3Px = sl.cut3 * H;
+        const bend1Val = (lp.bend) * (sl.bendFlip ? -1 : 1);
+        const bend2Val = (lp.bend2 ?? 0) * (sl.bendFlip2 ? -1 : 1);
+        const bend3Val = (lp.bend3 ?? 0) * (sl.bendFlip3 ? -1 : 1);
+        const jfx1 = (0.5 - sl.pivotX) * W * flip * scX, jfy1 = (sl.cut != null ? (sl.cut - sl.pivotY) : -sl.pivotY) * H * scY;
+        const co = Math.cos(wt.rot), si = Math.sin(wt.rot);
+        const j1x = wt.x + jfx1 * co - jfy1 * si, j1y = wt.y + jfx1 * si + jfy1 * co;
+        const r1 = wt.rot + rad(bend1Val);
+        const dist12 = (sl.cut2 - (sl.cut ?? 0)) * H * scY;
+        const j2x = j1x - dist12 * Math.sin(r1), j2y = j1y + dist12 * Math.cos(r1);
+        const r2 = r1 + rad(bend2Val);
+        const dist23 = (sl.cut3 - sl.cut2) * H * scY;
+        const j3x = j2x - dist23 * Math.sin(r2), j3y = j2y + dist23 * Math.cos(r2);
+        lo3.setOrigin(0.5, sl.cut3); lo3.setPosition(j3x, j3y);
+        lo3.setRotation(r2 + rad(bend3Val)); lo3.setScale(flip * scX, scY);
+        lo3.setCrop(0, cut3Px, W, H - cut3Px);
+        if (hurt) lo3.setTint(0xff5555); else lo3.clearTint();
       }
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
