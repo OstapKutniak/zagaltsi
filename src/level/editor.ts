@@ -1,6 +1,7 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
+import { hasSolidBackground, keyImage } from '../rig/keyer';
 import { pullLevelData, mergeLevelAssets, mergeByIdLWW } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
@@ -873,7 +874,7 @@ export function initLevelEditor(prefix: string): void {
         ev.preventDefault(); e.style.borderColor = '';
         const files = Array.from(ev.dataTransfer?.files ?? []);
         for (const f of files) {
-          toWebP(f, CAT_MAX_PX[state.cat] ?? 1024).then((url) => {
+          toWebP(f, CAT_MAX_PX[state.cat] ?? 1024, 0.85, keyBgOn()).then((url) => {
             if (!url) return;
             const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url };
             state.assets.push(a); loadImg(a); refreshAssets(); save();
@@ -884,17 +885,29 @@ export function initLevelEditor(prefix: string): void {
     }
   }
   const CAT_MAX_PX: Record<string, number> = { sky: 2048, clouds: 2048, bg: 2048, frontbg: 2048, map: 2048, foreground: 2048 }; // решта — 1024
-  // Convert imported image to WebP — reduces storage 5-10x vs raw PNG
-  function toWebP(file: File, maxPx = 1024, quality = 0.85): Promise<string> {
+  // Тогл «Вирізати фон» (lv-keyBgBtn) — кеїти рівний фон у завантажених PNG.
+  const keyBgOn = (): boolean => {
+    const b = document.getElementById(prefix + 'keyBgBtn');
+    return b ? b.classList.contains('on') : false;
+  };
+  document.getElementById(prefix + 'keyBgBtn')
+    ?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
+
+  // Convert imported image to WebP — reduces storage 5-10x vs raw PNG.
+  // doKey=true → спершу вирізаємо рівний фон (keyImage), webp зберігає альфу.
+  function toWebP(file: File, maxPx = 1024, quality = 0.85, doKey = false): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
       const blobUrl = URL.createObjectURL(file);
       img.onload = () => {
-        const scale = Math.min(1, maxPx / Math.max(img.naturalWidth, img.naturalHeight));
-        const w = Math.round(img.naturalWidth * scale);
-        const h = Math.round(img.naturalHeight * scale);
+        const src: HTMLImageElement | HTMLCanvasElement = doKey && hasSolidBackground(img) ? keyImage(img) : img;
+        const sw = src instanceof HTMLCanvasElement ? src.width : src.naturalWidth;
+        const sh = src instanceof HTMLCanvasElement ? src.height : src.naturalHeight;
+        const scale = Math.min(1, maxPx / Math.max(sw, sh));
+        const w = Math.round(sw * scale);
+        const h = Math.round(sh * scale);
         const c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        c.getContext('2d')!.drawImage(src, 0, 0, w, h);
         URL.revokeObjectURL(blobUrl);
         const out = c.toDataURL('image/webp', quality);
         resolve(out.startsWith('data:image/webp') ? out : c.toDataURL('image/png'));
@@ -1072,7 +1085,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
     const files = Array.from((ev.target as HTMLInputElement).files ?? []);
     for (const f of files) {
-      toWebP(f, CAT_MAX_PX[state.cat] ?? 1024).then((url) => {
+      toWebP(f, CAT_MAX_PX[state.cat] ?? 1024, 0.85, keyBgOn()).then((url) => {
         if (!url) return;
         const a: Asset = { id: 'a' + Date.now() + Math.round(performance.now()), cat: state.cat, name: f.name.replace(/\.[^.]+$/, ''), url };
         state.assets.push(a); loadImg(a); refreshAssets(); save();

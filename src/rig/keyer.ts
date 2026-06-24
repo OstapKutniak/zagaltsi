@@ -8,6 +8,29 @@ const TIGHT_TOL = 8;
 const FLAT_FRAC = 0.6;
 const ERODE = 2;
 
+// Завантажити dataURL/URL у <img>.
+export function loadImageEl(src: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('image load failed'));
+    im.src = src;
+  });
+}
+
+// Універсальна вирізка фону для будь-якого PNG (усі редактори). Якщо doKey=false
+// або фон не суцільний — повертає вхідний рядок без змін. Інакше — PNG dataURL з альфою.
+export async function keyDataUrl(src: string, doKey = true): Promise<string> {
+  if (!doKey) return src;
+  try {
+    const img = await loadImageEl(src);
+    if (!hasSolidBackground(img)) return src;
+    return keyImage(img).toDataURL('image/png');
+  } catch {
+    return src;
+  }
+}
+
 export function imageToCanvas(img: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = img.naturalWidth;

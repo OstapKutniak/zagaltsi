@@ -2,6 +2,7 @@
 import { idbGet, idbSet } from '../store';
 import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
+import { keyDataUrl } from '../rig/keyer';
 import type { NodeGraph } from '../node-editor';
 
 interface PlacedAsset {
@@ -450,6 +451,14 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     select(id, 'placed'); save(); setStatus(`«${name}» додано`);
   }
 
+  // Тогл «Вирізати фон» (loc-keyBgBtn) — кеїти рівний фон у завантажених PNG (пропси/будівлі, не фон локації).
+  const keyBgOn = (): boolean => {
+    const b = document.getElementById(prefix + 'keyBgBtn');
+    return b ? b.classList.contains('on') : false;
+  };
+  document.getElementById(prefix + 'keyBgBtn')
+    ?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
+
   $<HTMLInputElement>('bgInput').addEventListener('change', function () {
     const file = this.files?.[0]; if (!file) return;
     const r = new FileReader(); r.onload = () => loadBg(r.result as string); r.readAsDataURL(file); this.value = '';
@@ -459,7 +468,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   $<HTMLInputElement>('assetInput').addEventListener('change', function () {
     const files = this.files; if (!files) return;
-    for (const file of Array.from(files)) { const r = new FileReader(), f = file; r.onload = () => dropAsset(r.result as string, f.name); r.readAsDataURL(file); }
+    for (const file of Array.from(files)) { const r = new FileReader(), f = file; r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => dropAsset(u, f.name)); r.readAsDataURL(file); }
     this.value = '';
   });
   $('assetBtn')?.addEventListener('click', () => $<HTMLInputElement>('assetInput').click());
@@ -492,7 +501,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const r = new FileReader();
     r.onload = () => {
       if (file.name.toLowerCase().includes('bg') && !loc().bg) loadBg(r.result as string);
-      else dropAsset(r.result as string, file.name, wp.x, wp.y);
+      else void keyDataUrl(r.result as string, keyBgOn()).then((u) => dropAsset(u, file.name, wp.x, wp.y));
     };
     r.readAsDataURL(file);
   });
@@ -729,7 +738,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         if (!file?.type.startsWith('image/')) return;
         e.preventDefault(); e.stopPropagation();
         const r = new FileReader();
-        r.onload = () => { b.png = r.result as string; b.updatedAt = Date.now(); void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
+        r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => { b.png = u; b.updatedAt = Date.now(); void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); });
         r.readAsDataURL(file);
       });
 

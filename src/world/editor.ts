@@ -2,6 +2,7 @@
 import { idbGet, idbSet } from '../store';
 import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
+import { keyDataUrl } from '../rig/keyer';
 
 interface WorldNode {
   id: string;
@@ -608,11 +609,19 @@ export function initWorldEditor(prefix: string): void {
     img.src = dataUrl;
   }
 
+  // Тогл «Вирізати фон» (wld-keyBgBtn, дефолт ВИМК) — кеїти рівний фон у завантаженому PNG.
+  const keyBgOn = (): boolean => {
+    const b = document.getElementById(prefix + 'keyBgBtn');
+    return b ? b.classList.contains('on') : false;
+  };
+  document.getElementById(prefix + 'keyBgBtn')
+    ?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
+
   $<HTMLInputElement>('bgInput').addEventListener('change', function () {
     const file = this.files?.[0];
     if (!file) return;
     const r = new FileReader();
-    r.onload = () => loadBg(r.result as string);
+    r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then(loadBg);
     r.readAsDataURL(file);
     this.value = '';
   });
@@ -631,7 +640,7 @@ export function initWorldEditor(prefix: string): void {
     const file = e.dataTransfer?.files[0];
     if (file?.type.startsWith('image/')) {
       const r = new FileReader();
-      r.onload = () => loadBg(r.result as string);
+      r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then(loadBg);
       r.readAsDataURL(file);
     }
   });
