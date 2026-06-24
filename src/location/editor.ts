@@ -1,7 +1,7 @@
 // Location editor — статична сцена хабу: будівлі-ассети + активні зони-дії.
 import { idbGet, idbSet } from '../store';
 import { pullArray, mergeByIdLWW } from '../sync';
-import { ghCommit } from '../github';
+import { registerPublisher, wirePublishButton } from '../publish';
 import type { NodeGraph } from '../node-editor';
 
 interface PlacedAsset {
@@ -626,22 +626,13 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   // ── Publish to game ───────────────────────────────────────────────────────
 
-  $('exportBtn')?.addEventListener('click', () => {
-    const btn = $<HTMLButtonElement>('exportBtn');
-    if (!btn) return;
-    btn.disabled = true;
-    const orig = btn.textContent!;
-    btn.textContent = 'Публікую...';
-    const json = JSON.stringify({ version: 1, locations: state.locs }, null, 2);
-    const bJson = JSON.stringify({ version: 1, buildings }, null, 2);
-    ghCommit({ 'public/studio-data/locations.json': json, 'public/studio-data/buildings.json': bJson }, 'studio: update locations + buildings')
-      .then(() => {
-        btn.textContent = 'Оновлено!';
-        setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
-        if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
-      })
-      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
-      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
+  registerPublisher(() => ({
+    'public/studio-data/locations.json': JSON.stringify({ version: 1, locations: state.locs }, null, 2),
+    'public/studio-data/buildings.json': JSON.stringify({ version: 1, buildings }, null, 2),
+  }));
+  const exportBtn = $<HTMLButtonElement>('exportBtn');
+  if (exportBtn) wirePublishButton(exportBtn, setStatus, () => {
+    if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
   });
 
   // ── Бібліотека споруд ──────────────────────────────────────────────────────

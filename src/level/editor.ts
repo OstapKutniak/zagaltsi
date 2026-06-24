@@ -1,6 +1,6 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
-import { ghCommit } from '../github';
+import { registerPublisher, wirePublishButton } from '../publish';
 import { pullLevelData, mergeLevelAssets, mergeByIdLWW } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
@@ -2136,29 +2136,21 @@ export function initLevelEditor(prefix: string): void {
     const aEl = document.createElement('a'); aEl.href = URL.createObjectURL(blob); aEl.download = `${level().name}.json`; aEl.click();
     setStatus(`Експортовано ${level().name}`);
   });
-  $<HTMLButtonElement>('toGame').addEventListener('click', () => {
-    const btn = $<HTMLButtonElement>('toGame');
+  // Збирач файлів рівня для спільної публікації (один коміт на всі редактори, src/publish.ts).
+  // У standalone level.html це єдиний збирач; у studio.html — поряд із персонажами/локаціями/картами.
+  registerPublisher(async () => {
     const level = buildLevelDoc();
-    btn.disabled = true;
-    const orig = btn.textContent!;
-    btn.textContent = 'Публікую...';
     idbSet('zag_level', level).catch(() => {});
-    const character: unknown = (() => { try { const s = localStorage.getItem('zag_game_char'); return s ? JSON.parse(s) : null; } catch { return null; } })();
-    void gatherBehaviors().then((behaviors) => {
-      const files: Record<string, string> = {
-        'public/level.json': JSON.stringify(level),
-        'public/studio-data/level-assets.json': JSON.stringify(state.assets),
-        'public/studio-data/level-layouts.json': JSON.stringify({ levels: state.levels, cur: state.cur }),
-        // Поведінки НПС — щоб дерева ворогів цього рівня працювали на всіх пристроях.
-        'public/studio-data/behaviors.json': JSON.stringify(behaviors),
-      };
-      if (character) files['public/character.json'] = JSON.stringify(character);
-      return ghCommit(files, 'studio: publish to game');
-    })
-      .then(() => { btn.textContent = 'Оновлено!'; setStatus('✔ Оновлено! Telegram підтягне за ~1 хв.'); })
-      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
-      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
+    const behaviors = await gatherBehaviors();
+    return {
+      'public/level.json': JSON.stringify(level),
+      'public/studio-data/level-assets.json': JSON.stringify(state.assets),
+      'public/studio-data/level-layouts.json': JSON.stringify({ levels: state.levels, cur: state.cur }),
+      // Поведінки НПС — щоб дерева ворогів цього рівня працювали на всіх пристроях.
+      'public/studio-data/behaviors.json': JSON.stringify(behaviors),
+    };
   });
+  wirePublishButton($<HTMLButtonElement>('toGame'), setStatus);
   $<HTMLButtonElement>('mobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveLevelBtn')?.click());
   $<HTMLButtonElement>('mobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGame')?.click());
 

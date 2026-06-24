@@ -1,7 +1,7 @@
 // World map editor — намальований фон + вузли-локації + лінії-переходи між ними.
 import { idbGet, idbSet } from '../store';
 import { pullArray, mergeByIdLWW } from '../sync';
-import { ghCommit } from '../github';
+import { registerPublisher, wirePublishButton } from '../publish';
 
 interface WorldNode {
   id: string;
@@ -808,21 +808,12 @@ export function initWorldEditor(prefix: string): void {
 
   // ── Publish to game ───────────────────────────────────────────────────────
 
-  $('exportBtn')?.addEventListener('click', () => {
-    const btn = $<HTMLButtonElement>('exportBtn');
-    if (!btn) return;
-    btn.disabled = true;
-    const orig = btn.textContent!;
-    btn.textContent = 'Публікую...';
-    const json = JSON.stringify({ version: 1, worlds: state.worlds }, null, 2);
-    ghCommit({ 'public/studio-data/worlds.json': json }, 'studio: update worlds')
-      .then(() => {
-        btn.textContent = 'Оновлено!';
-        setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
-        if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
-      })
-      .catch((e: unknown) => { btn.textContent = 'Помилка'; setStatus('✗ ' + String(e).slice(0, 60)); })
-      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000); });
+  registerPublisher(() => ({
+    'public/studio-data/worlds.json': JSON.stringify({ version: 1, worlds: state.worlds }, null, 2),
+  }));
+  const exportBtn = $<HTMLButtonElement>('exportBtn');
+  if (exportBtn) wirePublishButton(exportBtn, setStatus, () => {
+    if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
   });
 
   // ── Status + persistence ──────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { initWorldEditor } from '../world/editor';
 import { initLocationEditor } from '../location/editor';
 import { NodeEditor, NodeGraph } from '../node-editor';
 import { idbGet, idbSet } from '../store';
-import { ghCommit } from '../github';
+import { registerPublisher, wirePublishButton } from '../publish';
 import { pullCharLib } from '../sync';
 import { gatherBehaviors, loadPublishedBehaviors } from '../behaviors';
 import { toggleConstructor } from '../ui-constructor';
@@ -1295,35 +1295,20 @@ document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
   openCharBehavior(item.id, item.name);
 });
 
-async function publishToGame(btn: HTMLButtonElement, statusFn: (s: string) => void): Promise<void> {
-  btn.disabled = true;
-  const orig = btn.textContent!;
-  btn.textContent = 'Публікую...';
-  try {
-    const character = buildDoc();
-    try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
-    const level = await idbGet<unknown>('zag_level');
-    const behaviors = await gatherBehaviors();
-    const files: Record<string, string> = {
-      'public/character.json': JSON.stringify(character),
-      'public/studio-data/char-library.json': JSON.stringify(loadLib()),
-      // Поведінки НПС — щоб дерева працювали на інших пристроях/коопі, не лише локально.
-      'public/studio-data/behaviors.json': JSON.stringify(behaviors),
-    };
-    if (level) files['public/level.json'] = JSON.stringify(level);
-    await ghCommit(files, 'studio: publish to game');
-    statusFn('✔ Оновлено! Telegram підтягне за ~1 хв.');
-    btn.textContent = 'Оновлено!';
-  } catch (e) {
-    statusFn('✗ ' + String(e).slice(0, 60));
-    btn.textContent = 'Помилка';
-  }
-  setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 4000);
-}
-$<HTMLButtonElement>('toGameBtn').addEventListener('click', () => {
-  reloadPreview();
-  void publishToGame($<HTMLButtonElement>('toGameBtn'), status);
+// Збирач файлів персонажа для спільної публікації (один коміт на всі редактори, src/publish.ts).
+// Рівень тепер додає рівневий редактор сам — тут лише персонаж, бібліотека, поведінки.
+registerPublisher(async () => {
+  const character = buildDoc();
+  try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
+  const behaviors = await gatherBehaviors();
+  return {
+    'public/character.json': JSON.stringify(character),
+    'public/studio-data/char-library.json': JSON.stringify(loadLib()),
+    // Поведінки НПС — щоб дерева працювали на інших пристроях/коопі, не лише локально.
+    'public/studio-data/behaviors.json': JSON.stringify(behaviors),
+  };
 });
+wirePublishButton($<HTMLButtonElement>('toGameBtn'), status, reloadPreview);
 
 // ---- таймлайн / авторські анімації ----
 const SMOOTH = (f: number): number => f * f * (3 - 2 * f);
