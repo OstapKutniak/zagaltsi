@@ -633,7 +633,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const orig = btn.textContent!;
     btn.textContent = 'Публікую...';
     const json = JSON.stringify({ version: 1, locations: state.locs }, null, 2);
-    ghCommit({ 'public/studio-data/locations.json': json }, 'studio: update locations')
+    const bJson = JSON.stringify({ version: 1, buildings }, null, 2);
+    ghCommit({ 'public/studio-data/locations.json': json, 'public/studio-data/buildings.json': bJson }, 'studio: update locations + buildings')
       .then(() => {
         btn.textContent = 'Оновлено!';
         setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
@@ -647,7 +648,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   // Будівля = тип з PNG-візуалом + власним нодовим деревом. Палітра спільна для
   // всіх локацій, зберігається в IDB. Клік по картці — нодове дерево цього типу;
   // тягни картку — постав копію у вьюпорт; кинь PNG на картку — задай/заміни візуал.
-  interface Building { id: string; name: string; png: string; nodeGraph?: NodeGraph }
+  interface Building { id: string; name: string; png: string; nodeGraph?: NodeGraph; updatedAt?: number }
   let buildings: Building[] = [];
 
   // Заглушка-силует для порожньої (без PNG) будівлі.
@@ -709,7 +710,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         onOpenNodes(
           b.nodeGraph ?? { nodes: [], edges: [] },
           ['condition', 'behavior', 'function'],
-          (g) => { b.nodeGraph = g; void saveBuildings(); },
+          (g) => { b.nodeGraph = g; b.updatedAt = Date.now(); void saveBuildings(); },
           'Будівля: ' + b.name,
         );
       });
@@ -737,7 +738,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         if (!file?.type.startsWith('image/')) return;
         e.preventDefault(); e.stopPropagation();
         const r = new FileReader();
-        r.onload = () => { b.png = r.result as string; void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
+        r.onload = () => { b.png = r.result as string; b.updatedAt = Date.now(); void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
         r.readAsDataURL(file);
       });
 
@@ -746,7 +747,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   }
 
   $('addBuilding')?.addEventListener('click', () => {
-    buildings.push({ id: 'bld' + uid(), name: 'Споруда ' + (buildings.length + 1), png: '' });
+    buildings.push({ id: 'bld' + uid(), name: 'Споруда ' + (buildings.length + 1), png: '', updatedAt: Date.now() });
     void saveBuildings(); renderBuildingLib(); setStatus('Будівлю створено — кинь PNG на картку');
   });
 
@@ -755,6 +756,17 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const saved = await idbGet<Building[]>('zag_buildings');
     buildings = Array.isArray(saved) ? saved : [];
     renderBuildingLib();
+    // Підтягнути опубліковану бібліотеку будівель і злити LWW.
+    const remote = await pullArray<Building>('buildings.json', 'buildings');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(buildings, remote);
+      if (changed > 0) {
+        buildings = merged as Building[];
+        await idbSet('zag_buildings', buildings);
+        renderBuildingLib();
+        setStatus(`Синхронізовано: ${changed} будівель з GitHub`);
+      }
+    }
   }
 
   // ── Status + persistence ──────────────────────────────────────────────────
