@@ -264,17 +264,21 @@ export class GameScene extends Phaser.Scene {
     // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку.
     const onDialog = (d: { graph: NodeGraph; nodeId: string; wx?: number; wy?: number; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
       if (isDialogActive()) return;
-      let screenX: number | undefined, screenY: number | undefined;
-      if (d.wx != null && d.wy != null) {
-        const cam = this.cameras.main;
-        const canvas = this.sys.game.canvas;
-        const rect = canvas.getBoundingClientRect();
-        const scX = rect.width / canvas.width;
-        const scY = rect.height / canvas.height;
-        screenX = rect.left + (d.wx - cam.scrollX) * scX;
-        screenY = rect.top  + (d.wy - cam.scrollY) * scY;
-      }
-      openDialog(d.graph, d.nodeId, { screenX, screenY, onOutcome: d.onOutcome });
+      // Жива конвертація світ→екран: кулька й хвіст слідкують за персонажем, поки
+      // камера рухається. worldView враховує зум/суперсемплінг, тож точка точна.
+      const getAnchor = (d.wx != null && d.wy != null)
+        ? (): { x: number; y: number } => {
+            const cam = this.cameras.main;
+            const v = cam.worldView;
+            const canvas = this.sys.game.canvas;
+            const rect = canvas.getBoundingClientRect();
+            return {
+              x: rect.left + (d.wx! - v.x) / v.width  * rect.width,
+              y: rect.top  + (d.wy! - v.y) / v.height * rect.height,
+            };
+          }
+        : undefined;
+      openDialog(d.graph, d.nodeId, { getAnchor, onOutcome: d.onOutcome });
     };
     this.events.on('enemyDialog', onDialog);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off('enemyDialog', onDialog));
