@@ -110,26 +110,27 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   if (!newCommitRes.ok) throw new Error('GitHub: помилка commit');
   const { sha: newCommit } = await newCommitRes.json() as { sha: string };
 
-  // 6. update ref (retry once — GitHub Actions may push between our read and write)
-  let updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
-    method: 'PATCH', headers: h,
-    body: JSON.stringify({ sha: newCommit }),
-  });
-  if (!updRes.ok) {
-    // Branch moved forward; rebase our commit on top of the new HEAD and retry
+  // 6. update ref — retry loop (branch may move during slow blob uploads)
+  let pendingCommit = newCommit;
+  const MAX_REF_TRIES = 5;
+  for (let attempt = 0; attempt < MAX_REF_TRIES; attempt++) {
+    const updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
+      method: 'PATCH', headers: h,
+      body: JSON.stringify({ sha: pendingCommit }),
+    });
+    if (updRes.ok) return;
+    if (attempt === MAX_REF_TRIES - 1) throw new Error('GitHub: не вдалось оновити ref після кількох спроб');
+    // Branch moved — get new HEAD, rebase tree onto it, retry
+    await new Promise((res) => setTimeout(res, 600 * (attempt + 1)));
     const ref2 = await fetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { headers: h });
-    if (!ref2.ok) throw new Error('GitHub: помилка update ref');
+    if (!ref2.ok) throw new Error('GitHub: помилка читання ref');
     const { object: { sha: newHead } } = await ref2.json() as { object: { sha: string } };
-    const retry = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits`, {
+    const rebaseRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits`, {
       method: 'POST', headers: h,
       body: JSON.stringify({ message, tree: newTree, parents: [newHead] }),
     });
-    if (!retry.ok) throw new Error('GitHub: помилка retry commit');
-    const { sha: retryCommit } = await retry.json() as { sha: string };
-    updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
-      method: 'PATCH', headers: h,
-      body: JSON.stringify({ sha: retryCommit }),
-    });
-    if (!updRes.ok) throw new Error('GitHub: помилка update ref (retry)');
+    if (!rebaseRes.ok) throw new Error('GitHub: помилка rebase commit');
+    const { sha: rebasedCommit } = await rebaseRes.json() as { sha: string };
+    pendingCommit = rebasedCommit;
   }
 }
