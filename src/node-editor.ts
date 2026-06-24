@@ -56,6 +56,16 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     cat: 'condition', label: 'Діалог завершено', color: '#8a5a00',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
   },
+  // «Діалог завершено позитивно» — Так якщо розмова скінчилась добром (домовились).
+  dialog_positive: {
+    cat: 'condition', label: 'Діалог завершено позитивно', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
+  // «Діалог завершено негативно» — Так якщо розмова скінчилась погано.
+  dialog_negative: {
+    cat: 'condition', label: 'Діалог завершено негативно', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
   // «І (AND)» — обидва підключених джерела А і В мають вернути потрібний вихід.
   and_cond: {
     cat: 'condition', label: 'І (AND)', color: '#1e5a9e',
@@ -65,6 +75,8 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
   walk_to_player: { cat: 'behavior', label: 'Йти на гравця',    color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   melee_attack:   { cat: 'behavior', label: 'Ближня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  // «Стати нейтральним» — ворог перестає нападати (домовились після доброго діалогу).
+  become_neutral: { cat: 'behavior', label: 'Стати нейтральним', color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   wait: {
     cat: 'behavior', label: 'Очікування', color: '#7a2e00',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }],
@@ -83,6 +95,16 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     config: {
       text: { type: 'text', label: 'Фраза', default: 'Гей, чужинцю!' },
       answers: { type: 'list', label: 'Відповіді', default: 'Привіт|Геть з дороги' },
+      // «Кінець» — позначає цю репліку як завершення розмови з результатом (для умов
+      // «діалог завершено позитивно/негативно»). «—» = не кінець, діалог триває.
+      ending: {
+        type: 'select', label: 'Кінець', default: 'none',
+        options: [
+          { value: 'none',     short: '—', label: '—  не кінець' },
+          { value: 'positive', short: '✓', label: '✓  завершити позитивно' },
+          { value: 'negative', short: '✗', label: '✗  завершити негативно' },
+        ],
+      },
     },
   },
 };
@@ -93,8 +115,8 @@ export function dialogAnswers(n: GraphNode): string[] {
 }
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done'] },
-  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack'] },
+  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done', 'dialog_positive', 'dialog_negative'] },
+  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack', 'become_neutral'] },
   { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
 ];
@@ -599,6 +621,9 @@ export class NodeEditor {
         const dxw = this.ww(sx) - this.drag.wx0, dyw = this.wh(sy) - this.drag.wy0;
         if (Math.abs(dxw) > 2 || Math.abs(dyw) > 2) this.drag.moved = true;
         if (this.drag.moved) this.applyMove(this.drag.ids, this.drag.orig, dxw, dyw);
+        // Тягнемо вільний вузол над зв'язком → підсвічуємо лінію (вставимо при відпусканні).
+        const insn = this.insertableDragNode();
+        this.hoveredEdge = insn ? this.edgeUnderNode(insn) : null;
       }
     }, sig);
 
@@ -628,7 +653,17 @@ export class NodeEditor {
         }
         this.box = null; return;
       }
-      if (this.drag) { if (this.drag.moved) this.onChange?.(this.graph); this.drag = null; }
+      if (this.drag) {
+        if (this.drag.moved) {
+          // Кинули вільний вузол на зв'язок → вставляємо його між кінцями (як у Blender).
+          const insn = this.insertableDragNode();
+          const overEdge = insn ? this.edgeUnderNode(insn) : null;
+          if (insn && overEdge) this.insertNodeIntoEdge(insn, overEdge);
+          this.onChange?.(this.graph);
+        }
+        this.hoveredEdge = null;
+        this.drag = null;
+      }
     }, sig);
 
     cvs.addEventListener('wheel', (e) => {
@@ -712,6 +747,42 @@ export class NodeEditor {
       }
     }
     return null;
+  }
+
+  // Зв'язок, чия лінія проходить ПІД тілом вузла (для вставки drag-and-drop, як у Blender).
+  // Ігноруємо зв'язки, що вже торкаються цього вузла. Повертає перший знайдений або null.
+  private edgeUnderNode(n: GraphNode): GraphEdge | null {
+    const sx0 = this.sw(n.x), sy0 = this.sh(n.y);
+    const sx1 = sx0 + nodeW(n) * this.zoom, sy1 = sy0 + nodeH(n) * this.zoom;
+    for (const e of this.graph.edges) {
+      if (e.fromId === n.id || e.toId === n.id) continue;
+      const a = this.edgeAnchors(e); if (!a) continue;
+      const mx = (a.fx + a.tx) / 2;
+      for (let s = 0; s <= 16; s++) {
+        const t = s / 16, it = 1 - t;
+        const bx = it * it * it * a.fx + 3 * it * it * t * mx + 3 * it * t * t * mx + t * t * t * a.tx;
+        const by = it * it * it * a.fy + 3 * it * it * t * a.fy + 3 * it * t * t * a.ty + t * t * t * a.ty;
+        if (bx >= sx0 && bx <= sx1 && by >= sy0 && by <= sy1) return e;
+      }
+    }
+    return null;
+  }
+
+  // Вставити вузол у наявний зв'язок: джерело→вхід0 вузла, вихід0 вузла→ціль.
+  private insertNodeIntoEdge(n: GraphNode, e: GraphEdge): void {
+    this.graph.edges = this.graph.edges.filter((ed) => ed !== e);
+    this.connect(e.fromId, e.fromPort, n.id, 0);
+    this.connect(n.id, 0, e.toId, e.toPort);
+  }
+
+  // Чи можна вставити цей вузол у зв'язок: він одинокий у виділенні, ще ні з чим не
+  // з'єднаний і має вхід та вихід (root без входів — не можна).
+  private insertableDragNode(): GraphNode | null {
+    if (!this.drag || this.drag.ids.length !== 1) return null;
+    const n = this.graph.nodes.find((nd) => nd.id === this.drag!.ids[0]);
+    if (!n || !inLabels(n).length || !outLabels(n).length) return null;
+    if (this.graph.edges.some((ed) => ed.fromId === n.id || ed.toId === n.id)) return null;
+    return n;
   }
 
   private cutAlong(a: { x: number; y: number }, b: { x: number; y: number }): void {

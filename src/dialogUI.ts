@@ -40,7 +40,7 @@ function injectStyle(): void {
 export function openDialog(
   graph: NodeGraph,
   startId: string,
-  opts?: { screenX?: number; screenY?: number; onClose?: () => void },
+  opts?: { screenX?: number; screenY?: number; onClose?: () => void; onOutcome?: (o: 'positive' | 'negative') => void },
 ): void {
   if (active) return;
   const byId = (id: string): GraphNode | undefined => graph.nodes.find((n) => n.id === id);
@@ -74,12 +74,17 @@ export function openDialog(
     root.classList.add('zag-dlg--center');
   }
 
+  // Результат розмови: ставиться, коли доходимо до репліки, позначеної як «Кінець»
+  // (позитивно/негативно). Повідомляємо ворогу при закритті — для умов поведінки.
+  let outcome: 'positive' | 'negative' | null = null;
+
   let timer = 0;
   function close(): void {
     if (!active) return;
     active = false;
     clearInterval(timer);
     root.remove();
+    if (outcome) opts?.onOutcome?.(outcome);
     opts?.onClose?.();
   }
   closeBtn.onclick = (e) => { e.stopPropagation(); close(); };
@@ -94,6 +99,8 @@ export function openDialog(
   function show(node: GraphNode): void {
     const full = String(node.config.text ?? '');
     const answers = dialogAnswers(node);
+    const ending = String(node.config.ending ?? 'none');
+    if (ending === 'positive' || ending === 'negative') outcome = ending; // ця репліка = кінець розмови
     ans.innerHTML = '';
     txt.textContent = '';
     let i = 0;

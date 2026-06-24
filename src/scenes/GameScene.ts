@@ -262,7 +262,7 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
 
     // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку.
-    const onDialog = (d: { graph: NodeGraph; nodeId: string; wx?: number; wy?: number }): void => {
+    const onDialog = (d: { graph: NodeGraph; nodeId: string; wx?: number; wy?: number; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
       if (isDialogActive()) return;
       let screenX: number | undefined, screenY: number | undefined;
       if (d.wx != null && d.wy != null) {
@@ -274,7 +274,7 @@ export class GameScene extends Phaser.Scene {
         screenX = rect.left + (d.wx - cam.scrollX) * scX;
         screenY = rect.top  + (d.wy - cam.scrollY) * scY;
       }
-      openDialog(d.graph, d.nodeId, { screenX, screenY });
+      openDialog(d.graph, d.nodeId, { screenX, screenY, onOutcome: d.onOutcome });
     };
     this.events.on('enemyDialog', onDialog);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off('enemyDialog', onDialog));
