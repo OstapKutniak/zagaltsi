@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Actor } from './Actor';
-import { PLAYER, JUMP, WORLD_WIDTH } from '../config';
+import { PLAYER, JUMP, WORLD_WIDTH, STATS } from '../config';
 import type { InputCommand } from '../core/input';
 
 // Елевація поверхні (px) у точці (gameX, gameY): висота клітинки-платформи під цією
@@ -18,11 +18,17 @@ export class Player extends Actor {
   moving = false; // чи рухається цього кроку (для вибору анімації)
   running = false; // біг (Shift)
 
+  // ── Бігунки персонажа ──
+  stamina = PLAYER.maxStamina;   // витрачається на біг та удари, регениться у спокої
+  backPain = 0;                  // «Біль у спині» (аналог мани), 0..STATS.painMax
+  anxiety = 0;                   // «Тривожність», 0..STATS.anxietyMax
+
   private attackUntil = 0;
   private nextAttackAt = 0;
   private invulnUntil = 0;
   private hurtUntil = 0; // для анімації отримання удару
   private attackAnimUntil = 0; // для анімації удару
+  private prevFloorZ = 0; // елевація минулого кроку — для детекту «заліз на колайдер»
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'player', PLAYER.maxHp);
@@ -87,9 +93,41 @@ export class Player extends Actor {
     const sf = surfaceAt(this.fx, this.fy);
     if (sf !== null) this.floorZ = sf;
     this.stepZ(dt);
+    this.updateStats(dt);
     const flashing = time < this.invulnUntil && Math.floor(time / 70) % 2 === 0;
     this.setAlpha(flashing ? 0.4 : 1);
     this.sync();
+  }
+
+  // Оновлення бігунків щокроку: стаміна (біг/відновлення), накопичення «Болю у спині»
+  // (заліз на колайдер / біг без стаміни) і пасивної «Тривожності» (повний біль / низьке ХП).
+  private updateStats(dt: number): void {
+    // Заліз на вертикальний колайдер (елевація зросла) → трішки болю у спині.
+    const climb = this.floorZ - this.prevFloorZ;
+    if (climb > 0) this.addBackPain(climb * STATS.painPerClimbPx);
+    this.prevFloorZ = this.floorZ;
+
+    // Стаміна: біг витрачає; біг при нульовій стамині → біль у спині. Спокій → регенерація.
+    if (this.running) {
+      if (this.stamina > 0) {
+        this.stamina = Math.max(0, this.stamina - PLAYER.staminaRunDrain * dt);
+      } else {
+        this.addBackPain(STATS.painRunNoStamina * dt);
+      }
+    } else {
+      this.stamina = Math.min(PLAYER.maxStamina, this.stamina + PLAYER.staminaRegen * dt);
+    }
+
+    // Тривожність: стабільно потроху при повному болю у спині; потроху при низькому ХП.
+    if (this.backPain >= STATS.painMax) this.addAnxiety(STATS.anxietyPainFull * dt);
+    if (this.hp < PLAYER.maxHp * STATS.anxietyLowHpFrac) this.addAnxiety(STATS.anxietyLowHp * dt);
+  }
+
+  private addBackPain(amount: number): void {
+    this.backPain = Math.min(STATS.painMax, this.backPain + amount);
+  }
+  private addAnxiety(amount: number): void {
+    this.anxiety = Math.min(STATS.anxietyMax, this.anxiety + amount);
   }
 
   // Бік по глибині (1 = вглиб/вниз, -1 = ближче/вгору) для ковзання повз край.
@@ -116,6 +154,7 @@ export class Player extends Actor {
     this.attackUntil = time + PLAYER.attackActive;
     this.nextAttackAt = time + PLAYER.attackCooldown;
     this.attackAnimUntil = time + 700;
+    this.stamina = Math.max(0, this.stamina - PLAYER.staminaAttackCost); // удар їсть стаміну
   }
 
   spawnAt(x: number, y?: number): void { this.fx = x; if (y != null) this.fy = y; }
@@ -136,6 +175,8 @@ export class Player extends Actor {
     this.invulnUntil = time + PLAYER.invulnDuration;
     this.hurtUntil = time + 600;
     this.fx += (this.fx < fromX ? -1 : 1) * 26; // відкидання
+    this.addBackPain(STATS.painOnHit * dmg);   // урон → біль у спині
+    this.addAnxiety(STATS.anxietyOnHit * dmg); // урон → тривожність
     return true;
   }
 }

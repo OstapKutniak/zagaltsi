@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER, RENDER_SCALE } from '../config';
+import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER, STATS, RENDER_SCALE } from '../config';
 import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
@@ -55,7 +55,8 @@ export class GameScene extends Phaser.Scene {
   private hudFills: Phaser.GameObjects.Graphics | null = null;
   private hudIcons: Phaser.GameObjects.Image[] = [];
   private hudLayout: Array<{ iconKey: string; iconCx: number; barX: number; barW: number }> = [];
-  private lastHp = -1;
+  private hudSig = ''; // підпис стану барів — перемальовуємо заливку лише при зміні
+  private bwActive = false; // чи увімкнено ч/б екран (тривожність = 100)
 
   private finished = false;
   private waveSpawned = false;
@@ -183,6 +184,8 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#2a2233');
     this.cameras.main.setZoom(RENDER_SCALE); // backing×RENDER_SCALE + zoom = те саме поле огляду, але різкіше
+    this.cameras.main.postFX.clear(); // скинути ч/б з минулого життя сцени (камера переживає restart)
+    this.bwActive = false;
     this.computeLayout();
 
     // Фон: "небо" зверху + смуга підлоги знизу (присмерковий тон у дусі Don't Starve)
@@ -573,6 +576,14 @@ export class GameScene extends Phaser.Scene {
     }));
   }
 
+  // Геометрія стрічки стаміни: під баром ХП (hudLayout[0]), вдвічі вужча (висота) і
+  // вдвічі коротша (ширина). barYC=26, barH=16 → нижній край ХП ≈ 34.
+  private staminaRect(): { x: number; y: number; w: number; h: number } {
+    const hp = this.hudLayout[0];
+    const barH = 16, barY = 26 - barH / 2;
+    return { x: hp ? hp.barX : 10, y: barY + barH + 3, w: (hp ? hp.barW : 100) / 2, h: barH / 2 };
+  }
+
   private createHudGraphics(): void {
     this.hudBars?.destroy();   this.hudBars  = null;
     this.hudFills?.destroy();  this.hudFills = null;
@@ -594,6 +605,9 @@ export class GameScene extends Phaser.Scene {
         { x: barX,             y: barY + barH },
       ], true);
     }
+    // Контур стрічки стаміни — під ХП, вдвічі вужча й коротша.
+    const st = this.staminaRect();
+    this.hudBars.strokeRect(st.x, st.y, st.w, st.h);
 
     // Іконки
     for (const { iconKey, iconCx } of this.hudLayout) {
@@ -607,24 +621,39 @@ export class GameScene extends Phaser.Scene {
 
     // Заливки (перемальовуються при зміні HP) — графіку зсуваємо на uiOff
     this.hudFills = this.add.graphics().setScrollFactor(0).setDepth(10000).setPosition(this.uiOffX, this.uiOffY);
-    this.lastHp = -1; // примусове перемалювання
+    this.hudSig = ''; // примусове перемалювання
     this.updateHud();
+  }
+
+  // Поточні заповнення барів 0..1: [ХП, Біль у спині, Тривожність].
+  private hudPcts(): [number, number, number, number] {
+    const p = this.player;
+    const cl = (v: number): number => Math.max(0, Math.min(1, v));
+    return [
+      cl(p.hp / PLAYER.maxHp),
+      cl(p.backPain / STATS.painMax),
+      cl(p.anxiety / STATS.anxietyMax),
+      cl(p.stamina / PLAYER.maxStamina),
+    ];
   }
 
   private updateHud(): void {
     if (!this.hudFills || !this.player) return;
-    const hp = this.player.hp;
-    if (hp === this.lastHp) return;
-    this.lastHp = hp;
+    const [hpPct, painPct, anxPct, stamPct] = this.hudPcts();
+    // Перемальовуємо заливку лише коли щось змінилось (квантуємо до сотих).
+    const sig = [hpPct, painPct, anxPct, stamPct].map((v) => Math.round(v * 100)).join(',');
+    if (sig === this.hudSig) return;
+    this.hudSig = sig;
 
     const barYC = 26, barH = 16, arrowW = 12;
     const barY  = barYC - barH / 2;
     this.hudFills.clear();
     this.hudFills.fillStyle(0xffffff, 0.85);
 
+    const mainPcts = [hpPct, painPct, anxPct];
     for (let i = 0; i < this.hudLayout.length; i++) {
       const { barX, barW } = this.hudLayout[i];
-      const pct = i === 0 ? Math.max(0, Math.min(1, hp / PLAYER.maxHp)) : 1;
+      const pct = mainPcts[i] ?? 1;
       if (pct <= 0) continue;
       if (pct >= 1) {
         // Повна стрілка
@@ -640,6 +669,24 @@ export class GameScene extends Phaser.Scene {
         this.hudFills.fillRect(barX + 1, barY + 2, (barW - 2) * pct, barH - 4);
       }
     }
+
+    // Заливка стрічки стаміни.
+    if (stamPct > 0) {
+      const st = this.staminaRect();
+      this.hudFills.fillRect(st.x + 1, st.y + 1, Math.max(0, (st.w - 2) * stamPct), st.h - 2);
+    }
+  }
+
+  // Ч/б екран при тривожності 100% (тимчасовий плейсхолдер «ультрапохмурого режиму»).
+  private updateAnxietyFx(): void {
+    if (!this.player) return;
+    const want = this.player.anxiety >= STATS.anxietyMax;
+    if (want === this.bwActive) return;
+    this.bwActive = want;
+    const cam = this.cameras.main;
+    // На цю камеру вішаємо лише цей ефект, тож clear() безпечно знімає його.
+    cam.postFX.clear();
+    if (want) cam.postFX.addColorMatrix().grayscale(1);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -737,8 +784,9 @@ export class GameScene extends Phaser.Scene {
       this.completeLevel();
     }
 
-    // HUD + смерть
+    // HUD + ч/б режим + смерть
     this.updateHud();
+    this.updateAnxietyFx();
     if (this.player.hp <= 0) this.scene.restart();
   }
 
