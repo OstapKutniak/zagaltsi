@@ -19,6 +19,25 @@ function hdr(token: string): HeadersInit {
   };
 }
 
+const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+
+// fetch + ретрай на ТРАНЗІЄНТНИХ помилках (403/429 secondary rate limit, 5xx).
+// Не-транзієнтні коди (401/404/422) повертаються як є — викликач сам вирішує.
+async function apiFetch(url: string, init: RequestInit, h: HeadersInit, retries = 4): Promise<Response> {
+  let res!: Response;
+  for (let a = 0; a < retries; a++) {
+    res = await fetch(url, { ...init, headers: h });
+    if (res.ok) return res;
+    if (res.status === 403 || res.status === 429 || res.status >= 500) {
+      const ra = Number(res.headers.get('retry-after'));
+      await sleep(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1200 * (a + 1));
+      continue;
+    }
+    return res; // 401/404/422 — ретрай не допоможе
+  }
+  return res;
+}
+
 // Encode potentially large UTF-8 string to base64 without btoa Unicode bug
 function toBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
@@ -95,42 +114,47 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   }
 
   // 4. new tree
-  const treeRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/trees`, {
-    method: 'POST', headers: h,
-    body: JSON.stringify({ base_tree: baseSha, tree: treeItems }),
-  });
-  if (!treeRes.ok) throw new Error('GitHub: помилка tree');
+  const treeRes = await apiFetch(`${API}/repos/${OWNER}/${REPO}/git/trees`,
+    { method: 'POST', body: JSON.stringify({ base_tree: baseSha, tree: treeItems }) }, h);
+  if (!treeRes.ok) throw new Error(`GitHub: tree ${treeRes.status} ${(await treeRes.text()).slice(0, 140)}`);
   const { sha: newTree } = await treeRes.json() as { sha: string };
 
   // 5. new commit
-  const newCommitRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits`, {
-    method: 'POST', headers: h,
-    body: JSON.stringify({ message, tree: newTree, parents: [headSha] }),
-  });
-  if (!newCommitRes.ok) throw new Error('GitHub: помилка commit');
-  const { sha: newCommit } = await newCommitRes.json() as { sha: string };
+  const commitMk = await apiFetch(`${API}/repos/${OWNER}/${REPO}/git/commits`,
+    { method: 'POST', body: JSON.stringify({ message, tree: newTree, parents: [headSha] }) }, h);
+  if (!commitMk.ok) throw new Error(`GitHub: commit ${commitMk.status} ${(await commitMk.text()).slice(0, 140)}`);
+  const { sha: newCommit } = await commitMk.json() as { sha: string };
 
-  // 6. update ref — retry loop (branch may move during slow blob uploads)
+  // 6. update ref — два РІЗНІ режими відмови:
+  //    • 422 (non-fast-forward) = гілка зрушила → ребейзимо коміт на свіжий HEAD;
+  //    • 403/429/5xx = secondary rate limit → ЧЕКАЄМО і повторюємо ТОЙ САМИЙ коміт
+  //      (перестворювати коміт під тротлінгом = лити олію у вогонь).
+  const refUrl = `${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`;
   let pendingCommit = newCommit;
-  const MAX_REF_TRIES = 5;
+  let lastErr = '';
+  const MAX_REF_TRIES = 6;
   for (let attempt = 0; attempt < MAX_REF_TRIES; attempt++) {
-    const updRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, {
-      method: 'PATCH', headers: h,
-      body: JSON.stringify({ sha: pendingCommit }),
-    });
+    const updRes = await fetch(refUrl, { method: 'PATCH', headers: h, body: JSON.stringify({ sha: pendingCommit }) });
     if (updRes.ok) return;
-    if (attempt === MAX_REF_TRIES - 1) throw new Error('GitHub: не вдалось оновити ref після кількох спроб');
-    // Branch moved — get new HEAD, rebase tree onto it, retry
-    await new Promise((res) => setTimeout(res, 600 * (attempt + 1)));
-    const ref2 = await fetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { headers: h });
-    if (!ref2.ok) throw new Error('GitHub: помилка читання ref');
+    const status = updRes.status;
+    lastErr = `${status} ${(await updRes.text()).slice(0, 140)}`;
+    if (attempt === MAX_REF_TRIES - 1) break;
+
+    if (status === 403 || status === 429 || status >= 500) {
+      // Тротлінг — почекати (Retry-After або наростаючий бек) і повторити той самий коміт.
+      const ra = Number(updRes.headers.get('retry-after'));
+      await sleep(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * (attempt + 1));
+      continue;
+    }
+    // 422/інше — гілка зрушила: підтягнути HEAD, ребейзнути коміт, повторити.
+    await sleep(500 * (attempt + 1));
+    const ref2 = await apiFetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { method: 'GET' }, h);
+    if (!ref2.ok) { lastErr = `re-read ref ${ref2.status}`; continue; }
     const { object: { sha: newHead } } = await ref2.json() as { object: { sha: string } };
-    const rebaseRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits`, {
-      method: 'POST', headers: h,
-      body: JSON.stringify({ message, tree: newTree, parents: [newHead] }),
-    });
-    if (!rebaseRes.ok) throw new Error('GitHub: помилка rebase commit');
-    const { sha: rebasedCommit } = await rebaseRes.json() as { sha: string };
-    pendingCommit = rebasedCommit;
+    const rebaseRes = await apiFetch(`${API}/repos/${OWNER}/${REPO}/git/commits`,
+      { method: 'POST', body: JSON.stringify({ message, tree: newTree, parents: [newHead] }) }, h);
+    if (!rebaseRes.ok) { lastErr = `rebase commit ${rebaseRes.status}`; continue; }
+    pendingCommit = (await rebaseRes.json() as { sha: string }).sha;
   }
+  throw new Error(`GitHub: не вдалось оновити ref — ${lastErr}`);
 }
