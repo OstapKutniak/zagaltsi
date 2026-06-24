@@ -23,6 +23,8 @@ export class Enemy extends Actor {
   private cellSize = 48;
   private readonly maxHp = ENEMY.hp;
   private dialogTriggered = false; // діалог «Почати діалог» спрацьовує один раз на ворога
+  private dialogOutcome: 'positive' | 'negative' | null = null; // чим скінчилась розмова
+  private neutralized = false; // домовились (через діалог) → більше не нападає
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'enemy', ENEMY.hp);
@@ -106,6 +108,8 @@ export class Enemy extends Actor {
         return (pass0 && pass1) ? 0 : 1; // 0=Так, 1=Ні
       }
       case 'dialog_done': return this.dialogTriggered ? 0 : 1; // 0=Так якщо вже поговорили
+      case 'dialog_positive': return this.dialogOutcome === 'positive' ? 0 : 1; // 0=Так якщо домовились
+      case 'dialog_negative': return this.dialogOutcome === 'negative' ? 0 : 1; // 0=Так якщо посварились
       case 'sees_player': return 0; // поки що завжди бачить
       case 'time_of_day':  return 0; // поки що завжди «День»
       default: return 0;
@@ -131,6 +135,18 @@ export class Enemy extends Actor {
     const dy = player.floorY - this.fy;
     this.facing = dx >= 0 ? 1 : -1;
 
+    // Домовились через діалог → ворог мирний: стоїть і не б'є.
+    if (this.neutralized) {
+      this.stepZ(dt); this.sync();
+      if (this.character) {
+        this.character.setAnim('idle');
+        this.character.tick(dt, this.facing);
+        this.character.setPosition(this.fx, this.fy - this.character.feetOffset() - this.hz);
+        this.character.setDepth(this.fy + 0.1);
+      }
+      return 0;
+    }
+
     let anim = 'walk';
     let damage = 0;
 
@@ -150,12 +166,17 @@ export class Enemy extends Actor {
         if (!this.dialogTriggered) {
           this.dialogTriggered = true;
           const { wx, wy } = this.headWorldPos();
-          this.scene.events.emit('enemyDialog', { graph: this.behavior, nodeId: act.id, wx, wy });
+          // onOutcome — діалог повідомить, чим скінчився («Кінець» у репліці).
+          this.scene.events.emit('enemyDialog', {
+            graph: this.behavior, nodeId: act.id, wx, wy,
+            onOutcome: (o: 'positive' | 'negative') => { this.dialogOutcome = o; },
+          });
         }
       } else switch (act?.type) {
         case 'run_to_player':  anim = 'run';  this.moveToward(dx, dy, ENEMY.speed, dt, band); break;
         case 'walk_to_player': anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed * 0.5, dt, band); break;
         case 'wait':           anim = 'idle'; break;
+        case 'become_neutral': anim = 'idle'; this.neutralized = true; break; // домовились
         case 'melee_attack':
         case 'range_attack':   anim = 'attack'; attack(); break;
         default:               anim = 'idle'; break; // нічого не обрано — стоїть

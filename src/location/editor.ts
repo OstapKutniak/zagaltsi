@@ -1,5 +1,6 @@
 // Location editor — статична сцена хабу: будівлі-ассети + активні зони-дії.
 import { idbGet, idbSet } from '../store';
+import { pullArray, mergeByIdLWW } from '../sync';
 import { ghCommit } from '../github';
 import type { NodeGraph } from '../node-editor';
 
@@ -19,6 +20,7 @@ interface LocationDoc {
   placed: PlacedAsset[];
   zones: ActionZone[];
   nodeGraph?: NodeGraph;
+  updatedAt?: number; // мітка останньої правки — для синхронізації між компами (LWW)
 }
 
 const ZONE_COLORS: Record<string, string> = {
@@ -54,7 +56,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   let _uid = Date.now();
   const uid = () => (++_uid).toString(36);
-  const newLoc = (name: string): LocationDoc => ({ id: uid(), name, bg: '', placed: [], zones: [] });
+  const newLoc = (name: string): LocationDoc => ({ id: uid(), name, bg: '', placed: [], zones: [], updatedAt: Date.now() });
 
   const state = {
     locs: [newLoc('Локація 1')] as LocationDoc[],
@@ -631,7 +633,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const orig = btn.textContent!;
     btn.textContent = 'Публікую...';
     const json = JSON.stringify({ version: 1, locations: state.locs }, null, 2);
-    ghCommit({ 'public/studio-data/locations.json': json }, 'studio: update locations')
+    const bJson = JSON.stringify({ version: 1, buildings }, null, 2);
+    ghCommit({ 'public/studio-data/locations.json': json, 'public/studio-data/buildings.json': bJson }, 'studio: update locations + buildings')
       .then(() => {
         btn.textContent = 'Оновлено!';
         setStatus('✔ Оновлено! Гра підтягне за ~1 хв.');
@@ -645,7 +648,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   // Будівля = тип з PNG-візуалом + власним нодовим деревом. Палітра спільна для
   // всіх локацій, зберігається в IDB. Клік по картці — нодове дерево цього типу;
   // тягни картку — постав копію у вьюпорт; кинь PNG на картку — задай/заміни візуал.
-  interface Building { id: string; name: string; png: string; nodeGraph?: NodeGraph }
+  interface Building { id: string; name: string; png: string; nodeGraph?: NodeGraph; updatedAt?: number }
   let buildings: Building[] = [];
 
   // Заглушка-силует для порожньої (без PNG) будівлі.
@@ -707,7 +710,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         onOpenNodes(
           b.nodeGraph ?? { nodes: [], edges: [] },
           ['condition', 'behavior', 'function'],
-          (g) => { b.nodeGraph = g; void saveBuildings(); },
+          (g) => { b.nodeGraph = g; b.updatedAt = Date.now(); void saveBuildings(); },
           'Будівля: ' + b.name,
         );
       });
@@ -735,7 +738,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         if (!file?.type.startsWith('image/')) return;
         e.preventDefault(); e.stopPropagation();
         const r = new FileReader();
-        r.onload = () => { b.png = r.result as string; void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
+        r.onload = () => { b.png = r.result as string; b.updatedAt = Date.now(); void saveBuildings(); renderBuildingLib(); setStatus(`«${b.name}»: візуал оновлено`); };
         r.readAsDataURL(file);
       });
 
@@ -744,7 +747,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   }
 
   $('addBuilding')?.addEventListener('click', () => {
-    buildings.push({ id: 'bld' + uid(), name: 'Споруда ' + (buildings.length + 1), png: '' });
+    buildings.push({ id: 'bld' + uid(), name: 'Споруда ' + (buildings.length + 1), png: '', updatedAt: Date.now() });
     void saveBuildings(); renderBuildingLib(); setStatus('Будівлю створено — кинь PNG на картку');
   });
 
@@ -753,16 +756,48 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const saved = await idbGet<Building[]>('zag_buildings');
     buildings = Array.isArray(saved) ? saved : [];
     renderBuildingLib();
+    // Підтягнути опубліковану бібліотеку будівель і злити LWW.
+    const remote = await pullArray<Building>('buildings.json', 'buildings');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(buildings, remote);
+      if (changed > 0) {
+        buildings = merged as Building[];
+        await idbSet('zag_buildings', buildings);
+        renderBuildingLib();
+        setStatus(`Синхронізовано: ${changed} будівель з GitHub`);
+      }
+    }
   }
 
   // ── Status + persistence ──────────────────────────────────────────────────
 
   function setStatus(msg: string) { const el = $('statusBar'); if (el) el.textContent = msg; }
-  async function save() { await idbSet('zag_locations', state.locs); }
+  async function save() {
+    const l = state.locs[state.cur];
+    if (l) l.updatedAt = Date.now(); // правлять поточну локацію → оновлюємо її мітку часу
+    await idbSet('zag_locations', state.locs);
+  }
   async function load() {
     const saved = await idbGet<LocationDoc[]>('zag_locations');
-    if (saved?.length) { state.locs = saved; state.cur = 0; ensureImages(); loadBgFromDoc(); }
-    renderList(); updateProps();
+    if (saved?.length) { state.locs = saved; state.cur = 0; }
+    // Локальне — одразу на екран; синхронізацію з репо тягнемо фоном (нижче).
+    if (state.locs.length) { ensureImages(); loadBgFromDoc(); }
+    renderList(); updateProps(); draw();
+    // Підтягнути опубліковані локації з репо й злити (LWW).
+    const curId = state.locs[state.cur]?.id;
+    const remote = await pullArray<LocationDoc>('locations.json', 'locations');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(state.locs, remote);
+      if (changed > 0) {
+        state.locs = merged;
+        const i = curId ? merged.findIndex((l) => l.id === curId) : 0;
+        state.cur = i >= 0 ? i : 0;
+        await idbSet('zag_locations', state.locs);
+        ensureImages(); loadBgFromDoc();
+        renderList(); updateProps(); draw();
+        setStatus(`Синхронізовано: ${changed} локацій з GitHub`);
+      }
+    }
   }
 
   window.addEventListener('locationTabActivated', () => {

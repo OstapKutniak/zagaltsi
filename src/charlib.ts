@@ -5,16 +5,12 @@
 // бібліотеці (тобто збережений і опублікований), бо лише вона спільна між пристроями.
 
 import { idbGet } from './store';
+import { mergeByIdLWW } from './sync';
 import type { CharDoc } from './anim/CutoutCharacter';
 
-export interface LibItem { id: string; name: string; cat: string; doc: CharDoc; thumb: string }
+export interface LibItem { id: string; name: string; cat: string; doc: CharDoc; thumb: string; updatedAt?: number }
 
 let cache: LibItem[] | null = null;
-
-function mergeById(base: LibItem[], extra: LibItem[]): LibItem[] {
-  const ids = new Set(base.map((x) => x.id));
-  return [...base, ...extra.filter((x) => !ids.has(x.id))];
-}
 
 export async function loadCharLibrary(force = false): Promise<LibItem[]> {
   if (cache && !force) return cache;
@@ -25,8 +21,9 @@ export async function loadCharLibrary(force = false): Promise<LibItem[]> {
   } catch { /* offline / нема файлу */ }
   let local: LibItem[] = [];
   try { const l = await idbGet<LibItem[]>('zag_char_lib'); if (Array.isArray(l)) local = l; } catch { /* ignore */ }
-  try { const l = await idbGet<LibItem[]>('ostap_library'); if (Array.isArray(l)) local = mergeById(local, l); } catch { /* ignore */ }
-  cache = mergeById(remote, local);
+  try { const l = await idbGet<LibItem[]>('ostap_library'); if (Array.isArray(l)) local = mergeByIdLWW(local, l).merged; } catch { /* ignore */ }
+  // LWW: найсвіжіша правка кожного персонажа перемагає (локальна чи опублікована).
+  cache = mergeByIdLWW(local, remote).merged;
   return cache;
 }
 

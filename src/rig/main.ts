@@ -6,7 +6,7 @@ import { NodeEditor, NodeGraph } from '../node-editor';
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
 import { pullCharLib } from '../sync';
-import { gatherBehaviors } from '../behaviors';
+import { gatherBehaviors, loadPublishedBehaviors } from '../behaviors';
 import { toggleConstructor } from '../ui-constructor';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -1208,7 +1208,7 @@ function composeThumb(w: number, h: number): string {
 }
 
 // ---- бібліотека персонажів (IndexedDB — необмежений обсяг) ----
-interface LibItem { id: string; name: string; cat: 'char' | 'enemy' | 'neutral'; doc: ReturnType<typeof buildDoc>; thumb: string }
+interface LibItem { id: string; name: string; cat: 'char' | 'enemy' | 'neutral'; doc: ReturnType<typeof buildDoc>; thumb: string; updatedAt?: number }
 const LIB_KEY = 'zag_char_lib'; // IDB key (нова назва, щоб не плутати зі старим localStorage)
 let _lib: LibItem[] = [];
 let libCat: 'char' | 'enemy' | 'neutral' = 'char';
@@ -1250,7 +1250,7 @@ function saveCharacter(): void {
   const def = libCat === 'enemy' ? 'Ворог' : libCat === 'neutral' ? 'Нейтрал' : 'Остап';
   const name = prompt(`Назва ${what}:`, def); if (!name) return;
   const lib = loadLib();
-  const item: LibItem = { id: 'c' + Date.now(), name, cat: libCat, doc: buildDoc(), thumb: composeThumb(150, 190) };
+  const item: LibItem = { id: 'c' + Date.now(), name, cat: libCat, doc: buildDoc(), thumb: composeThumb(150, 190), updatedAt: Date.now() };
   const i = lib.findIndex((x) => x.name === name && (x.cat ?? 'char') === libCat); // та сама назва В ЦІЙ вкладці -> заміна
   if (i >= 0) { item.id = lib[i].id; lib[i] = item; status(`Оновлено: ${name}`); }
   else { lib.push(item); status(`Збережено: ${name}`); }
@@ -1275,8 +1275,19 @@ $<HTMLSelectElement>('libCatSel').addEventListener('change', (e) => {
 // Char behavior node editor — дерево поведінки ПЕР-ПЕРСОНАЖА (за id ворога/нейтрала).
 function openCharBehavior(charId: string, name: string): void {
   const key = 'zag_behavior_' + charId;
-  const open = (g: NodeGraph) => openNodePanel(g, ['condition', 'behavior', 'dialog'], (ng) => { idbSet(key, ng).catch(() => {}); }, 'Поведінка: ' + name);
-  idbGet<NodeGraph>(key).then(saved => open(saved ?? { nodes: [], edges: [] })).catch(() => open({ nodes: [], edges: [] }));
+  // Зберігаючи граф — ставимо мітку часу (для LWW-синхронізації між компами).
+  const open = (g: NodeGraph) => openNodePanel(g, ['condition', 'behavior', 'dialog'], (ng) => { ng.updatedAt = Date.now(); idbSet(key, ng).catch(() => {}); }, 'Поведінка: ' + name);
+  // Беремо НОВІШУ з двох: локальна IDB чи опублікована в репо (щоб на іншому компі
+  // бачити свіже дерево, а не порожнє).
+  Promise.all([
+    idbGet<NodeGraph>(key).catch(() => null),
+    loadPublishedBehaviors().then((m) => m[charId] ?? null).catch(() => null),
+  ]).then(([local, remote]) => {
+    let g = local ?? remote ?? { nodes: [], edges: [] };
+    if (local && remote && (remote.updatedAt ?? 0) > (local.updatedAt ?? 0)) g = remote;
+    if (g === remote && remote) idbSet(key, remote).catch(() => {}); // підтягнули з репо → осідаємо локально
+    open(g);
+  }).catch(() => open({ nodes: [], edges: [] }));
 }
 document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
   const item = loadLib().find((x) => x.id === currentCharId && (x.cat ?? 'char') === libCat);

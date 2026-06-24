@@ -1,5 +1,6 @@
 // World map editor — намальований фон + вузли-локації + лінії-переходи між ними.
 import { idbGet, idbSet } from '../store';
+import { pullArray, mergeByIdLWW } from '../sync';
 import { ghCommit } from '../github';
 
 interface WorldNode {
@@ -23,6 +24,7 @@ interface WorldDoc {
   bg: string;
   nodes: WorldNode[];
   edges: WorldEdge[];
+  updatedAt?: number; // мітка останньої правки — для синхронізації між компами (LWW)
 }
 
 let _init = false;
@@ -36,7 +38,7 @@ export function initWorldEditor(prefix: string): void {
 
   let _uid = Date.now();
   const uid = () => (++_uid).toString(36);
-  const newWorld = (name: string): WorldDoc => ({ id: uid(), name, bg: '', nodes: [], edges: [] });
+  const newWorld = (name: string): WorldDoc => ({ id: uid(), name, bg: '', nodes: [], edges: [], updatedAt: Date.now() });
 
   const state = {
     worlds: [newWorld('Карта 1')] as WorldDoc[],
@@ -830,18 +832,37 @@ export function initWorldEditor(prefix: string): void {
     if (el) el.textContent = msg;
   }
 
-  async function save() { await idbSet('zag_worlds', state.worlds); }
+  async function save() {
+    const w = state.worlds[state.cur];
+    if (w) w.updatedAt = Date.now(); // правлять поточну карту → оновлюємо її мітку часу
+    await idbSet('zag_worlds', state.worlds);
+  }
 
   async function load() {
     const saved = await idbGet<WorldDoc[]>('zag_worlds');
     if (saved?.length) {
       state.worlds = saved;
       state.cur = 0;
-      const bg = world().bg;
-      if (bg) { const img = new Image(); img.onload = () => { state.bgImg = img; }; img.src = bg; }
     }
     renderList();
     updateProps();
+    // Підтягнути опубліковані карти з репо й злити (LWW) — щоб бачити свіже з інших компів.
+    const curId = state.worlds[state.cur]?.id;
+    const remote = await pullArray<WorldDoc>('worlds.json', 'worlds');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(state.worlds, remote);
+      if (changed > 0) {
+        state.worlds = merged;
+        state.cur = Math.max(0, curId ? merged.findIndex((w) => w.id === curId) : 0);
+        if (state.cur < 0) state.cur = 0;
+        await idbSet('zag_worlds', state.worlds);
+        renderList();
+        updateProps();
+        setStatus(`Синхронізовано: ${changed} карт з GitHub`);
+      }
+    }
+    const bg = world()?.bg;
+    if (bg) { const img = new Image(); img.onload = () => { state.bgImg = img; draw(); }; img.src = bg; }
   }
 
   window.addEventListener('worldTabActivated', () => {
