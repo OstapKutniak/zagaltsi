@@ -105,7 +105,7 @@ export interface GraphNode {
   thumb?: string; // дата-URL портрета для кореневого (персонаж/будівля) вузла
 }
 export interface GraphEdge { fromId: string; fromPort: number; toId: string; toPort: number; }
-export interface NodeGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
+export interface NodeGraph { nodes: GraphNode[]; edges: GraphEdge[]; updatedAt?: number; }
 
 // ── Layout constants ────────────────────────────────────────────────────────────
 const NW = 168;

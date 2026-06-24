@@ -1,7 +1,7 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
 import { ghCommit } from '../github';
-import { pullLevelData, mergeLevelAssets } from '../sync';
+import { pullLevelData, mergeLevelAssets, mergeByIdLWW } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
@@ -44,13 +44,16 @@ const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
-interface Level { name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
+  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
+  // Стабільний id для легасі-рівнів без id (на двох компах виводиться однаково з назви,
+  // тож ті самі рівні зливаються, а не дублюються). Викликати перед merge-by-id.
+  const ensureLevelId = (lv: Level): Level => { if (!lv.id) lv.id = 'L:' + lv.name; return lv; };
 
   const canvas = $<HTMLCanvasElement>('stage');
   const ctx = canvas.getContext('2d')!;
@@ -219,40 +222,54 @@ export function initLevelEditor(prefix: string): void {
       try { localStorage.removeItem('zag_assets'); localStorage.removeItem('zag_levels'); } catch { /* ignore */ }
     } catch { /* ignore */ }
     const hadLocalLevels = state.levels.length > 0; // capture before async pull (line below adds default)
-    // Pull from GitHub in background — merge new assets, update layouts if remote has data
+    state.levels.forEach(migrateLevel);
+    // Pull from GitHub in background — LWW-merge рівнів і ассетів за id (свіже з інших компів).
     pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
-      // Рівні виставляємо ПЕРШИМИ — щоб loadImg → draw() вже бачив placed-елементи
-      if (remoteLayouts?.levels?.length && !hadLocalLevels) {
-        state.levels = remoteLayouts.levels as Level[];
-        state.cur = remoteLayouts.cur || 0;
-        for (const lv of state.levels) if (typeof lv.grid !== 'number') lv.grid = 48;
-        state.grid = level().grid;
-        idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
-        refreshLevels();
-        draw();
+      // Рівні: зливаємо по id (найновіша правка перемагає). Легасі без id → стабільний
+      // id з назви (ensureLevelId), щоб ті самі рівні не дублювались між компами.
+      const remoteLevels = (remoteLayouts?.levels as Level[] | undefined)?.map((lv) => { migrateLevel(lv); return lv; }) ?? [];
+      if (remoteLevels.length) {
+        const curId = state.levels[state.cur]?.id;
+        const base = hadLocalLevels ? state.levels : []; // ігноруємо синтетичний дефолт-рівень
+        const { merged, changed } = mergeByIdLWW(base, remoteLevels);
+        if (changed > 0 || !hadLocalLevels) {
+          merged.forEach(migrateLevel);
+          state.levels = merged.length ? merged : state.levels;
+          const i = curId ? state.levels.findIndex((lv) => lv.id === curId) : 0;
+          state.cur = i >= 0 ? i : 0;
+          state.grid = level().grid;
+          idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
+          refreshLevels();
+          draw();
+          if (changed > 0) setStatus(`Синхронізовано: ${changed} рівнів з GitHub`);
+        }
       }
       const remoteFiltered = (remoteAssets ?? []).filter((r) => !deletedIds.has((r as Asset).id));
       const { merged, added } = mergeLevelAssets(state.assets, remoteFiltered);
       if (added > 0) {
-        state.assets = merged;
-        for (const as of merged.slice(-added)) loadImg(as as Asset);
+        state.assets = merged as Asset[];
+        for (const as of state.assets.slice(-added)) loadImg(as);
         idbSet('zag_assets', state.assets).catch(() => {});
         refreshAssets();
         setStatus(`Синхронізовано: +${added} ассетів з GitHub`);
       }
     }).catch(() => {});
     if (!state.levels.length) state.levels = [newLevel('Рівень 1')];
-    for (const lv of state.levels) {
-      if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
-      if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // міграція: один спавн -> масив
-      if (!lv.enemySpawns) lv.enemySpawns = []; // міграція: зони спавна ворогів
-      if (!lv.neutralSpawns) lv.neutralSpawns = []; // міграція: зони спавна нейтралів
-      if (typeof lv.start !== 'number') lv.start = 0;
-      if (typeof lv.end !== 'number') lv.end = 2400;
-      if (typeof lv.grid !== 'number') lv.grid = 32; // міграція: всі рівні на gs=32
-      ensureParallax(lv); // міграція: добиваємо всі паралакс-шари (хмари/перед.фон/перед.план)
-    }
+    state.levels.forEach(migrateLevel);
     state.grid = level().grid;
+  }
+
+  // Міграція одного рівня до повної схеми (старі збереження + злиті з репо).
+  function migrateLevel(lv: Level): void {
+    if (!lv.spawn) lv.spawn = { x: 120, y: 0 };
+    if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // один спавн -> масив
+    if (!lv.enemySpawns) lv.enemySpawns = []; // зони спавна ворогів
+    if (!lv.neutralSpawns) lv.neutralSpawns = []; // зони спавна нейтралів
+    if (typeof lv.start !== 'number') lv.start = 0;
+    if (typeof lv.end !== 'number') lv.end = 2400;
+    if (typeof lv.grid !== 'number') lv.grid = 32; // всі рівні на gs=32
+    ensureParallax(lv); // добиваємо всі паралакс-шари (хмари/перед.фон/перед.план)
+    ensureLevelId(lv); // стабільний id для злиття між компами
   }
   function loadImg(a: Asset): void {
     const im = new Image();
@@ -264,7 +281,12 @@ export function initLevelEditor(prefix: string): void {
   const setStatus = (m: string): void => { const el = $('statusBar'); if (el) el.textContent = m; };
 
   const undoStack: string[] = [];
-  function pushUndo(): void { undoStack.push(JSON.stringify({ levels: state.levels, cur: state.cur })); if (undoStack.length > 80) undoStack.shift(); }
+  function pushUndo(): void {
+    const lv = state.levels[state.cur];
+    if (lv) lv.updatedAt = Date.now(); // pushUndo = «зараз буде правка» → оновлюємо мітку часу рівня
+    undoStack.push(JSON.stringify({ levels: state.levels, cur: state.cur }));
+    if (undoStack.length > 80) undoStack.shift();
+  }
   function undo(): void {
     const s0 = undoStack.pop(); if (!s0) { setStatus('Нема що відміняти'); return; }
     const o = JSON.parse(s0) as { levels: Level[]; cur: number };
@@ -697,7 +719,7 @@ export function initLevelEditor(prefix: string): void {
       el.className = 'lvCard' + (i === state.cur ? ' sel' : '');
       const nm = document.createElement('div'); nm.textContent = lv.name; el.appendChild(nm);
       el.onclick = () => { state.cur = i; state.grid = state.levels[i].grid; state.selected = null; refreshLevels(); draw(); save(); };
-      el.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; refreshLevels(); save(); } };
+      el.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; lv.updatedAt = Date.now(); refreshLevels(); save(); } };
       if (state.levels.length > 1) {
         const x = document.createElement('button'); x.className = 'lvDel'; x.textContent = '×';
         x.onclick = (e) => {

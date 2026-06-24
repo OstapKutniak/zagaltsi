@@ -1,5 +1,6 @@
 // Location editor — статична сцена хабу: будівлі-ассети + активні зони-дії.
 import { idbGet, idbSet } from '../store';
+import { pullArray, mergeByIdLWW } from '../sync';
 import { ghCommit } from '../github';
 import type { NodeGraph } from '../node-editor';
 
@@ -19,6 +20,7 @@ interface LocationDoc {
   placed: PlacedAsset[];
   zones: ActionZone[];
   nodeGraph?: NodeGraph;
+  updatedAt?: number; // мітка останньої правки — для синхронізації між компами (LWW)
 }
 
 const ZONE_COLORS: Record<string, string> = {
@@ -54,7 +56,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   let _uid = Date.now();
   const uid = () => (++_uid).toString(36);
-  const newLoc = (name: string): LocationDoc => ({ id: uid(), name, bg: '', placed: [], zones: [] });
+  const newLoc = (name: string): LocationDoc => ({ id: uid(), name, bg: '', placed: [], zones: [], updatedAt: Date.now() });
 
   const state = {
     locs: [newLoc('Локація 1')] as LocationDoc[],
@@ -758,11 +760,32 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   // ── Status + persistence ──────────────────────────────────────────────────
 
   function setStatus(msg: string) { const el = $('statusBar'); if (el) el.textContent = msg; }
-  async function save() { await idbSet('zag_locations', state.locs); }
+  async function save() {
+    const l = state.locs[state.cur];
+    if (l) l.updatedAt = Date.now(); // правлять поточну локацію → оновлюємо її мітку часу
+    await idbSet('zag_locations', state.locs);
+  }
   async function load() {
     const saved = await idbGet<LocationDoc[]>('zag_locations');
-    if (saved?.length) { state.locs = saved; state.cur = 0; ensureImages(); loadBgFromDoc(); }
-    renderList(); updateProps();
+    if (saved?.length) { state.locs = saved; state.cur = 0; }
+    // Локальне — одразу на екран; синхронізацію з репо тягнемо фоном (нижче).
+    if (state.locs.length) { ensureImages(); loadBgFromDoc(); }
+    renderList(); updateProps(); draw();
+    // Підтягнути опубліковані локації з репо й злити (LWW).
+    const curId = state.locs[state.cur]?.id;
+    const remote = await pullArray<LocationDoc>('locations.json', 'locations');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(state.locs, remote);
+      if (changed > 0) {
+        state.locs = merged;
+        const i = curId ? merged.findIndex((l) => l.id === curId) : 0;
+        state.cur = i >= 0 ? i : 0;
+        await idbSet('zag_locations', state.locs);
+        ensureImages(); loadBgFromDoc();
+        renderList(); updateProps(); draw();
+        setStatus(`Синхронізовано: ${changed} локацій з GitHub`);
+      }
+    }
   }
 
   window.addEventListener('locationTabActivated', () => {
