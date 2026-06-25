@@ -7,52 +7,7 @@
       "bg": "",
       "nodes": [],
       "edges": [],
-      "updatedAt": 1782375753216
-    },
-    {
-      "id": "mqpg77xu",
-      "name": "Карта 1",
-      "bg": "",
-      "nodes": [
-        {
-          "id": "mqpgehx1",
-          "label": "Поділля",
-          "x": -94.62208865514648,
-          "y": -23.21938392186324,
-          "type": "region",
-          "regionId": "Поділля"
-        },
-        {
-          "id": "mqpgehx2",
-          "label": "Хмельницький",
-          "x": 5.381542436303391,
-          "y": 59.82301636805052,
-          "type": "location"
-        },
-        {
-          "id": "mqpgehx5",
-          "label": "Тернопіль",
-          "x": -204.56057789879952,
-          "y": 71.12622750489165,
-          "type": "location"
-        },
-        {
-          "id": "mqpgehx8",
-          "label": "Локація",
-          "x": -104.20065822486481,
-          "y": 166.07372283518558,
-          "type": "location"
-        }
-      ],
-      "edges": [
-        {
-          "id": "mqqblqtr",
-          "from": "mqpgehx5",
-          "to": "mqpgehx2",
-          "levelId": "",
-          "twoWay": false
-        }
-      ]
+      "updatedAt": 1782403193455
     }
   ]
 }

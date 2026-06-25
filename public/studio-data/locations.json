@@ -6,79 +6,8 @@
       "name": "Локація 1",
       "bg": "",
       "placed": [],
-      "zones": []
-    },
-    {
-      "id": "mqpqdoge",
-      "name": "Локація 1",
-      "bg": "",
-      "placed": [],
       "zones": [],
-      "nodeGraph": {
-        "nodes": [
-          {
-            "id": "mqpu9o4u",
-            "type": "dialog_menu",
-            "cat": "function",
-            "label": "Діалогове меню",
-            "x": 346,
-            "y": 50,
-            "config": {
-              "buttons": 2
-            }
-          },
-          {
-            "id": "mqpudzxz",
-            "type": "building",
-            "cat": "root",
-            "label": "Споруда 1",
-            "x": 4.636363636363626,
-            "y": 38.54545454545458,
-            "config": {}
-          },
-          {
-            "id": "mqpudzy0",
-            "type": "dialog_menu",
-            "cat": "function",
-            "label": "Діалогове меню",
-            "x": 356.4545454545454,
-            "y": 185.00000000000003,
-            "config": {
-              "buttons": 2
-            }
-          },
-          {
-            "id": "mqpudzy1",
-            "type": "reroute",
-            "cat": "reroute",
-            "label": "",
-            "x": 253.90909090909088,
-            "y": 128.6363636363637,
-            "config": {}
-          }
-        ],
-        "edges": [
-          {
-            "fromId": "mqpudzxz",
-            "fromPort": 0,
-            "toId": "mqpudzy1",
-            "toPort": 0
-          },
-          {
-            "fromId": "mqpudzy1",
-            "fromPort": 0,
-            "toId": "mqpudzy0",
-            "toPort": 0
-          },
-          {
-            "fromId": "mqpudzy1",
-            "fromPort": 0,
-            "toId": "mqpu9o4u",
-            "toPort": 0
-          }
-        ]
-      },
-      "updatedAt": 1782342073987
+      "updatedAt": 1782403198096
     }
   ]
 }
