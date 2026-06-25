@@ -116,10 +116,14 @@ export class Enemy extends Actor {
     }
   }
 
-  // Приблизні світові координати голови (для позиціонування діалогової кульки).
+  // Світові координати голови (для позиціонування діалогової кульки).
   headWorldPos(): { wx: number; wy: number } {
-    const fo = this.character?.feetOffset() ?? 200;
-    return { wx: this.fx, wy: this.fy - fo * 2.4 };
+    if (this.character) {
+      const fo = this.character.feetOffset();
+      const hl = this.character.headLocalY();
+      return { wx: this.fx, wy: this.fy - fo - this.hz + hl };
+    }
+    return { wx: this.fx, wy: this.fy - 400 };
   }
 
   private moveToward(dx: number, dy: number, speed: number, dt: number, band: Band): void {

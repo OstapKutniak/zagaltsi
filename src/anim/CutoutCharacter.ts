@@ -354,6 +354,15 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     return feet;
   }
 
+  // Y голови в локальних координатах контейнера (від'ємне = вище кореня/стегон).
+  // Використовується для позиціонування діалогової кульки над головою.
+  headLocalY(): number {
+    const im = this.parts['head'];
+    if (im) return im.y - im.displayHeight * im.originY; // верхній край голови
+    const us = this.unitScale();
+    return -(BASE.torso * this.prop.torso + BASE.neck + BASE.head * this.prop.head) * us;
+  }
+
   tick(dt: number, facing: number, ctx?: AnimCtx): void {
     this.t += dt;
     const us = this.unitScale();
