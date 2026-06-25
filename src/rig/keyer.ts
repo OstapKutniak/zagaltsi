@@ -65,8 +65,8 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   const data = id.data;
   const at = (x: number, y: number): number => (y * W + x) * 4;
 
-  // Збираємо кольори крайових пікселів ігноруючи прозорі (alpha<120) — щоб повторний
-  // прохід після часткового вирізу не плутав BG=(0,0,0) з прозорих кутів.
+  // --- Виявлення кольору фону ---
+  // Спочатку скануємо крайові пікселі, ігноруючи прозорі (від попереднього проходу).
   const edgePx: number[][] = [];
   const tryEdge = (x: number, y: number): void => {
     const i = at(x, y);
@@ -74,27 +74,48 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   };
   for (let x = 0; x < W; x++) { tryEdge(x, 0); tryEdge(x, H - 1); }
   for (let y = 1; y < H - 1; y++) { tryEdge(0, y); tryEdge(W - 1, y); }
-  if (edgePx.length < 4) return canvas; // немає непрозорих країв — нічого вирізати
-  const bg = [0, 1, 2].map((k) => Math.round(edgePx.reduce((s, c) => s + c[k], 0) / edgePx.length));
-  // Перевірка однорідності краю: якщо розкид > 50 — не суцільний фон, пропускаємо
-  const spread = edgePx.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
-  if (spread > 50) return canvas;
+
+  let bg: number[];
+  if (edgePx.length >= 4) {
+    bg = [0, 1, 2].map((k) => Math.round(edgePx.reduce((s, c) => s + c[k], 0) / edgePx.length));
+    const spread = edgePx.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
+    if (spread > 50) return canvas;
+  } else {
+    // Fallback для вже частково прозорих зображень: шукаємо середньо-сірі пікселі по всьому
+    // зображенню (low saturation, mid brightness — характерний нейтральний фон).
+    const grayish: number[][] = [];
+    const step = Math.max(1, Math.ceil(Math.sqrt(W * H) / 200));
+    for (let p = 0; p < W * H; p += step) {
+      const i = p * 4;
+      if (data[i + 3] < 120) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      if (mx - mn < 30 && mn > 60 && mx < 200) grayish.push([r, g, b]);
+    }
+    if (grayish.length < 20) return canvas;
+    bg = [0, 1, 2].map((k) => Math.round(grayish.reduce((s, c) => s + c[k], 0) / grayish.length));
+    const spread2 = grayish.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
+    if (spread2 > 40) return canvas;
+  }
+
   const dist = (i: number): number => Math.hypot(data[i] - bg[0], data[i + 1] - bg[1], data[i + 2] - bg[2]);
 
+  // --- Маркування кандидатів фону (прозорі пікселі виключаємо) ---
   const isBg = new Uint8Array(W * H);
-  for (let p = 0; p < W * H; p++) isBg[p] = dist(p * 4) <= FUZZINESS ? 1 : 0;
+  for (let p = 0; p < W * H; p++) {
+    isBg[p] = data[p * 4 + 3] >= 120 && dist(p * 4) <= FUZZINESS ? 1 : 0;
+  }
 
+  // --- Flood-fill звʼязних компонент ---
   const lab = new Int32Array(W * H);
   const area = [0];
   const exact = [0];
-  const border = [0]; // 1 = область торкається краю картинки (зовнішнє «море»), 0 = замкнена кишеня
+  const border = [0];
   let cc = 0;
   for (let p0 = 0; p0 < W * H; p0++) {
     if (!isBg[p0] || lab[p0]) continue;
     cc++;
-    area.push(0);
-    exact.push(0);
-    border.push(0);
+    area.push(0); exact.push(0); border.push(0);
     const st = [p0];
     lab[p0] = cc;
     while (st.length) {
@@ -108,23 +129,27 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
           const nx = qx + dx, ny = qy + dy;
           if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
           const np = ny * W + nx;
-          if (isBg[np] && !lab[np]) {
-            lab[np] = cc;
-            st.push(np);
-          }
+          if (isBg[np] && !lab[np]) { lab[np] = cc; st.push(np); }
         }
     }
   }
 
+  // --- Маска переднього плану ---
   let fg = new Uint8Array(W * H);
   for (let p = 0; p < W * H; p++) {
     const lid = lab[p];
-    // Зовнішнє «море» (торкається краю) — суворий поріг; замкнена кишеня — м'якший,
-    // бо її антиаліас-периметр займає більшу частку малої площі.
     const thr = lid && border[lid] ? FLAT_FRAC : ENCLOSED_FRAC;
     const flat = lid && exact[lid] / area[lid] >= thr;
     fg[p] = flat ? 0 : 1;
   }
+  // Зберігаємо вже прозорі пікселі від попереднього проходу. Без цього після PNG
+  // round-trip (прозорі пікселі = 0,0,0,0) вони потрапляли б у foreground і
+  // cover() робив їх знову непрозорими — другий прохід скасовував перший.
+  for (let p = 0; p < W * H; p++) {
+    if (data[p * 4 + 3] < 120) fg[p] = 0;
+  }
+
+  // --- Ерозія краю ---
   for (let k = 0; k < ERODE; k++) {
     const next = new Uint8Array(W * H);
     for (let y = 0; y < H; y++)
