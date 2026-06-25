@@ -777,6 +777,8 @@ export function initWorldEditor(prefix: string): void {
 
   const previewBox = $<HTMLElement>('preview');
   const previewFrame = $<HTMLIFrameElement>('previewFrame');
+  const _wldGameUrl = (window as unknown as { Capacitor?: unknown }).Capacitor ? 'game.html' : 'index.html';
+  if (previewFrame && !previewFrame.getAttribute('src')) previewFrame.src = _wldGameUrl;
   const previewBackdrop = document.createElement('div');
   previewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
   document.body.appendChild(previewBackdrop);
@@ -822,7 +824,7 @@ export function initWorldEditor(prefix: string): void {
   }));
   const exportBtn = $<HTMLButtonElement>('exportBtn');
   if (exportBtn) wirePublishButton(exportBtn, setStatus, () => {
-    if (previewFrame) previewFrame.src = 'index.html?t=' + Date.now();
+    if (previewFrame) previewFrame.src = _wldGameUrl + '?t=' + Date.now();
   });
 
   // ── Status + persistence ──────────────────────────────────────────────────

@@ -2042,8 +2042,9 @@ export function initLevelEditor(prefix: string): void {
   // Preview expand/collapse — same behaviour as char editor
   const lvPreviewBox = $<HTMLElement>('preview');
   const lvPreviewFrame = $<HTMLIFrameElement>('previewFrame');
-  // У APK iframe із src="index.html" показав би меню — перенацілюємо на гру.
-  if (lvPreviewFrame && (window as unknown as { Capacitor?: unknown }).Capacitor) lvPreviewFrame.src = gameUrl;
+  // Lazy-load: src не ставимо в HTML, щоб не запускати 3 Phaser-інстанси водночас на iOS.
+  // Ставимо тут — лише той iframe, що відповідає активному редактору.
+  if (lvPreviewFrame && !lvPreviewFrame.getAttribute('src')) lvPreviewFrame.src = gameUrl;
   const lvPreviewBackdrop = document.createElement('div');
   lvPreviewBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:99;cursor:pointer;';
   document.body.appendChild(lvPreviewBackdrop);
