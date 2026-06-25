@@ -2518,6 +2518,34 @@ export function initLevelEditor(prefix: string): void {
   wirePublishButton($<HTMLButtonElement>('toGame'), setStatus);
   $<HTMLButtonElement>('mobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveLevelBtn')?.click());
   $<HTMLButtonElement>('mobPublish')?.addEventListener('click', () => $<HTMLButtonElement>('toGame')?.click());
+  $<HTMLButtonElement>('mobSync')?.addEventListener('click', () => {
+    setStatus('Синхронізую з GitHub…');
+    pullLevelData().then(({ assets: remoteAssets, layouts: remoteLayouts }) => {
+      // Форс-синхронізація: remote перемагає незалежно від часових міток.
+      const remoteLevels = (remoteLayouts?.levels as Level[] | undefined)?.map((lv) => { migrateLevel(lv); return lv; }) ?? [];
+      if (remoteLevels.length) {
+        const curId = state.levels[state.cur]?.id;
+        // Форс-замінюємо remote поверх local (ігноруємо LWW — кнопка ручна).
+        const remoteMap = new Map(remoteLevels.map((lv) => [lv.id, lv]));
+        state.levels = state.levels.map((lv) => remoteMap.get(lv.id) ?? lv);
+        for (const rl of remoteLevels) if (!state.levels.find((l) => l.id === rl.id)) state.levels.push(rl);
+        const i = curId ? state.levels.findIndex((lv) => lv.id === curId) : 0;
+        state.cur = i >= 0 ? i : 0;
+        state.grid = level().grid;
+        idbSet('zag_levels', { levels: state.levels, cur: state.cur }).catch(() => {});
+        refreshLevels(); draw();
+      }
+      const remoteFiltered = (remoteAssets ?? []).filter((r) => !deletedIds.has((r as Asset).id));
+      const { merged, added } = mergeLevelAssets(state.assets, remoteFiltered);
+      if (added > 0) {
+        state.assets = merged as Asset[];
+        for (const as of state.assets.slice(-added)) loadImg(as);
+        idbSet('zag_assets', state.assets).catch(() => {});
+        refreshAssets();
+      }
+      setStatus(`Синхронізовано: ${remoteLevels.length} рівнів, ${remoteFiltered.length} ассетів`);
+    }).catch(() => setStatus('Помилка синхронізації'));
+  });
 
   // Висоту тулбару/AI-панелей задає ЄДИНИЙ писар у rig/main.ts через CSS-змінну
   // --panel-h (вимірює видимий таймлайн і застосовує до всіх панелей). Тут лише
