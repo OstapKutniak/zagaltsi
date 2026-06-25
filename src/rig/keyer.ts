@@ -65,42 +65,38 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   const data = id.data;
   const at = (x: number, y: number): number => (y * W + x) * 4;
 
-  // --- Виявлення кольору фону через histogram dominant bin ---
-  // Фон завжди однорідний → одна велика група. Контент різноманітний → дрібні групи.
-  // Працює з будь-яким кольором фону (темний/світлий/сірий) і не ламається від
-  // mixed-edge пікселів контенту чи прозорих кутів після попереднього проходу.
-  const BINSIZE = 12;
-  const hist = new Map<string, number[][]>();
-  const addSample = (x: number, y: number): void => {
+  // --- Виявлення кольору фону ---
+  // Спочатку скануємо крайові пікселі, ігноруючи прозорі (від попереднього проходу).
+  const edgePx: number[][] = [];
+  const tryEdge = (x: number, y: number): void => {
     const i = at(x, y);
-    if (data[i + 3] < 60) return; // пропустити прозорі
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    const key = `${Math.floor(r / BINSIZE)},${Math.floor(g / BINSIZE)},${Math.floor(b / BINSIZE)}`;
-    if (!hist.has(key)) hist.set(key, []);
-    hist.get(key)!.push([r, g, b]);
+    if (data[i + 3] >= 120) edgePx.push([data[i], data[i + 1], data[i + 2]]);
   };
+  for (let x = 0; x < W; x++) { tryEdge(x, 0); tryEdge(x, H - 1); }
+  for (let y = 1; y < H - 1; y++) { tryEdge(0, y); tryEdge(W - 1, y); }
 
-  // Крайова смуга ~4% від меншого розміру — захоплює фон, але не весь вміст
-  const BORDER = Math.max(2, Math.round(Math.min(W, H) * 0.04));
-  for (let y = 0; y < BORDER; y++) for (let x = 0; x < W; x++) { addSample(x, y); addSample(x, H - 1 - y); }
-  for (let x = 0; x < BORDER; x++) for (let y = BORDER; y < H - BORDER; y++) { addSample(x, y); addSample(W - 1 - x, y); }
-
-  // Якщо крайова смуга майже порожня (вже частково вирізано) — розширюємо на весь кадр
-  const totalBorderPx = [...hist.values()].reduce((s, v) => s + v.length, 0);
-  if (totalBorderPx < 20) {
-    const step = Math.max(1, Math.ceil(Math.sqrt(W * H) / 300));
-    for (let p = 0; p < W * H; p += step) addSample(p % W, (p / W) | 0);
+  let bg: number[];
+  if (edgePx.length >= 4) {
+    bg = [0, 1, 2].map((k) => Math.round(edgePx.reduce((s, c) => s + c[k], 0) / edgePx.length));
+    const spread = edgePx.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
+    if (spread > 50) return canvas;
+  } else {
+    // Fallback для вже частково прозорих зображень: шукаємо середньо-сірі пікселі по всьому
+    // зображенню (low saturation, mid brightness — характерний нейтральний фон).
+    const grayish: number[][] = [];
+    const step = Math.max(1, Math.ceil(Math.sqrt(W * H) / 200));
+    for (let p = 0; p < W * H; p += step) {
+      const i = p * 4;
+      if (data[i + 3] < 120) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      if (mx - mn < 30 && mn > 60 && mx < 200) grayish.push([r, g, b]);
+    }
+    if (grayish.length < 20) return canvas;
+    bg = [0, 1, 2].map((k) => Math.round(grayish.reduce((s, c) => s + c[k], 0) / grayish.length));
+    const spread2 = grayish.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
+    if (spread2 > 40) return canvas;
   }
-
-  // Домінантний бін = колір фону
-  let dominant: number[][] = [];
-  for (const [, pixels] of hist) { if (pixels.length > dominant.length) dominant = pixels; }
-  if (dominant.length < 8) return canvas;
-
-  const bg = [0, 1, 2].map((k) => Math.round(dominant.reduce((s, c) => s + c[k], 0) / dominant.length));
-  // Перевірка однорідності домінантного біна (розкид має бути в межах BINSIZE)
-  const bgSpread = dominant.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
-  if (bgSpread > BINSIZE * 1.5) return canvas;
 
   const dist = (i: number): number => Math.hypot(data[i] - bg[0], data[i + 1] - bg[1], data[i + 2] - bg[2]);
 
