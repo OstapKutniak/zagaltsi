@@ -2,6 +2,13 @@
   "version": 1,
   "locations": [
     {
+      "id": "mqs4pnr9",
+      "name": "Локація 1",
+      "bg": "",
+      "placed": [],
+      "zones": []
+    },
+    {
       "id": "mqpqdoge",
       "name": "Локація 1",
       "bg": "",

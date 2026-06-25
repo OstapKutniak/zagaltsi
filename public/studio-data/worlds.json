@@ -2,6 +2,14 @@
   "version": 1,
   "worlds": [
     {
+      "id": "mqt8i51d",
+      "name": "Карта 1",
+      "bg": "",
+      "nodes": [],
+      "edges": [],
+      "updatedAt": 1782375753216
+    },
+    {
       "id": "mqpg77xu",
       "name": "Карта 1",
       "bg": "",
