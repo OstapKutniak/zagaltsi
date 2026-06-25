@@ -16,7 +16,7 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import type { NodeGraph } from '../node-editor';
-import { type Atmosphere, type WeatherType, evalAtmosphere } from '../level/atmosphere';
+import { type Atmosphere, type WeatherType, evalSky, evalTod, evalWeather } from '../level/atmosphere';
 
 interface Remote {
   container: CutoutCharacter | null;
@@ -202,16 +202,19 @@ export class GameScene extends Phaser.Scene {
     this.bwActive = false;
     this.computeLayout();
 
-    // Фон: "небо" зверху + смуга підлоги знизу (присмерковий тон у дусі Don't Starve)
-    this.skyRect = this.add.rectangle(0, 0, 10, 10, 0x3a3148).setDepth(-1000);
-    this.groundRect = this.add.rectangle(0, 0, 10, 10, 0x4a3f2e).setDepth(-1000);
-    this.horizon = this.add.rectangle(0, 0, 10, 3, 0x000000, 0.25).setDepth(-999);
-    this.gateLine = this.add.rectangle(0, 0, 6, 10, 0x000000, 0.25).setDepth(-998);
+    // Фон: "небо" зверху + смуга підлоги знизу (присмерковий тон у дусі Don't Starve).
+    // Depth -2000/-1999: нижче sky-шару рівня (-1400) — не перекриває ассети.
+    this.skyRect    = this.add.rectangle(0, 0, 10, 10, 0x3a3148).setDepth(-2000);
+    this.groundRect = this.add.rectangle(0, 0, 10, 10, 0x4a3f2e).setDepth(-1999);
+    this.horizon    = this.add.rectangle(0, 0, 10, 3, 0x000000, 0.25).setDepth(-1998);
+    this.gateLine   = this.add.rectangle(0, 0, 6, 10, 0x000000, 0.25).setDepth(-1997);
 
-    // Overlays для атмосфери (над грою, під HUD ~10000)
-    this.ambientRect = this.add.rectangle(0, 0, 10, 10, 0x000000, 0).setDepth(8500).setScrollFactor(0);
-    this.fogRect     = this.add.rectangle(0, 0, 10, 10, 0x8899bb, 0).setDepth(8501).setScrollFactor(0);
-    this.weatherGfx  = this.add.graphics().setDepth(8502).setScrollFactor(0);
+    // Ambient/fog overlay: world-space (scrollFactor=1), поверх ассетів (depth 8000).
+    // Переміщується з камерою → рівномірно тонує весь видимий рівень (час доби).
+    this.ambientRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000000, 0).setDepth(8000);
+    this.fogRect     = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x8899bb, 0).setDepth(8001);
+    // Дощ/сніг: screen-space (scrollFactor=0), не прив'язані до камери → перекривають весь екран.
+    this.weatherGfx  = this.add.graphics().setDepth(8002).setScrollFactor(0);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
 
     // Магазин — ціль рівня
@@ -318,15 +321,14 @@ export class GameScene extends Phaser.Scene {
   // Застосувати рівень із редактора: візуал + спавн + межі камери/гравця.
   private applyLevel(doc: LevelDoc): void {
     this.levelMode = true;
-    const hasAtm = !!doc.atmosphere;
-    this.skyRect.setVisible(hasAtm); this.groundRect.setVisible(hasAtm); this.horizon.setVisible(hasAtm);
+    const hasSky = !!doc.atmosphere?.sky?.enabled;
+    this.skyRect.setVisible(hasSky); this.groundRect.setVisible(hasSky); this.horizon.setVisible(hasSky);
     this.gateLine.setVisible(false); this.goal.setVisible(false); this.goalLabel.setVisible(false);
     this.atmosphere = doc.atmosphere ?? null; this.atmTime = 0; this.weatherTime = 0;
-    // Одразу застосуємо початковий стан (t=0), щоб небо не мигало
-    if (this.atmosphere) {
-      const s = evalAtmosphere(this.atmosphere, 0);
-      this.skyRect.setFillStyle(s.skyColor); this.groundRect.setFillStyle(s.groundColor);
-    }
+    // Скидаємо overlays одразу, щоб не лишилось від минулого рівня
+    this.ambientRect.setFillStyle(0x000000, 0);
+    this.fogRect.setFillStyle(0x8899bb, 0);
+    this.weatherGfx.clear();
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.levelStart = doc.start ?? 0;
@@ -597,9 +599,10 @@ export class GameScene extends Phaser.Scene {
     this.gateLine.setPosition(GATE_X, (this.bandTop + h) / 2).setSize(6, h - this.bandTop);
     this.goal.setPosition(WORLD_WIDTH - 120, this.bandBottom).setDepth(this.bandBottom - 1);
     this.goalLabel.setPosition(WORLD_WIDTH - 162, this.bandBottom - 150);
-    const W = this.logicalW, H = this.logicalH;
-    this.ambientRect?.setSize(W, H).setPosition(W / 2, H / 2);
-    this.fogRect?.setSize(W, H).setPosition(W / 2, H / 2);
+    // world-space overlays (scrollFactor=1): розміром на весь рівень по ширині та висоту кадру
+    const H = this.worldH;
+    this.ambientRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
+    this.fogRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
   }
 
   private onResize(): void {
@@ -774,11 +777,6 @@ export class GameScene extends Phaser.Scene {
       this.atmTime += dt;
       this.weatherTime += dt;
       this.updateAtmosphere();
-    } else {
-      // Без атмосфери — overlays прозорі
-      this.ambientRect?.setFillStyle(0x000000, 0);
-      this.fogRect?.setFillStyle(0x8899bb, 0);
-      this.weatherGfx?.clear();
     }
   }
 
@@ -858,44 +856,75 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateAtmosphere(): void {
-    if (!this.atmosphere) return;
-    const s = evalAtmosphere(this.atmosphere, this.atmTime);
-    this.skyRect.setFillStyle(s.skyColor);
-    this.groundRect.setFillStyle(s.groundColor);
-    const W = this.logicalW, H = this.logicalH;
-    this.ambientRect.setSize(W, H).setPosition(W / 2, H / 2).setFillStyle(s.ambientColor, s.ambientAlpha);
-    this.fogRect.setSize(W, H).setPosition(W / 2, H / 2).setFillStyle(0x8899bb, s.fogAlpha * 0.55);
-    this.drawWeatherFx(s.weather, s.weatherIntensity, W, H);
+    const atm = this.atmosphere!;
+    // Небо
+    if (atm.sky?.enabled) {
+      const s = evalSky(atm.sky, this.atmTime);
+      this.skyRect.setFillStyle(s.skyColor);
+      this.groundRect.setFillStyle(s.groundColor);
+    }
+    // Час доби — ambient tint поверх всіх ассетів
+    if (atm.tod?.enabled) {
+      const s = evalTod(atm.tod, this.atmTime);
+      this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha);
+    } else {
+      this.ambientRect.setFillStyle(0x000000, 0);
+    }
+    // Погода
+    if (atm.weather?.enabled) {
+      const s = evalWeather(atm.weather, this.atmTime);
+      this.fogRect.setFillStyle(0x8899bb, s.fogAlpha * 0.5);
+      this.drawWeatherFx(s.type, s.intensity);
+    } else {
+      this.fogRect.setFillStyle(0x8899bb, 0);
+      this.weatherGfx.clear();
+    }
   }
 
-  private drawWeatherFx(type: WeatherType, intensity: number, W: number, H: number): void {
+  private drawWeatherFx(type: WeatherType, intensity: number): void {
     this.weatherGfx.clear();
     if (intensity <= 0.01 || type === 'clear' || type === 'fog') return;
+
+    // Кількість крапель пропорційна до intensity та розміру екрана
+    const W = this.logicalW, H = this.logicalH;
     const t = this.weatherTime;
+    // Золотий перетин для рівномірного розподілу без кластеризації (не periodical)
+    const GR  = 0.6180339887;
+    const GR2 = 0.7548776662;
 
     if (type === 'rain') {
-      const count = Math.round(90 * intensity);
-      this.weatherGfx.lineStyle(1, 0xaaddff, 0.5 * intensity);
-      for (let i = 0; i < count; i++) {
-        const hf = (i * 997 + 1) % 1000 / 1000;
-        const vf = (i * 487 + 3) % 1000 / 1000;
-        const sx = ((hf * W + t * 45) % (W + 60) + W + 60) % (W + 60) - 30;
-        const sy = (vf * (H + 30) + t * 560) % (H + 30) - 15;
+      const N = Math.round(120 * intensity);
+      const SPEED  = 600;   // px/сек вниз
+      const ANGLE  = 0.18;  // нахил: горизонтальний дрейф = ANGLE * вертикальний крок
+      const OW = W + 120;   // ширина з запасом (щоб не видно стрибків на краях)
+      const OH = H + 40;
+      this.weatherGfx.lineStyle(1.5, 0xaaddff, Math.min(0.7, 0.5 * intensity + 0.1));
+      for (let i = 0; i < N; i++) {
+        const hf = (i * GR)  % 1;   // рівномірно по ширині
+        const vf = (i * GR2) % 1;   // рівномірно по висоті
+        // Позиції зі зміщенням у часі: хвіст (y) падає вниз, голова (x) дрейфує
+        const sy = ((vf * OH + t * SPEED)             % OH) - 20;
+        const sx = ((hf * OW + t * SPEED * ANGLE)     % OW) - 60;
+        const ey = sy + 16;
+        const ex = sx + 16 * ANGLE;
         this.weatherGfx.beginPath();
         this.weatherGfx.moveTo(sx, sy);
-        this.weatherGfx.lineTo(sx - 2, sy + 14);
+        this.weatherGfx.lineTo(ex, ey);
         this.weatherGfx.strokePath();
       }
     } else if (type === 'snow') {
-      const count = Math.round(55 * intensity);
-      this.weatherGfx.fillStyle(0xffffff, 0.65 * intensity);
-      for (let i = 0; i < count; i++) {
-        const hf = (i * 883 + 1) % 1000 / 1000;
-        const vf = (i * 557 + 7) % 1000 / 1000;
-        const drift = Math.sin(t * 0.5 + i * 0.9) * 22;
-        const sx = ((hf * W + drift) % (W + 44) + W + 44) % (W + 44) - 22;
-        const sy = (vf * (H + 44) + t * 65) % (H + 44) - 22;
-        this.weatherGfx.fillCircle(sx, sy, 1.5 + (i % 3) * 0.7);
+      const N = Math.round(70 * intensity);
+      const SPEED = 70;
+      this.weatherGfx.fillStyle(0xffffff, Math.min(0.85, 0.6 * intensity + 0.1));
+      for (let i = 0; i < N; i++) {
+        const hf = (i * GR)  % 1;
+        const vf = (i * GR2) % 1;
+        const drift = Math.sin(t * 0.45 + i * 1.1) * 25;
+        const OH = H + 50;
+        const OW = W + 100;
+        const sy = ((vf * OH + t * SPEED) % OH) - 25;
+        const sx = ((hf * OW + drift)     % OW + OW) % OW - 50;
+        this.weatherGfx.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
     }
   }
