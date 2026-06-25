@@ -59,6 +59,19 @@ const PARENT: Record<string, string | null> = {
   torso: null, neck: 'torso', head: 'neck', arm_back: 'torso', arm_front: 'torso', leg_back: 'torso', leg_front: 'torso',
   eye_back: 'head', eye_front: 'head', brow_back: 'head', brow_front: 'head', mouth: 'head',
 };
+// Dynamic helpers that also handle custom bones
+function dynParent(key: string): string | null {
+  const c = state.customBones.find((cb) => cb.key === key);
+  return c ? c.parent : (key in PARENT ? PARENT[key] : null);
+}
+function dynLen(key: string): number {
+  const c = state.customBones.find((cb) => cb.key === key);
+  if (c) return c.defaultLen;
+  const d = SLOT_DEFS.find((d) => d.key === key);
+  if (!d) return BASE.arms * state.prop.arms;
+  const w = d.len as keyof typeof BASE;
+  return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1);
+}
 // Точка кріплення дитини в ЛОКАЛЬНІЙ системі батька (одиниці). Збережено стару
 // геометрію: при bind (усі rot=0) позиції ті самі, що були (нічого не з'їжджає).
 function conn(sel: string): { x: number; y: number } {
@@ -118,10 +131,17 @@ const state = {
   startDist: 1,
   startMx: 0,
   startMy: 0,
+  ikMode: false,
+  gravBones: [] as string[],
+  customBones: [] as { key: string; label: string; parent: string; defaultLen: number }[],
 };
 let _drawRaf = 0;
 let _rigPanning = false;
 let lastDTime = 0;
+// Gravity simulation: per-bone { ang=extra rotation rad, vel=angular velocity, last parent pos }
+const gravSim = new Map<string, { ang: number; vel: number; lpx: number; lpy: number }>();
+// Gravity display offsets (degrees) applied by eff() on top of keyframe/procedural pose
+const gravOffsets = new Map<string, number>();
 for (const d of SLOT_DEFS) state.slots[d.key] = { image: null, pivotX: d.piv[0], pivotY: d.piv[1], rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false, cut2: null, bend2: 0, bendFlip2: false, cut3: null, bend3: 0, bendFlip3: false };
 
 const lenOf = (key: string): number => { const w = def(key).len as keyof typeof BASE; return BASE[w] * ((state.prop as Record<string, number>)[w] ?? 1); };
@@ -141,7 +161,7 @@ const pivotOf = (sel: string): { x: number; y: number } => (sel === 'ref' ? { x:
 // (позицію кріплення й власний арт), як і обертання.
 function worldOf(sel: string): { x: number; y: number; rot: number; gs: number } {
   const t = eff(sel);
-  const p = PARENT[sel];
+  const p = dynParent(sel);
   if (!p) {
     return { x: state.origin.x + t.dx * s(), y: state.origin.y + t.dy * s(), rot: rad(t.rot), gs: t.gscale };
   }
@@ -178,14 +198,15 @@ const mirrorX = (x: number): number => (state.facing < 0 ? 2 * state.origin.x - 
 // Завдяки спільному кореню частини не "відриваються" (фікс стрибка).
 // Поза: авторські ключі (вже в слотах) / редагування -> слот; порожній кліп при ▶ -> процедурне прев'ю.
 function eff(sel: string): Tf {
-  if (sel === 'ref' || !state.anim) return tf(sel);
+  const gOff = gravOffsets.get(sel) ?? 0;
+  if (sel === 'ref' || !state.anim) { const t = tf(sel); return gOff ? { ...t, rot: t.rot + gOff } : t; }
   const clip = state.clips[state.anim];
-  if (clip && clip.keys.length) return tf(sel); // авторські ключі вже в слотах (loadFrame)
+  if (clip && clip.keys.length) { const t = tf(sel); return gOff ? { ...t, rot: t.rot + gOff } : t; }
   const su = rigSlots()[sel]; // процедурна поза — семплимо за animT (і на ПАУЗІ теж, для скрабу)
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
   if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; }
-  return { rot: su.rot + o.drot * state.animDir, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy, gscale: su.gscale };
+  return { rot: su.rot + o.drot * state.animDir + gOff, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy, gscale: su.gscale };
 }
 
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
@@ -351,7 +372,7 @@ function undo(): void {
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigForExport(), facing: state.facing, animDir: state.animDir, clips: state.clips })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigForExport(), facing: state.facing, animDir: state.animDir, clips: state.clips, customBones: state.customBones, gravBones: state.gravBones })); } catch { /* ignore */ }
 }
 function restoreLocal(): void {
   try {
@@ -361,6 +382,14 @@ function restoreLocal(): void {
     if (typeof o.facing === 'number') state.facing = o.facing;
     if (typeof o.animDir === 'number') state.animDir = o.animDir;
     if (o.clips) state.clips = o.clips;
+    if (o.customBones) {
+      state.customBones = o.customBones;
+      for (const c of state.customBones) {
+        PARENT[c.key] = c.parent;
+        if (!state.slots[c.key]) state.slots[c.key] = { image: null, pivotX: 0.5, pivotY: 0.08, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false, cut2: null, bend2: 0, bendFlip2: false, cut3: null, bend3: 0, bendFlip3: false };
+      }
+    }
+    if (o.gravBones) state.gravBones = o.gravBones;
     if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   } catch { /* ignore */ }
 }
@@ -543,12 +572,13 @@ function _drawNow(): void {
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
   for (const d of SLOT_DEFS) drawImageAt(d.key, 1);
+  for (const c of state.customBones) drawImageAt(c.key, 1); // custom bones
 
   // скелет: кістки як лінії між суглобами (розрізана кінцівка = кілька кісток)
   if (state.showBones) {
-    for (const d of SLOT_DEFS) {
-      const pts = boneChainPx(d.key); if (!pts || pts.length < 2) continue;
-      const on = d.key === state.selected;
+    const drawBoneChain = (key: string) => {
+      const pts = boneChainPx(key); if (!pts || pts.length < 2) return;
+      const on = key === state.selected;
       ctx.strokeStyle = on ? 'rgba(120,210,255,0.95)' : 'rgba(120,210,255,0.5)';
       ctx.lineWidth = on ? 3 : 2; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
@@ -556,7 +586,9 @@ function _drawNow(): void {
       ctx.stroke();
       ctx.fillStyle = on ? '#bfe9ff' : 'rgba(190,233,255,0.7)';
       for (const pt of pts) { ctx.beginPath(); ctx.arc(pt.x, pt.y, on ? 3.5 : 2.5, 0, Math.PI * 2); ctx.fill(); }
-    }
+    };
+    for (const d of SLOT_DEFS) drawBoneChain(d.key);
+    for (const c of state.customBones) drawBoneChain(c.key);
   }
 
   // маркери pivot
@@ -569,7 +601,7 @@ function _drawNow(): void {
       ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI * 2); ctx.stroke();
     } else { ctx.beginPath(); ctx.arc(a.x, a.y, 3, 0, Math.PI * 2); ctx.fill(); }
   };
-  if (state.showPivots) for (const d of SLOT_DEFS) drawMark(d.key);
+  if (state.showPivots) { for (const d of SLOT_DEFS) drawMark(d.key); for (const c of state.customBones) drawMark(c.key); }
   drawMark(state.selected); // вибраний завжди
 
   // маркер суглоба згину (рожевий) для вибраної розрізаної частини
@@ -649,9 +681,10 @@ function curLocal(sel: string, sx: number, sy: number): { lx: number; ly: number
   return { lx: localX + p.x * img.width, ly: ry / scy + p.y * img.height, iw: img.width, ih: img.height };
 }
 function hitTest(sx: number, sy: number): string | null {
-  for (let i = SLOT_DEFS.length - 1; i >= 0; i--) {
-    const loc = curLocal(SLOT_DEFS[i].key, sx, sy);
-    if (loc && loc.lx >= 0 && loc.lx <= loc.iw && loc.ly >= 0 && loc.ly <= loc.ih) return SLOT_DEFS[i].key;
+  const allKeys = [...SLOT_DEFS.map((d) => d.key), ...state.customBones.map((c) => c.key)];
+  for (let i = allKeys.length - 1; i >= 0; i--) {
+    const loc = curLocal(allKeys[i], sx, sy);
+    if (loc && loc.lx >= 0 && loc.lx <= loc.iw && loc.ly >= 0 && loc.ly <= loc.ih) return allKeys[i];
   }
   return null;
 }
@@ -659,8 +692,9 @@ function hitTest(sx: number, sy: number): string | null {
 function assignImage(key: string, name: string | null): void {
   const slot = state.slots[key]; slot.image = name;
   if (name) {
-    const img = state.images.get(name); if (img) slot.scale = lenOf(key) / img.height;
-    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.sx = 1; slot.sy = 1; slot.gscale = 1; slot.pivotX = def(key).piv[0]; slot.pivotY = def(key).piv[1];
+    const img = state.images.get(name); if (img) slot.scale = dynLen(key) / img.height;
+    slot.rot = 0; slot.dx = 0; slot.dy = 0; slot.sx = 1; slot.sy = 1; slot.gscale = 1;
+    const d = SLOT_DEFS.find((d) => d.key === key); if (d) { slot.pivotX = d.piv[0]; slot.pivotY = d.piv[1]; }
     slot.cut = null; slot.bend = 0; slot.bendFlip = false;
   }
 }
@@ -732,6 +766,8 @@ function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
   state.mode = m; state.pivotMode = false; state.axis = null;
   state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy, gscale: t.gscale };
   if (m === 'B') { const bn = bendField(state.activeCut); state.origBend = (state.slots[state.selected] as any)?.[bn] ?? 0; }
+  // IK G mode: also save bend for undo/cancel
+  if (m === 'G' && state.ikMode && state.selected !== 'ref') { const sl = state.slots[state.selected]; if (sl?.cut != null) state.origBend = sl.bend; }
   const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x);
   state.startMx = mx; state.startMy = state.mouse.y;
@@ -744,18 +780,22 @@ function applyMode(): void {
   const t = tf(state.selected); const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x); const my = state.mouse.y;
   if (state.mode === 'G') {
-    const pr = state.selected !== 'ref' && PARENT[state.selected] ? worldOf(PARENT[state.selected]!).rot : 0;
-    let wdx = mx - state.startMx, wdy = my - state.startMy;
-    if (state.axis === 'x') wdy = 0; else if (state.axis === 'z') wdx = 0; // обмеження осі (екранна гориз./верт.)
-    const c = Math.cos(-pr), s2 = Math.sin(-pr);
-    t.dx = state.orig.dx + (wdx * c - wdy * s2) / s();
-    t.dy = state.orig.dy + (wdx * s2 + wdy * c) / s();
+    const sl = state.selected !== 'ref' ? state.slots[state.selected] : null;
+    if (state.ikMode && sl?.cut != null) { solveIK(state.selected, mx, my); }
+    else {
+      const pr = state.selected !== 'ref' && dynParent(state.selected) ? worldOf(dynParent(state.selected)!).rot : 0;
+      let wdx = mx - state.startMx, wdy = my - state.startMy;
+      if (state.axis === 'x') wdy = 0; else if (state.axis === 'z') wdx = 0;
+      const c = Math.cos(-pr), s2 = Math.sin(-pr);
+      t.dx = state.orig.dx + (wdx * c - wdy * s2) / s();
+      t.dy = state.orig.dy + (wdx * s2 + wdy * c) / s();
+    }
   } else if (state.mode === 'R') { const ang = Math.atan2(my - a.y, mx - a.x); t.rot = state.orig.rot + ((ang - state.startAng) * 180) / Math.PI; }
   else if (state.mode === 'S') {
     const ratio = Math.max(0.02, Math.hypot(mx - a.x, my - a.y) / state.startDist);
     if (state.axis === 'x') t.sx = Math.max(0.02, state.orig.sx * ratio);
     else if (state.axis === 'z') t.sy = Math.max(0.02, state.orig.sy * ratio);
-    else t.gscale = Math.max(0.02, state.orig.gscale * ratio); // уніформний масштаб поширюється на дітей
+    else t.gscale = Math.max(0.02, state.orig.gscale * ratio);
   } else if (state.mode === 'B') {
     const sl = state.slots[state.selected]; if (sl) { const bn = bendField(state.activeCut); (sl as any)[bn] = Math.max(-150, Math.min(150, state.origBend + (mx - state.startMx) * 0.8)); }
   }
@@ -766,8 +806,148 @@ function endMode(commit: boolean): void {
   if (!commit) {
     if (state.orig) Object.assign(tf(state.selected), state.orig);
     if (state.mode === 'B') { const sl = state.slots[state.selected]; if (sl) { const bn = bendField(state.activeCut); (sl as any)[bn] = state.origBend; } }
+    // Restore bend when cancelling IK G mode
+    if (state.mode === 'G' && state.ikMode) { const sl = state.slots[state.selected]; if (sl?.cut != null) sl.bend = state.origBend; }
   }
   state.mode = null; state.orig = null; state.axis = null; refreshUI();
+}
+
+// ---- IK (Інтенсивна Кінематика) ----
+function wrapAngle(a: number): number { return ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI; }
+
+// Solve 2-bone IK for bone `sel` (requires cut1). Target = (tx, ty) in screen coords.
+// Updates slot.rot (shoulder) and slot.bend (elbow). Does NOT touch dx/dy (anchor stays fixed).
+function solveIK(sel: string, tx: number, ty: number): void {
+  const slot = state.slots[sel]; if (!slot || slot.cut == null) return;
+  const img = imgOf(sel); if (!img) return;
+  const t = eff(sel);
+  // Bone total length in screen pixels
+  const totalLen = img.height * t.scale * t.sy * worldGs(sel) * s();
+  const L1 = slot.cut * totalLen;
+  const L2 = (1 - slot.cut) * totalLen;
+  if (L1 < 1 || L2 < 1) return;
+
+  // Shoulder anchor in screen space
+  const aS = anchorPx(sel); // = worldOf(sel).{x,y}
+  const parentRot = (() => { const p = dynParent(sel); return p ? worldOf(p).rot : 0; })();
+
+  const dx = tx - aS.x, dy = ty - aS.y;
+  const D = Math.min(L1 + L2 - 0.1, Math.max(Math.abs(L1 - L2) + 0.1, Math.hypot(dx, dy)));
+
+  // Law of cosines: angle α at shoulder between upper arm and the reach line S→T
+  const cosAlpha = Math.max(-1, Math.min(1, (L1 * L1 + D * D - L2 * L2) / (2 * L1 * D)));
+  const alpha = Math.acos(cosAlpha);
+
+  const dirToTarget = Math.atan2(dy, dx);
+
+  // Current bone direction in screen: bone tip vector from anchor
+  // When worldRot = wr, tip vector direction = π/2 - wr
+  const curPhi = Math.PI / 2 - worldRot(sel);
+
+  // Two IK solutions: elbow on either side. Pick the one closer to current pose.
+  const phiA = dirToTarget + alpha;
+  const phiB = dirToTarget - alpha;
+  const phi_upper = Math.abs(wrapAngle(phiA - curPhi)) <= Math.abs(wrapAngle(phiB - curPhi)) ? phiA : phiB;
+
+  // Elbow position
+  const Ex = aS.x + L1 * Math.cos(phi_upper);
+  const Ey = aS.y + L1 * Math.sin(phi_upper);
+  const phi_lower = Math.atan2(ty - Ey, tx - Ex);
+
+  // Convert upper-arm direction to slot.rot
+  const desiredWorldRot = Math.PI / 2 - phi_upper;
+  slot.rot = (desiredWorldRot - parentRot) * 180 / Math.PI;
+
+  // Bend angle: how much the lower segment rotates relative to upper at the cut joint
+  // β = phi_upper - phi_lower (sign convention matches drawImageAt bend direction)
+  const bendRad = phi_upper - phi_lower;
+  const sign = slot.flip < 0 ? -1 : 1;
+  const flipF = slot.bendFlip ? -1 : 1;
+  slot.bend = (bendRad * 180 / Math.PI) / (sign * flipF);
+}
+
+// ---- Гравітація (фізика кістки) ----
+const GRAV_K = 12;    // spring constant back to rest angle (rad/s² per radian)
+const GRAV_DAMP = 8;  // angular damping coefficient
+
+function updateGravity(dt: number): void {
+  for (const sel of state.gravBones) {
+    const slot = state.slots[sel]; if (!slot) continue;
+    let sim = gravSim.get(sel);
+    const par = dynParent(sel) ?? 'torso';
+    const pw = worldOf(par);
+    if (!sim) { sim = { ang: 0, vel: 0, lpx: pw.x, lpy: pw.y }; gravSim.set(sel, sim); }
+
+    // Acceleration of parent anchor (drives the pendulum as if gravity changes direction)
+    const accX = (pw.x - sim.lpx) / Math.max(dt, 0.001);
+    const accY = (pw.y - sim.lpy) / Math.max(dt, 0.001);
+    sim.lpx = pw.x; sim.lpy = pw.y;
+
+    // Effective gravity pulls the tip "down" (positive Y in screen). Bone hangs at ang=0.
+    // Parent lateral acceleration feels like tilt: external torque proportional to accX.
+    const extTorque = -accX * 0.003;          // drag from parent movement
+    const restoreTorque = -GRAV_K * sim.ang;   // spring to rest (ang=0)
+    const dampTorque = -GRAV_DAMP * sim.vel;   // angular damping
+
+    sim.vel += (restoreTorque + dampTorque + extTorque) * dt;
+    sim.ang += sim.vel * dt;
+    sim.ang = Math.max(-Math.PI * 0.6, Math.min(Math.PI * 0.6, sim.ang)); // ±108° clamp
+
+    gravOffsets.set(sel, sim.ang * 180 / Math.PI);
+  }
+  // Clear offsets for bones no longer in gravBones
+  for (const k of gravOffsets.keys()) if (!state.gravBones.includes(k)) gravOffsets.delete(k);
+}
+
+// ---- Додати кістку ----
+function addBone(): void {
+  const idx = state.customBones.length + 1;
+  const key = 'custom_' + idx;
+  const label = 'Кістка ' + idx;
+  const isValidParent = (k: string) => k in PARENT || state.customBones.some((c) => c.key === k);
+  const parent = state.selected !== 'ref' && isValidParent(state.selected) ? state.selected : 'torso';
+  pushUndo();
+  state.customBones.push({ key, label, parent, defaultLen: dynLen(parent) * 0.6 });
+  PARENT[key] = parent;
+  state.slots[key] = { image: null, pivotX: 0.5, pivotY: 0.08, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false, cut2: null, bend2: 0, bendFlip2: false, cut3: null, bend3: 0, bendFlip3: false };
+  state.selected = key; refreshUI();
+  status('Кістку «' + label + '» додано (батько: ' + parent + '). Перетягни зображення на неї.');
+}
+function openBoneMenu(clientX: number, clientY: number): void {
+  const sel = state.selected;
+  const cust = state.customBones.find((c) => c.key === sel);
+  if (!cust) { status('Для команд з кісткою — спочатку виділи власну кістку (+ Кістка)'); return; }
+  const menu = document.createElement('div');
+  menu.style.cssText = `position:fixed;left:${clientX}px;top:${Math.min(clientY, window.innerHeight - 120)}px;background:#2d2d2d;border:1px solid #4a4a4a;border-radius:8px;padding:4px;z-index:9999;min-width:170px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.5)`;
+  const addItem = (txt: string, fn: () => void) => {
+    const b = document.createElement('button');
+    b.textContent = txt; b.style.cssText = 'width:100%;text-align:left;background:0 0;border:0;color:#e8e8e8;padding:6px 10px;cursor:pointer;border-radius:6px;font-size:13px;';
+    b.onmouseenter = () => { b.style.background = '#3a3a3a'; }; b.onmouseleave = () => { b.style.background = ''; };
+    b.onclick = () => { menu.remove(); fn(); }; menu.appendChild(b);
+  };
+  addItem('Приперентити…', () => {
+    const valid = [...SLOT_DEFS.map((d) => d.key), ...state.customBones.map((c) => c.key).filter((k) => k !== sel)];
+    const np = prompt('Новий батько (' + valid.join(', ') + '):', cust.parent);
+    if (!np?.trim() || !valid.includes(np.trim())) { status('Невідома назва батька'); return; }
+    pushUndo(); cust.parent = np.trim(); PARENT[sel] = np.trim(); refreshUI(); status('Батько: ' + np.trim());
+  });
+  addItem('Перейменувати…', () => {
+    const nn = prompt('Нова назва:', cust.label); if (!nn?.trim()) return;
+    pushUndo(); cust.label = nn.trim(); refreshUI();
+  });
+  addItem('Видалити', () => {
+    if (!confirm('Видалити кістку «' + cust.label + '»?')) return;
+    pushUndo();
+    state.customBones = state.customBones.filter((c) => c.key !== sel);
+    delete state.slots[sel]; delete PARENT[sel];
+    state.gravBones = state.gravBones.filter((k) => k !== sel);
+    gravSim.delete(sel); gravOffsets.delete(sel);
+    if (state.selected === sel) state.selected = 'torso';
+    refreshUI(); status('Кістку видалено');
+  });
+  document.body.appendChild(menu);
+  const close = (e: MouseEvent) => { if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 10);
 }
 
 // ---- UI ----
@@ -775,8 +955,9 @@ let faceOpen = false; // підменю «Голова» (брови/очі/ро
 function refreshChips(): void {
   const make = (key: string): HTMLElement => {
     const isRef = key === 'ref';
-    const label = isRef ? 'Фоновий концепт' : def(key).label;
-    const empty = isRef ? !state.ref.canvas : !state.slots[key].image;
+    const cust = state.customBones.find((c) => c.key === key);
+    const label = isRef ? 'Фоновий концепт' : cust ? cust.label : def(key).label;
+    const empty = isRef ? !state.ref.canvas : !state.slots[key]?.image;
     const el = document.createElement('div');
     el.className = 'chip' + (key === state.selected ? ' sel' : '') + (empty ? ' empty' : '');
     el.textContent = label;
@@ -792,6 +973,11 @@ function refreshChips(): void {
     }
   };
   renderRows($('slotChips'), LIST_ROWS);
+  // Custom bones rendered after the base list
+  if (state.customBones.length > 0) {
+    const box = $('slotChips');
+    for (const c of state.customBones) box.appendChild(make(c.key));
+  }
   renderRows($('faceChips'), FACE_ROWS);
   // Mobile dock parts strip (exists only on small screens)
   const mobParts = document.getElementById('mob-char-parts-chips');
@@ -867,6 +1053,12 @@ function refreshUI(): void {
   $<HTMLButtonElement>('faceBtn').textContent = '🔄 Перевернути арт: ' + (state.facing > 0 ? '→' : '←');
   $<HTMLButtonElement>('animDirBtn').textContent = '🦵 Хода в бік: ' + (state.animDir > 0 ? '→' : '←');
   refreshBoneLabels();
+  // Sync gravity button highlight with selected bone
+  const gravBtn = document.getElementById('gravBtn') as HTMLButtonElement | null;
+  if (gravBtn) gravBtn.classList.toggle('light', state.gravBones.includes(state.selected));
+  // IK button always reflects global mode
+  const ikBtn2 = document.getElementById('ikBtn') as HTMLButtonElement | null;
+  if (ikBtn2) ikBtn2.classList.toggle('light', state.ikMode);
   saveLocal();
   draw();
 }
@@ -1231,20 +1423,32 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
-function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip> } {
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip>; customBones?: typeof state.customBones } {
   const rig = rigForExport();
   const used = new Set(Object.values(rig).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  return { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)) };
+  const doc: ReturnType<typeof buildDoc> = { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)) };
+  if (state.customBones.length) doc.customBones = JSON.parse(JSON.stringify(state.customBones));
+  return doc;
 }
-function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }): void {
+function loadCharFromDoc(doc: { proportions?: typeof state.prop; slots?: Record<string, Slot>; images?: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip>; customBones?: typeof state.customBones }): void {
   const keepAnim = state.anim; const wasPlaying = state.playing; // лишаємо ту саму вибрану анімацію після перемикання персонажа
   state.anim = null; exitClip(); // чистий вихід із поточного кліпу
   if (typeof doc.facing === 'number') state.facing = doc.facing;
   if (typeof doc.animDir === 'number') state.animDir = doc.animDir;
   if (doc.proportions) Object.assign(state.prop, doc.proportions);
   if (doc.clips) state.clips = doc.clips;
+  // Reset custom bones before loading (avoid duplicates)
+  for (const c of state.customBones) { delete state.slots[c.key]; delete PARENT[c.key]; }
+  state.customBones = [];
+  if (doc.customBones) {
+    state.customBones = JSON.parse(JSON.stringify(doc.customBones));
+    for (const c of state.customBones) {
+      PARENT[c.key] = c.parent;
+      state.slots[c.key] = { image: null, pivotX: 0.5, pivotY: 0.08, rot: 0, scale: 1, dx: 0, dy: 0, flip: 1, sx: 1, sy: 1, gscale: 1, cut: null, bend: 0, bendFlip: false, cut2: null, bend2: 0, bendFlip2: false, cut3: null, bend3: 0, bendFlip3: false };
+    }
+  }
   if (doc.slots) for (const k of Object.keys(state.slots)) if (doc.slots[k]) Object.assign(state.slots[k], doc.slots[k]);
   if (doc.images) for (const [name, data] of Object.entries(doc.images)) {
     const im = new Image();
@@ -1863,9 +2067,10 @@ let raf = 0;
 let lastTs = 0;
 function tick(ts: number): void {
   if (!state.playing) return;
-  const dt = (ts - lastTs) / 1000 || 0; lastTs = ts;
+  const dt = Math.min((ts - lastTs) / 1000, 0.1) || 0; lastTs = ts;
   const clip = curClip();
   if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; if (clip.keys.length) loadFrame(state.animT); }
+  if (state.gravBones.length > 0) updateGravity(dt);
   draw();
   movePlayhead();
   raf = requestAnimationFrame(tick);
@@ -2009,6 +2214,34 @@ $<HTMLButtonElement>('copyAnimBtn').addEventListener('click', () => {
 });
 $<HTMLButtonElement>('copyAnimBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); pasteMode = !pasteMode; refreshCopyBtn(); });
 refreshCopyBtn();
+
+// IK toggle
+$<HTMLButtonElement>('ikBtn').addEventListener('click', () => {
+  state.ikMode = !state.ikMode;
+  $<HTMLButtonElement>('ikBtn').classList.toggle('light', state.ikMode);
+  status(state.ikMode ? 'IK увімкнено: G тягни кінчик кістки-з-суглобом (cut1)' : 'IK вимкнено');
+});
+
+// Gravity toggle for selected bone
+$<HTMLButtonElement>('gravBtn').addEventListener('click', () => {
+  const sel = state.selected;
+  if (sel === 'ref' || !state.slots[sel]) { status('Виділи кістку для гравітації'); return; }
+  const idx = state.gravBones.indexOf(sel);
+  if (idx >= 0) {
+    state.gravBones.splice(idx, 1); gravSim.delete(sel); gravOffsets.delete(sel);
+    $<HTMLButtonElement>('gravBtn').classList.remove('light');
+    status('Гравітацію для «' + sel + '» вимкнено');
+  } else {
+    state.gravBones.push(sel); // sim initialized on first tick
+    $<HTMLButtonElement>('gravBtn').classList.add('light');
+    if (!state.playing) status('Гравітація увімкнена для «' + sel + '» — натисни ▶ щоб побачити');
+  }
+  draw();
+});
+
+// Add bone
+$<HTMLButtonElement>('addBoneBtn').addEventListener('click', addBone);
+$<HTMLButtonElement>('addBoneBtn').addEventListener('contextmenu', (e) => { e.preventDefault(); openBoneMenu(e.clientX, e.clientY); });
 
 $<HTMLButtonElement>('ghostBtn').addEventListener('click', () => {
   ghostEnabled = !ghostEnabled;
