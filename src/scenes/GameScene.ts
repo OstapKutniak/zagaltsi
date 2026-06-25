@@ -16,6 +16,7 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import type { NodeGraph } from '../node-editor';
+import { type Atmosphere, type WeatherType, evalAtmosphere } from '../level/atmosphere';
 
 interface Remote {
   container: CutoutCharacter | null;
@@ -47,6 +48,14 @@ export class GameScene extends Phaser.Scene {
   private gateLine!: Phaser.GameObjects.Rectangle;
   private goal!: Phaser.GameObjects.Rectangle;
   private goalLabel!: Phaser.GameObjects.Text;
+
+  // Атмосфера
+  private atmosphere: Atmosphere | null = null;
+  private atmTime = 0;
+  private weatherTime = 0;
+  private ambientRect!: Phaser.GameObjects.Rectangle;
+  private fogRect!: Phaser.GameObjects.Rectangle;
+  private weatherGfx!: Phaser.GameObjects.Graphics;
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -199,6 +208,12 @@ export class GameScene extends Phaser.Scene {
     this.horizon = this.add.rectangle(0, 0, 10, 3, 0x000000, 0.25).setDepth(-999);
     this.gateLine = this.add.rectangle(0, 0, 6, 10, 0x000000, 0.25).setDepth(-998);
 
+    // Overlays для атмосфери (над грою, під HUD ~10000)
+    this.ambientRect = this.add.rectangle(0, 0, 10, 10, 0x000000, 0).setDepth(8500).setScrollFactor(0);
+    this.fogRect     = this.add.rectangle(0, 0, 10, 10, 0x8899bb, 0).setDepth(8501).setScrollFactor(0);
+    this.weatherGfx  = this.add.graphics().setDepth(8502).setScrollFactor(0);
+    this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
+
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
     this.goalLabel = this.add.text(0, 0, 'МАГАЗИН', {
@@ -303,8 +318,15 @@ export class GameScene extends Phaser.Scene {
   // Застосувати рівень із редактора: візуал + спавн + межі камери/гравця.
   private applyLevel(doc: LevelDoc): void {
     this.levelMode = true;
-    this.skyRect.setVisible(false); this.groundRect.setVisible(false); this.horizon.setVisible(false);
+    const hasAtm = !!doc.atmosphere;
+    this.skyRect.setVisible(hasAtm); this.groundRect.setVisible(hasAtm); this.horizon.setVisible(hasAtm);
     this.gateLine.setVisible(false); this.goal.setVisible(false); this.goalLabel.setVisible(false);
+    this.atmosphere = doc.atmosphere ?? null; this.atmTime = 0; this.weatherTime = 0;
+    // Одразу застосуємо початковий стан (t=0), щоб небо не мигало
+    if (this.atmosphere) {
+      const s = evalAtmosphere(this.atmosphere, 0);
+      this.skyRect.setFillStyle(s.skyColor); this.groundRect.setFillStyle(s.groundColor);
+    }
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.levelStart = doc.start ?? 0;
@@ -575,6 +597,9 @@ export class GameScene extends Phaser.Scene {
     this.gateLine.setPosition(GATE_X, (this.bandTop + h) / 2).setSize(6, h - this.bandTop);
     this.goal.setPosition(WORLD_WIDTH - 120, this.bandBottom).setDepth(this.bandBottom - 1);
     this.goalLabel.setPosition(WORLD_WIDTH - 162, this.bandBottom - 150);
+    const W = this.logicalW, H = this.logicalH;
+    this.ambientRect?.setSize(W, H).setPosition(W / 2, H / 2);
+    this.fogRect?.setSize(W, H).setPosition(W / 2, H / 2);
   }
 
   private onResize(): void {
@@ -744,6 +769,17 @@ export class GameScene extends Phaser.Scene {
       this.step(FIXED_DT);
       this.accumulator -= FIXED_DT;
     }
+    if (this.atmosphere) {
+      const dt = Math.min(delta / 1000, 0.1);
+      this.atmTime += dt;
+      this.weatherTime += dt;
+      this.updateAtmosphere();
+    } else {
+      // Без атмосфери — overlays прозорі
+      this.ambientRect?.setFillStyle(0x000000, 0);
+      this.fogRect?.setFillStyle(0x8899bb, 0);
+      this.weatherGfx?.clear();
+    }
   }
 
   private step(dt: number): void {
@@ -819,6 +855,49 @@ export class GameScene extends Phaser.Scene {
     this.updateHud();
     this.updateAnxietyFx();
     if (this.player.hp <= 0) this.scene.restart();
+  }
+
+  private updateAtmosphere(): void {
+    if (!this.atmosphere) return;
+    const s = evalAtmosphere(this.atmosphere, this.atmTime);
+    this.skyRect.setFillStyle(s.skyColor);
+    this.groundRect.setFillStyle(s.groundColor);
+    const W = this.logicalW, H = this.logicalH;
+    this.ambientRect.setSize(W, H).setPosition(W / 2, H / 2).setFillStyle(s.ambientColor, s.ambientAlpha);
+    this.fogRect.setSize(W, H).setPosition(W / 2, H / 2).setFillStyle(0x8899bb, s.fogAlpha * 0.55);
+    this.drawWeatherFx(s.weather, s.weatherIntensity, W, H);
+  }
+
+  private drawWeatherFx(type: WeatherType, intensity: number, W: number, H: number): void {
+    this.weatherGfx.clear();
+    if (intensity <= 0.01 || type === 'clear' || type === 'fog') return;
+    const t = this.weatherTime;
+
+    if (type === 'rain') {
+      const count = Math.round(90 * intensity);
+      this.weatherGfx.lineStyle(1, 0xaaddff, 0.5 * intensity);
+      for (let i = 0; i < count; i++) {
+        const hf = (i * 997 + 1) % 1000 / 1000;
+        const vf = (i * 487 + 3) % 1000 / 1000;
+        const sx = ((hf * W + t * 45) % (W + 60) + W + 60) % (W + 60) - 30;
+        const sy = (vf * (H + 30) + t * 560) % (H + 30) - 15;
+        this.weatherGfx.beginPath();
+        this.weatherGfx.moveTo(sx, sy);
+        this.weatherGfx.lineTo(sx - 2, sy + 14);
+        this.weatherGfx.strokePath();
+      }
+    } else if (type === 'snow') {
+      const count = Math.round(55 * intensity);
+      this.weatherGfx.fillStyle(0xffffff, 0.65 * intensity);
+      for (let i = 0; i < count; i++) {
+        const hf = (i * 883 + 1) % 1000 / 1000;
+        const vf = (i * 557 + 7) % 1000 / 1000;
+        const drift = Math.sin(t * 0.5 + i * 0.9) * 22;
+        const sx = ((hf * W + drift) % (W + 44) + W + 44) % (W + 44) - 22;
+        const sy = (vf * (H + 44) + t * 65) % (H + 44) - 22;
+        this.weatherGfx.fillCircle(sx, sy, 1.5 + (i % 3) * 0.7);
+      }
+    }
   }
 
   private completeLevel(): void {

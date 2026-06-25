@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { footprintWorldCells, footprintFrontEditorY } from './footprint';
+import type { Atmosphere } from './atmosphere';
 
 // Малює рівень (з редактора рівнів) у грі: тайли/фон/небо/декор як спрайти у світі.
 // Координати рівня: x — уздовж рівня, y — від лінії землі (0 = підлога, де ноги).
@@ -47,6 +48,7 @@ export interface LevelDoc {
   enemySpawns?: string[]; // зони спавна ворогів: "cx,cy" — кут 3×3 підлогових клітинок
   grid?: number;
   parallax?: Record<string, number>; // «Дальність» 0..1 per-шар
+  atmosphere?: Atmosphere;
 }
 
 // Шари (depth) ззаду→наперед. Небо/хмари/задній фон/перед.фон/карта — позаду персонажа;

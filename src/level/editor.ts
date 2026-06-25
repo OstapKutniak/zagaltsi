@@ -8,6 +8,7 @@ import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { animOffset, PLAN_DIST_STEP, type PlacedAnim } from './LevelView';
+import { type Atmosphere, type AtmospherePhase, type WeatherType, defaultPhase } from './atmosphere';
 import { generateGameAsset, hasFalKey } from '../ai';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
@@ -46,7 +47,7 @@ const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim }
-interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
@@ -1231,6 +1232,146 @@ export function initLevelEditor(prefix: string): void {
     });
   }
 
+  // ── Атмосфера: процедурна зміна неба й погоди ──
+  const atmToggle = $<HTMLButtonElement>('atmToggle');
+  const atmPanel  = $<HTMLElement>('atmPanel');
+  if (atmToggle && atmPanel) {
+    atmPanel.style.display = 'none';
+    atmToggle.addEventListener('click', () => {
+      const open = atmPanel.style.display === 'none';
+      atmPanel.style.display = open ? 'flex' : 'none';
+      atmToggle.classList.toggle('on', open);
+      if (open) renderAtmPanel();
+    });
+  }
+
+  function ensureAtm(): Atmosphere {
+    const lv = level();
+    if (!lv.atmosphere) {
+      lv.atmosphere = {
+        cycleSec: 60,
+        phases: [
+          { ...defaultPhase(0),    skyHex: '#1a1030', groundHex: '#2a1f1a', ambientHex: '#000022', ambientAlpha: 0.3, weather: 'clear', weatherIntensity: 0, fogAlpha: 0 },
+          { ...defaultPhase(0.25), skyHex: '#e87040', groundHex: '#5a3820', ambientHex: '#ff8844', ambientAlpha: 0.12, weather: 'clear', weatherIntensity: 0, fogAlpha: 0 },
+          { ...defaultPhase(0.5),  skyHex: '#7ec8e3', groundHex: '#5a8040', ambientHex: '#fff0cc', ambientAlpha: 0.06, weather: 'clear', weatherIntensity: 0, fogAlpha: 0 },
+          { ...defaultPhase(0.75), skyHex: '#c0603a', groundHex: '#4a3020', ambientHex: '#ff6622', ambientAlpha: 0.14, weather: 'clear', weatherIntensity: 0, fogAlpha: 0 },
+        ],
+      };
+    }
+    return lv.atmosphere!;
+  }
+
+  const WEATHER_LABELS: Record<string, string> = { clear: 'Ясно', rain: 'Дощ', snow: 'Сніг', fog: 'Туман' };
+
+  function renderAtmPanel(): void {
+    if (!atmPanel) return;
+    atmPanel.innerHTML = '';
+    if (!level().atmosphere) {
+      const startBtn = document.createElement('button');
+      startBtn.textContent = 'Увімкнути атмосферу';
+      startBtn.style.cssText = 'width:100%;font-size:11px;padding:5px;';
+      startBtn.addEventListener('click', () => { ensureAtm(); save(); renderAtmPanel(); });
+      atmPanel.appendChild(startBtn);
+      return;
+    }
+    const atm = level().atmosphere!;
+
+    // Тривалість циклу
+    const cycleRow = document.createElement('div');
+    cycleRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0';
+    const cycleLbl = document.createElement('span'); cycleLbl.style.cssText = 'color:var(--muted);flex:0 0 72px'; cycleLbl.textContent = 'Цикл (сек)';
+    const cycleInp = document.createElement('input') as HTMLInputElement;
+    cycleInp.type = 'number'; cycleInp.min = '5'; cycleInp.max = '3600'; cycleInp.value = String(atm.cycleSec);
+    cycleInp.style.cssText = 'width:56px;background:var(--rail);border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-size:12px;color:var(--ink);font-family:inherit';
+    cycleInp.addEventListener('change', () => { atm.cycleSec = Math.max(5, Number(cycleInp.value) || 60); save(); });
+    cycleRow.appendChild(cycleLbl); cycleRow.appendChild(cycleInp); atmPanel.appendChild(cycleRow);
+
+    // Градієнтна смужка-прев'ю циклу (показує кольори неба)
+    const previewBar = document.createElement('canvas'); previewBar.width = 200; previewBar.height = 12;
+    previewBar.style.cssText = 'width:100%;height:12px;border-radius:4px;margin:2px 0';
+    const pctx = previewBar.getContext('2d')!;
+    const grad = pctx.createLinearGradient(0, 0, 200, 0);
+    const sorted = [...atm.phases].sort((a, b) => a.t - b.t);
+    for (const p of sorted) grad.addColorStop(p.t, p.skyHex);
+    if (sorted.length && sorted[sorted.length - 1].t < 1) grad.addColorStop(1, sorted[0].skyHex);
+    pctx.fillStyle = grad; pctx.fillRect(0, 0, 200, 12);
+    atmPanel.appendChild(previewBar);
+
+    // Фази
+    const list = document.createElement('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+    atm.phases.forEach((ph: AtmospherePhase, idx: number) => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:var(--rail);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px';
+
+      // Час % + видалити
+      const hd = document.createElement('div'); hd.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px';
+      const tLbl = document.createElement('span'); tLbl.style.cssText = 'color:var(--muted)'; tLbl.textContent = 'Час %';
+      const tInp = document.createElement('input') as HTMLInputElement;
+      tInp.type = 'number'; tInp.min = '0'; tInp.max = '100'; tInp.value = String(Math.round(ph.t * 100));
+      tInp.style.cssText = 'width:44px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 4px;font-size:11px;color:var(--ink);font-family:inherit';
+      tInp.addEventListener('change', () => { ph.t = Math.max(0, Math.min(1, Number(tInp.value) / 100)); atm.phases.sort((a: AtmospherePhase, b: AtmospherePhase) => a.t - b.t); save(); renderAtmPanel(); });
+      const delBtn = document.createElement('button'); delBtn.textContent = '✕'; delBtn.style.cssText = 'margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px';
+      delBtn.addEventListener('click', () => { if (atm.phases.length > 2) { atm.phases.splice(idx, 1); save(); renderAtmPanel(); } else { setStatus('Мінімум 2 фази'); } });
+      hd.appendChild(tLbl); hd.appendChild(tInp); hd.appendChild(delBtn); card.appendChild(hd);
+
+      // Кольори
+      const colorRow = document.createElement('div'); colorRow.style.cssText = 'display:flex;gap:6px;align-items:flex-end';
+      const addColor = (lbl: string, val: string, onChange: (v: string) => void): void => {
+        const wr = document.createElement('div'); wr.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px';
+        const sp = document.createElement('span'); sp.style.cssText = 'font-size:10px;color:var(--muted)'; sp.textContent = lbl;
+        const inp = document.createElement('input') as HTMLInputElement;
+        inp.type = 'color'; inp.value = val; inp.style.cssText = 'width:30px;height:24px;padding:1px;border:1px solid var(--line);border-radius:3px;cursor:pointer;background:none';
+        inp.addEventListener('input', () => { onChange(inp.value); save(); renderAtmPanel(); });
+        wr.appendChild(sp); wr.appendChild(inp); colorRow.appendChild(wr);
+      };
+      addColor('Небо', ph.skyHex, (v) => { ph.skyHex = v; });
+      addColor('Земля', ph.groundHex, (v) => { ph.groundHex = v; });
+      addColor('Накл.', ph.ambientHex, (v) => { ph.ambientHex = v; });
+      card.appendChild(colorRow);
+
+      // Слайдери
+      const mkSlider = (lbl: string, val: number, onChange: (v: number) => void): HTMLElement => {
+        const wr = document.createElement('div'); wr.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px';
+        const sp = document.createElement('span'); sp.style.cssText = 'color:var(--muted);flex:0 0 50px'; sp.textContent = lbl;
+        const sl = document.createElement('input') as HTMLInputElement;
+        sl.type = 'range'; sl.min = '0'; sl.max = '100'; sl.step = '1'; sl.value = String(Math.round(val * 100)); sl.style.cssText = 'flex:1;accent-color:var(--sel)';
+        const vl = document.createElement('span'); vl.style.cssText = 'flex:0 0 28px;text-align:right;color:var(--muted)'; vl.textContent = Math.round(val * 100) + '%';
+        sl.addEventListener('input', () => { const v = Number(sl.value) / 100; onChange(v); vl.textContent = Math.round(v * 100) + '%'; save(); });
+        wr.appendChild(sp); wr.appendChild(sl); wr.appendChild(vl); return wr;
+      };
+      card.appendChild(mkSlider('Накл.α', ph.ambientAlpha, (v) => { ph.ambientAlpha = v; }));
+      card.appendChild(mkSlider('Туман', ph.fogAlpha, (v) => { ph.fogAlpha = v; }));
+
+      // Погода
+      const wxRow = document.createElement('div'); wxRow.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px';
+      const wxLbl = document.createElement('span'); wxLbl.style.cssText = 'color:var(--muted);flex:0 0 50px'; wxLbl.textContent = 'Погода';
+      const wxSel = document.createElement('select') as HTMLSelectElement;
+      wxSel.style.cssText = 'flex:1;background:var(--rail);border:1px solid var(--line);border-radius:4px;color:var(--ink);font-size:11px;padding:2px;font-family:inherit';
+      (['clear','rain','snow','fog'] as WeatherType[]).forEach((w) => {
+        const o = document.createElement('option'); o.value = w; o.textContent = WEATHER_LABELS[w]; wxSel.appendChild(o);
+      });
+      wxSel.value = ph.weather;
+      wxSel.addEventListener('change', () => { ph.weather = wxSel.value as WeatherType; save(); });
+      wxRow.appendChild(wxLbl); wxRow.appendChild(wxSel); card.appendChild(wxRow);
+      card.appendChild(mkSlider('Інтенс.', ph.weatherIntensity, (v) => { ph.weatherIntensity = v; }));
+
+      list.appendChild(card);
+    });
+    atmPanel.appendChild(list);
+
+    // Кнопки
+    const addBtn = document.createElement('button'); addBtn.textContent = '+ Додати фазу'; addBtn.style.cssText = 'width:100%;font-size:11px;padding:5px;margin-top:2px';
+    addBtn.addEventListener('click', () => {
+      const t = atm.phases.length ? (atm.phases[atm.phases.length - 1].t + 0.5) % 1 : 0.5;
+      atm.phases.push(defaultPhase(t)); atm.phases.sort((a: AtmospherePhase, b: AtmospherePhase) => a.t - b.t); save(); renderAtmPanel();
+    });
+    atmPanel.appendChild(addBtn);
+
+    const disBtn = document.createElement('button'); disBtn.textContent = 'Вимкнути атмосферу'; disBtn.style.cssText = 'width:100%;font-size:11px;padding:5px;color:var(--muted)';
+    disBtn.addEventListener('click', () => { delete level().atmosphere; save(); renderAtmPanel(); });
+    atmPanel.appendChild(disBtn);
+  }
+
   function snapToEdge(): void {
     const p = sel(); const img = imgOf(p as Placed); if (!p || !img) return;
     const w = img.width * p.scale, h = img.height * p.scale;
@@ -2315,7 +2456,9 @@ export function initLevelEditor(prefix: string): void {
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    return { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    if (lv.atmosphere) doc.atmosphere = lv.atmosphere;
+    return doc;
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
     idbSet('zag_level', buildLevelDoc())
