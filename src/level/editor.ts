@@ -88,6 +88,7 @@ export function initLevelEditor(prefix: string): void {
     showEnemySpawns: true,
     showPlayerSpawns: true,
     hiddenCats: new Set<string>(),
+    hiddenIds: new Set<string>(), // тимчасово приховані ассети (тільки редактор, H / Alt+H)
     soloFillCat: null as string | null,
     zoom: 0.6,
     pan: { x: 0, y: 0 },
@@ -318,7 +319,7 @@ export function initLevelEditor(prefix: string): void {
   }
   function placedSorted(): Placed[] {
     return level().placed
-      .filter((p) => !state.hiddenCats.has(p.cat)) // «Наповнення» — приховані категорії не малюються/не клікаються
+      .filter((p) => !state.hiddenCats.has(p.cat) && !state.hiddenIds.has(p.id)) // приховані категорії + окремо приховані ассети (H)
       // у межах шару: більший plan (ближче) малюється пізніше = зверху
       .sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || ((a.plan ?? 0) - (b.plan ?? 0)) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
   }
@@ -2077,7 +2078,21 @@ export function initLevelEditor(prefix: string): void {
         refreshSel(); draw(); save(); startMode('G');
       }
     }
-    else if (ev.code === 'KeyH') { ev.preventDefault(); state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns(); if (state.pathTool === 'h') setStatus('Підлога (земля). Наведи на клітинку: 1 вище / 2 нижче / 3 вирівняти — стіни малюються самі'); }
+    else if (ev.code === 'KeyH') {
+      ev.preventDefault();
+      if (ev.altKey) {
+        // Alt+H — показати всі приховані ассети
+        state.hiddenIds.clear(); setStatus('Усі скриті ассети показано'); draw();
+      } else if (state.selected && !state.pathTool && !state.mode) {
+        // H з вибраним ассетом — сховати його
+        state.hiddenIds.add(state.selected); state.selected = null; refreshSel(); draw();
+        setStatus('Ассет прихований · Alt+H — показати всі');
+      } else {
+        // H без вибраного — інструмент підлоги (як раніше)
+        state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns();
+        if (state.pathTool === 'h') setStatus('Підлога (земля). 1 вище / 2 нижче / 3 вирівняти');
+      }
+    }
     // Висотні інструменти: 1 підняти / 2 опустити / 3 вирівняти. Клавіша лише АКТИВУЄ режим —
     // далі наводиш на колайдер (підсвічується білим) і клікаєш/тягнеш ЛКМ, щоб застосувати.
     else if (ev.code === 'Digit1') { ev.preventDefault(); state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: наведи на колайдер і клікай/тягни ЛКМ' : ''); draw(); }
