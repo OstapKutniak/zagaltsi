@@ -65,11 +65,20 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   const data = id.data;
   const at = (x: number, y: number): number => (y * W + x) * 4;
 
-  const corners = [[0, 0], [W - 1, 0], [0, H - 1], [W - 1, H - 1]].map(([x, y]) => {
+  // Збираємо кольори крайових пікселів ігноруючи прозорі (alpha<120) — щоб повторний
+  // прохід після часткового вирізу не плутав BG=(0,0,0) з прозорих кутів.
+  const edgePx: number[][] = [];
+  const tryEdge = (x: number, y: number): void => {
     const i = at(x, y);
-    return [data[i], data[i + 1], data[i + 2]];
-  });
-  const bg = [0, 1, 2].map((k) => Math.round(corners.reduce((s, c) => s + c[k], 0) / corners.length));
+    if (data[i + 3] >= 120) edgePx.push([data[i], data[i + 1], data[i + 2]]);
+  };
+  for (let x = 0; x < W; x++) { tryEdge(x, 0); tryEdge(x, H - 1); }
+  for (let y = 1; y < H - 1; y++) { tryEdge(0, y); tryEdge(W - 1, y); }
+  if (edgePx.length < 4) return canvas; // немає непрозорих країв — нічого вирізати
+  const bg = [0, 1, 2].map((k) => Math.round(edgePx.reduce((s, c) => s + c[k], 0) / edgePx.length));
+  // Перевірка однорідності краю: якщо розкид > 50 — не суцільний фон, пропускаємо
+  const spread = edgePx.reduce((m, p) => Math.max(m, Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2])), 0);
+  if (spread > 50) return canvas;
   const dist = (i: number): number => Math.hypot(data[i] - bg[0], data[i + 1] - bg[1], data[i + 2] - bg[2]);
 
   const isBg = new Uint8Array(W * H);

@@ -873,8 +873,11 @@ export function initLevelEditor(prefix: string): void {
       setStatus('Очищення фону…');
       try {
         const img = await loadImageEl(a.url);
-        if (!hasSolidBackground(img)) { setStatus('Фон вже прозорий або неоднорідний'); return; }
-        a.url = keyImage(img).toDataURL('image/png');
+        // Не перевіряємо hasSolidBackground — юзер явно просить, keyImage сам вирішить
+        // чи є фон (через перевірку крайових пікселів і spread > 50 всередині).
+        const keyed = keyImage(img).toDataURL('image/png');
+        if (keyed === a.url) { setStatus('Фон не виявлено або вже очищено'); return; }
+        a.url = keyed;
         save(); refreshAssets(); draw(); setStatus('Фон очищено');
       } catch { setStatus('Не вдалося очистити фон'); }
     });
