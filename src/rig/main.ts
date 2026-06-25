@@ -99,6 +99,7 @@ const state = {
   slots: {} as Record<string, Slot>,
   selected: 'torso',
   showPivots: true,
+  showBones: false,
   pivotMode: false,
   cutMode: false,
   activeCut: 1 as (1 | 2 | 3),
@@ -390,6 +391,52 @@ function accumBounds(a: { x: number; y: number }, ang: number, sxv: number, syv:
     if (py < charBB.minY) charBB.minY = py; if (py > charBB.maxY) charBB.maxY = py;
   }
 }
+// Екранні точки ланцюга кісток слота (для відображення скелета). Повторює трансформ
+// drawImageAt: локальні згини розрізів → масштаб(flip)→поворот ланцюга→анкер.
+// Розрізана кінцівка = кілька кісток: верх→розріз1→розріз2→…→кінчик.
+function boneChainPx(sel: string): { x: number; y: number }[] | null {
+  if (sel === 'ref') return null;
+  const img = imgOf(sel); if (!img) return null;
+  const slot = state.slots[sel];
+  const t = eff(sel); const p = pivotOf(sel); const a = anchorPx(sel);
+  const w = img.width, h = img.height;
+  const ox = -p.x * w, oy = -p.y * h;
+  const jx = ox + 0.5 * w;
+  const proc = !!(state.anim && !(state.clips[state.anim]?.keys.length));
+  const pB = (fn: (n: string, t: number, k: string) => number): number => proc ? fn(state.anim as string, state.animT, sel) * state.animDir : 0;
+  interface CutEntry { pos: number; bend: number; bendFlip: boolean }
+  const cuts: CutEntry[] = [];
+  if (slot.cut != null) cuts.push({ pos: slot.cut, bend: slot.bend + pB(animBend), bendFlip: slot.bendFlip });
+  if (slot.cut2 != null) cuts.push({ pos: slot.cut2, bend: (slot.bend2 ?? 0) + pB(animBend2), bendFlip: slot.bendFlip2 ?? false });
+  if (slot.cut3 != null) cuts.push({ pos: slot.cut3, bend: (slot.bend3 ?? 0) + pB(animBend3), bendFlip: slot.bendFlip3 ?? false });
+  cuts.sort((c1, c2) => c1.pos - c2.pos);
+  const sign = slot.flip < 0 ? -1 : 1;
+  const jyOrig = cuts.map((c) => oy + c.pos * h);                                  // оригінальні (незігнуті) y суглобів
+  const bendRad = cuts.map((c) => rad(c.bend * sign * (c.bendFlip ? -1 : 1)));
+  // застосувати згини 0..count-1 (зовнішній→внутрішній) до локальної точки
+  const applyBends = (lx: number, ly: number, count: number): { x: number; y: number } => {
+    let x = lx, y = ly;
+    for (let j = count - 1; j >= 0; j--) {
+      const dx = x - jx, dy = y - jyOrig[j];
+      const cs = Math.cos(bendRad[j]), sn = Math.sin(bendRad[j]);
+      x = jx + dx * cs - dy * sn; y = jyOrig[j] + dx * sn + dy * cs;
+    }
+    return { x, y };
+  };
+  const localPts: { x: number; y: number }[] = [];
+  localPts.push(applyBends(jx, oy, 0));                                            // верх кістки
+  for (let i = 0; i < cuts.length; i++) localPts.push(applyBends(jx, jyOrig[i], i)); // суглоби
+  localPts.push(applyBends(jx, oy + h, cuts.length));                             // кінчик
+  // локальні → екран: масштаб(flip*scx, scy) → поворот(worldRot) → +анкер
+  const wgs = worldGs(sel);
+  const sxp = t.flip * t.scale * t.sx * wgs * s(), syp = t.scale * t.sy * wgs * s();
+  const wr = worldRot(sel); const cw = Math.cos(wr), sw = Math.sin(wr);
+  return localPts.map((pt) => {
+    const X = pt.x * sxp, Y = pt.y * syp;
+    return { x: a.x + X * cw - Y * sw, y: a.y + X * sw + Y * cw };
+  });
+}
+
 function drawImageAt(sel: string, alpha: number): void {
   const img = imgOf(sel); if (!img) return;
   const t = eff(sel); const p = pivotOf(sel); const a = anchorPx(sel);
@@ -496,6 +543,21 @@ function _drawNow(): void {
   if (state.facing < 0) { ctx.translate(state.origin.x, 0); ctx.scale(-1, 1); ctx.translate(-state.origin.x, 0); }
   if (state.showRef) drawImageAt('ref', state.selected === 'ref' ? 0.5 : 0.22);
   for (const d of SLOT_DEFS) drawImageAt(d.key, 1);
+
+  // скелет: кістки як лінії між суглобами (розрізана кінцівка = кілька кісток)
+  if (state.showBones) {
+    for (const d of SLOT_DEFS) {
+      const pts = boneChainPx(d.key); if (!pts || pts.length < 2) continue;
+      const on = d.key === state.selected;
+      ctx.strokeStyle = on ? 'rgba(120,210,255,0.95)' : 'rgba(120,210,255,0.5)';
+      ctx.lineWidth = on ? 3 : 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      ctx.fillStyle = on ? '#bfe9ff' : 'rgba(190,233,255,0.7)';
+      for (const pt of pts) { ctx.beginPath(); ctx.arc(pt.x, pt.y, on ? 3.5 : 2.5, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
 
   // маркери pivot
   const drawMark = (sel: string) => {
@@ -827,6 +889,7 @@ $<HTMLButtonElement>('bendFlipBtn').addEventListener('click', () => {
 $<HTMLButtonElement>('setPivot').addEventListener('click', () => { if (state.selected !== 'ref') { state.pivotMode = !state.pivotMode; state.mode = null; refreshUI(); } });
 $<HTMLButtonElement>('resetPart').addEventListener('click', () => { pushUndo(); if (state.selected === 'ref') Object.assign(state.ref, { rot: 0, scale: 1, dx: 0, dy: 0 }); else assignImage(state.selected, state.slots[state.selected].image); refreshUI(); });
 $<HTMLInputElement>('showPivots').addEventListener('change', (e) => { state.showPivots = (e.target as HTMLInputElement).checked; draw(); });
+$<HTMLInputElement>('showBones')?.addEventListener('change', (e) => { state.showBones = (e.target as HTMLInputElement).checked; draw(); });
 $<HTMLInputElement>('showRef').addEventListener('change', (e) => { state.showRef = (e.target as HTMLInputElement).checked; draw(); });
 let showGrid = true;
 const gridBtn = $<HTMLButtonElement>('gridBtn');

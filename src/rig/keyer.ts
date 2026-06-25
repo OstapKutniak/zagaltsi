@@ -5,7 +5,9 @@
 
 const FUZZINESS = 34;
 const TIGHT_TOL = 8;
-const FLAT_FRAC = 0.6;
+const FLAT_FRAC = 0.6;       // поріг «плоского острова» для областей, що торкаються краю (зовнішнє «море»)
+const ENCLOSED_FRAC = 0.18;  // м'якший поріг для ЗАМКНЕНИХ кишень (діра у волоссі, між ногами): антиаліас-край
+                             // розбавляє частку «точних» пікселів, тож для оточених фоном областей вимагаємо менше
 const ERODE = 2;
 
 // Завантажити dataURL/URL у <img>.
@@ -76,12 +78,14 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   const lab = new Int32Array(W * H);
   const area = [0];
   const exact = [0];
+  const border = [0]; // 1 = область торкається краю картинки (зовнішнє «море»), 0 = замкнена кишеня
   let cc = 0;
   for (let p0 = 0; p0 < W * H; p0++) {
     if (!isBg[p0] || lab[p0]) continue;
     cc++;
     area.push(0);
     exact.push(0);
+    border.push(0);
     const st = [p0];
     lab[p0] = cc;
     while (st.length) {
@@ -89,6 +93,7 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
       area[cc]++;
       if (dist(q * 4) <= TIGHT_TOL) exact[cc]++;
       const qx = q % W, qy = (q / W) | 0;
+      if (qx === 0 || qy === 0 || qx === W - 1 || qy === H - 1) border[cc] = 1;
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
           const nx = qx + dx, ny = qy + dy;
@@ -105,7 +110,10 @@ export function keyImage(img: HTMLImageElement): HTMLCanvasElement {
   let fg = new Uint8Array(W * H);
   for (let p = 0; p < W * H; p++) {
     const lid = lab[p];
-    const flat = lid && exact[lid] / area[lid] >= FLAT_FRAC;
+    // Зовнішнє «море» (торкається краю) — суворий поріг; замкнена кишеня — м'якший,
+    // бо її антиаліас-периметр займає більшу частку малої площі.
+    const thr = lid && border[lid] ? FLAT_FRAC : ENCLOSED_FRAC;
+    const flat = lid && exact[lid] / area[lid] >= thr;
     fg[p] = flat ? 0 : 1;
   }
   for (let k = 0; k < ERODE; k++) {
