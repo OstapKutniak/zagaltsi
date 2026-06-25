@@ -7,6 +7,7 @@ import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
+import { animOffset, PLAN_DIST_STEP, type PlacedAnim } from './LevelView';
 import { generateGameAsset, hasFalKey } from '../ai';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
@@ -44,7 +45,7 @@ const GAME_VIEW_W = 1280; // ширина ігрового кадру — для
 const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim }
 interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number> }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
@@ -96,6 +97,7 @@ export function initLevelEditor(prefix: string): void {
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     pendingEnemy: null as string | null,          // id ворога що зараз виставляється
     pendingNeutral: null as string | null,        // id нейтрала що зараз виставляється
+    animLinePid: null as string | null,           // id ассета, для якого зараз малюємо лінію руху
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
   };
 
@@ -111,6 +113,10 @@ export function initLevelEditor(prefix: string): void {
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
 
+  // Оголошено рано (до draw/previewActive), щоб не було TDZ при першому малюванні.
+  let drag: { x: number; y: number; ox: number; oy: number } | null = null;
+  let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
+  let painting = false;
   let _drawRaf = 0;
   let _panning = false;
 
@@ -305,7 +311,8 @@ export function initLevelEditor(prefix: string): void {
   function placedSorted(): Placed[] {
     return level().placed
       .filter((p) => !state.hiddenCats.has(p.cat)) // «Наповнення» — приховані категорії не малюються/не клікаються
-      .sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
+      // у межах шару: більший plan (ближче) малюється пізніше = зверху
+      .sort((a, b) => (LAYER[a.cat] - LAYER[b.cat]) || ((a.plan ?? 0) - (b.plan ?? 0)) || (level().placed.indexOf(a) - level().placed.indexOf(b)));
   }
   // Світові ізо-клітинки, вирізані футпринтами розміщених ассетів (непрохідні + плановість).
   function collectFootprintCells(): Set<string> {
@@ -318,6 +325,32 @@ export function initLevelEditor(prefix: string): void {
     }
     return out;
   }
+  // ── Живе прев'ю анімацій ассетів (обертання/переміщення) ──
+  // Грає автоматично, поки є анімовані ассети й користувач не тягне/не редагує.
+  let animClock = 0; let animRaf = 0; let animLast = 0;
+  let lineDraw: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  let lastMenuX = 0, lastMenuY = 0;
+  const hasAnims = (): boolean => !!level()?.placed.some((p) => p.anim);
+  const previewActive = (): boolean =>
+    hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
+    && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw;
+  // Відображувані позиція/кут ассета (з анімаційним зсувом, якщо прев'ю активне).
+  function animDisp(p: Placed): { x: number; y: number; rot: number } {
+    if (p.anim && previewActive()) { const o = animOffset(p.anim, animClock); return { x: p.x + o.dx, y: p.y + o.dy, rot: p.rot + o.rot }; }
+    return { x: p.x, y: p.y, rot: p.rot };
+  }
+  function tickAnim(ts: number): void {
+    animRaf = 0;
+    if (!previewActive()) { animLast = 0; return; }
+    if (animLast) animClock += Math.min((ts - animLast) / 1000, 0.1);
+    animLast = ts;
+    _drawNow();
+    animRaf = requestAnimationFrame(tickAnim);
+  }
+  function ensureAnimLoop(): void {
+    if (previewActive() && !animRaf) { animLast = 0; animRaf = requestAnimationFrame(tickAnim); }
+  }
+
   function _drawNow(): void {
     if (!canvas.width) return;
     ctx.imageSmoothingEnabled = !_panning;
@@ -338,12 +371,12 @@ export function initLevelEditor(prefix: string): void {
 
     for (const p of placedSorted()) {
       const img = imgOf(p); if (!img) continue;
-      const s2 = toScreen(p.x, p.y);
+      const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
       const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
       ctx.save();
       if (dim) ctx.filter = 'grayscale(1)';
       ctx.translate(s2.x, s2.y);
-      ctx.rotate(rad(p.rot));
+      ctx.rotate(rad(d2.rot));
       const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
       ctx.scale(p.flip * kx, ky);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
@@ -360,10 +393,10 @@ export function initLevelEditor(prefix: string): void {
       for (const p of placedSorted()) {
         if (p.cat !== state.soloFillCat) continue;
         const img = imgOf(p); if (!img) continue;
-        const s2 = toScreen(p.x, p.y);
+        const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
         ctx.save();
         ctx.translate(s2.x, s2.y);
-        ctx.rotate(rad(p.rot));
+        ctx.rotate(rad(d2.rot));
         const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
         ctx.scale(p.flip * kx, ky);
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
@@ -670,8 +703,20 @@ export function initLevelEditor(prefix: string): void {
       ctx.strokeRect(vx, vy, vw, vh); // справжній кадр 20:9 (canvas обріже зайве, пропорції не псуються)
       ctx.setLineDash([]);
     }
+    // Лінія напряму руху (режим «Задати лінію») — стрілка від старту до курсора.
+    if (lineDraw) {
+      const { x0, y0, x1, y1 } = lineDraw;
+      ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - 12 * Math.cos(ang - 0.4), y1 - 12 * Math.sin(ang - 0.4));
+      ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
   }
   function draw(): void {
+    ensureAnimLoop();
     if (_drawRaf) return;
     _drawRaf = requestAnimationFrame(() => { _drawRaf = 0; _drawNow(); });
   }
@@ -698,8 +743,8 @@ export function initLevelEditor(prefix: string): void {
     const list = placedSorted().filter(p => state.soloFillCat === null || p.cat === state.soloFillCat);
     for (let i = list.length - 1; i >= 0; i--) {
       const p = list[i]; const img = imgOf(p); if (!img) continue;
-      const o = toScreen(p.x, p.y);
-      const ang = rad(-p.rot); const dx = sx - o.x, dy = sy - o.y;
+      const d2 = animDisp(p); const o = toScreen(d2.x, d2.y);
+      const ang = rad(-d2.rot); const dx = sx - o.x, dy = sy - o.y;
       const k = p.scale * sc();
       let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / k; const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / k;
       if (p.flip < 0) lx = -lx;
@@ -1181,9 +1226,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLButtonElement>('lowerBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'lower' ? null : 'lower'; updatePathBtns(); setStatus(state.pathTool ? 'Опустити: тапни/тягни на клітинку' : ''); draw(); });
   $<HTMLButtonElement>('flatBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'flat' ? null : 'flat'; updatePathBtns(); setStatus(state.pathTool ? 'Вирівняти: тапни/тягни на клітинку' : ''); draw(); });
   $<HTMLButtonElement>('walkBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'walk' ? null : 'walk'; updatePathBtns(); setStatus(state.pathTool ? 'Зелений колайдер (прохідність): малюй поверх вирізу ассета. Колесо — пензель' : ''); draw(); });
-  let drag: { x: number; y: number; ox: number; oy: number } | null = null;
-  let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
-  let painting = false;
+  // (drag/panning/painting оголошено рано — див. початок initLevelEditor)
   // brushCells: всі клітинки в квадраті brushSize×brushSize навколо (cx,cy).
   function brushCells(cx: number, cy: number): Array<{ cx: number; cy: number }> {
     const s = state.brushSize, r = Math.floor((s - 1) / 2);
@@ -1283,6 +1326,7 @@ export function initLevelEditor(prefix: string): void {
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
+    if (state.animLinePid && ev.button === 0) { lineDraw = { x0: x, y0: y, x1: x, y1: y }; return; } // режим «Задати лінію»
     const lv0 = level();
     const MHIT = 9;
     const startSx = toScreen(lv0.start, 0).x;
@@ -1355,6 +1399,7 @@ export function initLevelEditor(prefix: string): void {
   window.addEventListener('mousemove', (ev) => {
     const r = canvas.getBoundingClientRect();
     state.mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    if (lineDraw) { lineDraw.x1 = state.mouse.x; lineDraw.y1 = state.mouse.y; draw(); return; }
     if (panning) { state.pan.x = panStart.px + (state.mouse.x - panStart.mx); state.pan.y = panStart.py + (state.mouse.y - panStart.my); applyOrigin(); draw(); return; }
     if (state.markerDrag) {
       const w = toWorld(state.mouse.x, state.mouse.y); const lv = level();
@@ -1374,7 +1419,23 @@ export function initLevelEditor(prefix: string): void {
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
     else if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
-  window.addEventListener('mouseup', () => { if (drag || painting || state.markerDrag) save(); drag = null; panning = false; painting = false; state.markerDrag = null; });
+  window.addEventListener('mouseup', () => {
+    if (lineDraw) {
+      const w0 = toWorld(lineDraw.x0, lineDraw.y0), w1 = toWorld(lineDraw.x1, lineDraw.y1);
+      const ddx = w1.x - w0.x, ddy = w1.y - w0.y; const len = Math.hypot(ddx, ddy);
+      const pid = state.animLinePid; const p = level().placed.find((pp) => pp.id === pid);
+      if (p && len > 2) {
+        pushUndo();
+        p.anim = { type: 'move', dx: ddx / len, dy: ddy / len, dist: Math.round(len), speed: p.anim?.speed ?? 40, constant: p.anim?.constant ?? false };
+        save(); setStatus('Напрям руху задано');
+      }
+      lineDraw = null; state.animLinePid = null;
+      if (p) openAssetMenu(p, lastMenuX, lastMenuY);
+      draw(); return;
+    }
+    if (drag || painting || state.markerDrag) save();
+    drag = null; panning = false; painting = false; state.markerDrag = null;
+  });
 
   // Touch support: 1 finger = draw/interact, 2 fingers = pan; double-tap = toggle zoom mode (persistent)
   {
@@ -1536,7 +1597,88 @@ export function initLevelEditor(prefix: string): void {
     }, { passive: true });
   }
 
-  canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); } });
+  // ── Контекст-меню виставленого ассета (ПКМ): планарність + анімація ──
+  let _assetMenuEl: HTMLDivElement | null = null;
+  const _menuOutside = (e: MouseEvent): void => { if (_assetMenuEl && !_assetMenuEl.contains(e.target as Node)) closeAssetMenu(); };
+  function closeAssetMenu(): void { if (_assetMenuEl) { _assetMenuEl.remove(); _assetMenuEl = null; } document.removeEventListener('mousedown', _menuOutside, true); }
+  function openAssetMenu(p: Placed, clientX: number, clientY: number): void {
+    lastMenuX = clientX; lastMenuY = clientY;
+    closeAssetMenu();
+    const mk = (tag: string, css: string | null, txt?: string): HTMLElement => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (txt != null) e.textContent = txt; return e; };
+    const btnCss = (active: boolean): string => `padding:5px 9px;margin:2px;border-radius:6px;border:1px solid ${active ? '#39d0ff' : '#555'};background:${active ? '#1d3b46' : '#3a3a3a'};color:#e8e8e8;cursor:pointer;font:13px sans-serif;`;
+    const rebuild = (): void => openAssetMenu(p, lastMenuX, lastMenuY);
+    const m = document.createElement('div'); _assetMenuEl = m;
+    m.style.cssText = 'position:fixed;z-index:99999;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:10px;min-width:212px;box-shadow:0 6px 20px rgba(0,0,0,0.5);color:#e8e8e8;font:13px sans-serif;';
+    const isParallax = ['sky', 'clouds', 'bg', 'frontbg', 'foreground'].includes(p.cat);
+    const aname = state.assets.find((a) => a.id === p.asset)?.name ?? p.cat;
+    m.appendChild(mk('div', 'font-weight:600;margin-bottom:8px;color:#9ad0ff;', '⚙ ' + aname));
+
+    // Плановість
+    m.appendChild(mk('div', 'opacity:0.7;margin:6px 0 2px;', 'Плановість' + (isParallax ? ' (далі = повільніше)' : '')));
+    const prow = mk('div', 'display:flex;align-items:center;gap:6px;');
+    const far = mk('button', btnCss(false), '− Дальше');
+    const planVal = mk('span', 'min-width:26px;text-align:center;', String(p.plan ?? 0));
+    const near = mk('button', btnCss(false), 'Ближче +');
+    far.onclick = () => { pushUndo(); p.plan = (p.plan ?? 0) - 1; planVal.textContent = String(p.plan); save(); draw(); };
+    near.onclick = () => { pushUndo(); p.plan = (p.plan ?? 0) + 1; planVal.textContent = String(p.plan); save(); draw(); };
+    prow.append(far, planVal, near); m.appendChild(prow);
+
+    // Анімація
+    m.appendChild(mk('div', 'opacity:0.7;margin:10px 0 2px;', 'Анімація'));
+    const arow = mk('div', 'display:flex;flex-wrap:wrap;');
+    const none = mk('button', btnCss(!p.anim), 'Немає');
+    const rotB = mk('button', btnCss(p.anim?.type === 'rotate'), 'Обертання');
+    const movB = mk('button', btnCss(p.anim?.type === 'move'), 'Переміщення');
+    none.onclick = () => { pushUndo(); delete p.anim; save(); draw(); rebuild(); };
+    rotB.onclick = () => { pushUndo(); p.anim = { type: 'rotate', range: p.anim?.range ?? 360, speed: p.anim?.type === 'rotate' ? p.anim.speed : 60 }; save(); draw(); rebuild(); };
+    movB.onclick = () => { pushUndo(); p.anim = { type: 'move', dx: p.anim?.dx ?? 1, dy: p.anim?.dy ?? 0, dist: p.anim?.dist ?? 100, speed: p.anim?.type === 'move' ? p.anim.speed : 40, constant: p.anim?.constant ?? false }; save(); draw(); rebuild(); };
+    arow.append(none, rotB, movB); m.appendChild(arow);
+
+    const numRow = (label: string, val: number, on: (v: number) => void): HTMLElement => {
+      const r = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:6px;');
+      r.appendChild(mk('span', 'min-width:84px;opacity:0.8;', label));
+      const inp = document.createElement('input'); inp.type = 'number'; inp.value = String(val);
+      inp.style.cssText = 'width:70px;padding:3px 5px;background:#1f1f1f;border:1px solid #555;border-radius:5px;color:#e8e8e8;';
+      inp.onchange = () => on(Number(inp.value));
+      r.appendChild(inp); return r;
+    };
+
+    const an = p.anim;
+    if (an?.type === 'rotate') {
+      m.appendChild(numRow('Діапазон, °', an.range ?? 360, (v) => { pushUndo(); an.range = v; save(); draw(); }));
+      m.appendChild(numRow('Швидкість, °/с', an.speed, (v) => { pushUndo(); an.speed = v; save(); draw(); }));
+      m.appendChild(mk('div', 'opacity:0.55;margin-top:4px;font-size:11px;', '360° = безперервне; менше = туди-сюди'));
+    } else if (an?.type === 'move') {
+      const lineBtn = mk('button', btnCss(false) + 'display:block;width:100%;margin-top:6px;', 'Задати лінію напряму →');
+      lineBtn.onclick = () => { state.animLinePid = p.id; closeAssetMenu(); setStatus('Проведи лінію напряму руху на канвасі'); draw(); };
+      m.appendChild(lineBtn);
+      m.appendChild(mk('div', 'opacity:0.55;margin-top:3px;font-size:11px;', 'довжина лінії = діапазон (' + (an.dist ?? 0) + ' од)'));
+      m.appendChild(numRow('Швидкість, од/с', an.speed, (v) => { pushUndo(); an.speed = v; save(); draw(); }));
+      const cr = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!an.constant;
+      cb.onchange = () => { pushUndo(); an.constant = cb.checked; save(); draw(); };
+      cr.append(cb, mk('span', null, 'Постійно (без вороття)')); m.appendChild(cr);
+    }
+
+    const cl = mk('button', btnCss(false) + 'display:block;width:100%;margin-top:10px;', 'Закрити');
+    cl.onclick = () => closeAssetMenu(); m.appendChild(cl);
+
+    document.body.appendChild(m);
+    const rct = m.getBoundingClientRect();
+    let left = clientX, top = clientY;
+    if (left + rct.width > window.innerWidth) left = window.innerWidth - rct.width - 8;
+    if (top + rct.height > window.innerHeight) top = window.innerHeight - rct.height - 8;
+    m.style.left = Math.max(8, left) + 'px'; m.style.top = Math.max(8, top) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', _menuOutside, true), 0);
+  }
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); return; }
+    if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral) return; // ПКМ зайнятий інструментом
+    const hit = hitTest(e.offsetX, e.offsetY);
+    if (hit) { state.selected = hit; refreshSel(); draw(); const p = sel(); if (p) openAssetMenu(p, e.clientX, e.clientY); }
+  });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (state.pendingAsset) {

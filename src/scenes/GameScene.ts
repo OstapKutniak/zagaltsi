@@ -4,7 +4,7 @@ import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
-import { buildLevelView, type LevelDoc } from '../level/LevelView';
+import { buildLevelView, animOffset, type LevelDoc, type PlacedAnim } from '../level/LevelView';
 import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
@@ -76,6 +76,10 @@ export class GameScene extends Phaser.Scene {
   private parallaxLayers: { im: Phaser.GameObjects.Image; baseX: number; sf: number }[] = [];
   private parallaxAnchored = false;
   private lastCamScrollX = NaN;
+  // Анімовані ассети рівня (обертання/переміщення). Базу (позиція/кут) фіксуємо лениво —
+  // для паралакс-шарів після анкера, інакше зразу.
+  private levelAnims: { im: Phaser.GameObjects.Image; anim: PlacedAnim; isPlx: boolean; based: boolean; bx: number; by: number; br: number }[] = [];
+  private lvlAnimTime = 0;
   private playerSpawned = false;
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
@@ -178,6 +182,7 @@ export class GameScene extends Phaser.Scene {
     this.started = false;
     this.playerSpawned = false;
     this.parallaxAnchored = false; this.parallaxLayers = []; this.lastCamScrollX = NaN;
+    this.levelAnims = []; this.lvlAnimTime = 0;
     this.remotes = {};
     this.netStates = {};
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
@@ -390,6 +395,7 @@ export class GameScene extends Phaser.Scene {
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
     this.cameras.main.setBounds(this.levelStart, 0, this.levelEnd - this.levelStart, this.worldH);
     this.parallaxAnchored = false; this.parallaxLayers = []; this.lastCamScrollX = NaN;
+    this.levelAnims = []; this.lvlAnimTime = 0;
     void buildLevelView(this, doc, this.bandBottom).then(() => this.collectParallaxLayers());
     this.banner.setText('');
   }
@@ -398,11 +404,30 @@ export class GameScene extends Phaser.Scene {
   // в update(), коли камера стабілізується на стартовому кадрі.
   private collectParallaxLayers(): void {
     this.parallaxLayers = [];
+    this.levelAnims = [];
     for (const o of this.children.list) {
       const im = o as Phaser.GameObjects.Image;
-      if (im.getData && im.getData('plxSf') != null) {
-        this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
+      if (!im.getData) continue;
+      const isPlx = im.getData('plxSf') != null;
+      if (isPlx) this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
+      const anim = im.getData('lvlAnim') as PlacedAnim | undefined;
+      if (anim) this.levelAnims.push({ im, anim, isPlx, based: false, bx: 0, by: 0, br: 0 });
+    }
+  }
+
+  // Програти анімації ассетів рівня. Базу позиції фіксуємо лениво: для паралакс-шарів —
+  // після анкера (бо анкер змінює im.x), для решти — одразу.
+  private updateLevelAnims(dt: number): void {
+    if (!this.levelAnims.length) return;
+    this.lvlAnimTime += dt;
+    for (const a of this.levelAnims) {
+      if (!a.based) {
+        if (a.isPlx && !this.parallaxAnchored) continue;
+        a.bx = a.im.x; a.by = a.im.y; a.br = a.im.rotation; a.based = true;
       }
+      const off = animOffset(a.anim, this.lvlAnimTime);
+      if (a.anim.type === 'rotate') a.im.setRotation(a.br + (off.rot * Math.PI) / 180);
+      else a.im.setPosition(a.bx + off.dx, a.by + off.dy);
     }
   }
 
@@ -712,6 +737,7 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.finished) return;
     if (!this.parallaxAnchored) this.anchorParallaxOnSettle();
+    this.updateLevelAnims(Math.min(delta / 1000, 0.1));
     this.accumulator += Math.min(delta / 1000, 0.1);
     while (this.accumulator >= FIXED_DT) {
       this.step(FIXED_DT);
