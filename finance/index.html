@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Фінанси">
+  <meta name="theme-color" content="#0f172a">
+  <title>Фінанси</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- SETUP -->
+  <div class="view" id="setup-view">
+    <div class="setup-logo">💰</div>
+    <div class="setup-title">Фінанси</div>
+    <div class="setup-subtitle">Введи дані Supabase щоб розпочати.<br>Вони зберігаються тільки на твоєму пристрої.</div>
+    <div class="setup-card">
+      <div>
+        <label>Project URL</label>
+        <input id="setup-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div>
+        <label>Anon key</label>
+        <input id="setup-key" type="text" placeholder="eyJhbGci..." autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+      <button class="btn btn-primary" id="setup-save">Підключити</button>
+    </div>
+    <div class="setup-steps">
+      <b>Як отримати?</b><br>
+      1. supabase.com → New project<br>
+      2. SQL Editor → вставити <b>schema.sql</b><br>
+      3. Settings → API → скопіювати URL і anon key
+    </div>
+  </div>
+
+  <!-- LIST -->
+  <div class="view" id="list-view">
+    <div class="header">
+      <div class="header-month">
+        <button class="month-nav" id="prev-month">‹</button>
+        <span class="month-label" id="month-label">Червень 2026</span>
+        <button class="month-nav" id="next-month">›</button>
+      </div>
+      <div class="balance-row">
+        <div class="balance-card exp">
+          <div class="label">Витрати</div>
+          <div class="amount" id="total-exp">0 ₴</div>
+        </div>
+        <div class="balance-card inc">
+          <div class="label">Доходи</div>
+          <div class="amount" id="total-inc">0 ₴</div>
+        </div>
+        <div class="balance-card total">
+          <div class="label">Баланс</div>
+          <div class="amount" id="total-bal">0 ₴</div>
+        </div>
+      </div>
+    </div>
+    <div class="list-scroll" id="tx-list"></div>
+    <div class="bottom-nav">
+      <button class="nav-btn active" id="nav-list">
+        <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        Список
+      </button>
+      <button class="fab" id="add-btn">+</button>
+      <button class="nav-btn" id="nav-settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Налашт.
+      </button>
+    </div>
+  </div>
+
+  <!-- ADD FORM -->
+  <div class="view" id="add-view">
+    <div class="form-header">
+      <button class="form-close" id="add-close">Скасувати</button>
+      <span class="form-title" id="add-title">Нова операція</span>
+      <button class="form-save" id="add-save">Зберегти</button>
+    </div>
+    <div class="type-toggle">
+      <button class="type-btn active expense" data-type="expense">Витрата</button>
+      <button class="type-btn income"  data-type="income">Дохід</button>
+      <button class="type-btn transfer" data-type="transfer">Переказ</button>
+    </div>
+    <div class="amount-block">
+      <input class="amount-input" id="amount-input" type="text" inputmode="decimal" placeholder="0" autocomplete="off">
+    </div>
+    <div class="form-scroll">
+      <div class="form-row">
+        <div class="form-field" id="field-category">
+          <span class="field-icon" id="cat-icon">🏷️</span>
+          <span class="field-label">Категорія</span>
+          <span class="field-value placeholder" id="cat-value">Обрати</span>
+        </div>
+        <div class="form-field" id="field-account">
+          <span class="field-icon">💳</span>
+          <span class="field-label">Рахунок</span>
+          <span class="field-value placeholder" id="acc-value">Обрати</span>
+        </div>
+        <div class="form-field" id="field-to-account" style="display:none">
+          <span class="field-icon">→</span>
+          <span class="field-label">На рахунок</span>
+          <span class="field-value placeholder" id="to-acc-value">Обрати</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field" id="field-date">
+          <span class="field-icon">📅</span>
+          <span class="field-label">Дата</span>
+          <input class="field-input" id="date-input" type="datetime-local" style="color:var(--text);">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <span class="field-icon">📝</span>
+          <span class="field-label">Коментар</span>
+          <input class="field-input" id="note-input" type="text" placeholder="Необов'язково">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="view" id="settings-view">
+    <div class="settings-header">Налаштування</div>
+    <div class="settings-section-label">Дані</div>
+    <div class="settings-section">
+      <div class="settings-row" id="btn-import">
+        <span class="settings-row-icon">⬆️</span>
+        <div class="settings-row-text">Імпорт CSV</div>
+        <span class="settings-row-arrow">›</span>
+      </div>
+      <div class="settings-row" id="btn-reset-sb">
+        <span class="settings-row-icon">🔗</span>
+        <div>
+          <div class="settings-row-text">Підключення Supabase</div>
+          <div class="settings-row-sub" id="sb-url-label">—</div>
+        </div>
+        <span class="settings-row-arrow">›</span>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <button class="nav-btn" id="nav-list-from-settings">
+        <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        Список
+      </button>
+      <div style="width:52px"></div>
+      <button class="nav-btn active" id="nav-settings-2">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Налашт.
+      </button>
+    </div>
+  </div>
+
+  <!-- IMPORT -->
+  <div class="view" id="import-view">
+    <div class="import-header">
+      <button class="import-back" id="import-back">‹</button>
+      <span class="import-title">Імпорт CSV</span>
+    </div>
+    <div class="import-body">
+      <div class="import-zone" id="import-zone">
+        <div class="icon">📂</div>
+        <p><b>Обрати CSV файл</b></p>
+        <p style="margin-top:8px;font-size:13px">Формат: date, type, account, category, amount, note</p>
+      </div>
+      <input type="file" id="import-file" accept=".csv,.txt">
+      <div class="import-progress" id="import-progress" style="display:none">
+        <div id="import-progress-text" style="font-size:15px;font-weight:600;text-align:center">Завантаження...</div>
+        <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+        <div class="import-status" id="import-status">0 / 0</div>
+      </div>
+      <div id="import-result" style="display:none;margin-top:16px">
+        <button class="btn btn-secondary" id="import-back2">← Назад до налаштувань</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PICKER SHEET -->
+  <div class="sheet-overlay" id="sheet-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="sheet-title">Оберіть</div>
+      <input class="sheet-search" id="sheet-search" type="text" placeholder="Пошук або нова назва...">
+      <div class="sheet-list" id="sheet-list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
