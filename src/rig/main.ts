@@ -1570,11 +1570,20 @@ document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
 registerPublisher(async () => {
   const character = buildDoc();
   try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
-  const behaviors = await gatherBehaviors();
+  // Злити локальні поведінки з опублікованими (LWW) — щоб публікація з «порожньої» машини
+  // не затирала графи, збережені на іншому компі.
+  const [local, published] = await Promise.all([
+    gatherBehaviors(),
+    loadPublishedBehaviors().catch(() => ({} as import('../behaviors').BehaviorMap)),
+  ]);
+  const behaviors: import('../behaviors').BehaviorMap = { ...published };
+  for (const [id, g] of Object.entries(local)) {
+    const rem = published[id];
+    if (!rem || (g.updatedAt ?? 0) >= (rem.updatedAt ?? 0)) behaviors[id] = g;
+  }
   return {
     'public/character.json': JSON.stringify(character),
     'public/studio-data/char-library.json': JSON.stringify(loadLib()),
-    // Поведінки НПС — щоб дерева працювали на інших пристроях/коопі, не лише локально.
     'public/studio-data/behaviors.json': JSON.stringify(behaviors),
   };
 });
