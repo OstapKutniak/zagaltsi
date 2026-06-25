@@ -47,7 +47,10 @@ const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
 interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim }
-interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere }
+// Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
+// камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
+interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[] }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
@@ -100,6 +103,9 @@ export function initLevelEditor(prefix: string): void {
     pendingNeutral: null as string | null,        // id нейтрала що зараз виставляється
     animLinePid: null as string | null,           // id ассета, для якого зараз малюємо лінію руху
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
+    camZoneTool: false,
+    camZoneSel: null as string | null,
+    camZoneDrag: null as null | { id: string; type: 'zone' | 'camX'; startSx: number; zoneX0: number; camX0: number },
   };
 
   // Неігрові персонажі (вороги/нейтрали) з бібліотеки персонажів + кеш тонованих мініатюр.
@@ -278,6 +284,7 @@ export function initLevelEditor(prefix: string): void {
     if (typeof lv.grid !== 'number') lv.grid = 32; // всі рівні на gs=32
     ensureParallax(lv); // добиваємо всі паралакс-шари (хмари/перед.фон/перед.план)
     ensureLevelId(lv); // стабільний id для злиття між компами
+    if (!lv.camZones) lv.camZones = [];
   }
   function loadImg(a: Asset): void {
     const im = new Image();
@@ -370,9 +377,23 @@ export function initLevelEditor(prefix: string): void {
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(0, g0.y); ctx.lineTo(canvas.width, g0.y); ctx.stroke();
 
+    // Паралакс-корекція X для режиму камери 20:9: δx = (1−sf) * (frameLeft − origin.x).
+    // Формула виводиться з Phaser scroll: screenX = worldX − sf * cameraScrollX.
+    // Коли camView вимкнено — повертає 0 (без корекції).
+    const plxDx = (cat: string, plan?: number): number => {
+      if (!state.camView) return 0;
+      if (!(PARALLAX_LAYERS as readonly string[]).includes(cat)) return 0;
+      const fl = (canvas.width - 1280 * sc()) / 2;
+      let d = level().parallax?.[cat] ?? PARALLAX_DEFAULTS[cat as ParallaxLayer];
+      if (plan) d += (cat === 'foreground' ? +1 : -1) * plan * PLAN_DIST_STEP;
+      d = Math.max(0, Math.min(0.98, d));
+      return (1 - layerScrollFactor(cat, d)) * (fl - state.origin.x);
+    };
+
     for (const p of placedSorted()) {
       const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
+      s2.x += plxDx(p.cat, p.plan);
       const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
       ctx.save();
       if (dim) ctx.filter = 'grayscale(1)';
@@ -395,6 +416,7 @@ export function initLevelEditor(prefix: string): void {
         if (p.cat !== state.soloFillCat) continue;
         const img = imgOf(p); if (!img) continue;
         const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
+        s2.x += plxDx(p.cat, p.plan);
         ctx.save();
         ctx.translate(s2.x, s2.y);
         ctx.rotate(rad(d2.rot));
@@ -623,6 +645,26 @@ export function initLevelEditor(prefix: string): void {
       ctx.strokeStyle = '#ff6a6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ex, 0); ctx.lineTo(ex, canvas.height); ctx.stroke();
       ctx.fillStyle = '#ff6a6a'; ctx.fillText('кінець (карта)', ex + 3, 14);
     }
+    // Зони блокування камери: смуга тригера + лінія позиції камери.
+    if (lv.camZones?.length) {
+      ctx.font = '11px monospace';
+      for (const z of lv.camZones) {
+        const sel = z.id === state.camZoneSel;
+        const lx = toScreen(z.x - z.w / 2, 0).x, rx = toScreen(z.x + z.w / 2, 0).x;
+        const cx = toScreen(z.camX, 0).x;
+        ctx.fillStyle = sel ? 'rgba(80,200,255,0.15)' : 'rgba(80,200,255,0.07)';
+        ctx.fillRect(lx, 0, rx - lx, canvas.height);
+        ctx.strokeStyle = sel ? 'rgba(80,200,255,0.95)' : 'rgba(80,200,255,0.45)';
+        ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.strokeRect(lx, 0, rx - lx, canvas.height); ctx.setLineDash([]);
+        ctx.strokeStyle = sel ? '#ffcc00' : 'rgba(255,180,40,0.75)';
+        ctx.lineWidth = sel ? 2.5 : 2;
+        ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height); ctx.stroke();
+        const lbl = z.label || 'Зона камери';
+        ctx.fillStyle = sel ? '#ffcc00' : 'rgba(255,180,40,0.9)';
+        ctx.fillText('⊡ ' + lbl, cx + 4, canvas.height - 22);
+      }
+    }
     if (state.showPlayerSpawns) {
       // Спавни гравця — кольорова підлогова клітинка (без прапорця), номер у центрі.
       const gs = state.grid, k = gs * Math.SQRT1_2;
@@ -754,6 +796,20 @@ export function initLevelEditor(prefix: string): void {
     return null;
   }
   const sel = (): Placed | undefined => level().placed.find((p) => p.id === state.selected);
+  // Hit-тест для зон камери: повертає { zone, nearCamX } — nearCamX=true якщо клік поруч з лінією позиції.
+  function hitCamZone(sx: number): { zone: CamZone; nearCamX: boolean } | null {
+    const zones = level().camZones;
+    if (!zones?.length) return null;
+    const MHIT = 8;
+    for (let i = zones.length - 1; i >= 0; i--) {
+      const z = zones[i];
+      const lx = toScreen(z.x - z.w / 2, 0).x, rx = toScreen(z.x + z.w / 2, 0).x;
+      const cx = toScreen(z.camX, 0).x;
+      if (Math.abs(sx - cx) < MHIT) return { zone: z, nearCamX: true };
+      if (sx >= lx && sx <= rx) return { zone: z, nearCamX: false };
+    }
+    return null;
+  }
 
   function addLevel(): void {
     pushUndo();
@@ -1594,6 +1650,25 @@ export function initLevelEditor(prefix: string): void {
       }
     }
     if (state.mode) { state.mode = null; state.orig = null; save(); return; }
+    // Інструмент зон камери: ЛКМ — вибрати/перетягти зону або створити нову.
+    if (state.camZoneTool && ev.button === 0) {
+      const h = hitCamZone(x);
+      if (h) {
+        state.camZoneSel = h.zone.id;
+        pushUndo();
+        state.camZoneDrag = { id: h.zone.id, type: h.nearCamX ? 'camX' : 'zone', startSx: x, zoneX0: h.zone.x, camX0: h.zone.camX };
+      } else {
+        pushUndo();
+        const wx = toWorld(x, y).x;
+        if (!level().camZones) level().camZones = [];
+        const z: CamZone = { id: 'cz-' + Date.now(), x: wx, w: 600, camX: wx, label: '' };
+        level().camZones!.push(z);
+        state.camZoneSel = z.id;
+        state.camZoneDrag = { id: z.id, type: 'zone', startSx: x, zoneX0: wx, camX0: wx };
+        save();
+      }
+      draw(); return;
+    }
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
     if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { pushUndo(); neutralAt(x, y); save(); return; }
@@ -1623,8 +1698,17 @@ export function initLevelEditor(prefix: string): void {
       else state.pendingScale = Math.max(0.1, Math.min(10, 1 + dx / 120));
       draw(); return;
     }
+    if (state.camZoneDrag) {
+      const dw = (state.mouse.x - state.camZoneDrag.startSx) / sc();
+      const z = level().camZones?.find((zz) => zz.id === state.camZoneDrag!.id);
+      if (z) {
+        if (state.camZoneDrag.type === 'camX') z.camX = state.camZoneDrag.camX0 + dw;
+        else { z.x = state.camZoneDrag.zoneX0 + dw; z.camX = state.camZoneDrag.camX0 + dw; }
+      }
+      draw(); return;
+    }
     if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
-    else if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral) draw(); // оновити прев'ю інструмента або ghost під курсором
+    else if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral || state.camZoneTool) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
   window.addEventListener('mouseup', () => {
     if (lineDraw) {
@@ -1640,8 +1724,8 @@ export function initLevelEditor(prefix: string): void {
       if (p) openAssetMenu(p, lastMenuX, lastMenuY);
       draw(); return;
     }
-    if (drag || painting || state.markerDrag) save();
-    drag = null; panning = false; painting = false; state.markerDrag = null;
+    if (drag || painting || state.markerDrag || state.camZoneDrag) save();
+    drag = null; panning = false; painting = false; state.markerDrag = null; state.camZoneDrag = null;
   });
 
   // Touch support: 1 finger = draw/interact, 2 fingers = pan; double-tap = toggle zoom mode (persistent)
@@ -1883,6 +1967,35 @@ export function initLevelEditor(prefix: string): void {
     e.preventDefault();
     if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; draw(); return; }
     if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral) return; // ПКМ зайнятий інструментом
+    // ПКМ у режимі зон камери — редагувати/видалити зону.
+    if (state.camZoneTool) {
+      const h = hitCamZone(e.offsetX);
+      if (!h) return;
+      const z = h.zone; state.camZoneSel = z.id; draw();
+      const m = document.createElement('div');
+      m.style.cssText = 'position:fixed;z-index:9999;background:#2a2a2a;border:1px solid #555;border-radius:8px;padding:10px 12px;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,.6);font:13px sans-serif;color:#e8e8e8;display:flex;flex-direction:column;gap:8px';
+      m.style.left = Math.max(8, e.clientX) + 'px'; m.style.top = Math.max(8, e.clientY) + 'px';
+      const row = (lbl: string, val: string, key: keyof CamZone) => {
+        const r = document.createElement('label'); r.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px';
+        const sp = document.createElement('span'); sp.textContent = lbl; sp.style.cssText = 'color:#aaa;white-space:nowrap;width:80px';
+        const inp = document.createElement('input'); inp.type = key === 'label' ? 'text' : 'number'; inp.value = String(val);
+        inp.style.cssText = 'flex:1;padding:4px 6px;background:#3a3a3a;border:1px solid #555;border-radius:5px;color:#e8e8e8;font-size:12px';
+        inp.oninput = () => { pushUndo(); (z as unknown as Record<string, unknown>)[key] = key === 'label' ? inp.value : Number(inp.value); save(); draw(); };
+        r.appendChild(sp); r.appendChild(inp); return r;
+      };
+      m.appendChild(row('Підпис:', z.label ?? '', 'label'));
+      m.appendChild(row('Ширина:', String(Math.round(z.w)), 'w'));
+      m.appendChild(row('Позиція X:', String(Math.round(z.x)), 'x'));
+      m.appendChild(row('Камера X:', String(Math.round(z.camX)), 'camX'));
+      const delBtn = document.createElement('button'); delBtn.textContent = '🗑 Видалити зону';
+      delBtn.style.cssText = 'margin-top:4px;padding:6px 10px;background:#5a2020;border:1px solid #a03030;border-radius:6px;color:#ffaaaa;cursor:pointer;font-size:12px';
+      delBtn.onclick = () => { pushUndo(); level().camZones = level().camZones!.filter((zz) => zz.id !== z.id); state.camZoneSel = null; save(); draw(); m.remove(); };
+      m.appendChild(delBtn);
+      document.body.appendChild(m);
+      const outside = (ev: MouseEvent) => { if (!m.contains(ev.target as Node)) { m.remove(); document.removeEventListener('mousedown', outside, true); } };
+      setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+      return;
+    }
     const hit = hitTest(e.offsetX, e.offsetY);
     if (hit) { state.selected = hit; refreshSel(); draw(); const p = sel(); if (p) openAssetMenu(p, e.clientX, e.clientY); }
   });
@@ -1978,7 +2091,12 @@ export function initLevelEditor(prefix: string): void {
       else { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
     }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
-    else if (ev.code === 'Delete' || ev.code === 'Backspace') { ev.preventDefault(); deleteSel(); }
+    else if (ev.code === 'Delete' || ev.code === 'Backspace') {
+      ev.preventDefault();
+      if (state.camZoneSel) {
+        pushUndo(); level().camZones = level().camZones?.filter((z) => z.id !== state.camZoneSel); state.camZoneSel = null; save(); draw();
+      } else { deleteSel(); }
+    }
     else if (ev.code === 'Escape') {
       if (state.pendingEnemy) {
         state.pendingEnemy = null;
@@ -2022,6 +2140,13 @@ export function initLevelEditor(prefix: string): void {
     state.camView = !state.camView;
     $('camViewBtn').classList.toggle('on', state.camView);
     if (state.camView) snapCamView();
+    draw();
+  });
+  $<HTMLButtonElement>('camZoneBtn')?.addEventListener('click', () => {
+    state.camZoneTool = !state.camZoneTool;
+    $('camZoneBtn')?.classList.toggle('on', state.camZoneTool);
+    if (state.camZoneTool) { state.pathTool = null; updatePathBtns(); setStatus('Зони камери: ЛКМ — додати зону · Тягни смугу — перемістити · Тягни жовту лінію — змістити позицію камери · ПКМ на зону — редагувати/видалити'); }
+    else setStatus('');
     draw();
   });
 
@@ -2488,6 +2613,7 @@ export function initLevelEditor(prefix: string): void {
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
     const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
     if (lv.atmosphere) doc.atmosphere = lv.atmosphere;
+    if (lv.camZones?.length) doc.camZones = lv.camZones;
     return doc;
   }
   $<HTMLButtonElement>('saveLevelBtn')?.addEventListener('click', () => {
