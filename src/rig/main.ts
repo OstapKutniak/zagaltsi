@@ -1174,13 +1174,16 @@ document.getElementById('nodeEditorClose')?.addEventListener('click', closeNodeP
 
 // Initialize level editor (panels are hidden by default via CSS)
 initLevelEditor('lv-');
-// Initialize world map editor
-initWorldEditor('wld-');
-// Initialize location editor
-initLocationEditor('loc-', openNodePanel);
+// World/location editors: skip on mobile — saves 2 canvas contexts (iOS Safari has strict limits)
+// and skips heavy init that's unused on small screens anyway
+const _isMobileInit = window.matchMedia('(max-width: 900px)').matches;
+if (!_isMobileInit) {
+  initWorldEditor('wld-');
+  initLocationEditor('loc-', openNodePanel);
+}
 
 // On mobile — auto-switch to level editor as default starting mode
-if (window.matchMedia('(max-width: 900px)').matches) setMode('level');
+if (_isMobileInit) setMode('level');
 
 // Mobile char editor action buttons (proxy to existing hidden buttons)
 document.getElementById('charMobSave')?.addEventListener('click', () => $<HTMLButtonElement>('saveChar').click());

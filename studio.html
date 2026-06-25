@@ -295,6 +295,9 @@
         #topTabs { order: 1; display: flex; gap: 4px; flex-shrink: 0; }
         #topTabs button { flex: 1; padding: 7px 4px; font-size: 12px; min-height: 34px; }
         #topTabs button[data-soon] { display: none; }
+        /* Світ/локація не ініціалізуються на мобільному — приховати вкладки */
+        #topTabs button[data-tab="world"],
+        #topTabs button[data-tab="location"] { display: none; }
 
         /* Canvas — займає весь вільний простір */
         #centerMid { order: 4; flex: 1; min-height: 0; position: relative; }
