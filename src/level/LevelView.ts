@@ -4,7 +4,37 @@ import { footprintWorldCells, footprintFrontEditorY } from './footprint';
 // Малює рівень (з редактора рівнів) у грі: тайли/фон/небо/декор як спрайти у світі.
 // Координати рівня: x — уздовж рівня, y — від лінії землі (0 = підлога, де ноги).
 
-export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number }
+// Проста анімація розміщеного ассета (вітряк крутиться, хмара пливе тощо).
+export interface PlacedAnim {
+  type: 'rotate' | 'move';
+  speed: number;        // обертання — град/с; переміщення — од/с
+  range?: number;       // обертання: діапазон кута (град). >=360 → безперервне; менше → туди-сюди 0..range
+  dx?: number; dy?: number; // переміщення: напрям (нормалізований вектор із лінії)
+  dist?: number;        // переміщення: діапазон туди-сюди (од). 0 → постійний дрейф (constant)
+  constant?: boolean;   // переміщення: постійний рух в один бік (інакше — туди-сюди в межах dist)
+}
+
+// Зсув анімації в момент t (секунди). rot — у градусах; dx/dy — у світових одиницях.
+// Спільна для гри й живого прев'ю редактора, щоб рух збігався.
+export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: number; dy: number } {
+  const tri = (ph: number, period: number, amp: number): number => {
+    const half = period / 2; const x = ((ph % period) + period) % period;
+    return x < half ? (x / half) * amp : amp - ((x - half) / half) * amp; // 0→amp→0
+  };
+  if (anim.type === 'rotate') {
+    const range = anim.range ?? 360;
+    const spd = Math.max(0.0001, anim.speed);
+    if (range >= 360) return { rot: (spd * t) % 360, dx: 0, dy: 0 };
+    return { rot: tri(spd * t, 2 * range, range), dx: 0, dy: 0 }; // коливання 0..range
+  }
+  const dx = anim.dx ?? 1, dy = anim.dy ?? 0;
+  const spd = Math.max(0.0001, anim.speed);
+  if (anim.constant || !anim.dist) { const off = spd * t; return { rot: 0, dx: dx * off, dy: dy * off }; }
+  const d = tri(spd * t, 2 * anim.dist, anim.dist); // туди-сюди в межах dist
+  return { rot: 0, dx: dx * d, dy: dy * d };
+}
+
+export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim }
 export interface LevelDoc {
   name?: string;
   placed: LevelPlaced[];
@@ -27,6 +57,8 @@ const LAYER: Record<string, number> = {
 };
 // Дефолтна «дальність» паралакса, якщо рівень її не задає.
 const PARALLAX_FALLBACK: Record<string, number> = { sky: 0.85, clouds: 0.7, bg: 0.5, frontbg: 0.25, foreground: 0.35 };
+// Крок дальності на одиницю поассетної планарності (±). Має бути спільним із редактором.
+export const PLAN_DIST_STEP = 0.04;
 // scrollFactor шару: фонові повільніше карти (1−дальність), передній план швидше (1+дальність).
 function layerScrollFactor(cat: string, dist: number): number {
   return cat === 'foreground' ? 1 + dist : Math.max(0, 1 - dist);
@@ -63,17 +95,24 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       const cells = footprintWorldCells(fpp, { x: p.x, y: p.y, scale: p.scale, flip: p.flip, rot: p.rot }, p.x, p.y, gs);
       if (cells.length) depth = floorY + footprintFrontEditorY(cells, gs); // = gameY переднього краю
     }
-    im.setDepth(depth);
+    // Поассетна планарність: у межах шару ассет із більшим plan — ближче (вище в стосі).
+    if (p.plan) im.setDepth(depth + p.plan * 0.5);
+    else im.setDepth(depth);
     // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
     // Анкер (зсув) застосовує GameScene після стабілізації камери — до ФАКТИЧНОЇ scrollX стартового
     // кадру (камера стоїть там, куди її ставить спавн+зум, не обов'язково на lv.start). Тут лише
     // тегаємо шар його sf і базовою X, щоб GameScene знав, що і як зсувати.
     if (p.cat in PARALLAX_FALLBACK) {
-      const dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
+      let dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
+      // АВТОМАТИЧНА поассетна планарність: чим дальше (менший plan) — тим повільніше рухається
+      // відносно шару. Для фонів швидше = менша дальність; для переднього плану — навпаки.
+      if (p.plan) dist += (p.cat === 'foreground' ? +1 : -1) * p.plan * PLAN_DIST_STEP;
+      dist = Math.max(0, Math.min(0.98, dist));
       const sf = layerScrollFactor(p.cat, dist);
       im.setScrollFactor(sf, 1);
       im.setData('plxSf', sf);
       im.setData('plxBaseX', p.x);
     }
+    if (p.anim) im.setData('lvlAnim', p.anim); // GameScene програє ці анімації в update()
   }
 }
