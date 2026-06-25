@@ -913,6 +913,7 @@
           <button id="mob-aiGenBtn">gen</button>
         </div>
         <div id="mob-actions">
+          <button id="mob-sync">Синхр.</button>
           <button id="mob-undo">Скасувати</button>
           <button id="mob-save">Зберегти</button>
           <button id="mob-publish" class="btn-accent">Оновити гру</button>
@@ -1065,6 +1066,9 @@
       })();
 
       // Level dock actions
+      document.getElementById('mob-sync')?.addEventListener('click', function () {
+        document.getElementById('lv-mobSync')?.click();
+      });
       document.getElementById('mob-undo')?.addEventListener('click', function () {
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true, bubbles: true }));
       });
