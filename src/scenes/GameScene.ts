@@ -267,19 +267,20 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
 
     // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку.
-    const onDialog = (d: { graph: NodeGraph; nodeId: string; wx?: number; wy?: number; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
+    const onDialog = (d: { graph: NodeGraph; nodeId: string; getHeadPos?: () => { wx: number; wy: number }; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
       if (isDialogActive()) return;
-      // Жива конвертація світ→екран: кулька й хвіст слідкують за персонажем, поки
-      // камера рухається. worldView враховує зум/суперсемплінг, тож точка точна.
-      const getAnchor = (d.wx != null && d.wy != null)
+      // getHeadPos — живий callback: кожного кадру запитуємо поточну позицію голови
+      // ворога, тож кулька й хвіст слідкують навіть якщо ворог рухається і камера їде.
+      const getAnchor = d.getHeadPos
         ? (): { x: number; y: number } => {
+            const { wx, wy } = d.getHeadPos!();
             const cam = this.cameras.main;
             const v = cam.worldView;
             const canvas = this.sys.game.canvas;
             const rect = canvas.getBoundingClientRect();
             return {
-              x: rect.left + (d.wx! - v.x) / v.width  * rect.width,
-              y: rect.top  + (d.wy! - v.y) / v.height * rect.height,
+              x: rect.left + (wx - v.x) / v.width  * rect.width,
+              y: rect.top  + (wy - v.y) / v.height * rect.height,
             };
           }
         : undefined;

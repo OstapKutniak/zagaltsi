@@ -165,10 +165,10 @@ export class Enemy extends Actor {
         anim = 'idle';
         if (!this.dialogTriggered) {
           this.dialogTriggered = true;
-          const { wx, wy } = this.headWorldPos();
           // onOutcome — діалог повідомить, чим скінчився («Кінець» у репліці).
           this.scene.events.emit('enemyDialog', {
-            graph: this.behavior, nodeId: act.id, wx, wy,
+            graph: this.behavior, nodeId: act.id,
+            getHeadPos: (): { wx: number; wy: number } => this.headWorldPos(),
             onOutcome: (o: 'positive' | 'negative') => { this.dialogOutcome = o; },
           });
         }

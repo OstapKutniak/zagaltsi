@@ -1,7 +1,7 @@
 // Core level editor logic — usable both standalone (prefix='') and embedded in studio (prefix='lv-').
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
-import { hasSolidBackground, keyImage } from '../rig/keyer';
+import { hasSolidBackground, keyImage, loadImageEl } from '../rig/keyer';
 import { pullLevelData, mergeLevelAssets, mergeByIdLWW } from '../sync';
 import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
@@ -850,6 +850,40 @@ export function initLevelEditor(prefix: string): void {
   let _libDragActive = false;
   let _libDragGhost: HTMLElement | null = null;
 
+  // ПКМ-меню бібліотечного ассету: «Малювати колайдер» + «Очистити фон»
+  let _libMenuEl: HTMLDivElement | null = null;
+  const _libMenuOutside = (e: MouseEvent): void => {
+    if (_libMenuEl && !_libMenuEl.contains(e.target as Node)) { _libMenuEl.remove(); _libMenuEl = null; document.removeEventListener('mousedown', _libMenuOutside, true); }
+  };
+  function openLibMenu(a: typeof state.assets[0], clientX: number, clientY: number): void {
+    if (_libMenuEl) { _libMenuEl.remove(); _libMenuEl = null; document.removeEventListener('mousedown', _libMenuOutside, true); }
+    const m = document.createElement('div'); _libMenuEl = m;
+    m.style.cssText = 'position:fixed;z-index:99999;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:6px;min-width:172px;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+    const btn = (label: string, cb: () => void): void => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'display:block;width:100%;padding:7px 11px;margin:2px 0;border-radius:6px;border:0;background:#3a3a3a;color:#e8e8e8;cursor:pointer;font:13px sans-serif;text-align:left;';
+      b.onmouseenter = (): void => { b.style.background = '#505050'; };
+      b.onmouseleave = (): void => { b.style.background = '#3a3a3a'; };
+      b.addEventListener('mousedown', (ev) => { ev.stopPropagation(); m.remove(); _libMenuEl = null; document.removeEventListener('mousedown', _libMenuOutside, true); cb(); });
+      m.appendChild(b);
+    };
+    btn('Малювати колайдер', () => openFootprintEditor(a));
+    btn('Очистити фон', async () => {
+      setStatus('Очищення фону…');
+      try {
+        const img = await loadImageEl(a.url);
+        if (!hasSolidBackground(img)) { setStatus('Фон вже прозорий або неоднорідний'); return; }
+        a.url = keyImage(img).toDataURL('image/png');
+        save(); refreshAssets(); draw(); setStatus('Фон очищено');
+      } catch { setStatus('Не вдалося очистити фон'); }
+    });
+    m.style.left = Math.max(8, Math.min(window.innerWidth - 190, clientX)) + 'px';
+    m.style.top  = Math.max(8, Math.min(window.innerHeight - 80, clientY)) + 'px';
+    document.body.appendChild(m);
+    setTimeout(() => document.addEventListener('mousedown', _libMenuOutside, true), 0);
+  }
+
   function refreshAssets(): void {
     const box = $('libGrid'); box.innerHTML = '';
     const cats = state.assets.filter((x) => x.cat === state.cat);
@@ -868,7 +902,7 @@ export function initLevelEditor(prefix: string): void {
       });
       el.appendChild(img); el.appendChild(nm); el.appendChild(del);
       if (a.footprint?.cells.length) { const dot = document.createElement('div'); dot.className = 'fpDot'; dot.title = 'має колайдери'; el.appendChild(dot); }
-      el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
+      el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); openLibMenu(a, ev.clientX, ev.clientY); });
       el.addEventListener('dblclick', (ev) => { ev.preventDefault(); ev.stopPropagation(); openFootprintEditor(a); });
       // Перетягування картки в AI-поле (реф) — несемо id ассета.
       el.draggable = true;
