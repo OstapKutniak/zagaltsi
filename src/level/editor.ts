@@ -7,7 +7,7 @@ import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
-import { animOffset, PLAN_DIST_STEP, type PlacedAnim } from './LevelView';
+import { animOffset, deformImgPt, PLAN_DIST_STEP, type PlacedAnim, type PlacedDeform } from './LevelView';
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -46,7 +46,7 @@ const GAME_VIEW_W = 1280; // ширина ігрового кадру — для
 const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform }
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
@@ -107,6 +107,10 @@ export function initLevelEditor(prefix: string): void {
     camZoneTool: false,
     camZoneSel: null as string | null,
     camZoneDrag: null as null | { id: string; type: 'zone' | 'camX'; startSx: number; zoneX0: number; camX0: number },
+    deformEdit: null as string | null,     // id ассета, чиї хендли редагуємо
+    deformHandleIdx: -1,                   // індекс перетягуваного хендла (-1 = немає)
+    deformDragSx0: 0, deformDragSy0: 0,   // екранна позиція початку дрегу
+    deformDragOrigVals: [] as number[],    // знімок corners/pts на початку дрегу
   };
 
   // Неігрові персонажі (вороги/нейтрали) з бібліотеки персонажів + кеш тонованих мініатюр.
@@ -120,6 +124,16 @@ export function initLevelEditor(prefix: string): void {
   const toScreen = (wx: number, wy: number) => ({ x: state.origin.x + wx * sc(), y: state.origin.y + wy * sc() });
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
+  // Паралакс-корекція X для режиму камери (camView). Виведено зі scrollFactor Phaser.
+  const plxDx = (cat: string, plan?: number): number => {
+    if (!state.camView) return 0;
+    if (!(PARALLAX_LAYERS as readonly string[]).includes(cat)) return 0;
+    const fl = (canvas.width - 1280 * sc()) / 2;
+    let d = level().parallax?.[cat] ?? PARALLAX_DEFAULTS[cat as ParallaxLayer];
+    if (plan) d += (cat === 'foreground' ? +1 : -1) * plan * PLAN_DIST_STEP;
+    d = Math.max(0, Math.min(0.98, d));
+    return (1 - layerScrollFactor(cat, d)) * (fl - state.origin.x);
+  };
 
   // Оголошено рано (до draw/previewActive), щоб не було TDZ при першому малюванні.
   let drag: { x: number; y: number; ox: number; oy: number } | null = null;
@@ -342,7 +356,8 @@ export function initLevelEditor(prefix: string): void {
   const hasAnims = (): boolean => !!level()?.placed.some((p) => p.anim);
   const previewActive = (): boolean =>
     hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
-    && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw;
+    && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw
+    && state.deformHandleIdx < 0;
   // Відображувані позиція/кут ассета (з анімаційним зсувом, якщо прев'ю активне).
   function animDisp(p: Placed): { x: number; y: number; rot: number } {
     if (p.anim && previewActive()) { const o = animOffset(p.anim, animClock); return { x: p.x + o.dx, y: p.y + o.dy, rot: p.rot + o.rot }; }
@@ -358,6 +373,81 @@ export function initLevelEditor(prefix: string): void {
   }
   function ensureAnimLoop(): void {
     if (previewActive() && !animRaf) { animLast = 0; animRaf = requestAnimationFrame(tickAnim); }
+  }
+
+  // ── Деформація ассетів (перспектива / FFD) ──
+  // Перетворює UV (t,s) → екранна позиція з урахуванням деформації + повного трансформу ассета.
+  function deformScreenPt(p: Placed, img: HTMLImageElement, t: number, s: number): { x: number; y: number } {
+    const W = img.width, H = img.height;
+    const d = animDisp(p);
+    const s2 = toScreen(d.x, d.y);
+    s2.x += plxDx(p.cat, p.plan);
+    const pos = p.deform ? deformImgPt(p.deform, W, H, t, s) : { x: (t - 0.5) * W, y: (s - 0.5) * H };
+    const kx = p.scale * (p.scaleW ?? 1) * p.flip * sc();
+    const ky = p.scale * (p.scaleH ?? 1) * sc();
+    const rRad = rad(d.rot);
+    const cosR = Math.cos(rRad), sinR = Math.sin(rRad);
+    const lx = pos.x * kx, ly = pos.y * ky;
+    return { x: s2.x + lx * cosR - ly * sinR, y: s2.y + lx * sinR + ly * cosR };
+  }
+  // Малює один трикутник з афінним UV-відображенням (src → dst, Крамер).
+  function drawDeformTri(
+    img: HTMLImageElement,
+    s0: { x: number; y: number }, s1: { x: number; y: number }, s2: { x: number; y: number },
+    d0: { x: number; y: number }, d1: { x: number; y: number }, d2: { x: number; y: number },
+  ): void {
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(d0.x, d0.y); ctx.lineTo(d1.x, d1.y); ctx.lineTo(d2.x, d2.y); ctx.closePath(); ctx.clip();
+    const det = (s0.x - s2.x) * (s1.y - s2.y) - (s1.x - s2.x) * (s0.y - s2.y);
+    if (Math.abs(det) < 0.0001) { ctx.restore(); return; }
+    const a  = ((d0.x - d2.x) * (s1.y - s2.y) - (d1.x - d2.x) * (s0.y - s2.y)) / det;
+    const b  = ((d0.y - d2.y) * (s1.y - s2.y) - (d1.y - d2.y) * (s0.y - s2.y)) / det;
+    const cc = ((d1.x - d2.x) * (s0.x - s2.x) - (d0.x - d2.x) * (s1.x - s2.x)) / det;
+    const dd = ((d1.y - d2.y) * (s0.x - s2.x) - (d0.y - d2.y) * (s1.x - s2.x)) / det;
+    const ee = d0.x - a * s0.x - cc * s0.y;
+    const ff = d0.y - b * s0.x - dd * s0.y;
+    ctx.transform(a, b, cc, dd, ee, ff);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+  // Малює деформований ассет на Canvas 2D квадосіткою N×N трикутних пар.
+  function drawDeformedAsset(p: Placed, img: HTMLImageElement): void {
+    const N = p.deform!.subdiv ?? 8; // у редакторі достатньо 8 — швидше
+    const W = img.width, H = img.height;
+    for (let row = 0; row < N; row++) {
+      for (let col = 0; col < N; col++) {
+        const t0 = col / N, t1 = (col + 1) / N;
+        const s0 = row / N, s1 = (row + 1) / N;
+        const p00 = deformScreenPt(p, img, t0, s0);
+        const p10 = deformScreenPt(p, img, t1, s0);
+        const p01 = deformScreenPt(p, img, t0, s1);
+        const p11 = deformScreenPt(p, img, t1, s1);
+        const src00 = { x: t0 * W, y: s0 * H }, src10 = { x: t1 * W, y: s0 * H };
+        const src01 = { x: t0 * W, y: s1 * H }, src11 = { x: t1 * W, y: s1 * H };
+        drawDeformTri(img, src00, src10, src01, p00, p10, p01);
+        drawDeformTri(img, src10, src11, src01, p10, p11, p01);
+      }
+    }
+  }
+  // Малює хендли деформації поточного обраного ассета (якщо state.deformEdit збігається).
+  function drawDeformHandles(p: Placed, img: HTMLImageElement): void {
+    if (state.deformEdit !== p.id || !p.deform) return;
+    const df = p.deform;
+    const W = img.width, H = img.height;
+    const pts: Array<{ t: number; s: number }> = [];
+    if (df.type === 'persp') {
+      pts.push({ t: 0, s: 0 }, { t: 1, s: 0 }, { t: 1, s: 1 }, { t: 0, s: 1 });
+    } else {
+      const cols = df.cols ?? 2, rows = df.rows ?? 2;
+      for (let ri = 0; ri <= rows; ri++) for (let ci = 0; ci <= cols; ci++) pts.push({ t: ci / cols, s: ri / rows });
+    }
+    pts.forEach(({ t, s }, hi) => {
+      const sp = deformScreenPt(p, img, t, s);
+      const active = state.deformHandleIdx === hi;
+      ctx.beginPath(); ctx.arc(sp.x, sp.y, active ? 7 : 5, 0, Math.PI * 2);
+      ctx.fillStyle = active ? '#ffcc00' : '#ffffff'; ctx.fill();
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5; ctx.stroke();
+    });
   }
 
   function _drawNow(): void {
@@ -378,32 +468,27 @@ export function initLevelEditor(prefix: string): void {
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(0, g0.y); ctx.lineTo(canvas.width, g0.y); ctx.stroke();
 
-    // Паралакс-корекція X для режиму камери 20:9: δx = (1−sf) * (frameLeft − origin.x).
-    // Формула виводиться з Phaser scroll: screenX = worldX − sf * cameraScrollX.
-    // Коли camView вимкнено — повертає 0 (без корекції).
-    const plxDx = (cat: string, plan?: number): number => {
-      if (!state.camView) return 0;
-      if (!(PARALLAX_LAYERS as readonly string[]).includes(cat)) return 0;
-      const fl = (canvas.width - 1280 * sc()) / 2;
-      let d = level().parallax?.[cat] ?? PARALLAX_DEFAULTS[cat as ParallaxLayer];
-      if (plan) d += (cat === 'foreground' ? +1 : -1) * plan * PLAN_DIST_STEP;
-      d = Math.max(0, Math.min(0.98, d));
-      return (1 - layerScrollFactor(cat, d)) * (fl - state.origin.x);
-    };
-
     for (const p of placedSorted()) {
       const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
       s2.x += plxDx(p.cat, p.plan);
       const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
-      ctx.save();
-      if (dim) ctx.filter = 'grayscale(1)';
-      ctx.translate(s2.x, s2.y);
-      ctx.rotate(rad(d2.rot));
-      const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
-      ctx.scale(p.flip * kx, ky);
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
-      ctx.restore();
+      if (p.deform) {
+        // Деформований ассет: квадрова сітка через Canvas 2D afine mapping
+        ctx.save(); if (dim) ctx.filter = 'grayscale(1)';
+        drawDeformedAsset(p, img);
+        ctx.restore();
+        drawDeformHandles(p, img);
+      } else {
+        ctx.save();
+        if (dim) ctx.filter = 'grayscale(1)';
+        ctx.translate(s2.x, s2.y);
+        ctx.rotate(rad(d2.rot));
+        const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+        ctx.scale(p.flip * kx, ky);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.restore();
+      }
       if (p.id === state.selected && !dim) {
         ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5;
         ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12);
@@ -418,13 +503,18 @@ export function initLevelEditor(prefix: string): void {
         const img = imgOf(p); if (!img) continue;
         const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
         s2.x += plxDx(p.cat, p.plan);
-        ctx.save();
-        ctx.translate(s2.x, s2.y);
-        ctx.rotate(rad(d2.rot));
-        const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
-        ctx.scale(p.flip * kx, ky);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
-        ctx.restore();
+        if (p.deform) {
+          drawDeformedAsset(p, img);
+          drawDeformHandles(p, img);
+        } else {
+          ctx.save();
+          ctx.translate(s2.x, s2.y);
+          ctx.rotate(rad(d2.rot));
+          const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+          ctx.scale(p.flip * kx, ky);
+          ctx.drawImage(img, -img.width / 2, -img.height / 2);
+          ctx.restore();
+        }
         if (p.id === state.selected) { ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5; ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12); }
       }
     }
@@ -1670,10 +1760,31 @@ export function initLevelEditor(prefix: string): void {
       }
       draw(); return;
     }
-    if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; } // спавн — дискретно, по кліку
-    if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; } // зони — дискретно, по кліку
+    if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
+    if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
     if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { pushUndo(); neutralAt(x, y); save(); return; }
     if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
+    // Хендли деформації: якщо state.deformEdit → перевіряємо, чи клік потрапив у хендл
+    if (state.deformEdit && ev.button === 0) {
+      const p = level().placed.find((pp) => pp.id === state.deformEdit);
+      const img = p ? imgOf(p) : undefined;
+      if (p && img && p.deform) {
+        const df = p.deform;
+        const handles: Array<{ t: number; s: number }> = [];
+        if (df.type === 'persp') handles.push({ t: 0, s: 0 }, { t: 1, s: 0 }, { t: 1, s: 1 }, { t: 0, s: 1 });
+        else { const cols = df.cols ?? 2, rows = df.rows ?? 2; for (let ri = 0; ri <= rows; ri++) for (let ci = 0; ci <= cols; ci++) handles.push({ t: ci / cols, s: ri / rows }); }
+        for (let hi = 0; hi < handles.length; hi++) {
+          const sp = deformScreenPt(p, img, handles[hi].t, handles[hi].s);
+          if (Math.hypot(x - sp.x, y - sp.y) <= 10) {
+            pushUndo();
+            state.deformHandleIdx = hi;
+            state.deformDragSx0 = x; state.deformDragSy0 = y;
+            state.deformDragOrigVals = [...(df.type === 'persp' ? (df.corners ?? new Array(8).fill(0)) : (df.pts ?? []))];
+            return;
+          }
+        }
+      }
+    }
     const hit = hitTest(x, y);
     state.selected = hit;
     if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
@@ -1692,6 +1803,33 @@ export function initLevelEditor(prefix: string): void {
       draw(); return;
     }
     if (painting) { paintAt(state.mouse.x, state.mouse.y); return; }
+    // Дрег хендла деформації: конвертуємо екранну дельту → пікселі зображення
+    if (state.deformHandleIdx >= 0 && state.deformEdit) {
+      const p = level().placed.find((pp) => pp.id === state.deformEdit);
+      if (p?.deform) {
+        const dsx = state.mouse.x - state.deformDragSx0, dsy = state.mouse.y - state.deformDragSy0;
+        const d = animDisp(p);
+        const rRad = -rad(d.rot); const cosR = Math.cos(rRad), sinR = Math.sin(rRad);
+        const kx = p.scale * (p.scaleW ?? 1) * p.flip * sc();
+        const ky = p.scale * (p.scaleH ?? 1) * sc();
+        // Скасовуємо: zoom → ротацію → scale+flip → отримуємо дельту в пікселях зображення
+        const drx = dsx * cosR - dsy * sinR, dry = dsx * sinR + dsy * cosR;
+        const dpx = drx / kx, dpy = dry / ky;
+        const hi = state.deformHandleIdx;
+        const orig = state.deformDragOrigVals;
+        if (p.deform.type === 'persp') {
+          if (!p.deform.corners) p.deform.corners = new Array(8).fill(0);
+          p.deform.corners[hi * 2] = (orig[hi * 2] ?? 0) + dpx;
+          p.deform.corners[hi * 2 + 1] = (orig[hi * 2 + 1] ?? 0) + dpy;
+        } else {
+          const totalPts = ((p.deform.cols ?? 2) + 1) * ((p.deform.rows ?? 2) + 1) * 2;
+          if (!p.deform.pts || p.deform.pts.length < totalPts) p.deform.pts = new Array(totalPts).fill(0);
+          p.deform.pts[hi * 2] = (orig[hi * 2] ?? 0) + dpx;
+          p.deform.pts[hi * 2 + 1] = (orig[hi * 2 + 1] ?? 0) + dpy;
+        }
+        draw(); return;
+      }
+    }
     if (state.mode) { applyMode(); return; }
     if (state.pendingAsset && state.pendingTransMode) {
       const dx = state.mouse.x - state.startWx;
@@ -1725,6 +1863,7 @@ export function initLevelEditor(prefix: string): void {
       if (p) openAssetMenu(p, lastMenuX, lastMenuY);
       draw(); return;
     }
+    if (state.deformHandleIdx >= 0) { save(); state.deformHandleIdx = -1; draw(); return; }
     if (drag || painting || state.markerDrag || state.camZoneDrag) save();
     drag = null; panning = false; painting = false; state.markerDrag = null; state.camZoneDrag = null;
   });
@@ -1950,6 +2089,48 @@ export function initLevelEditor(prefix: string): void {
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!an.constant;
       cb.onchange = () => { pushUndo(); an.constant = cb.checked; save(); draw(); };
       cr.append(cb, mk('span', null, 'Постійно (без вороття)')); m.appendChild(cr);
+    }
+
+    // Деформація
+    m.appendChild(mk('div', 'opacity:0.7;margin:10px 0 2px;', 'Деформація'));
+    const dfrow = mk('div', 'display:flex;flex-wrap:wrap;');
+    const dfNone = mk('button', btnCss(!p.deform), 'Немає');
+    const dfPersp = mk('button', btnCss(p.deform?.type === 'persp'), 'Перспектива');
+    const dfFfd = mk('button', btnCss(p.deform?.type === 'ffd'), 'FFD');
+    dfNone.onclick = () => { pushUndo(); delete p.deform; if (state.deformEdit === p.id) state.deformEdit = null; save(); draw(); rebuild(); };
+    dfPersp.onclick = () => {
+      if (p.deform?.type !== 'persp') { pushUndo(); p.deform = { type: 'persp' }; save(); draw(); rebuild(); }
+    };
+    dfFfd.onclick = () => {
+      if (p.deform?.type !== 'ffd') { pushUndo(); p.deform = { type: 'ffd', cols: 2, rows: 2 }; save(); draw(); rebuild(); }
+    };
+    dfrow.append(dfNone, dfPersp, dfFfd); m.appendChild(dfrow);
+
+    if (p.deform?.type === 'ffd') {
+      const df = p.deform;
+      m.appendChild(numRow('Стовпці', df.cols ?? 2, (v) => {
+        const nc = Math.max(1, Math.min(16, Math.round(v)));
+        if (nc !== (df.cols ?? 2)) { pushUndo(); df.cols = nc; df.rows = df.rows ?? 2; df.pts = undefined as unknown as number[]; save(); draw(); rebuild(); }
+      }));
+      m.appendChild(numRow('Рядки', df.rows ?? 2, (v) => {
+        const nr = Math.max(1, Math.min(16, Math.round(v)));
+        if (nr !== (df.rows ?? 2)) { pushUndo(); df.rows = nr; df.cols = df.cols ?? 2; df.pts = undefined as unknown as number[]; save(); draw(); rebuild(); }
+      }));
+      m.appendChild(mk('div', 'opacity:0.55;margin-top:3px;font-size:11px;', 'Зміна поділу скидає хендли'));
+    }
+
+    if (p.deform) {
+      const editBtn = mk('button', btnCss(state.deformEdit === p.id) + 'display:block;width:100%;margin-top:6px;', state.deformEdit === p.id ? 'Редагую хендли ✓' : 'Редагувати хендли');
+      editBtn.onclick = () => {
+        state.deformEdit = state.deformEdit === p.id ? null : p.id;
+        draw(); rebuild();
+      };
+      m.appendChild(editBtn);
+      if (p.deform.corners?.some((v) => v !== 0) || p.deform.pts?.some((v) => v !== 0)) {
+        const resetBtn = mk('button', 'padding:4px 9px;margin:4px 2px 0;border-radius:6px;border:1px solid #a04040;background:#3a2020;color:#ffaaaa;cursor:pointer;font:12px sans-serif;', 'Скинути хендли');
+        resetBtn.onclick = () => { pushUndo(); if (p.deform) { p.deform.corners = undefined as unknown as number[]; p.deform.pts = undefined as unknown as number[]; } save(); draw(); rebuild(); };
+        m.appendChild(resetBtn);
+      }
     }
 
     const cl = mk('button', btnCss(false) + 'display:block;width:100%;margin-top:10px;', 'Закрити');
