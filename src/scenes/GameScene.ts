@@ -4,7 +4,7 @@ import { InputController } from '../core/input';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
-import { buildLevelView, animOffset, type LevelDoc, type PlacedAnim } from '../level/LevelView';
+import { buildLevelView, animOffset, deformKfAt, deformImgPt, type LevelDoc, type PlacedAnim, type PlacedDeform } from '../level/LevelView';
 import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
@@ -89,6 +89,8 @@ export class GameScene extends Phaser.Scene {
   // для паралакс-шарів після анкера, інакше зразу.
   private levelAnims: { im: Phaser.GameObjects.Image; anim: PlacedAnim; isPlx: boolean; based: boolean; bx: number; by: number; br: number }[] = [];
   private lvlAnimTime = 0;
+  private lvlKfAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; idx: number[] }[] = [];
+  private lvlKfTime = 0;
   private playerSpawned = false;
   private accumulator = 0;
   private simTime = 0; // власний час симуляції (мс), незалежний від кадрів
@@ -430,6 +432,7 @@ export class GameScene extends Phaser.Scene {
   private collectParallaxLayers(): void {
     this.parallaxLayers = [];
     this.levelAnims = [];
+    this.lvlKfAnims = [];
     for (const o of this.children.list) {
       const im = o as Phaser.GameObjects.Image;
       if (!im.getData) continue;
@@ -437,6 +440,34 @@ export class GameScene extends Phaser.Scene {
       if (isPlx) this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
       const anim = im.getData('lvlAnim') as PlacedAnim | undefined;
       if (anim) this.levelAnims.push({ im, anim, isPlx, based: false, bx: 0, by: 0, br: 0 });
+      const kfData = im.getData('lvlKfDeform') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number } | undefined;
+      if (kfData) {
+        const { deform, W, H, N, scale, flip } = kfData;
+        const idx: number[] = [];
+        for (let row = 0; row < N; row++) for (let col = 0; col < N; col++) {
+          const i = row * (N + 1) + col;
+          idx.push(i, i + 1, i + N + 1, i + 1, i + N + 2, i + N + 1);
+        }
+        this.lvlKfAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, idx });
+      }
+    }
+  }
+
+  // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
+  private updateKfAnims(dt: number): void {
+    if (!this.lvlKfAnims.length) return;
+    this.lvlKfTime += dt;
+    for (const a of this.lvlKfAnims) {
+      const interpDeform = deformKfAt(a.deform, this.lvlKfTime);
+      const N = a.N, verts: number[] = [], uvs: number[] = [];
+      for (let row = 0; row <= N; row++) for (let col = 0; col <= N; col++) {
+        const t = col / N, s = row / N;
+        const pos = deformImgPt(interpDeform, a.W, a.H, t, s);
+        verts.push(pos.x * a.scale * a.flip, -pos.y * a.scale);
+        uvs.push(t, s);
+      }
+      a.mesh.clear();
+      a.mesh.addVertices(verts, uvs, a.idx, false);
     }
   }
 
@@ -766,7 +797,9 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.finished) return;
     if (!this.parallaxAnchored) this.anchorParallaxOnSettle();
-    this.updateLevelAnims(Math.min(delta / 1000, 0.1));
+    const dtS = Math.min(delta / 1000, 0.1);
+    this.updateLevelAnims(dtS);
+    this.updateKfAnims(dtS);
     this.accumulator += Math.min(delta / 1000, 0.1);
     while (this.accumulator >= FIXED_DT) {
       this.step(FIXED_DT);

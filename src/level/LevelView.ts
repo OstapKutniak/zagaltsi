@@ -15,6 +15,15 @@ export interface PlacedAnim {
   constant?: boolean;   // переміщення: постійний рух в один бік (інакше — туди-сюди в межах dist)
 }
 
+// Один кейфрейм деформації (+ опційно трансформ ассета).
+export interface DeformKf {
+  corners?: number[];
+  pts?: number[];
+  x?: number; y?: number;  // позиція (якщо animPos)
+  rot?: number;            // кут (якщо animRot)
+  scale?: number;          // масштаб (якщо animScale)
+}
+
 // Деформація ассета як модифікатор (накидається поверх геометрії; анімація крутить готову деформацію).
 export interface PlacedDeform {
   type: 'persp' | 'ffd';
@@ -28,6 +37,13 @@ export interface PlacedDeform {
   pts?: number[];
   // якість рендеру: N×N квадів на все зображення (за замовчуванням 12)
   subdiv?: number;
+  // Кейфрейм-анімація деформації (K-key у редакторі)
+  speed?: number;       // секунд на перехід між кейфреймами
+  reverse?: boolean;    // пінг-понг (туди-назад)
+  animPos?: boolean;    // записувати/програвати x,y
+  animRot?: boolean;    // записувати/програвати rot
+  animScale?: boolean;  // записувати/програвати scale
+  keyframes?: DeformKf[];
 }
 
 // Бінарний біліній від UV (t,s)∈[0,1]² до деформованої локальної позиції (пікселі зображення, центр 0,0).
@@ -58,6 +74,46 @@ export function deformImgPt(deform: PlacedDeform, W: number, H: number, t: numbe
   return {
     x: lerp(lerp(tl.x, tr.x, lt), lerp(bl.x, br.x, lt), ls),
     y: lerp(lerp(tl.y, tr.y, lt), lerp(bl.y, br.y, lt), ls),
+  };
+}
+
+// Фаза кейфрейм-циклу (0..n-1) в момент t. Спільна логіка для deformKfAt / deformKfTransform.
+function kfPhase(deform: PlacedDeform, t: number): { i0: number; i1: number; f: number } {
+  const kfs = deform.keyframes!;
+  const n = kfs.length;
+  const speed = Math.max(0.0001, deform.speed ?? 1);
+  let ph: number;
+  if (deform.reverse) {
+    const steps = n - 1, period = 2 * steps * speed;
+    const x = ((t % period) + period) % period;
+    ph = x < steps * speed ? x / speed : 2 * steps - x / speed;
+  } else {
+    ph = (((t / speed) % n) + n) % n;
+  }
+  const i0 = Math.min(Math.floor(ph), n - 2);
+  return { i0, i1: i0 + 1, f: ph - i0 };
+}
+// Інтерполяція corners/pts між кейфреймами. Потребує ≥ 2 keyframes.
+export function deformKfAt(deform: PlacedDeform, t: number): PlacedDeform {
+  const { i0, i1, f } = kfPhase(deform, t);
+  const kf0 = deform.keyframes![i0], kf1 = deform.keyframes![i1];
+  const lerpArr = (a?: number[], b?: number[]): number[] | undefined => {
+    if (!a && !b) return undefined;
+    const A = a ?? new Array(b!.length).fill(0), B = b ?? new Array(A.length).fill(0);
+    return A.map((v, i) => v + ((B[i] ?? 0) - v) * f);
+  };
+  return { ...deform, corners: lerpArr(kf0.corners, kf1.corners), pts: lerpArr(kf0.pts, kf1.pts) };
+}
+// Інтерполяція трансформу (x/y/rot/scale) між кейфреймами. Потребує ≥ 2 keyframes.
+export function deformKfTransform(deform: PlacedDeform, t: number, base: { x: number; y: number; rot: number; scale: number }): { x: number; y: number; rot: number; scale: number } {
+  const { i0, i1, f } = kfPhase(deform, t);
+  const kf0 = deform.keyframes![i0], kf1 = deform.keyframes![i1];
+  const lerpN = (a?: number, b?: number, dflt = 0) => (a ?? dflt) + ((b ?? dflt) - (a ?? dflt)) * f;
+  return {
+    x:     deform.animPos   ? lerpN(kf0.x,     kf1.x,     base.x)     : base.x,
+    y:     deform.animPos   ? lerpN(kf0.y,     kf1.y,     base.y)     : base.y,
+    rot:   deform.animRot   ? lerpN(kf0.rot,   kf1.rot,   base.rot)   : base.rot,
+    scale: deform.animScale ? lerpN(kf0.scale, kf1.scale, base.scale) : base.scale,
   };
 }
 
@@ -160,6 +216,10 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       mesh.setOrtho(mesh.width, mesh.height); // вершини 1:1 до піксельних координат
       mesh.setRotation((p.rot * Math.PI) / 180);
       mesh.addVertices(verts, uvs, idx, false);
+      // Якщо є кейфрейм-анімація деформації — зберігаємо дані для оновлення вершин у GameScene.
+      if (p.deform.keyframes && p.deform.keyframes.length >= 2) {
+        mesh.setData('lvlKfDeform', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip });
+      }
       go = mesh as unknown as Phaser.GameObjects.Image;
     } else {
       const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);

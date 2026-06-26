@@ -7,7 +7,7 @@ import { toggleConstructor } from '../ui-constructor';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
-import { animOffset, deformImgPt, PLAN_DIST_STEP, type PlacedAnim, type PlacedDeform } from './LevelView';
+import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -46,7 +46,7 @@ const GAME_VIEW_W = 1280; // ширина ігрового кадру — для
 const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; pivotX?: number; pivotY?: number }
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
@@ -358,10 +358,17 @@ export function initLevelEditor(prefix: string): void {
     hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
     && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw
     && state.deformHandleIdx < 0;
-  // Відображувані позиція/кут ассета (з анімаційним зсувом, якщо прев'ю активне).
-  function animDisp(p: Placed): { x: number; y: number; rot: number } {
-    if (p.anim && previewActive()) { const o = animOffset(p.anim, animClock); return { x: p.x + o.dx, y: p.y + o.dy, rot: p.rot + o.rot }; }
-    return { x: p.x, y: p.y, rot: p.rot };
+  // Відображувані позиція/кут/масштаб ассета (з анімаційним зсувом або кейфреймами).
+  function animDisp(p: Placed): { x: number; y: number; rot: number; scale: number } {
+    const base = { x: p.x, y: p.y, rot: p.rot, scale: p.scale };
+    if (p.anim && previewActive()) {
+      const o = animOffset(p.anim, animClock);
+      return { ...base, x: p.x + o.dx, y: p.y + o.dy, rot: p.rot + o.rot };
+    }
+    if (p.deform?.keyframes && p.deform.keyframes.length >= 2 && previewActive()) {
+      return deformKfTransform(p.deform, animClock, base);
+    }
+    return base;
   }
   function tickAnim(ts: number): void {
     animRaf = 0;
@@ -376,18 +383,26 @@ export function initLevelEditor(prefix: string): void {
   }
 
   // ── Деформація ассетів (перспектива / FFD) ──
-  // Перетворює UV (t,s) → екранна позиція з урахуванням деформації + повного трансформу ассета.
+  // Інтерполяція кейфреймів деформації для поточного моменту (animClock).
+  function kfDeformOf(p: Placed): PlacedDeform | null {
+    const df = p.deform;
+    if (!df?.keyframes || df.keyframes.length < 2 || !previewActive()) return null;
+    return deformKfAt(df, animClock);
+  }
+  // Перетворює UV (t,s) → екранна позиція з урахуванням деформації + pivot + повного трансформу.
   function deformScreenPt(p: Placed, img: HTMLImageElement, t: number, s: number): { x: number; y: number } {
     const W = img.width, H = img.height;
     const d = animDisp(p);
     const s2 = toScreen(d.x, d.y);
     s2.x += plxDx(p.cat, p.plan);
-    const pos = p.deform ? deformImgPt(p.deform, W, H, t, s) : { x: (t - 0.5) * W, y: (s - 0.5) * H };
-    const kx = p.scale * (p.scaleW ?? 1) * p.flip * sc();
-    const ky = p.scale * (p.scaleH ?? 1) * sc();
+    const effDeform = kfDeformOf(p) ?? p.deform;
+    const pos = effDeform ? deformImgPt(effDeform, W, H, t, s) : { x: (t - 0.5) * W, y: (s - 0.5) * H };
+    const pivX = p.pivotX ?? 0, pivY = p.pivotY ?? 0;
+    const sc_ = d.scale * (p.scaleW ?? 1) * p.flip * sc();
+    const ky = d.scale * (p.scaleH ?? 1) * sc();
     const rRad = rad(d.rot);
     const cosR = Math.cos(rRad), sinR = Math.sin(rRad);
-    const lx = pos.x * kx, ly = pos.y * ky;
+    const lx = (pos.x - pivX) * sc_, ly = (pos.y - pivY) * ky;
     return { x: s2.x + lx * cosR - ly * sinR, y: s2.y + lx * sinR + ly * cosR };
   }
   // Малює один трикутник з афінним UV-відображенням (src → dst, Крамер).
@@ -483,14 +498,23 @@ export function initLevelEditor(prefix: string): void {
         if (dim) ctx.filter = 'grayscale(1)';
         ctx.translate(s2.x, s2.y);
         ctx.rotate(rad(d2.rot));
-        const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+        const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
         ctx.scale(p.flip * kx, ky);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.drawImage(img, -img.width / 2 - (p.pivotX ?? 0), -img.height / 2 - (p.pivotY ?? 0));
         ctx.restore();
       }
       if (p.id === state.selected && !dim) {
         ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5;
         ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12);
+        // Pivot-хрест
+        if (p.pivotX || p.pivotY) {
+          const cosR = Math.cos(rad(d2.rot)), sinR = Math.sin(rad(d2.rot));
+          const kxf = d2.scale * (p.scaleW ?? 1) * p.flip * sc(), kyf = d2.scale * (p.scaleH ?? 1) * sc();
+          const px2 = s2.x + (p.pivotX ?? 0) * kxf * cosR - (p.pivotY ?? 0) * kyf * sinR;
+          const py2 = s2.y + (p.pivotX ?? 0) * kxf * sinR + (p.pivotY ?? 0) * kyf * cosR;
+          ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(px2 - 7, py2); ctx.lineTo(px2 + 7, py2); ctx.moveTo(px2, py2 - 7); ctx.lineTo(px2, py2 + 7); ctx.stroke();
+        }
       }
     }
     // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
@@ -508,9 +532,9 @@ export function initLevelEditor(prefix: string): void {
           ctx.save();
           ctx.translate(s2.x, s2.y);
           ctx.rotate(rad(d2.rot));
-          const kx = p.scale * (p.scaleW ?? 1) * sc(); const ky = p.scale * (p.scaleH ?? 1) * sc();
+          const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
           ctx.scale(p.flip * kx, ky);
-          ctx.drawImage(img, -img.width / 2, -img.height / 2);
+          ctx.drawImage(img, -img.width / 2 - (p.pivotX ?? 0), -img.height / 2 - (p.pivotY ?? 0));
           ctx.restore();
         }
         if (p.id === state.selected) { ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5; ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12); }
@@ -884,10 +908,12 @@ export function initLevelEditor(prefix: string): void {
       const p = list[i]; const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const o = toScreen(d2.x, d2.y);
       const ang = rad(-d2.rot); const dx = sx - o.x, dy = sy - o.y;
-      const k = p.scale * sc();
+      const k = d2.scale * sc();
       let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / k; const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / k;
       if (p.flip < 0) lx = -lx;
-      if (Math.abs(lx) <= img.width / 2 && Math.abs(ly) <= img.height / 2 && _alphaAt(img, lx, ly) > 10) return p.id;
+      // Зміщуємо в просторі зображення з урахуванням pivot
+      const testLx = lx + (p.pivotX ?? 0), testLy = ly + (p.pivotY ?? 0);
+      if (Math.abs(testLx) <= img.width / 2 && Math.abs(testLy) <= img.height / 2 && _alphaAt(img, testLx, testLy) > 10) return p.id;
     }
     return null;
   }
@@ -1698,6 +1724,21 @@ export function initLevelEditor(prefix: string): void {
       const si = lv0.spawns.findIndex((s) => Math.floor((s.x - s.y) / gs0) === cc.cx && Math.floor(s.y / k0) === cc.cy);
       if (si >= 0) { state.spawnSel = si; refreshSpawnUI(); draw(); return; }
     }
+    // Shift+ЛКМ на вибраному ассеті — перемістити pivot у точку кліка
+    if (ev.button === 0 && ev.shiftKey && state.selected && !state.pathTool && !state.mode) {
+      const p = sel(); const img = p ? imgOf(p) : undefined;
+      if (p && img) {
+        const d = animDisp(p); const s2 = toScreen(d.x, d.y); s2.x += plxDx(p.cat, p.plan);
+        const ddx = x - s2.x, ddy = y - s2.y;
+        const ang = -rad(d.rot);
+        const rdx = ddx * Math.cos(ang) - ddy * Math.sin(ang), rdy = ddx * Math.sin(ang) + ddy * Math.cos(ang);
+        pushUndo();
+        p.pivotX = rdx / (d.scale * (p.scaleW ?? 1) * p.flip * sc());
+        p.pivotY = rdy / (d.scale * (p.scaleH ?? 1) * sc());
+        save(); draw(); setStatus('Pivot переміщено · Shift+ЛКМ на центрі — скинути');
+        return;
+      }
+    }
     // Pending-ворог: ЛКМ виставляє ворога у зону спавна під курсором
     if (ev.button === 0 && state.pendingEnemy) {
       const w = toWorld(x, y); const gs = state.grid, k = gs * Math.SQRT1_2;
@@ -2125,16 +2166,41 @@ export function initLevelEditor(prefix: string): void {
     }
 
     if (p.deform) {
+      const df = p.deform;
       const editBtn = mk('button', btnCss(state.deformEdit === p.id) + 'display:block;width:100%;margin-top:6px;', state.deformEdit === p.id ? 'Редагую хендли ✓' : 'Редагувати хендли');
-      editBtn.onclick = () => {
-        state.deformEdit = state.deformEdit === p.id ? null : p.id;
-        draw(); rebuild();
-      };
+      editBtn.onclick = () => { state.deformEdit = state.deformEdit === p.id ? null : p.id; draw(); rebuild(); };
       m.appendChild(editBtn);
-      if (p.deform.corners?.some((v) => v !== 0) || p.deform.pts?.some((v) => v !== 0)) {
+      if (df.corners?.some((v) => v !== 0) || df.pts?.some((v) => v !== 0)) {
         const resetBtn = mk('button', 'padding:4px 9px;margin:4px 2px 0;border-radius:6px;border:1px solid #a04040;background:#3a2020;color:#ffaaaa;cursor:pointer;font:12px sans-serif;', 'Скинути хендли');
         resetBtn.onclick = () => { pushUndo(); if (p.deform) { p.deform.corners = undefined as unknown as number[]; p.deform.pts = undefined as unknown as number[]; } save(); draw(); rebuild(); };
         m.appendChild(resetBtn);
+      }
+
+      // ── Кейфрейм-анімація деформації ──
+      m.appendChild(mk('div', 'opacity:0.7;margin:10px 0 3px;', 'Анімація деформації'));
+      m.appendChild(numRow('Швидкість, с', df.speed ?? 1, (v) => { pushUndo(); df.speed = Math.max(0.05, v); save(); draw(); }));
+      const revRow = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer;');
+      const revCb = document.createElement('input'); revCb.type = 'checkbox'; revCb.checked = !!df.reverse;
+      revCb.onchange = () => { pushUndo(); df.reverse = revCb.checked; save(); draw(); };
+      revRow.append(revCb, mk('span', null, 'Зворотна (пінг-понг)')); m.appendChild(revRow);
+      // Галочки що записується в кейфрейм
+      const mkCheck = (lbl: string, checked: boolean, onChange: (v: boolean) => void): HTMLElement => {
+        const r = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer;');
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = checked;
+        cb.onchange = () => onChange(cb.checked);
+        r.append(cb, mk('span', null, lbl)); return r;
+      };
+      m.appendChild(mkCheck('Анімувати позицію',  !!df.animPos,   (v) => { pushUndo(); df.animPos   = v; save(); }));
+      m.appendChild(mkCheck('Анімувати обертання', !!df.animRot,   (v) => { pushUndo(); df.animRot   = v; save(); }));
+      m.appendChild(mkCheck('Анімувати масштаб',   !!df.animScale, (v) => { pushUndo(); df.animScale = v; save(); }));
+      // Статус кейфреймів
+      const kfCount = df.keyframes?.length ?? 0;
+      const kfInfo = mk('div', 'margin-top:6px;font-size:12px;opacity:0.8;', kfCount < 2 ? `Кейфреймів: ${kfCount} · натисни K щоб записати` : `Кейфреймів: ${kfCount} · K — додати`);
+      m.appendChild(kfInfo);
+      if (kfCount > 0) {
+        const kfResetBtn = mk('button', 'padding:4px 9px;margin-top:4px;border-radius:6px;border:1px solid #a04040;background:#3a2020;color:#ffaaaa;cursor:pointer;font:12px sans-serif;', 'Скинути кейфрейми');
+        kfResetBtn.onclick = () => { pushUndo(); df.keyframes = []; save(); draw(); rebuild(); };
+        m.appendChild(kfResetBtn);
       }
     }
 
@@ -2253,6 +2319,21 @@ export function initLevelEditor(prefix: string): void {
           draw();
         }
       } else { startMode(ev.code === 'KeyG' ? 'G' : ev.code === 'KeyR' ? 'R' : 'S'); }
+    }
+    else if (ev.code === 'KeyK') {
+      ev.preventDefault();
+      const p = sel(); if (!p?.deform) { setStatus('Спочатку вибери ассет із деформацією'); return; }
+      pushUndo();
+      if (!p.deform.keyframes) p.deform.keyframes = [];
+      const kf: DeformKf = {
+        corners: p.deform.corners ? [...p.deform.corners] : undefined,
+        pts:     p.deform.pts     ? [...p.deform.pts]     : undefined,
+      };
+      if (p.deform.animPos)   { kf.x = p.x; kf.y = p.y; }
+      if (p.deform.animRot)   { kf.rot   = p.rot; }
+      if (p.deform.animScale) { kf.scale = p.scale; }
+      p.deform.keyframes.push(kf);
+      save(); draw(); setStatus(`Кейфрейм ${p.deform.keyframes.length} записано · K — додати ще · Del — скинути`);
     }
     else if (ev.code === 'KeyD' && ev.shiftKey) {
       ev.preventDefault();
