@@ -400,9 +400,12 @@ export function initLevelEditor(prefix: string): void {
     const pivX = p.pivotX ?? 0, pivY = p.pivotY ?? 0;
     const sc_ = d.scale * (p.scaleW ?? 1) * p.flip * sc();
     const ky = d.scale * (p.scaleH ?? 1) * sc();
+    const lx = (pos.x - pivX) * sc_, ly = (pos.y - pivY) * ky;
+    if (p.deform?.baked) {
+      return { x: s2.x + lx, y: s2.y + ly };
+    }
     const rRad = rad(d.rot);
     const cosR = Math.cos(rRad), sinR = Math.sin(rRad);
-    const lx = (pos.x - pivX) * sc_, ly = (pos.y - pivY) * ky;
     return { x: s2.x + lx * cosR - ly * sinR, y: s2.y + lx * sinR + ly * cosR };
   }
   // Малює один трикутник з афінним UV-відображенням (src → dst, Крамер).
@@ -429,6 +432,17 @@ export function initLevelEditor(prefix: string): void {
   function drawDeformedAsset(p: Placed, img: HTMLImageElement): void {
     const N = p.deform!.subdiv ?? 8; // у редакторі достатньо 8 — швидше
     const W = img.width, H = img.height;
+    const baked = !!p.deform?.baked;
+    let cosA = 1, sinA = 0;
+    if (baked) {
+      const a = -rad(animDisp(p).rot);
+      cosA = Math.cos(a); sinA = Math.sin(a);
+    }
+    const mkSrc = (t: number, s: number): { x: number; y: number } => {
+      if (!baked) return { x: t * W, y: s * H };
+      const dx = t * W - W / 2, dy = s * H - H / 2;
+      return { x: W / 2 + dx * cosA - dy * sinA, y: H / 2 + dx * sinA + dy * cosA };
+    };
     for (let row = 0; row < N; row++) {
       for (let col = 0; col < N; col++) {
         const t0 = col / N, t1 = (col + 1) / N;
@@ -437,10 +451,8 @@ export function initLevelEditor(prefix: string): void {
         const p10 = deformScreenPt(p, img, t1, s0);
         const p01 = deformScreenPt(p, img, t0, s1);
         const p11 = deformScreenPt(p, img, t1, s1);
-        const src00 = { x: t0 * W, y: s0 * H }, src10 = { x: t1 * W, y: s0 * H };
-        const src01 = { x: t0 * W, y: s1 * H }, src11 = { x: t1 * W, y: s1 * H };
-        drawDeformTri(img, src00, src10, src01, p00, p10, p01);
-        drawDeformTri(img, src10, src11, src01, p10, p11, p01);
+        drawDeformTri(img, mkSrc(t0, s0), mkSrc(t1, s0), mkSrc(t0, s1), p00, p10, p01);
+        drawDeformTri(img, mkSrc(t1, s0), mkSrc(t1, s1), mkSrc(t0, s1), p10, p11, p01);
       }
     }
   }
@@ -2193,6 +2205,7 @@ export function initLevelEditor(prefix: string): void {
         cb.onchange = () => onChange(cb.checked);
         r.append(cb, mk('span', null, lbl)); return r;
       };
+      m.appendChild(mkCheck('Запечені хендли',     !!df.baked,     (v) => { pushUndo(); df.baked     = v || undefined; save(); draw(); }));
       m.appendChild(mkCheck('Анімувати позицію',  !!df.animPos,   (v) => { pushUndo(); df.animPos   = v; save(); }));
       m.appendChild(mkCheck('Анімувати обертання', !!df.animRot,   (v) => { pushUndo(); df.animRot   = v; save(); }));
       m.appendChild(mkCheck('Анімувати масштаб',   !!df.animScale, (v) => { pushUndo(); df.animScale = v; save(); }));

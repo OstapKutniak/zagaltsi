@@ -44,6 +44,7 @@ export interface PlacedDeform {
   animRot?: boolean;    // записувати/програвати rot
   animScale?: boolean;  // записувати/програвати scale
   keyframes?: DeformKf[];
+  baked?: boolean;      // хендли запечені: меш фіксований у world-space, контент обертається всередині
 }
 
 // Бінарний біліній від UV (t,s)∈[0,1]² до деформованої локальної позиції (пікселі зображення, центр 0,0).
