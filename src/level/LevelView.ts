@@ -218,8 +218,12 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       mesh.setRotation((p.rot * Math.PI) / 180);
       mesh.addVertices(verts, uvs, idx, false);
       // Якщо є кейфрейм-анімація деформації — зберігаємо дані для оновлення вершин у GameScene.
-      if (p.deform.keyframes && p.deform.keyframes.length >= 2) {
+      if (p.deform.keyframes && p.deform.keyframes.length >= 2 && !p.deform.baked) {
         mesh.setData('lvlKfDeform', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip });
+      }
+      // Запечений деформ + анімація: UV крутиться через фіксовану форму.
+      if (p.deform.baked && p.anim) {
+        mesh.setData('lvlBakedAnim', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip, anim: p.anim });
       }
       go = mesh as unknown as Phaser.GameObjects.Image;
     } else {
@@ -248,6 +252,6 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       go.setData('plxSf', sf);
       go.setData('plxBaseX', p.x);
     }
-    if (p.anim) go.setData('lvlAnim', p.anim); // GameScene програє ці анімації в update()
+    if (p.anim && !(p.deform?.baked)) go.setData('lvlAnim', p.anim); // GameScene програє ці анімації в update()
   }
 }

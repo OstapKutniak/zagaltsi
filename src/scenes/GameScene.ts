@@ -90,6 +90,7 @@ export class GameScene extends Phaser.Scene {
   private levelAnims: { im: Phaser.GameObjects.Image; anim: PlacedAnim; isPlx: boolean; based: boolean; bx: number; by: number; br: number }[] = [];
   private lvlAnimTime = 0;
   private lvlKfAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; idx: number[] }[] = [];
+  private lvlBakedAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; anim: PlacedAnim; idx: number[] }[] = [];
   private lvlKfTime = 0;
   private playerSpawned = false;
   private accumulator = 0;
@@ -433,6 +434,7 @@ export class GameScene extends Phaser.Scene {
     this.parallaxLayers = [];
     this.levelAnims = [];
     this.lvlKfAnims = [];
+    this.lvlBakedAnims = [];
     for (const o of this.children.list) {
       const im = o as Phaser.GameObjects.Image;
       if (!im.getData) continue;
@@ -449,6 +451,16 @@ export class GameScene extends Phaser.Scene {
           idx.push(i, i + 1, i + N + 1, i + 1, i + N + 2, i + N + 1);
         }
         this.lvlKfAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, idx });
+      }
+      const bakedData = im.getData('lvlBakedAnim') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; anim: PlacedAnim } | undefined;
+      if (bakedData) {
+        const { deform, W, H, N, scale, flip, anim } = bakedData;
+        const idx: number[] = [];
+        for (let row = 0; row < N; row++) for (let col = 0; col < N; col++) {
+          const i = row * (N + 1) + col;
+          idx.push(i, i + 1, i + N + 1, i + 1, i + N + 2, i + N + 1);
+        }
+        this.lvlBakedAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, anim, idx });
       }
     }
   }
@@ -471,11 +483,34 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // Запечені деформи: форма фіксована у world-space, UV крутиться анімацією.
+  private updateBakedAnims(): void {
+    if (!this.lvlBakedAnims.length) return;
+    for (const a of this.lvlBakedAnims) {
+      const off = animOffset(a.anim, this.lvlAnimTime);
+      const rotRad = -(off.rot * Math.PI) / 180;
+      const cosA = Math.cos(rotRad), sinA = Math.sin(rotRad);
+      const effDeform = (a.deform.keyframes?.length ?? 0) >= 2 ? deformKfAt(a.deform, this.lvlKfTime) : a.deform;
+      const verts: number[] = [], uvs: number[] = [];
+      for (let row = 0; row <= a.N; row++) {
+        for (let col = 0; col <= a.N; col++) {
+          const t = col / a.N, s = row / a.N;
+          const pos = deformImgPt(effDeform, a.W, a.H, t, s);
+          verts.push(pos.x * a.scale * a.flip, -pos.y * a.scale);
+          const ux = t - 0.5, uy = s - 0.5;
+          uvs.push(0.5 + ux * cosA - uy * sinA, 0.5 + ux * sinA + uy * cosA);
+        }
+      }
+      a.mesh.clear();
+      a.mesh.addVertices(verts, uvs, a.idx, false);
+    }
+  }
+
   // Програти анімації ассетів рівня. Базу позиції фіксуємо лениво: для паралакс-шарів —
   // після анкера (бо анкер змінює im.x), для решти — одразу.
   private updateLevelAnims(dt: number): void {
-    if (!this.levelAnims.length) return;
     this.lvlAnimTime += dt;
+    if (!this.levelAnims.length) return;
     for (const a of this.levelAnims) {
       if (!a.based) {
         if (a.isPlx && !this.parallaxAnchored) continue;
@@ -800,6 +835,7 @@ export class GameScene extends Phaser.Scene {
     const dtS = Math.min(delta / 1000, 0.1);
     this.updateLevelAnims(dtS);
     this.updateKfAnims(dtS);
+    this.updateBakedAnims();
     this.accumulator += Math.min(delta / 1000, 0.1);
     while (this.accumulator >= FIXED_DT) {
       this.step(FIXED_DT);
