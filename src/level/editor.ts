@@ -353,7 +353,7 @@ export function initLevelEditor(prefix: string): void {
   let animClock = 0; let animRaf = 0; let animLast = 0;
   let lineDraw: { x0: number; y0: number; x1: number; y1: number } | null = null;
   let lastMenuX = 0, lastMenuY = 0;
-  const hasAnims = (): boolean => !!level()?.placed.some((p) => p.anim);
+  const hasAnims = (): boolean => !!level()?.placed.some((p) => p.anim || (p.deform?.keyframes && p.deform.keyframes.length >= 2));
   const previewActive = (): boolean =>
     hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
     && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw
@@ -907,9 +907,12 @@ export function initLevelEditor(prefix: string): void {
     for (let i = list.length - 1; i >= 0; i--) {
       const p = list[i]; const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const o = toScreen(d2.x, d2.y);
+      o.x += plxDx(p.cat, p.plan); // паралакс-корекція — як у малюванні
       const ang = rad(-d2.rot); const dx = sx - o.x, dy = sy - o.y;
-      const k = d2.scale * sc();
-      let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / k; const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / k;
+      const kx = d2.scale * (p.scaleW ?? 1) * sc();
+      const ky = d2.scale * (p.scaleH ?? 1) * sc();
+      let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / kx;
+      const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / ky;
       if (p.flip < 0) lx = -lx;
       // Зміщуємо в просторі зображення з урахуванням pivot
       const testLx = lx + (p.pivotX ?? 0), testLy = ly + (p.pivotY ?? 0);
