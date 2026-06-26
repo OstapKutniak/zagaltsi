@@ -478,7 +478,6 @@ export function initLevelEditor(prefix: string): void {
         ctx.save(); if (dim) ctx.filter = 'grayscale(1)';
         drawDeformedAsset(p, img);
         ctx.restore();
-        drawDeformHandles(p, img);
       } else {
         ctx.save();
         if (dim) ctx.filter = 'grayscale(1)';
@@ -505,7 +504,6 @@ export function initLevelEditor(prefix: string): void {
         s2.x += plxDx(p.cat, p.plan);
         if (p.deform) {
           drawDeformedAsset(p, img);
-          drawDeformHandles(p, img);
         } else {
           ctx.save();
           ctx.translate(s2.x, s2.y);
@@ -517,6 +515,13 @@ export function initLevelEditor(prefix: string): void {
         }
         if (p.id === state.selected) { ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5; ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12); }
       }
+    }
+
+    // Хендли деформації — поверх усіх ассетів
+    if (state.deformEdit) {
+      const dp = level().placed.find((pp) => pp.id === state.deformEdit);
+      const dimg = dp ? imgOf(dp) : undefined;
+      if (dp && dimg) drawDeformHandles(dp, dimg);
     }
 
     if (state.showCollider) {
