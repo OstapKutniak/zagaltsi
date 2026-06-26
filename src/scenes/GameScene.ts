@@ -216,8 +216,9 @@ export class GameScene extends Phaser.Scene {
     // Переміщується з камерою → рівномірно тонує весь видимий рівень (час доби).
     this.ambientRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000000, 0).setDepth(8000);
     this.fogRect     = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x8899bb, 0).setDepth(8001);
-    // Дощ/сніг: screen-space (scrollFactor=0), не прив'язані до камери → перекривають весь екран.
-    this.weatherGfx  = this.add.graphics().setDepth(8002).setScrollFactor(0).setPosition(this.uiOffX, this.uiOffY);
+    // Дощ/сніг: world-space (scrollFactor=1, як усі спрайти), малюємо по camera.worldView →
+    // надійно лягає на весь видимий екран без зум-зсувів.
+    this.weatherGfx  = this.add.graphics().setDepth(8002);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
 
     // Магазин — ціль рівня
@@ -959,7 +960,9 @@ export class GameScene extends Phaser.Scene {
     this.weatherGfx.clear();
     if (type === 'clear' || type === 'fog') return;
 
-    const W = this.logicalW, H = this.logicalH;
+    // Малюємо у світових координатах рівно по тому, що бачить камера зараз.
+    const view = this.cameras.main.worldView;
+    const X0 = view.x, Y0 = view.y, W = view.width, H = view.height;
     const t = this.weatherTime;
     const GR  = 0.6180339887;
     const GR2 = 0.7548776662;
@@ -988,8 +991,8 @@ export class GameScene extends Phaser.Scene {
         for (let i = 0; i < l.n; i++) {
           const hf = (i * GR)  % 1;
           const vf = (i * GR2) % 1;
-          const sy = ((vf * OH + lt * speed)             % OH) - 20;
-          const sx = ((hf * OW + lt * speed * angle)     % OW) - 40;
+          const sy = Y0 + ((vf * OH + lt * speed)         % OH) - 20;
+          const sx = X0 + ((hf * OW + lt * speed * angle) % OW) - 40;
           this.weatherGfx.beginPath();
           this.weatherGfx.moveTo(sx, sy);
           this.weatherGfx.lineTo(sx + len * angle, sy + len);
@@ -1004,8 +1007,8 @@ export class GameScene extends Phaser.Scene {
         const vf = (i * GR2) % 1;
         const drift = Math.sin(t * 0.45 + i * 1.1) * 25;
         const OH = H + 50, OW = W + 100;
-        const sy = ((vf * OH + t * SPEED) % OH) - 25;
-        const sx = ((hf * OW + drift) % OW + OW) % OW - 50;
+        const sy = Y0 + ((vf * OH + t * SPEED) % OH) - 25;
+        const sx = X0 + ((hf * OW + drift) % OW + OW) % OW - 50;
         this.weatherGfx.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
     }
