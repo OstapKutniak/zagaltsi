@@ -217,7 +217,7 @@ export class GameScene extends Phaser.Scene {
     this.ambientRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000000, 0).setDepth(8000);
     this.fogRect     = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x8899bb, 0).setDepth(8001);
     // Дощ/сніг: screen-space (scrollFactor=0), не прив'язані до камери → перекривають весь екран.
-    this.weatherGfx  = this.add.graphics().setDepth(8002).setScrollFactor(0);
+    this.weatherGfx  = this.add.graphics().setDepth(8002).setScrollFactor(0).setPosition(this.uiOffX, this.uiOffY);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
 
     // Магазин — ціль рівня
