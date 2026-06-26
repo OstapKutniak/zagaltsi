@@ -15,6 +15,52 @@ export interface PlacedAnim {
   constant?: boolean;   // переміщення: постійний рух в один бік (інакше — туди-сюди в межах dist)
 }
 
+// Деформація ассета як модифікатор (накидається поверх геометрії; анімація крутить готову деформацію).
+export interface PlacedDeform {
+  type: 'persp' | 'ffd';
+  // persp: зсуви кутів від дефолтної позиції, у пікселях зображення
+  // порядок: [dx_TL,dy_TL, dx_TR,dy_TR, dx_BR,dy_BR, dx_BL,dy_BL]
+  corners?: number[];
+  // ffd: кількість поділів по горизонталі та вертикалі
+  cols?: number;
+  rows?: number;
+  // ffd: зсуви опорних точок (cols+1)*(rows+1)*2, рядковий порядок, кожна пара (dx,dy) у пікселях
+  pts?: number[];
+  // якість рендеру: N×N квадів на все зображення (за замовчуванням 12)
+  subdiv?: number;
+}
+
+// Бінарний біліній від UV (t,s)∈[0,1]² до деформованої локальної позиції (пікселі зображення, центр 0,0).
+export function deformImgPt(deform: PlacedDeform, W: number, H: number, t: number, s: number): { x: number; y: number } {
+  const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
+  if (deform.type === 'persp') {
+    const c = deform.corners ?? [0, 0, 0, 0, 0, 0, 0, 0];
+    const tlx = -W / 2 + (c[0] ?? 0), tly = -H / 2 + (c[1] ?? 0);
+    const trx = W / 2 + (c[2] ?? 0), tryy = -H / 2 + (c[3] ?? 0);
+    const brx = W / 2 + (c[4] ?? 0), bry = H / 2 + (c[5] ?? 0);
+    const blx = -W / 2 + (c[6] ?? 0), bly = H / 2 + (c[7] ?? 0);
+    return {
+      x: lerp(lerp(tlx, trx, t), lerp(blx, brx, t), s),
+      y: lerp(lerp(tly, tryy, t), lerp(bly, bry, t), s),
+    };
+  }
+  // FFD: розбивка на (cols+1)×(rows+1) опорних точок
+  const cols = deform.cols ?? 2, rows = deform.rows ?? 2;
+  const pts = deform.pts;
+  const gci = Math.min(Math.floor(t * cols), cols - 1);
+  const gcj = Math.min(Math.floor(s * rows), rows - 1);
+  const lt = t * cols - gci, ls = s * rows - gcj;
+  const cp = (ci: number, cj: number): { x: number; y: number } => {
+    const pi = (cj * (cols + 1) + ci) * 2;
+    return { x: -W / 2 + ci * W / cols + (pts?.[pi] ?? 0), y: -H / 2 + cj * H / rows + (pts?.[pi + 1] ?? 0) };
+  };
+  const tl = cp(gci, gcj), tr = cp(gci + 1, gcj), bl = cp(gci, gcj + 1), br = cp(gci + 1, gcj + 1);
+  return {
+    x: lerp(lerp(tl.x, tr.x, lt), lerp(bl.x, br.x, lt), ls),
+    y: lerp(lerp(tl.y, tr.y, lt), lerp(bl.y, br.y, lt), ls),
+  };
+}
+
 // Зсув анімації в момент t (секунди). rot — у градусах; dx/dy — у світових одиницях.
 // Спільна для гри й живого прев'ю редактора, щоб рух збігався.
 export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: number; dy: number } {
@@ -35,7 +81,7 @@ export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: numb
   return { rot: 0, dx: dx * d, dy: dy * d };
 }
 
-export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim }
+export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform }
 export interface LevelDoc {
   name?: string;
   placed: LevelPlaced[];
@@ -87,9 +133,40 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
   for (const p of doc.placed) {
     const key = 'lvl_' + p.asset;
     if (!scene.textures.exists(key)) continue;
-    const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);
-    im.setRotation((p.rot * Math.PI) / 180);
-    im.setScale(p.scale * p.flip, p.scale);
+    // Деформований ассет — Phaser Mesh для довільної форми у WebGL.
+    let go: Phaser.GameObjects.Image;
+    if (p.deform) {
+      const frame = scene.textures.get(key).get();
+      const W = frame.realWidth, H = frame.realHeight;
+      const N = p.deform.subdiv ?? 12;
+      const verts: number[] = [], uvs: number[] = [], idx: number[] = [];
+      for (let row = 0; row <= N; row++) {
+        for (let col = 0; col <= N; col++) {
+          const t = col / N, s = row / N;
+          const pos = deformImgPt(p.deform, W, H, t, s);
+          // Негуємо y: image-space (y↓) → OpenGL/Phaser Mesh (y↑)
+          verts.push(pos.x * p.scale * p.flip, -pos.y * p.scale);
+          uvs.push(t, s);
+        }
+      }
+      for (let row = 0; row < N; row++) {
+        for (let col = 0; col < N; col++) {
+          const i = row * (N + 1) + col;
+          idx.push(i, i + 1, i + N + 1, i + 1, i + N + 2, i + N + 1);
+        }
+      }
+      const mesh = scene.add.mesh(p.x, floorY + p.y, key);
+      mesh.hideCCW = false;
+      mesh.setOrtho(mesh.width, mesh.height); // вершини 1:1 до піксельних координат
+      mesh.setRotation((p.rot * Math.PI) / 180);
+      mesh.addVertices(verts, uvs, idx, false);
+      go = mesh as unknown as Phaser.GameObjects.Image;
+    } else {
+      const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);
+      im.setRotation((p.rot * Math.PI) / 180);
+      im.setScale(p.scale * p.flip, p.scale);
+      go = im;
+    }
     const isBackdrop = p.cat === 'sky' || p.cat === 'clouds' || p.cat === 'bg' || p.cat === 'frontbg' || p.cat === 'map';
     let depth = LAYER[p.cat] ?? -500;
     const fpp = fpMap.get(p.asset);
@@ -98,23 +175,18 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       if (cells.length) depth = floorY + footprintFrontEditorY(cells, gs); // = gameY переднього краю
     }
     // Поассетна планарність: у межах шару ассет із більшим plan — ближче (вище в стосі).
-    if (p.plan) im.setDepth(depth + p.plan * 0.5);
-    else im.setDepth(depth);
+    if (p.plan) go.setDepth(depth + p.plan * 0.5);
+    else go.setDepth(depth);
     // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
-    // Анкер (зсув) застосовує GameScene після стабілізації камери — до ФАКТИЧНОЇ scrollX стартового
-    // кадру (камера стоїть там, куди її ставить спавн+зум, не обов'язково на lv.start). Тут лише
-    // тегаємо шар його sf і базовою X, щоб GameScene знав, що і як зсувати.
     if (p.cat in PARALLAX_FALLBACK) {
       let dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];
-      // АВТОМАТИЧНА поассетна планарність: чим дальше (менший plan) — тим повільніше рухається
-      // відносно шару. Для фонів швидше = менша дальність; для переднього плану — навпаки.
       if (p.plan) dist += (p.cat === 'foreground' ? +1 : -1) * p.plan * PLAN_DIST_STEP;
       dist = Math.max(0, Math.min(0.98, dist));
       const sf = layerScrollFactor(p.cat, dist);
-      im.setScrollFactor(sf, 1);
-      im.setData('plxSf', sf);
-      im.setData('plxBaseX', p.x);
+      go.setScrollFactor(sf, 1);
+      go.setData('plxSf', sf);
+      go.setData('plxBaseX', p.x);
     }
-    if (p.anim) im.setData('lvlAnim', p.anim); // GameScene програє ці анімації в update()
+    if (p.anim) go.setData('lvlAnim', p.anim); // GameScene програє ці анімації в update()
   }
 }
