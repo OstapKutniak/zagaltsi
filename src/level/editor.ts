@@ -46,7 +46,7 @@ const GAME_VIEW_W = 1280; // ширина ігрового кадру — для
 const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; pivotX?: number; pivotY?: number }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; pivotX?: number; pivotY?: number; group?: string; transparent?: boolean }
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
@@ -89,6 +89,8 @@ export function initLevelEditor(prefix: string): void {
     showPlayerSpawns: true,
     hiddenCats: new Set<string>(),
     hiddenIds: new Set<string>(), // тимчасово приховані ассети (тільки редактор, H / Alt+H)
+    multiSel: new Set<string>(),  // мультивибір (Shift+ЛКМ); primary = state.selected
+    openGroup: null as string | null, // id групи в «відкритому» режимі (Alt+G)
     soloFillCat: null as string | null,
     zoom: 0.6,
     pan: { x: 0, y: 0 },
@@ -136,7 +138,7 @@ export function initLevelEditor(prefix: string): void {
   };
 
   // Оголошено рано (до draw/previewActive), щоб не було TDZ при першому малюванні.
-  let drag: { x: number; y: number; ox: number; oy: number } | null = null;
+  let drag: { x: number; y: number; ox: number; oy: number; others: { id: string; ox: number; oy: number }[] } | null = null;
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
   let _drawRaf = 0;
@@ -314,13 +316,15 @@ export function initLevelEditor(prefix: string): void {
   function pushUndo(): void {
     const lv = state.levels[state.cur];
     if (lv) lv.updatedAt = Date.now(); // pushUndo = «зараз буде правка» → оновлюємо мітку часу рівня
-    undoStack.push(JSON.stringify({ levels: state.levels, cur: state.cur }));
+    undoStack.push(JSON.stringify({ levels: state.levels, cur: state.cur, hiddenIds: [...state.hiddenIds] }));
     if (undoStack.length > 80) undoStack.shift();
   }
   function undo(): void {
     const s0 = undoStack.pop(); if (!s0) { setStatus('Нема що відміняти'); return; }
-    const o = JSON.parse(s0) as { levels: Level[]; cur: number };
-    state.levels = o.levels; state.cur = Math.min(o.cur, o.levels.length - 1); state.grid = level().grid; state.selected = null;
+    const o = JSON.parse(s0) as { levels: Level[]; cur: number; hiddenIds?: string[] };
+    state.levels = o.levels; state.cur = Math.min(o.cur, o.levels.length - 1); state.grid = level().grid;
+    state.selected = null; state.multiSel.clear(); state.openGroup = null;
+    state.hiddenIds = new Set(o.hiddenIds ?? []);
     refreshLevels(); refreshSel(); draw(); save(); setStatus('↩ Відмінено');
   }
 
@@ -527,6 +531,19 @@ export function initLevelEditor(prefix: string): void {
           ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.moveTo(px2 - 7, py2); ctx.lineTo(px2 + 7, py2); ctx.moveTo(px2, py2 - 7); ctx.lineTo(px2, py2 + 7); ctx.stroke();
         }
+      } else if (state.multiSel.has(p.id) && !dim) {
+        ctx.strokeStyle = '#55aaff'; ctx.lineWidth = 1.2;
+        ctx.strokeRect(s2.x - 5, s2.y - 5, 10, 10);
+      }
+      // Прозорий ассет: пунктирна рамка навколо точки опори
+      if (p.transparent && !dim) {
+        ctx.save(); ctx.strokeStyle = 'rgba(180,180,255,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+        ctx.strokeRect(s2.x - 8, s2.y - 8, 16, 16); ctx.setLineDash([]); ctx.restore();
+      }
+      // Індикатор групи: маленький квадратик у лівому верхньому куті
+      if (p.group && !dim) {
+        ctx.fillStyle = state.openGroup === p.group ? 'rgba(255,200,0,0.9)' : 'rgba(255,200,0,0.5)';
+        ctx.fillRect(s2.x - 9, s2.y - 9, 4, 4);
       }
     }
     // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
@@ -915,7 +932,11 @@ export function initLevelEditor(prefix: string): void {
     return data[(py * img.width + px) * 4 + 3] ?? 0;
   }
   function hitTest(sx: number, sy: number): string | null {
-    const list = placedSorted().filter(p => state.soloFillCat === null || p.cat === state.soloFillCat);
+    const list = placedSorted().filter(p =>
+      !p.transparent &&                                          // прозорі ассети — невибирані
+      (state.soloFillCat === null || p.cat === state.soloFillCat) &&
+      (state.openGroup === null || p.group === state.openGroup) // у відкритій групі — тільки її члени
+    );
     for (let i = list.length - 1; i >= 0; i--) {
       const p = list[i]; const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const o = toScreen(d2.x, d2.y);
@@ -958,14 +979,14 @@ export function initLevelEditor(prefix: string): void {
       const el = document.createElement('div');
       el.className = 'lvCard' + (i === state.cur ? ' sel' : '');
       const nm = document.createElement('div'); nm.textContent = lv.name; el.appendChild(nm);
-      el.onclick = () => { state.cur = i; state.grid = state.levels[i].grid; state.selected = null; refreshLevels(); draw(); save(); };
+      el.onclick = () => { state.cur = i; state.grid = state.levels[i].grid; state.selected = null; state.multiSel.clear(); state.openGroup = null; refreshLevels(); draw(); save(); };
       el.ondblclick = () => { const n = prompt('Назва рівня:', lv.name); if (n) { lv.name = n; lv.updatedAt = Date.now(); refreshLevels(); save(); } };
       if (state.levels.length > 1) {
         const x = document.createElement('button'); x.className = 'lvDel'; x.textContent = '×';
         x.onclick = (e) => {
           e.stopPropagation(); pushUndo(); state.levels.splice(i, 1);
           if (state.cur >= state.levels.length) state.cur = state.levels.length - 1;
-          state.grid = level().grid; state.selected = null; refreshLevels(); draw(); save();
+          state.grid = level().grid; state.selected = null; state.multiSel.clear(); state.openGroup = null; refreshLevels(); draw(); save();
         };
         el.appendChild(x);
       }
@@ -1739,20 +1760,25 @@ export function initLevelEditor(prefix: string): void {
       const si = lv0.spawns.findIndex((s) => Math.floor((s.x - s.y) / gs0) === cc.cx && Math.floor(s.y / k0) === cc.cy);
       if (si >= 0) { state.spawnSel = si; refreshSpawnUI(); draw(); return; }
     }
-    // Shift+ЛКМ на вибраному ассеті — перемістити pivot у точку кліка
-    if (ev.button === 0 && ev.shiftKey && state.selected && !state.pathTool && !state.mode) {
-      const p = sel(); const img = p ? imgOf(p) : undefined;
-      if (p && img) {
-        const d = animDisp(p); const s2 = toScreen(d.x, d.y); s2.x += plxDx(p.cat, p.plan);
-        const ddx = x - s2.x, ddy = y - s2.y;
-        const ang = -rad(d.rot);
-        const rdx = ddx * Math.cos(ang) - ddy * Math.sin(ang), rdy = ddx * Math.sin(ang) + ddy * Math.cos(ang);
-        pushUndo();
-        p.pivotX = rdx / (d.scale * (p.scaleW ?? 1) * p.flip * sc());
-        p.pivotY = rdy / (d.scale * (p.scaleH ?? 1) * sc());
-        save(); draw(); setStatus('Pivot переміщено · Shift+ЛКМ на центрі — скинути');
-        return;
+    // Shift+ЛКМ — мультивибір (додати/прибрати ассет або всю групу)
+    if (ev.button === 0 && ev.shiftKey && !state.pathTool && !state.mode && !state.pendingAsset) {
+      const hit = hitTest(x, y);
+      if (hit) {
+        const hp = level().placed.find((p) => p.id === hit);
+        const gid = hp?.group;
+        if (gid && state.openGroup !== gid) {
+          // Клік на групу: перемикаємо всі її члени
+          const mates = level().placed.filter((p) => p.group === gid).map((p) => p.id);
+          const allIn = mates.every((id) => state.multiSel.has(id));
+          if (allIn) { mates.forEach((id) => { state.multiSel.delete(id); if (state.selected === id) state.selected = null; }); }
+          else { mates.forEach((id) => state.multiSel.add(id)); state.selected = hit; }
+        } else {
+          if (state.multiSel.has(hit)) { state.multiSel.delete(hit); if (state.selected === hit) state.selected = [...state.multiSel][0] ?? null; }
+          else { state.multiSel.add(hit); state.selected = hit; }
+        }
+        refreshSel(); draw();
       }
+      return;
     }
     // Pending-ворог: ЛКМ виставляє ворога у зону спавна під курсором
     if (ev.button === 0 && state.pendingEnemy) {
@@ -1847,8 +1873,31 @@ export function initLevelEditor(prefix: string): void {
       }
     }
     const hit = hitTest(x, y);
-    state.selected = hit;
-    if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
+    if (hit) {
+      const hp = level().placed.find((p) => p.id === hit)!;
+      const gid = hp.group;
+      if (gid && state.openGroup !== gid) {
+        // Клік на згруповану ассету → виділити всю групу
+        state.selected = hit;
+        state.multiSel.clear();
+        level().placed.forEach((p) => { if (p.group === gid) state.multiSel.add(p.id); });
+      } else if (state.multiSel.has(hit)) {
+        // Клік на вже вибраний ассет: залишаємо multiSel, просто міняємо primary
+        state.selected = hit;
+      } else {
+        // Звичайний клік на новий ассет: скидаємо мультивибір
+        state.selected = hit; state.multiSel.clear(); state.multiSel.add(hit);
+      }
+      pushUndo();
+      const pp = level().placed.find((p) => p.id === hit)!;
+      const others = [...state.multiSel].filter((id) => id !== hit).map((id) => {
+        const q = level().placed.find((p) => p.id === id)!;
+        return { id, ox: q.x, oy: q.y };
+      });
+      drag = { x, y, ox: pp.x, oy: pp.y, others };
+    } else {
+      state.selected = null; state.multiSel.clear(); state.openGroup = null;
+    }
     refreshSel(); draw();
   });
   window.addEventListener('mousemove', (ev) => {
@@ -1907,7 +1956,18 @@ export function initLevelEditor(prefix: string): void {
       }
       draw(); return;
     }
-    if (drag) { const p = sel(); if (p) { p.x = drag.ox + (state.mouse.x - drag.x) / sc(); p.y = drag.oy + (state.mouse.y - drag.y) / sc(); draw(); } }
+    if (drag) {
+      const p = sel();
+      if (p) {
+        const ddx = (state.mouse.x - drag.x) / sc(), ddy = (state.mouse.y - drag.y) / sc();
+        p.x = drag.ox + ddx; p.y = drag.oy + ddy;
+        for (const o of drag.others) {
+          const pp = level().placed.find((q) => q.id === o.id);
+          if (pp) { pp.x = o.ox + ddx; pp.y = o.oy + ddy; }
+        }
+        draw();
+      }
+    }
     else if (state.pathTool || state.pendingAsset || state.pendingEnemy || state.pendingNeutral || state.camZoneTool) draw(); // оновити прев'ю інструмента або ghost під курсором
   });
   window.addEventListener('mouseup', () => {
@@ -1978,8 +2038,8 @@ export function initLevelEditor(prefix: string): void {
         if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
         if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
         const hit = hitTest(x, y);
-        state.selected = hit;
-        if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y }; }
+        state.selected = hit; state.multiSel.clear(); if (hit) state.multiSel.add(hit);
+        if (hit) { pushUndo(); const p = sel()!; drag = { x, y, ox: p.x, oy: p.y, others: [] }; }
         refreshSel(); draw();
       } else if (ev.touches.length === 2) {
         singleTouchDown = false;
@@ -2220,6 +2280,12 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
+    // Прозорий ассет: виділення ігнорує цей ассет (для туману/оверлеїв)
+    const transRow = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer;');
+    const transCb = document.createElement('input'); transCb.type = 'checkbox'; transCb.checked = !!p.transparent;
+    transCb.onchange = () => { pushUndo(); p.transparent = transCb.checked || undefined; save(); draw(); };
+    transRow.append(transCb, mk('span', 'opacity:0.8;', 'Прозорий ассет (невибираний)')); m.appendChild(transRow);
+
     const cl = mk('button', btnCss(false) + 'display:block;width:100%;margin-top:10px;', 'Закрити');
     cl.onclick = () => closeAssetMenu(); m.appendChild(cl);
 
@@ -2265,8 +2331,26 @@ export function initLevelEditor(prefix: string): void {
       setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
       return;
     }
+    // Shift+ПКМ — перемістити pivot у точку кліка
+    if (e.shiftKey && state.selected && !state.pathTool && !state.mode) {
+      const p = sel(); const img = p ? imgOf(p) : undefined;
+      if (p && img) {
+        const d = animDisp(p); const s2 = toScreen(d.x, d.y); s2.x += plxDx(p.cat, p.plan);
+        const ddx = e.offsetX - s2.x, ddy = e.offsetY - s2.y;
+        const ang = -rad(d.rot);
+        const rdx = ddx * Math.cos(ang) - ddy * Math.sin(ang), rdy = ddx * Math.sin(ang) + ddy * Math.cos(ang);
+        pushUndo();
+        p.pivotX = rdx / (d.scale * (p.scaleW ?? 1) * p.flip * sc());
+        p.pivotY = rdy / (d.scale * (p.scaleH ?? 1) * sc());
+        save(); draw(); setStatus('Pivot переміщено · Shift+ПКМ на центрі — скинути');
+        return;
+      }
+    }
     const hit = hitTest(e.offsetX, e.offsetY);
-    if (hit) { state.selected = hit; refreshSel(); draw(); const p = sel(); if (p) openAssetMenu(p, e.clientX, e.clientY); }
+    if (hit) {
+      state.selected = hit; state.multiSel.clear(); state.multiSel.add(hit);
+      refreshSel(); draw(); const p = sel(); if (p) openAssetMenu(p, e.clientX, e.clientY);
+    }
   });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -2319,6 +2403,30 @@ export function initLevelEditor(prefix: string): void {
     if ((ev.code === 'KeyX' || ev.code === 'KeyZ') && (state.mode === 'G' || state.mode === 'S')) {
       ev.preventDefault(); state.axisLock = ev.code === 'KeyX' ? 'x' : 'z'; return;
     }
+    // Ctrl+G — згрупувати виділені; Alt+G — відкрити групу; Shift+G — розформувати
+    if (ev.code === 'KeyG' && ev.ctrlKey) {
+      ev.preventDefault();
+      const ids = state.multiSel.size > 1 ? [...state.multiSel] : state.selected ? [state.selected] : [];
+      if (ids.length < 2) { setStatus('Виділи ≥2 ассети (Shift+ЛКМ) щоб згрупувати'); return; }
+      pushUndo();
+      const gid = 'g' + Date.now();
+      ids.forEach((id) => { const p = level().placed.find((x) => x.id === id); if (p) p.group = gid; });
+      save(); draw(); setStatus('Групу створено · Alt+G — відкрити · Shift+G — розформувати'); return;
+    }
+    if (ev.code === 'KeyG' && ev.altKey) {
+      ev.preventDefault();
+      const p = sel(); if (!p?.group) { setStatus('Спочатку виділи ассет із групою'); return; }
+      state.openGroup = state.openGroup === p.group ? null : p.group;
+      draw(); setStatus(state.openGroup ? 'Група відкрита · Alt+G — закрити' : 'Групу закрито'); return;
+    }
+    if (ev.code === 'KeyG' && ev.shiftKey) {
+      ev.preventDefault();
+      const p = sel(); if (!p?.group) { setStatus('Спочатку виділи ассет із групою'); return; }
+      pushUndo();
+      const gid = p.group;
+      level().placed.forEach((x) => { if (x.group === gid) delete x.group; });
+      state.openGroup = null; save(); draw(); setStatus('Групу розформовано'); return;
+    }
     if (ev.code === 'KeyG' || ev.code === 'KeyR' || ev.code === 'KeyS') {
       ev.preventDefault();
       if (state.pendingAsset) {
@@ -2364,12 +2472,15 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'KeyH') {
       ev.preventDefault();
       if (ev.altKey) {
-        // Alt+H — показати всі приховані ассети
-        state.hiddenIds.clear(); setStatus('Усі скриті ассети показано'); draw();
+        // Alt+H — показати всі приховані ассети (undo-сумісно)
+        pushUndo(); state.hiddenIds.clear(); setStatus('Усі скриті ассети показано'); draw();
       } else if (state.selected && !state.mode) {
         // H з вибраним ассетом — сховати його (має пріоритет над інструментом підлоги)
-        state.hiddenIds.add(state.selected); state.selected = null; refreshSel(); draw();
-        setStatus('Ассет прихований · Alt+H — показати всі');
+        pushUndo();
+        const toHide = state.multiSel.size > 1 ? [...state.multiSel] : [state.selected];
+        toHide.forEach((id) => state.hiddenIds.add(id));
+        state.selected = null; state.multiSel.clear(); refreshSel(); draw();
+        setStatus('Ассет(и) приховано · Ctrl+Z — повернути · Alt+H — показати всі');
       } else {
         // H без вибраного — інструмент підлоги (як раніше)
         state.pathTool = state.pathTool === 'h' ? null : 'h'; updatePathBtns();
@@ -2393,10 +2504,17 @@ export function initLevelEditor(prefix: string): void {
       ev.preventDefault();
       if (state.camZoneSel) {
         pushUndo(); level().camZones = level().camZones?.filter((z) => z.id !== state.camZoneSel); state.camZoneSel = null; save(); draw();
+      } else if (state.multiSel.size > 1) {
+        pushUndo();
+        const toDelete = new Set(state.multiSel);
+        level().placed = level().placed.filter((p) => !toDelete.has(p.id));
+        state.selected = null; state.multiSel.clear(); state.openGroup = null; refreshSel(); draw(); save();
       } else { deleteSel(); }
     }
     else if (ev.code === 'Escape') {
-      if (state.pendingEnemy) {
+      if (state.openGroup) {
+        state.openGroup = null; draw();
+      } else if (state.pendingEnemy) {
         state.pendingEnemy = null;
         $('npcList')?.querySelectorAll('.npcCard').forEach((c) => c.classList.remove('pending'));
         draw();
@@ -2408,6 +2526,8 @@ export function initLevelEditor(prefix: string): void {
         state.pendingAsset = null; state.pendingRot = 0; state.pendingScale = 1; state.pendingFlip = 1; state.pendingTransMode = null;
         $('libGrid')?.querySelectorAll('.libCard').forEach((c) => c.classList.remove('pending'));
         draw();
+      } else if (state.multiSel.size > 1) {
+        state.multiSel.clear(); state.selected = null; refreshSel(); draw();
       } else if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
       else if (state.pathTool) { state.pathTool = null; updatePathBtns(); }
     }

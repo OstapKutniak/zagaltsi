@@ -66,6 +66,35 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     cat: 'condition', label: 'Діалог завершено негативно', color: '#8a5a00',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
   },
+  dialog_active: {
+    cat: 'condition', label: 'Діалог триває', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+  },
+  stat_check: {
+    cat: 'condition', label: 'Характеристика', color: '#1e5a9e',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Так' }, { label: 'Ні' }],
+    config: {
+      stat: {
+        type: 'select', label: 'Параметр', default: 'health',
+        options: [
+          { value: 'health',    short: '♥',  label: '♥  Здоровʼя' },
+          { value: 'back_pain', short: '🦴', label: '🦴  Біль у спині' },
+          { value: 'anxiety',   short: '⚡', label: '⚡  Тривожність' },
+        ],
+      },
+      cmp: {
+        type: 'select', label: 'Умова', default: 'lte',
+        options: [
+          { value: 'lte', short: '≤', label: '≤  менше або дорівнює' },
+          { value: 'gte', short: '≥', label: '≥  більше або дорівнює' },
+          { value: 'eq',  short: '=', label: '=  дорівнює' },
+          { value: 'lt',  short: '<', label: '<  менше' },
+          { value: 'gt',  short: '>', label: '>  більше' },
+        ],
+      },
+      percent: { type: 'number', label: '%', default: 50 },
+    },
+  },
   // «І (AND)» — обидва підключених джерела А і В мають вернути потрібний вихід.
   and_cond: {
     cat: 'condition', label: 'І (AND)', color: '#1e5a9e',
@@ -76,7 +105,9 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
   range_attack:   { cat: 'behavior', label: 'Дальня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   melee_attack:   { cat: 'behavior', label: 'Ближня атака',     color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   // «Стати нейтральним» — ворог перестає нападати (домовились після доброго діалогу).
-  become_neutral: { cat: 'behavior', label: 'Стати нейтральним', color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  become_neutral:  { cat: 'behavior', label: 'Стати нейтральним',    color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  player_stop:     { cat: 'behavior', label: 'Гравець зупиняється',   color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
+  player_resume:   { cat: 'behavior', label: 'Гравець відновлює рух', color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }] },
   wait: {
     cat: 'behavior', label: 'Очікування', color: '#7a2e00',
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }],
@@ -115,8 +146,8 @@ export function dialogAnswers(n: GraphNode): string[] {
 }
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done', 'dialog_positive', 'dialog_negative'] },
-  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack', 'become_neutral'] },
+  { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done', 'dialog_positive', 'dialog_negative', 'dialog_active', 'stat_check'] },
+  { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack', 'become_neutral', 'player_stop', 'player_resume'] },
   { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
   { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
 ];
