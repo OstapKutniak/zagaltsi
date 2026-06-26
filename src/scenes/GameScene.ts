@@ -948,56 +948,64 @@ export class GameScene extends Phaser.Scene {
     if (atm.weather?.enabled) {
       const s = evalWeather(atm.weather, this.atmTime);
       this.fogRect.setFillStyle(0x8899bb, s.fogAlpha * 0.5);
-      this.drawWeatherFx(s.type, s.intensity);
+      this.drawWeatherFx(s.type, s);
     } else {
       this.fogRect.setFillStyle(0x8899bb, 0);
       this.weatherGfx.clear();
     }
   }
 
-  private drawWeatherFx(type: WeatherType, intensity: number): void {
+  private drawWeatherFx(type: WeatherType, ws: import('../level/atmosphere').WeatherState): void {
     this.weatherGfx.clear();
-    if (intensity <= 0.01 || type === 'clear' || type === 'fog') return;
+    if (type === 'clear' || type === 'fog') return;
 
-    // Кількість крапель пропорційна до intensity та розміру екрана
     const W = this.logicalW, H = this.logicalH;
     const t = this.weatherTime;
-    // Золотий перетин для рівномірного розподілу без кластеризації (не periodical)
     const GR  = 0.6180339887;
     const GR2 = 0.7548776662;
 
     if (type === 'rain') {
-      const N = Math.round(120 * intensity);
-      const SPEED  = 600;   // px/сек вниз
-      const ANGLE  = 0.18;  // нахил: горизонтальний дрейф = ANGLE * вертикальний крок
-      const OW = W + 120;   // ширина з запасом (щоб не видно стрибків на краях)
-      const OH = H + 40;
-      this.weatherGfx.lineStyle(1.5, 0xaaddff, Math.min(0.7, 0.5 * intensity + 0.1));
-      for (let i = 0; i < N; i++) {
-        const hf = (i * GR)  % 1;   // рівномірно по ширині
-        const vf = (i * GR2) % 1;   // рівномірно по висоті
-        // Позиції зі зміщенням у часі: хвіст (y) падає вниз, голова (x) дрейфує
-        const sy = ((vf * OH + t * SPEED)             % OH) - 20;
-        const sx = ((hf * OW + t * SPEED * ANGLE)     % OW) - 60;
-        const ey = sy + 16;
-        const ex = sx + 16 * ANGLE;
-        this.weatherGfx.beginPath();
-        this.weatherGfx.moveTo(sx, sy);
-        this.weatherGfx.lineTo(ex, ey);
-        this.weatherGfx.strokePath();
+      const angle   = Math.tan((ws.rainDir ?? 15) * Math.PI / 180);
+      const hexCol  = parseInt((ws.rainColor ?? '#aaddff').replace('#', ''), 16);
+      const spd     = ws.rainSpeed ?? 600;
+      const baseLen = ws.rainDropLen ?? 16;
+
+      // Три паралакс-шари: [speedMul, lenMul, widthPx, alpha, count, timeOff]
+      const layers = [
+        { sm: 0.55, lm: 0.6,  w: 0.8, a: ws.rainFar  ?? 0.35, n: 80,  to: 0    },
+        { sm: 1.0,  lm: 1.0,  w: 1.5, a: ws.rainMid  ?? 0.7,  n: 100, to: 777  },
+        { sm: 1.55, lm: 1.55, w: 2.5, a: ws.rainNear ?? 1.0,  n: 40,  to: 1337 },
+      ];
+
+      for (const l of layers) {
+        if (l.a < 0.01) continue;
+        const speed = spd * l.sm;
+        const len   = baseLen * l.lm;
+        const OW    = W + len * Math.abs(angle) + 80;
+        const OH    = H + len + 40;
+        const lt    = t + l.to;
+        this.weatherGfx.lineStyle(l.w, hexCol, Math.min(1, l.a));
+        for (let i = 0; i < l.n; i++) {
+          const hf = (i * GR)  % 1;
+          const vf = (i * GR2) % 1;
+          const sy = ((vf * OH + lt * speed)             % OH) - 20;
+          const sx = ((hf * OW + lt * speed * angle)     % OW) - 40;
+          this.weatherGfx.beginPath();
+          this.weatherGfx.moveTo(sx, sy);
+          this.weatherGfx.lineTo(sx + len * angle, sy + len);
+          this.weatherGfx.strokePath();
+        }
       }
     } else if (type === 'snow') {
-      const N = Math.round(70 * intensity);
       const SPEED = 70;
-      this.weatherGfx.fillStyle(0xffffff, Math.min(0.85, 0.6 * intensity + 0.1));
-      for (let i = 0; i < N; i++) {
+      this.weatherGfx.fillStyle(0xffffff, 0.7);
+      for (let i = 0; i < 70; i++) {
         const hf = (i * GR)  % 1;
         const vf = (i * GR2) % 1;
         const drift = Math.sin(t * 0.45 + i * 1.1) * 25;
-        const OH = H + 50;
-        const OW = W + 100;
+        const OH = H + 50, OW = W + 100;
         const sy = ((vf * OH + t * SPEED) % OH) - 25;
-        const sx = ((hf * OW + drift)     % OW + OW) % OW - 50;
+        const sx = ((hf * OW + drift) % OW + OW) % OW - 50;
         this.weatherGfx.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
     }

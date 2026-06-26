@@ -79,14 +79,16 @@ export function initLevelEditor(prefix: string): void {
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
     spawnSel: 0, // який зі спавнів зараз вибраний/тягнеться
-    camView: false,
+    camView: true,
     showGrid: false,
     grid: 48,
     snap: true,
-    showCollider: true,
-    showMarkers: true,
-    showEnemySpawns: true,
-    showPlayerSpawns: true,
+    showCollider: false,
+    showMarkers: false,
+    showEnemySpawns: false,
+    showPlayerSpawns: false,
+    showAtm: false,
+    showAnim: false,
     hiddenCats: new Set<string>(),
     hiddenIds: new Set<string>(), // тимчасово приховані ассети (тільки редактор, H / Alt+H)
     multiSel: new Set<string>(),  // мультивибір (Shift+ЛКМ); primary = state.selected
@@ -908,7 +910,45 @@ export function initLevelEditor(prefix: string): void {
       ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
       ctx.closePath(); ctx.fill();
     }
+    // Атмосфера у вьюпорті редактора
+    if (state.showAtm) drawEditorRain();
   }
+
+  function drawEditorRain(): void {
+    const lv = level();
+    const wx = lv.atmosphere?.weather;
+    if (!wx?.enabled) return;
+    const ph = wx.phases[0] as import('./atmosphere').WeatherPhase;
+    if (!ph || ph.type !== 'rain') return;
+    const W = canvas.width, H = canvas.height;
+    const t = performance.now() / 1000;
+    const GR = 0.6180339887, GR2 = 0.7548776662;
+    const angle = Math.tan((ph.rainDir ?? 15) * Math.PI / 180);
+    const spd = ph.rainSpeed ?? 600, baseLen = ph.rainDropLen ?? 16;
+    const color = ph.rainColor ?? '#aaddff';
+    const layers = [
+      { sm: 0.55, lm: 0.6,  w: 0.8, a: ph.rainFar  ?? 0.35, n: 80,  to: 0    },
+      { sm: 1.0,  lm: 1.0,  w: 1.5, a: ph.rainMid  ?? 0.7,  n: 100, to: 777  },
+      { sm: 1.55, lm: 1.55, w: 2.5, a: ph.rainNear ?? 1.0,  n: 40,  to: 1337 },
+    ];
+    for (const l of layers) {
+      if (l.a < 0.01) continue;
+      const speed = spd * l.sm, len = baseLen * l.lm;
+      const OW = W + len * Math.abs(angle) + 80, OH = H + len + 40, lt = t + l.to;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = Math.min(1, l.a);
+      ctx.lineWidth = l.w;
+      for (let i = 0; i < l.n; i++) {
+        const hf = (i * GR) % 1, vf = (i * GR2) % 1;
+        const sy = ((vf * OH + lt * speed) % OH) - 20;
+        const sx = ((hf * OW + lt * speed * angle) % OW) - 40;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + len * angle, sy + len); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   function draw(): void {
     ensureAnimLoop();
     if (_drawRaf) return;
@@ -1500,11 +1540,11 @@ export function initLevelEditor(prefix: string): void {
     wr.appendChild(sp); wr.appendChild(inp); return wr;
   }
 
-  // Будує секцію-акордеон (заголовок + ON/OFF + тіло)
-  function makeSection(label: string, enabled: boolean, onToggle: (v: boolean) => void): { wrap: HTMLElement; body: HTMLElement; setOpen: (v: boolean) => void } {
+  // Будує секцію-акордеон (заголовок + ON/OFF + Незмінне + тіло)
+  function makeSection(label: string, enabled: boolean, onToggle: (v: boolean) => void, staticVal = false, onStatic?: (v: boolean) => void): { wrap: HTMLElement; body: HTMLElement; setOpen: (v: boolean) => void } {
     const wrap = document.createElement('div'); wrap.style.cssText = 'border:1px solid var(--line);border-radius:6px;overflow:hidden';
-    const hd   = document.createElement('div'); hd.style.cssText = 'display:flex;align-items:center;gap:0;cursor:pointer;user-select:none;background:var(--rail);padding:5px 6px';
-    const arr  = document.createElement('span'); arr.style.cssText = 'font-size:11px;margin-right:5px;transition:transform .15s'; arr.textContent = '▶';
+    const hd   = document.createElement('div'); hd.style.cssText = 'display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;background:var(--rail);padding:5px 6px';
+    const arr  = document.createElement('span'); arr.style.cssText = 'font-size:11px;transition:transform .15s'; arr.textContent = '▶';
     const lbEl = document.createElement('span'); lbEl.style.cssText = 'font-size:12px;font-weight:600;flex:1'; lbEl.textContent = label;
     const onOff = document.createElement('button');
     onOff.textContent = enabled ? 'ВКЛ' : 'ВИКЛ';
@@ -1517,7 +1557,22 @@ export function initLevelEditor(prefix: string): void {
       onOff.style.color = nv ? '#1b1b1b' : 'var(--muted)';
       onToggle(nv); save(); renderAtmPanel();
     });
-    hd.appendChild(arr); hd.appendChild(lbEl); hd.appendChild(onOff); wrap.appendChild(hd);
+    hd.appendChild(arr); hd.appendChild(lbEl); hd.appendChild(onOff);
+    if (onStatic) {
+      const lk = document.createElement('button');
+      lk.title = 'Незмінне (не переходить між фазами)';
+      lk.textContent = staticVal ? '🔒' : '🔓';
+      lk.style.cssText = 'font-size:13px;padding:0 3px;border-radius:3px;border:1px solid var(--line);cursor:pointer;background:' + (staticVal ? 'var(--accent)' : 'var(--rail)');
+      lk.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nv = lk.textContent === '🔓';
+        lk.textContent = nv ? '🔒' : '🔓';
+        lk.style.background = nv ? 'var(--accent)' : 'var(--rail)';
+        onStatic(nv); save();
+      });
+      hd.appendChild(lk);
+    }
+    wrap.appendChild(hd);
     const body = document.createElement('div'); body.style.cssText = 'display:none;flex-direction:column;gap:4px;padding:6px';
     wrap.appendChild(body);
     let open = false;
@@ -1526,6 +1581,41 @@ export function initLevelEditor(prefix: string): void {
     };
     hd.addEventListener('click', () => setOpen(!open));
     return { wrap, body, setOpen };
+  }
+
+  function mkRangeAbs(lbl: string, val: number, min: number, max: number, suffix: string, onChange: (v: number) => void): HTMLElement {
+    const wr = document.createElement('div'); wr.style.cssText = 'display:flex;align-items:center;gap:4px';
+    const sp = document.createElement('span'); sp.style.cssText = 'color:var(--muted);flex:0 0 60px;font-size:11px'; sp.textContent = lbl;
+    const sl = document.createElement('input') as HTMLInputElement;
+    sl.type = 'range'; sl.min = String(min); sl.max = String(max); sl.step = '1'; sl.value = String(Math.round(val));
+    sl.style.cssText = 'flex:1;accent-color:var(--sel)';
+    const vl = document.createElement('span'); vl.style.cssText = 'flex:0 0 36px;text-align:right;color:var(--muted);font-size:11px'; vl.textContent = Math.round(val) + suffix;
+    sl.addEventListener('input', () => { const v = Number(sl.value); onChange(v); vl.textContent = v + suffix; save(); });
+    wr.appendChild(sp); wr.appendChild(sl); wr.appendChild(vl); return wr;
+  }
+
+  function mkDirPicker(val: number, onChange: (v: number) => void): HTMLElement {
+    const wr = document.createElement('div'); wr.style.cssText = 'display:flex;align-items:center;gap:6px';
+    const sp = document.createElement('span'); sp.style.cssText = 'color:var(--muted);flex:0 0 60px;font-size:11px'; sp.textContent = 'Напрямок';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 32 32');
+    svg.style.cssText = 'width:26px;height:26px;flex:0 0 26px;border:1px solid var(--line);border-radius:50%;background:var(--bg)';
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('x1', '16'); ln.setAttribute('y1', '4');
+    ln.setAttribute('stroke', 'var(--sel)'); ln.setAttribute('stroke-width', '2.5'); ln.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(ln);
+    const updateArrow = (deg: number) => {
+      const rad = deg * Math.PI / 180;
+      ln.setAttribute('x2', (16 + 12 * Math.sin(rad)).toFixed(1));
+      ln.setAttribute('y2', (4  + 24 * Math.cos(rad)).toFixed(1));
+    };
+    updateArrow(val);
+    const sl = document.createElement('input') as HTMLInputElement;
+    sl.type = 'range'; sl.min = '-45'; sl.max = '45'; sl.step = '1'; sl.value = String(Math.round(val));
+    sl.style.cssText = 'flex:1;accent-color:var(--sel)';
+    const vl = document.createElement('span'); vl.style.cssText = 'flex:0 0 28px;text-align:right;color:var(--muted);font-size:11px'; vl.textContent = Math.round(val) + '°';
+    sl.addEventListener('input', () => { const v = Number(sl.value); onChange(v); updateArrow(v); vl.textContent = v + '°'; save(); });
+    wr.appendChild(sp); wr.appendChild(svg); wr.appendChild(sl); wr.appendChild(vl); return wr;
   }
 
   function renderAtmPanel(): void {
@@ -1541,7 +1631,7 @@ export function initLevelEditor(prefix: string): void {
     const { wrap: skyWrap, body: skyBody, setOpen: skyOpen } = makeSection('Небо', skyEnabled, (en) => {
       if (!atm.sky) atm.sky = { enabled: en, phases: [{ ...DEFAULT_SKY_PHASE }] };
       else atm.sky.enabled = en;
-    });
+    }, !!(atm.sky?.static), (v) => { if (atm.sky) atm.sky.static = v; });
     if (atm.sky?.enabled) {
       skyOpen(true);
       const sky = atm.sky;
@@ -1564,7 +1654,7 @@ export function initLevelEditor(prefix: string): void {
     const { wrap: todWrap, body: todBody, setOpen: todOpen } = makeSection('Час доби', todEnabled, (en) => {
       if (!atm.tod) atm.tod = { enabled: en, phases: [{ ...DEFAULT_TOD_PHASE }] };
       else atm.tod.enabled = en;
-    });
+    }, !!(atm.tod?.static), (v) => { if (atm.tod) atm.tod.static = v; });
     if (atm.tod?.enabled) {
       todOpen(true);
       const tod = atm.tod;
@@ -1587,7 +1677,7 @@ export function initLevelEditor(prefix: string): void {
     const { wrap: wxWrap, body: wxBody, setOpen: wxOpen } = makeSection('Погода', wxEnabled, (en) => {
       if (!atm.weather) atm.weather = { enabled: en, phases: [{ ...DEFAULT_WEATHER_PHASE }] };
       else atm.weather.enabled = en;
-    });
+    }, !!(atm.weather?.static), (v) => { if (atm.weather) atm.weather.static = v; });
     if (atm.weather?.enabled) {
       wxOpen(true);
       const wx = atm.weather;
@@ -1597,17 +1687,37 @@ export function initLevelEditor(prefix: string): void {
         });
         // Тип погоди
         const wxRow = document.createElement('div'); wxRow.style.cssText = 'display:flex;align-items:center;gap:4px';
-        const wxLbl = document.createElement('span'); wxLbl.style.cssText = 'color:var(--muted);flex:0 0 50px;font-size:11px'; wxLbl.textContent = 'Тип';
+        const wxLbl = document.createElement('span'); wxLbl.style.cssText = 'color:var(--muted);flex:0 0 60px;font-size:11px'; wxLbl.textContent = 'Тип';
         const wxSel = document.createElement('select') as HTMLSelectElement;
         wxSel.style.cssText = 'flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font-size:11px;padding:2px;font-family:inherit';
         (['clear','rain','snow','fog'] as WeatherType[]).forEach((w) => {
           const o = document.createElement('option'); o.value = w; o.textContent = WEATHER_LABELS[w]; wxSel.appendChild(o);
         });
         wxSel.value = ph.type;
-        wxSel.addEventListener('change', () => { ph.type = wxSel.value as WeatherType; save(); });
+        // Rain-specific controls container
+        const rainBlock = document.createElement('div'); rainBlock.style.cssText = 'display:flex;flex-direction:column;gap:3px';
+        const fogBlock  = document.createElement('div'); fogBlock.style.cssText = 'display:flex;flex-direction:column;gap:3px';
+        const refreshBlocks = () => {
+          rainBlock.style.display = ph.type === 'rain' ? 'flex' : 'none';
+          fogBlock.style.display  = (ph.type === 'fog' || ph.type === 'rain') ? 'flex' : 'none';
+        };
+        wxSel.addEventListener('change', () => { ph.type = wxSel.value as WeatherType; refreshBlocks(); save(); });
         wxRow.appendChild(wxLbl); wxRow.appendChild(wxSel); body.appendChild(wxRow);
-        body.appendChild(mkSlider('Інтенс.', ph.intensity, 100, (v) => { ph.intensity = v; }));
-        body.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));
+
+        // Дощ: колір, напрямок, швидкість, довжина, три шари
+        rainBlock.appendChild(mkColorPicker('Колір', ph.rainColor ?? '#aaddff', (v) => { ph.rainColor = v; }));
+        rainBlock.appendChild(mkDirPicker(ph.rainDir ?? 15, (v) => { ph.rainDir = v; }));
+        rainBlock.appendChild(mkRangeAbs('Швидкість', ph.rainSpeed ?? 600, 50, 2000, ' px/s', (v) => { ph.rainSpeed = v; }));
+        rainBlock.appendChild(mkRangeAbs('Довжина', ph.rainDropLen ?? 16, 2, 80, ' px', (v) => { ph.rainDropLen = v; }));
+        rainBlock.appendChild(mkSlider('Ближній', ph.rainNear ?? 1, 100, (v) => { ph.rainNear = v; }));
+        rainBlock.appendChild(mkSlider('Середній', ph.rainMid ?? 0.7, 100, (v) => { ph.rainMid = v; }));
+        rainBlock.appendChild(mkSlider('Дальній', ph.rainFar ?? 0.35, 100, (v) => { ph.rainFar = v; }));
+
+        // Туман / загальне
+        fogBlock.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));
+
+        body.appendChild(rainBlock); body.appendChild(fogBlock);
+        refreshBlocks();
         wxBody.appendChild(card);
       });
       const addBtn = document.createElement('button'); addBtn.textContent = '+ Додати фазу'; addBtn.style.cssText = 'font-size:11px;padding:4px;width:100%';
@@ -2507,6 +2617,13 @@ export function initLevelEditor(prefix: string): void {
       state.selected = copies[0].id;
       refreshSel(); draw(); save(); startMode('G');
     }
+    else if (ev.code === 'KeyF' && ev.altKey) {
+      ev.preventDefault();
+      // Alt+F — зняти "прозорий" з усіх ассетів (щоб їх знову можна було вибрати)
+      pushUndo();
+      level().placed.forEach((p) => { p.transparent = false; });
+      setStatus('Прозорість знята з усіх ассетів'); draw(); save();
+    }
     else if (ev.code === 'KeyH') {
       ev.preventDefault();
       if (ev.altKey) {
@@ -2691,10 +2808,12 @@ export function initLevelEditor(prefix: string): void {
     lv_gridBtn.classList.toggle('on', state.showGrid);
     draw();
   });
-  const showColliderBtn = $<HTMLButtonElement>('showColliderBtn');
-  showColliderBtn?.addEventListener('click', () => {
-    state.showCollider = !state.showCollider;
-    showColliderBtn.classList.toggle('on', state.showCollider);
+  // showDebugBtn = колайдери + спавни (одна кнопка)
+  const showDebugBtn = $<HTMLButtonElement>('showDebugBtn');
+  showDebugBtn?.addEventListener('click', () => {
+    const on = !state.showCollider;
+    state.showCollider = on; state.showEnemySpawns = on; state.showPlayerSpawns = on;
+    showDebugBtn.classList.toggle('on', on);
     draw();
   });
   const bwBtn = $<HTMLButtonElement>('bwBtn');
@@ -2710,17 +2829,16 @@ export function initLevelEditor(prefix: string): void {
     linesBtn.classList.toggle('on', state.showMarkers);
     draw();
   });
-  const enemySpawnsBtn = $<HTMLButtonElement>('enemySpawnsViewBtn');
-  enemySpawnsBtn?.addEventListener('click', () => {
-    state.showEnemySpawns = !state.showEnemySpawns;
-    enemySpawnsBtn.classList.toggle('on', state.showEnemySpawns);
+  const showAtmBtn = $<HTMLButtonElement>('showAtmBtn');
+  showAtmBtn?.addEventListener('click', () => {
+    state.showAtm = !state.showAtm;
+    showAtmBtn.classList.toggle('on', state.showAtm);
     draw();
   });
-  const playerSpawnsBtn = $<HTMLButtonElement>('playerSpawnsViewBtn');
-  playerSpawnsBtn?.addEventListener('click', () => {
-    state.showPlayerSpawns = !state.showPlayerSpawns;
-    playerSpawnsBtn.classList.toggle('on', state.showPlayerSpawns);
-    draw();
+  const showAnimBtn = $<HTMLButtonElement>('showAnimBtn');
+  showAnimBtn?.addEventListener('click', () => {
+    state.showAnim = !state.showAnim;
+    showAnimBtn.classList.toggle('on', state.showAnim);
   });
   const constructorBtn = $<HTMLButtonElement>('constructorBtn');
   constructorBtn?.addEventListener('click', () => constructorBtn.classList.toggle('on', toggleConstructor()));
@@ -3159,8 +3277,7 @@ export function initLevelEditor(prefix: string): void {
   load().then(() => {
     resize(); refreshLevels(); refreshCatSelect(); refreshAssets(); refreshSel(); draw();
     wireSpawnControls();
-    showColliderBtn?.classList.toggle('on', state.showCollider);
-    snapBtn?.classList.toggle('on', state.snap);
+    if (state.camView) { snapCamView(); $('camViewBtn')?.classList.add('on'); }
     setStatus('Завантаж PNG у бібліотеку і тягни на доріжку.');
   });
 

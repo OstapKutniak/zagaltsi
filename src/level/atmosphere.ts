@@ -4,11 +4,23 @@ export type WeatherType = 'clear' | 'rain' | 'snow' | 'fog';
 
 export interface SkyPhase     { durationSec: number; skyHex: string; groundHex: string }
 export interface TodPhase     { durationSec: number; ambientHex: string; ambientAlpha: number }
-export interface WeatherPhase { durationSec: number; type: WeatherType; intensity: number; fogAlpha: number }
+export interface WeatherPhase {
+  durationSec: number;
+  type: WeatherType;
+  fogAlpha: number;
+  // rain-specific
+  rainColor?:   string;   // hex, default '#aaddff'
+  rainDir?:     number;   // degrees tilt right, default 15
+  rainSpeed?:   number;   // px/sec mid-layer, default 600
+  rainDropLen?: number;   // px at mid layer, default 16
+  rainNear?:    number;   // near layer opacity 0-1, default 1
+  rainMid?:     number;   // mid layer opacity 0-1, default 0.7
+  rainFar?:     number;   // far layer opacity 0-1, default 0.35
+}
 
-export interface AtmSky     { enabled: boolean; phases: SkyPhase[] }
-export interface AtmTod     { enabled: boolean; phases: TodPhase[] }
-export interface AtmWeather { enabled: boolean; phases: WeatherPhase[] }
+export interface AtmSky     { enabled: boolean; static?: boolean; phases: SkyPhase[] }
+export interface AtmTod     { enabled: boolean; static?: boolean; phases: TodPhase[] }
+export interface AtmWeather { enabled: boolean; static?: boolean; phases: WeatherPhase[] }
 
 export interface Atmosphere {
   sky?:     AtmSky;
@@ -46,14 +58,24 @@ function findPhase<T extends { durationSec: number }>(phases: T[], wallSec: numb
   return { pA: phases[0], pB: phases[0], f: 0 };
 }
 
+function staticOrFind<T extends { durationSec: number }>(arr: T[], wallSec: number, isStatic?: boolean): { pA: T; pB: T; f: number } {
+  if (!arr.length) return { pA: {} as T, pB: {} as T, f: 0 };
+  if (isStatic) return { pA: arr[0], pB: arr[0], f: 0 };
+  return findPhase(arr, wallSec);
+}
+
 // ── Eval ─────────────────────────────────────────────────────────────────────
 
 export interface SkyState     { skyColor: number; groundColor: number }
 export interface TodState     { ambientColor: number; ambientAlpha: number }
-export interface WeatherState { type: WeatherType; intensity: number; fogAlpha: number }
+export interface WeatherState {
+  type: WeatherType; fogAlpha: number;
+  rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number;
+  rainNear: number; rainMid: number; rainFar: number;
+}
 
 export function evalSky(sky: AtmSky, wallSec: number): SkyState {
-  const { pA, pB, f } = findPhase(sky.phases, wallSec);
+  const { pA, pB, f } = staticOrFind(sky.phases, wallSec, sky.static);
   return {
     skyColor:    lerpHex((pA as SkyPhase).skyHex    ?? '#3a3148', (pB as SkyPhase).skyHex    ?? '#3a3148', f),
     groundColor: lerpHex((pA as SkyPhase).groundHex ?? '#4a3f2e', (pB as SkyPhase).groundHex ?? '#4a3f2e', f),
@@ -61,7 +83,7 @@ export function evalSky(sky: AtmSky, wallSec: number): SkyState {
 }
 
 export function evalTod(tod: AtmTod, wallSec: number): TodState {
-  const { pA, pB, f } = findPhase(tod.phases, wallSec);
+  const { pA, pB, f } = staticOrFind(tod.phases, wallSec, tod.static);
   const a = pA as TodPhase, b = pB as TodPhase;
   return {
     ambientColor: lerpHex(a.ambientHex ?? '#000000', b.ambientHex ?? '#000000', f),
@@ -70,12 +92,18 @@ export function evalTod(tod: AtmTod, wallSec: number): TodState {
 }
 
 export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
-  const { pA, pB, f } = findPhase(wx.phases, wallSec);
+  const { pA, pB, f } = staticOrFind(wx.phases, wallSec, wx.static);
   const a = pA as WeatherPhase, b = pB as WeatherPhase;
   return {
-    type:      f < 0.5 ? (a.type ?? 'clear') : (b.type ?? 'clear'),
-    intensity: (a.intensity ?? 0) + ((b.intensity ?? 0) - (a.intensity ?? 0)) * f,
-    fogAlpha:  (a.fogAlpha  ?? 0) + ((b.fogAlpha  ?? 0) - (a.fogAlpha  ?? 0)) * f,
+    type:        f < 0.5 ? (a.type ?? 'clear') : (b.type ?? 'clear'),
+    fogAlpha:    (a.fogAlpha    ?? 0) + ((b.fogAlpha    ?? 0) - (a.fogAlpha    ?? 0)) * f,
+    rainColor:   a.rainColor   ?? '#aaddff',
+    rainDir:     a.rainDir     ?? 15,
+    rainSpeed:   a.rainSpeed   ?? 600,
+    rainDropLen: a.rainDropLen ?? 16,
+    rainNear:    a.rainNear    ?? 1,
+    rainMid:     a.rainMid     ?? 0.7,
+    rainFar:     a.rainFar     ?? 0.35,
   };
 }
 
@@ -83,4 +111,4 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
 
 export const DEFAULT_SKY_PHASE:     SkyPhase     = { durationSec: 30, skyHex: '#3a3148', groundHex: '#4a3f2e' };
 export const DEFAULT_TOD_PHASE:     TodPhase     = { durationSec: 30, ambientHex: '#000000', ambientAlpha: 0 };
-export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, type: 'clear', intensity: 0, fogAlpha: 0 };
+export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, type: 'clear', fogAlpha: 0, rainColor: '#aaddff', rainDir: 15, rainSpeed: 600, rainDropLen: 16, rainNear: 1, rainMid: 0.7, rainFar: 0.35 };
