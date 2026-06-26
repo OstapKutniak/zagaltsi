@@ -139,6 +139,8 @@ export function initLevelEditor(prefix: string): void {
 
   // Оголошено рано (до draw/previewActive), щоб не було TDZ при першому малюванні.
   let drag: { x: number; y: number; ox: number; oy: number; others: { id: string; ox: number; oy: number }[] } | null = null;
+  // Початкові трансформи інших виділених ассетів для G/R/S-mode.
+  let multiOrigPos: { id: string; x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number }[] = [];
   let panning = false; let panStart = { mx: 0, my: 0, px: 0, py: 0 };
   let painting = false;
   let _drawRaf = 0;
@@ -2371,6 +2373,11 @@ export function initLevelEditor(prefix: string): void {
     const p = sel(); if (!p) return;
     pushUndo(); state.axisLock = null;
     state.mode = m; state.orig = { x: p.x, y: p.y, rot: p.rot, scale: p.scale, scaleW: p.scaleW ?? 1, scaleH: p.scaleH ?? 1 };
+    // Запам'ятати оригінали ВСІХ виділених ассетів (крім primary)
+    multiOrigPos = [...state.multiSel].filter((id) => id !== p.id).map((id) => {
+      const q = level().placed.find((x) => x.id === id);
+      return q ? { id, x: q.x, y: q.y, rot: q.rot, scale: q.scale, scaleW: q.scaleW ?? 1, scaleH: q.scaleH ?? 1 } : null;
+    }).filter((x): x is typeof multiOrigPos[0] => !!x);
     const o = toScreen(p.x, p.y);
     state.startWx = state.mouse.x; state.startWy = state.mouse.y;
     state.startAng = Math.atan2(state.mouse.y - o.y, state.mouse.x - o.x);
@@ -2384,13 +2391,36 @@ export function initLevelEditor(prefix: string): void {
       if (state.axisLock === 'x') { p.x = state.orig.x + dx; p.y = state.orig.y; }
       else if (state.axisLock === 'z') { p.x = state.orig.x; p.y = state.orig.y + dy; }
       else { p.x = state.orig.x + dx; p.y = state.orig.y + dy; }
+      // Решта виділених — той самий зсув
+      for (const mo of multiOrigPos) {
+        const q = level().placed.find((x) => x.id === mo.id);
+        if (!q) continue;
+        if (state.axisLock === 'x') { q.x = mo.x + dx; q.y = mo.y; }
+        else if (state.axisLock === 'z') { q.x = mo.x; q.y = mo.y + dy; }
+        else { q.x = mo.x + dx; q.y = mo.y + dy; }
+      }
     }
-    else if (state.mode === 'R') { const a = Math.atan2(state.mouse.y - o.y, state.mouse.x - o.x); p.rot = state.orig.rot + ((a - state.startAng) * 180) / Math.PI; }
+    else if (state.mode === 'R') {
+      const a = Math.atan2(state.mouse.y - o.y, state.mouse.x - o.x);
+      const dRot = ((a - state.startAng) * 180) / Math.PI;
+      p.rot = state.orig.rot + dRot;
+      // Кожен обертається навколо власного центру на той самий кут
+      for (const mo of multiOrigPos) {
+        const q = level().placed.find((x) => x.id === mo.id); if (q) q.rot = mo.rot + dRot;
+      }
+    }
     else if (state.mode === 'S') {
       const d = Math.hypot(state.mouse.x - o.x, state.mouse.y - o.y); const ratio = d / state.startDist;
       if (state.axisLock === 'x') { p.scaleW = Math.max(0.05, state.orig.scaleW * ratio); }
       else if (state.axisLock === 'z') { p.scaleH = Math.max(0.05, state.orig.scaleH * ratio); }
       else { p.scale = Math.max(0.05, state.orig.scale * ratio); }
+      // Той самий ratio на решту
+      for (const mo of multiOrigPos) {
+        const q = level().placed.find((x) => x.id === mo.id); if (!q) continue;
+        if (state.axisLock === 'x') q.scaleW = Math.max(0.05, mo.scaleW * ratio);
+        else if (state.axisLock === 'z') q.scaleH = Math.max(0.05, mo.scaleH * ratio);
+        else q.scale = Math.max(0.05, mo.scale * ratio);
+      }
     }
     refreshSel(); draw();
   }
@@ -2461,13 +2491,21 @@ export function initLevelEditor(prefix: string): void {
     }
     else if (ev.code === 'KeyD' && ev.shiftKey) {
       ev.preventDefault();
-      const p = sel();
-      if (p) {
-        pushUndo();
-        const copy: Placed = { ...p, id: 'p' + Date.now() + Math.round(performance.now()) };
-        level().placed.push(copy); state.selected = copy.id;
-        refreshSel(); draw(); save(); startMode('G');
-      }
+      const ids = state.multiSel.size > 1 ? [...state.multiSel] : state.selected ? [state.selected] : [];
+      if (!ids.length) return;
+      pushUndo();
+      // Якщо всі належать одній групі — нова копія отримує НОВИЙ спільний group id
+      const srcGroups = new Set(ids.map((id) => level().placed.find((p) => p.id === id)?.group).filter(Boolean));
+      const groupRemap = new Map<string, string>();
+      srcGroups.forEach((g) => groupRemap.set(g!, 'g' + Date.now() + Math.random().toString(36).slice(2, 6)));
+      const copies: Placed[] = ids.map((id, i) => {
+        const src = level().placed.find((p) => p.id === id)!;
+        return { ...src, id: 'p' + Date.now() + i + Math.round(performance.now()), group: src.group ? groupRemap.get(src.group) : undefined };
+      });
+      level().placed.push(...copies);
+      state.multiSel.clear(); copies.forEach((c) => state.multiSel.add(c.id));
+      state.selected = copies[0].id;
+      refreshSel(); draw(); save(); startMode('G');
     }
     else if (ev.code === 'KeyH') {
       ev.preventDefault();
@@ -2497,7 +2535,14 @@ export function initLevelEditor(prefix: string): void {
     else if (ev.code === 'KeyM') {
       ev.preventDefault();
       if (state.pendingAsset) { state.pendingFlip *= -1; draw(); }
-      else { const p = sel(); if (p) { pushUndo(); p.flip *= -1; draw(); save(); } }
+      else {
+        const ids = state.multiSel.size > 0 ? [...state.multiSel] : state.selected ? [state.selected] : [];
+        if (ids.length) {
+          pushUndo();
+          ids.forEach((id) => { const q = level().placed.find((p) => p.id === id); if (q) q.flip *= -1; });
+          draw(); save();
+        }
+      }
     }
     else if (ev.code === 'KeyJ') { ev.preventDefault(); if (state.snap) snapToEdge(); }
     else if (ev.code === 'Delete' || ev.code === 'Backspace') {
@@ -2528,7 +2573,15 @@ export function initLevelEditor(prefix: string): void {
         draw();
       } else if (state.multiSel.size > 1) {
         state.multiSel.clear(); state.selected = null; refreshSel(); draw();
-      } else if (state.mode) { const p = sel(); if (p && state.orig) Object.assign(p, state.orig); state.mode = null; state.orig = null; state.axisLock = null; draw(); }
+      } else if (state.mode) {
+        const p = sel(); if (p && state.orig) Object.assign(p, state.orig);
+        // Відкотити решту виділених до їх оригіналів
+        for (const mo of multiOrigPos) {
+          const q = level().placed.find((x) => x.id === mo.id);
+          if (q) { q.x = mo.x; q.y = mo.y; q.rot = mo.rot; q.scale = mo.scale; q.scaleW = mo.scaleW; q.scaleH = mo.scaleH; }
+        }
+        multiOrigPos = []; state.mode = null; state.orig = null; state.axisLock = null; draw();
+      }
       else if (state.pathTool) { state.pathTool = null; updatePathBtns(); }
     }
   });
