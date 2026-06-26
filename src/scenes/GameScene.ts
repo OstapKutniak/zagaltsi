@@ -466,6 +466,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
+  // Після addVertices одразу форсуємо preUpdate — бо Phaser.Mesh.preUpdate виконується
+  // ДО scene.update, тому нові вершини (vx/vy=0) інакше дійшли б до рендеру невидимими.
   private updateKfAnims(dt: number): void {
     if (!this.lvlKfAnims.length) return;
     this.lvlKfTime += dt;
@@ -480,29 +482,32 @@ export class GameScene extends Phaser.Scene {
       }
       a.mesh.clear();
       a.mesh.addVertices(verts, uvs, a.idx, false);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (a.mesh as any).preUpdate();
     }
   }
 
   // Запечені деформи: форма фіксована у world-space, UV крутиться анімацією.
+  // Оновлюємо лише tu/tv в існуючих вершинах — без clear()/addVertices(), щоб
+  // не зкидати vx/vy до нуля між preUpdate і рендером.
   private updateBakedAnims(): void {
     if (!this.lvlBakedAnims.length) return;
     for (const a of this.lvlBakedAnims) {
       const off = animOffset(a.anim, this.lvlAnimTime);
       const rotRad = -(off.rot * Math.PI) / 180;
       const cosA = Math.cos(rotRad), sinA = Math.sin(rotRad);
-      const effDeform = (a.deform.keyframes?.length ?? 0) >= 2 ? deformKfAt(a.deform, this.lvlKfTime) : a.deform;
-      const verts: number[] = [], uvs: number[] = [];
-      for (let row = 0; row <= a.N; row++) {
-        for (let col = 0; col <= a.N; col++) {
-          const t = col / a.N, s = row / a.N;
-          const pos = deformImgPt(effDeform, a.W, a.H, t, s);
-          verts.push(pos.x * a.scale * a.flip, -pos.y * a.scale);
-          const ux = t - 0.5, uy = s - 0.5;
-          uvs.push(0.5 + ux * cosA - uy * sinA, 0.5 + ux * sinA + uy * cosA);
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mv = (a.mesh as any).vertices as Array<any>;
+      if (!mv?.length) continue;
+      for (let i = 0; i < mv.length; i++) {
+        const origIdx = a.idx[i];
+        const col = origIdx % (a.N + 1);
+        const row = Math.floor(origIdx / (a.N + 1));
+        const t = col / a.N, s = row / a.N;
+        const ux = t - 0.5, uy = s - 0.5;
+        mv[i].tu = 0.5 + ux * cosA - uy * sinA;
+        mv[i].tv = 0.5 + ux * sinA + uy * cosA;
       }
-      a.mesh.clear();
-      a.mesh.addVertices(verts, uvs, a.idx, false);
     }
   }
 
