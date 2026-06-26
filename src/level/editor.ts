@@ -2264,8 +2264,8 @@ export function initLevelEditor(prefix: string): void {
       if (ev.altKey) {
         // Alt+H — показати всі приховані ассети
         state.hiddenIds.clear(); setStatus('Усі скриті ассети показано'); draw();
-      } else if (state.selected && !state.pathTool && !state.mode) {
-        // H з вибраним ассетом — сховати його
+      } else if (state.selected && !state.mode) {
+        // H з вибраним ассетом — сховати його (має пріоритет над інструментом підлоги)
         state.hiddenIds.add(state.selected); state.selected = null; refreshSel(); draw();
         setStatus('Ассет прихований · Alt+H — показати всі');
       } else {
