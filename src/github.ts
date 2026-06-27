@@ -21,12 +21,25 @@ function hdr(token: string): HeadersInit {
 
 const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 
+// fetch, стійкий до МЕРЕЖЕВИХ збоїв: коли fetch КИДАЄ (TypeError: Failed to fetch —
+// VPN/проксі/розширення/офлайн заблокували зʼєднання), ретраїмо з беком, а як усе марно —
+// кидаємо зрозуміле повідомлення (а не голий «Failed to fetch»).
+async function netFetch(url: string, init: RequestInit, retries = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let a = 0; a < retries; a++) {
+    try { return await fetch(url, init); }
+    catch (e) { lastErr = e; if (a < retries - 1) await sleep(900 * (a + 1)); }
+  }
+  const msg = (lastErr as Error)?.message || String(lastErr);
+  throw new Error(`Немає зʼєднання з api.github.com (${msg}). Імовірно блокує VPN/корпоративний проксі/розширення браузера — спробуй іншу мережу або вимкни блокувальники.`);
+}
+
 // fetch + ретрай на ТРАНЗІЄНТНИХ помилках (403/429 secondary rate limit, 5xx).
 // Не-транзієнтні коди (401/404/422) повертаються як є — викликач сам вирішує.
 async function apiFetch(url: string, init: RequestInit, h: HeadersInit, retries = 4): Promise<Response> {
   let res!: Response;
   for (let a = 0; a < retries; a++) {
-    res = await fetch(url, { ...init, headers: h });
+    res = await netFetch(url, { ...init, headers: h });
     if (res.ok) return res;
     if (res.status === 403 || res.status === 429 || res.status >= 500) {
       const ra = Number(res.headers.get('retry-after'));
@@ -69,7 +82,7 @@ async function createBlob(path: string, content: string, h: HeadersInit): Promis
   const MAX = 5;
   let lastErr = '';
   for (let attempt = 0; attempt < MAX; attempt++) {
-    const r = await fetch(`${API}/repos/${OWNER}/${REPO}/git/blobs`, {
+    const r = await netFetch(`${API}/repos/${OWNER}/${REPO}/git/blobs`, {
       method: 'POST', headers: h,
       body: JSON.stringify({ content: toBase64(content), encoding: 'base64' }),
     });
@@ -96,12 +109,12 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   const h = hdr(token);
 
   // 1. HEAD sha
-  const refRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { headers: h });
-  if (!refRes.ok) { clearToken(); throw new Error(`GitHub ${refRes.status}: перевір токен`); }
+  const refRes = await netFetch(`${API}/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`, { headers: h });
+  if (!refRes.ok) { if (refRes.status === 401) clearToken(); throw new Error(`GitHub ${refRes.status}: перевір токен`); }
   const { object: { sha: headSha } } = await refRes.json() as { object: { sha: string } };
 
   // 2. tree sha of HEAD commit
-  const commitRes = await fetch(`${API}/repos/${OWNER}/${REPO}/git/commits/${headSha}`, { headers: h });
+  const commitRes = await netFetch(`${API}/repos/${OWNER}/${REPO}/git/commits/${headSha}`, { headers: h });
   if (!commitRes.ok) throw new Error(`GitHub ${commitRes.status}: commits`);
   const { tree: { sha: baseSha } } = await commitRes.json() as { tree: { sha: string } };
 
@@ -134,7 +147,7 @@ export async function ghCommit(files: Record<string, string>, message: string): 
   let lastErr = '';
   const MAX_REF_TRIES = 6;
   for (let attempt = 0; attempt < MAX_REF_TRIES; attempt++) {
-    const updRes = await fetch(refUrl, { method: 'PATCH', headers: h, body: JSON.stringify({ sha: pendingCommit }) });
+    const updRes = await netFetch(refUrl, { method: 'PATCH', headers: h, body: JSON.stringify({ sha: pendingCommit }) });
     if (updRes.ok) return;
     const status = updRes.status;
     lastErr = `${status} ${(await updRes.text()).slice(0, 140)}`;
