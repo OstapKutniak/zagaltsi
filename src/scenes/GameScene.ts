@@ -994,33 +994,39 @@ export class GameScene extends Phaser.Scene {
       const spd     = ws.rainSpeed ?? 600;
       const baseLen = ws.rainDropLen ?? 16;
       const palette = this.rainPalette(ws.rainColor ?? '#aaddff');
+      const hash = (n: number): number => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
 
-      // Три шари. Краплі ПАДАЮТЬ ВЕРТИКАЛЬНО (анімується тільки sy), нахил дає скіс самої смуги —
-      // жодного бічного дрейфу всього поля, тож дощ завжди рівномірно покриває екран.
-      // Ближній: довгі, швидкі, рідкі смуги (motion-blur ефект). Дальній: короткі, повільні, бліді.
+      // Три шари. Краплі рухаються ВЗДОВЖ свого нахилу (sx тягнеться за фазою падіння), а не
+      // суто вниз — тож при нахиленому напрямку вони реально летять по діагоналі.
+      // Кожна крапля рандомізована (x, довжина, прозорість, фаза) → жодного паттерна.
+      // Ближній: довгі швидкі смуги (motion-blur). Дальній: короткі, повільні, бліді.
       const layers: Array<{ gfx: Phaser.GameObjects.Graphics; sm: number; lm: number; w: number; a: number; n: number; seed: number }> = [
-        { gfx: this.weatherFar,  sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 70, seed: 0    },
-        { gfx: this.weatherMid,  sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 90, seed: 777  },
-        { gfx: this.weatherNear, sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 26, seed: 1337 },
+        { gfx: this.weatherFar,  sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 70, seed: 11 },
+        { gfx: this.weatherMid,  sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 90, seed: 53 },
+        { gfx: this.weatherNear, sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 26, seed: 97 },
       ];
 
       for (const l of layers) {
         if (l.a < 0.01) continue;
         const speed = spd * l.sm;
-        const len   = baseLen * l.lm;
-        const OH    = H + len + 60;
-        const OW    = W + Math.abs(angle) * len + 80;
         for (let i = 0; i < l.n; i++) {
-          const hf = ((i + l.seed) * GR)  % 1;
-          const vf = ((i + l.seed) * GR2) % 1;
-          // x фіксований per-drop (рівномірний розподіл), анімується лише вертикальна фаза
-          const baseX = X0 - 40 + hf * OW;
-          const sy    = Y0 - 40 + ((vf * OH + t * speed) % OH);
+          const rx   = hash(i + l.seed);                    // 0..1 — випадкова позиція по ширині
+          const rlen = 0.6 + hash(i + l.seed + 7) * 0.9;    // варіація довжини 0.6..1.5
+          const ra   = 0.55 + hash(i + l.seed + 13) * 0.45; // варіація прозорості
+          const rph  = hash(i + l.seed + 23);               // зсув вертикальної фази
+          const len   = baseLen * l.lm * rlen;
+          const drift = Math.abs(angle) * (H + len);
+          const OW    = W + drift + 80;
+          const OH    = H + len + 60;
+          const baseX = X0 - 40 - (angle > 0 ? drift : 0) + rx * OW;
+          const phase = ((rph * OH) + t * speed) % OH;      // вертикальний прогрес 0..OH
+          const sy    = Y0 - 40 + phase;
+          const sx    = baseX + phase * angle;              // x тягнеться за фазою → діагональ
           const col   = palette[(i + l.seed) % palette.length];
-          l.gfx.lineStyle(l.w, col, Math.min(1, l.a));
+          l.gfx.lineStyle(l.w, col, Math.min(1, l.a * ra));
           l.gfx.beginPath();
-          l.gfx.moveTo(baseX, sy);
-          l.gfx.lineTo(baseX + len * angle, sy + len);
+          l.gfx.moveTo(sx, sy);
+          l.gfx.lineTo(sx + len * angle, sy + len);
           l.gfx.strokePath();
         }
       }

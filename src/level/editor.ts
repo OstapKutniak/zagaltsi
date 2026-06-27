@@ -930,31 +930,39 @@ export function initLevelEditor(prefix: string): void {
     if (!ph || ph.type !== 'rain') return;
     const W = canvas.width, H = canvas.height;
     const t = performance.now() / 1000;
-    const GR = 0.6180339887, GR2 = 0.7548776662;
+    const hash = (n: number): number => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
     const angle = Math.tan((ph.rainDir ?? 15) * Math.PI / 180);
     const spd = (ph.rainSpeed ?? 600) * sc(), baseLen = (ph.rainDropLen ?? 16) * sc();
     const palette = rainPaletteEd(ph.rainColor ?? '#aaddff');
     // [speedMul, lenMul, widthPx, alpha, count, blurPx, seed] — як у грі
     const layers = [
-      { sm: 0.7, lm: 0.5, w: 1.0, a: ph.rainFar  ?? 0.35, n: 70, blur: 2.5, seed: 0    },
-      { sm: 1.0, lm: 1.0, w: 1.6, a: ph.rainMid  ?? 0.7,  n: 90, blur: 0,   seed: 777  },
-      { sm: 2.4, lm: 3.2, w: 3.0, a: ph.rainNear ?? 1.0,  n: 26, blur: 3.5, seed: 1337 },
+      { sm: 0.7, lm: 0.5, w: 1.0, a: ph.rainFar  ?? 0.35, n: 70, blur: 2.5, seed: 11 },
+      { sm: 1.0, lm: 1.0, w: 1.6, a: ph.rainMid  ?? 0.7,  n: 90, blur: 0,   seed: 53 },
+      { sm: 2.4, lm: 3.2, w: 3.0, a: ph.rainNear ?? 1.0,  n: 26, blur: 3.5, seed: 97 },
     ];
     for (const l of layers) {
       if (l.a < 0.01) continue;
-      const speed = spd * l.sm, len = baseLen * l.lm;
-      const OW = W + Math.abs(angle) * len + 80, OH = H + len + 60;
+      const speed = spd * l.sm;
       ctx.save();
-      ctx.globalAlpha = Math.min(1, l.a);
       ctx.lineWidth = l.w;
       ctx.lineCap = 'round';
       if (l.blur > 0) ctx.filter = `blur(${l.blur}px)`;
       for (let i = 0; i < l.n; i++) {
-        const hf = ((i + l.seed) * GR) % 1, vf = ((i + l.seed) * GR2) % 1;
-        const baseX = -40 + hf * OW;
-        const sy = -40 + ((vf * OH + t * speed) % OH);
+        const rx   = hash(i + l.seed);
+        const rlen = 0.6 + hash(i + l.seed + 7) * 0.9;
+        const ra   = 0.55 + hash(i + l.seed + 13) * 0.45;
+        const rph  = hash(i + l.seed + 23);
+        const len   = baseLen * l.lm * rlen;
+        const drift = Math.abs(angle) * (H + len);
+        const OW    = W + drift + 80;
+        const OH    = H + len + 60;
+        const baseX = -40 - (angle > 0 ? drift : 0) + rx * OW;
+        const phase = ((rph * OH) + t * speed) % OH;
+        const sy    = -40 + phase;
+        const sx    = baseX + phase * angle;
+        ctx.globalAlpha = Math.min(1, l.a * ra);
         ctx.strokeStyle = palette[(i + l.seed) % palette.length];
-        ctx.beginPath(); ctx.moveTo(baseX, sy); ctx.lineTo(baseX + len * angle, sy + len); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + len * angle, sy + len); ctx.stroke();
       }
       ctx.restore();
     }
@@ -1725,11 +1733,14 @@ export function initLevelEditor(prefix: string): void {
         wxSel.addEventListener('change', () => { ph.type = wxSel.value as WeatherType; refreshBlocks(); save(); });
         wxRow.appendChild(wxLbl); wxRow.appendChild(wxSel); body.appendChild(wxRow);
 
-        // Дощ: колір, напрямок, швидкість, довжина, три шари
+        // Дощ: колір, напрямок, швидкість, довжина
         rainBlock.appendChild(mkColorPicker('Колір', ph.rainColor ?? '#aaddff', (v) => { ph.rainColor = v; }));
         rainBlock.appendChild(mkDirPicker(ph.rainDir ?? 15, (v) => { ph.rainDir = v; }));
         rainBlock.appendChild(mkRangeAbs('Швидкість', ph.rainSpeed ?? 600, 50, 2000, ' px/s', (v) => { ph.rainSpeed = v; }));
         rainBlock.appendChild(mkRangeAbs('Довжина', ph.rainDropLen ?? 16, 2, 80, ' px', (v) => { ph.rainDropLen = v; }));
+        // Непрозорість по шарах (ближній/середній/дальній)
+        const lbl = document.createElement('div'); lbl.textContent = 'Непрозорість шарів'; lbl.style.cssText = 'color:var(--muted);font-size:11px;margin-top:2px';
+        rainBlock.appendChild(lbl);
         rainBlock.appendChild(mkSlider('Ближній', ph.rainNear ?? 1, 100, (v) => { ph.rainNear = v; }));
         rainBlock.appendChild(mkSlider('Середній', ph.rainMid ?? 0.7, 100, (v) => { ph.rainMid = v; }));
         rainBlock.appendChild(mkSlider('Дальній', ph.rainFar ?? 0.35, 100, (v) => { ph.rainFar = v; }));
