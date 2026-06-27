@@ -48,6 +48,7 @@ zagaltsi/
     rig/main.ts         ← логіка редактора персонажів (Canvas2D)
     anim/CutoutCharacter.ts ← рендер персонажа у грі (Phaser)
     level/main.ts       ← редактор рівнів
+    level/LevelView.ts  ← рендер рівня у грі + cullLevel()
     shared/idb.ts       ← IndexedDB wrapper
   public/
     character.json      ← fallback персонаж (якщо немає в IndexedDB)
@@ -124,9 +125,38 @@ bendVal = (lp.bend + procBend) * (sl.bendFlip ? -1 : 1)
 `Scale.NONE` + ручний letterbox у `viewport.ts` — єдине надійне рішення.  
 `window.__zagRefit` = `apply` — студія кличе після resize iframe.
 
+### roundPixels — ВИМКНЕНО
+`roundPixels: false` глобально і в `startFollow` (камера).  
+При `true` Phaser округлює позицію кожної частини персонажа **окремо** → сильний дрож при русі камери і «піксельний» вигляд навіть при суперсемплінгу.  
+Різкість дає `RENDER_SCALE` (суперсемплінг), не roundPixels.
+
 ### Персонаж у гру
 1. Тулза: "Export у гру" → idbSet('zag_game_char', buildDoc())
 2. Гра: читає 'zag_game_char' із IndexedDB, fallback → public/character.json
+
+---
+
+## Дощ (WeatherSystem)
+
+Три шари: `weatherFar / weatherMid / weatherNear`.  
+Кожна крапля має власний колір, прозорість (×0.45..0.85, cap 0.9), довжину.  
+**Blur** (postFX.addBlur) на кожному шарі — повернуто після відкату оптимізації.  
+Blur є основним джерелом візуального ефекту «об'єму» дощу; без нього дощ — тупі білі смуги.
+
+> ⚠️ Не прибирати blur дощу заради перфу — він не є вузьким місцем (~170 strokePath/кадр нешкідливі).  
+> Пожирач GPU — надмірна кількість шарів або постефекти на всій сцені.
+
+---
+
+## Culling ігрового шару (LevelView.ts)
+
+`cullLevel()` викликається щокадру:
+- Збирає `cullables` — ассети ігрового шару з `scrollFactor=1` (не паралакс-фон, не деформ-меш)
+- `setVisible(false)` для ассетів повністю за межами `camera.worldView` (+260px запас)
+- Назад `setVisible(true)` коли входять у кадр
+- Лише видимість — стан гри, фізика, колайдери не чіпаємо
+- Безпечно для кооп: кожен клієнт кулить під свою камеру (локальний рендер)
+- Малий зиск на 1 екрані, великий — на довгих насичених рівнях
 
 ---
 
@@ -144,19 +174,20 @@ bendVal = (lp.bend + procBend) * (sl.bendFlip ? -1 : 1)
 
 ---
 
-## Останній коміт (37d4ea4)
+## Останні коміти (2026-06-27)
 
-```
-Studio: LMB-collapse preview, frame-zoom timeline, char select + copy anim,
-        head submenu; fix bend in game
-```
+### Що зроблено сьогодні:
 
-Що зроблено в останній пачці:
-1. **Preview toggle** — LMB click = expand/collapse, без ✕
-2. **Timeline zoom** — колесо над треком = framesInView; білий маркер END_FRAME=24; прибрано кнопку ▶ (Space only)
-3. **#charSel** — вибір персонажа поряд з анімацією; копіювати/вставити анімацію між персонажами (RMB на #copyAnimBtn = paste mode)
-4. **Підменю обличчя** — ПКМ на "Голова" відкриває #faceList збоку (очі/брови/рот); у головному списку їх прибрано
-5. **Фікс знаку bend у грі** — прибрано `*(flip<0?-1:1)` з CutoutCharacter.ts
+1. **Фікс якості персонажа** — `roundPixels=false` (глобально + startFollow камери).  
+   При `roundPixels=true` Phaser округлював позицію кожної частини тіла окремо → дрож і піксельний вигляд.
+
+2. **Повернено блюр дощу** — три шари (weatherFar/Mid/Near) з `postFX.addBlur`, per-drop колір/прозорість/довжина.  
+   Попередньо прибирали заради перфу — помилка, blur не є вузьким місцем.
+
+3. **Відкат даунскейлу текстур** — `LevelView` більше не downscale-ує текстури.  
+   Downscale міняв піксельні розміри, а гра масштабує за `p.scale` від оригіналу → ассети зменшувались до пивота, фон/карта не заповнювали кадр.
+
+4. **Culling ассетів поза кадром** — `cullLevel()` в `LevelView.ts` щокадру ховає ассети за межами camera.worldView (+260px запас). Великий зиск на довгих рівнях.
 
 ---
 
@@ -170,6 +201,7 @@ Studio: LMB-collapse preview, frame-zoom timeline, char select + copy anim,
 - [ ] **Редактор рівнів UI** — Остап сказав "ще накидаю" (blocking від ескізу)
 - [ ] Анімації — доробити (Остап паузнув таймлайн роботи)
 - [ ] GitHub Actions Node20 deprecation (non-blocking, можна бампнути пізніше)
+- [ ] Поставити ліміт витрат в OpenAI і remove.bg (URL воркера відкритий)
 
 ---
 
@@ -184,6 +216,10 @@ Studio: LMB-collapse preview, frame-zoom timeline, char select + copy anim,
 | setup vs slots | статичні поля (pivot/flip/bendFlip/image) з live slots; анімовані (rot/dx/dy/scale/bend) з bind pose (setup) |
 | SELECT елемент тримав фокус → Space відкривав dropdown | `.blur()` після change |
 | IndexedDB замість localStorage | base64 не влазить у ~5МБ localStorage |
+| Дрож і піксельний вигляд персонажа при русі камери | `roundPixels=false` глобально і в startFollow; різкість — RENDER_SCALE |
+| Дощ без blur виглядає як білі смуги | Повернути постефект addBlur на всіх 3 шарах дощу — не пожирач перфу |
+| Downscale текстур ламав розміри ассетів | Гра масштабує від оригіналу через p.scale → не downscale текстури в LevelView |
+| HUD зсувається при start≠0 | `uiOffX/uiOffY = logicalW/H·(RENDER_SCALE−1)/2` до всіх sf=0 елементів |
 
 ---
 
