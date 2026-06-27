@@ -1910,6 +1910,24 @@ export function initLevelEditor(prefix: string): void {
   }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
+    // Піпетка: взяти колір пікселя з вьюпорта й записати в outline.color вибраного ассета.
+    if (eyedropPid && ev.button === 0) {
+      ev.preventDefault();
+      const pid = eyedropPid; eyedropPid = null;
+      const px = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
+      const py = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
+      try {
+        const pd = ctx.getImageData(px, py, 1, 1).data;
+        const hex = '#' + [pd[0], pd[1], pd[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+        const pl = level().placed.find((q) => q.id === pid);
+        if (pl?.outline) { pushUndo(); pl.outline.color = hex; save(); }
+        setStatus('Колір узято: ' + hex);
+      } catch { setStatus('Не вдалося взяти колір'); }
+      draw();
+      const pl2 = level().placed.find((q) => q.id === pid);
+      if (pl2) openAssetMenu(pl2, lastMenuX, lastMenuY);
+      return;
+    }
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
     if (state.animLinePid && ev.button === 0) { lineDraw = { x0: x, y0: y, x1: x, y1: y }; return; } // режим «Задати лінію»
     const lv0 = level();
@@ -2315,19 +2333,40 @@ export function initLevelEditor(prefix: string): void {
 
   // ── Контекст-меню виставленого ассета (ПКМ): планарність + анімація ──
   let _assetMenuEl: HTMLDivElement | null = null;
+  // Згорнуті секції меню (другий клік по активному модифікатору ховає його налаштування).
+  let menuCollapse: Record<string, boolean> = {};
+  let menuCollapseFor = '';
+  // Піпетка кольору з вьюпорта: pid ассета, чий outline.color заповнюємо наступним кліком.
+  let eyedropPid: string | null = null;
   const _menuOutside = (e: MouseEvent): void => { if (_assetMenuEl && !_assetMenuEl.contains(e.target as Node)) closeAssetMenu(); };
   function closeAssetMenu(): void { if (_assetMenuEl) { _assetMenuEl.remove(); _assetMenuEl = null; } document.removeEventListener('mousedown', _menuOutside, true); }
   function openAssetMenu(p: Placed, clientX: number, clientY: number): void {
     lastMenuX = clientX; lastMenuY = clientY;
+    if (menuCollapseFor !== p.id) { menuCollapse = {}; menuCollapseFor = p.id; } // скидаємо колапс лише для нового ассета
     closeAssetMenu();
     const mk = (tag: string, css: string | null, txt?: string): HTMLElement => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (txt != null) e.textContent = txt; return e; };
     const btnCss = (active: boolean): string => `padding:5px 9px;margin:2px;border-radius:6px;border:1px solid ${active ? '#39d0ff' : '#555'};background:${active ? '#1d3b46' : '#3a3a3a'};color:#e8e8e8;cursor:pointer;font:13px sans-serif;`;
     const rebuild = (): void => openAssetMenu(p, lastMenuX, lastMenuY);
     const m = document.createElement('div'); _assetMenuEl = m;
-    m.style.cssText = 'position:fixed;z-index:99999;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:10px;min-width:212px;box-shadow:0 6px 20px rgba(0,0,0,0.5);color:#e8e8e8;font:13px sans-serif;';
+    // Скрол: меню не довше за екран; драг за хедер дозволяє відсунути від ассета.
+    m.style.cssText = 'position:fixed;z-index:99999;background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:10px;min-width:212px;max-height:calc(100vh - 24px);overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.5);color:#e8e8e8;font:13px sans-serif;';
     const isParallax = ['sky', 'clouds', 'bg', 'frontbg', 'foreground'].includes(p.cat);
     const aname = state.assets.find((a) => a.id === p.asset)?.name ?? p.cat;
-    m.appendChild(mk('div', 'font-weight:600;margin-bottom:8px;color:#9ad0ff;', '⚙ ' + aname));
+    const header = mk('div', 'font-weight:600;margin-bottom:8px;color:#9ad0ff;cursor:move;user-select:none;', '⠿ ' + aname);
+    // Драг меню за хедер
+    header.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const r = m.getBoundingClientRect(); const ox = e.clientX - r.left, oy = e.clientY - r.top;
+      const onMove = (ev: MouseEvent): void => {
+        const nl = Math.max(4, Math.min(window.innerWidth - r.width - 4, ev.clientX - ox));
+        const nt = Math.max(4, Math.min(window.innerHeight - 30, ev.clientY - oy));
+        m.style.left = nl + 'px'; m.style.top = nt + 'px';
+        lastMenuX = nl; lastMenuY = nt; // щоб rebuild не стрибав назад
+      };
+      const onUp = (): void => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+    });
+    m.appendChild(header);
 
     // Плановість
     m.appendChild(mk('div', 'opacity:0.7;margin:6px 0 2px;', 'Плановість' + (isParallax ? ' (далі = повільніше)' : '')));
@@ -2345,10 +2384,18 @@ export function initLevelEditor(prefix: string): void {
     const none = mk('button', btnCss(!p.anim), 'Немає');
     const rotB = mk('button', btnCss(p.anim?.type === 'rotate'), 'Обертання');
     const movB = mk('button', btnCss(p.anim?.type === 'move'), 'Переміщення');
-    none.onclick = () => { pushUndo(); delete p.anim; save(); draw(); rebuild(); };
-    rotB.onclick = () => { pushUndo(); p.anim = { type: 'rotate', range: p.anim?.range ?? 360, speed: p.anim?.type === 'rotate' ? p.anim.speed : 60 }; save(); draw(); rebuild(); };
-    movB.onclick = () => { pushUndo(); p.anim = { type: 'move', dx: p.anim?.dx ?? 1, dy: p.anim?.dy ?? 0, dist: p.anim?.dist ?? 100, speed: p.anim?.type === 'move' ? p.anim.speed : 40, constant: p.anim?.constant ?? false }; save(); draw(); rebuild(); };
-    arow.append(none, rotB, movB); m.appendChild(arow);
+    none.onclick = () => { pushUndo(); delete p.anim; menuCollapse.anim = false; save(); draw(); rebuild(); };
+    rotB.onclick = () => {
+      if (p.anim?.type === 'rotate') { menuCollapse.anim = !menuCollapse.anim; rebuild(); }
+      else { pushUndo(); p.anim = { type: 'rotate', range: p.anim?.range ?? 360, speed: 60 }; menuCollapse.anim = false; save(); draw(); rebuild(); }
+    };
+    movB.onclick = () => {
+      if (p.anim?.type === 'move') { menuCollapse.anim = !menuCollapse.anim; rebuild(); }
+      else { pushUndo(); p.anim = { type: 'move', dx: p.anim?.dx ?? 1, dy: p.anim?.dy ?? 0, dist: p.anim?.dist ?? 100, speed: 40, constant: p.anim?.constant ?? false }; menuCollapse.anim = false; save(); draw(); rebuild(); }
+    };
+    arow.append(none, rotB, movB);
+    if (p.anim) arow.append(mk('span', 'opacity:0.5;font-size:11px;align-self:center;margin-left:4px;', menuCollapse.anim ? '▸ налаштування' : '▾'));
+    m.appendChild(arow);
 
     const numRow = (label: string, val: number, on: (v: number) => void): HTMLElement => {
       const r = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:6px;');
@@ -2359,7 +2406,7 @@ export function initLevelEditor(prefix: string): void {
       r.appendChild(inp); return r;
     };
 
-    const an = p.anim;
+    const an = menuCollapse.anim ? undefined : p.anim;
     if (an?.type === 'rotate') {
       m.appendChild(numRow('Діапазон, °', an.range ?? 360, (v) => { pushUndo(); an.range = v; save(); draw(); }));
       m.appendChild(numRow('Швидкість, °/с', an.speed, (v) => { pushUndo(); an.speed = v; save(); draw(); }));
@@ -2382,16 +2429,20 @@ export function initLevelEditor(prefix: string): void {
     const dfNone = mk('button', btnCss(!p.deform), 'Немає');
     const dfPersp = mk('button', btnCss(p.deform?.type === 'persp'), 'Перспектива');
     const dfFfd = mk('button', btnCss(p.deform?.type === 'ffd'), 'FFD');
-    dfNone.onclick = () => { pushUndo(); delete p.deform; if (state.deformEdit === p.id) state.deformEdit = null; save(); draw(); rebuild(); };
+    dfNone.onclick = () => { pushUndo(); delete p.deform; if (state.deformEdit === p.id) state.deformEdit = null; menuCollapse.deform = false; save(); draw(); rebuild(); };
     dfPersp.onclick = () => {
-      if (p.deform?.type !== 'persp') { pushUndo(); p.deform = { type: 'persp' }; save(); draw(); rebuild(); }
+      if (p.deform?.type === 'persp') { menuCollapse.deform = !menuCollapse.deform; rebuild(); } // 2-й клік — згорнути/розгорнути
+      else { pushUndo(); p.deform = { type: 'persp' }; menuCollapse.deform = false; save(); draw(); rebuild(); }
     };
     dfFfd.onclick = () => {
-      if (p.deform?.type !== 'ffd') { pushUndo(); p.deform = { type: 'ffd', cols: 2, rows: 2 }; save(); draw(); rebuild(); }
+      if (p.deform?.type === 'ffd') { menuCollapse.deform = !menuCollapse.deform; rebuild(); }
+      else { pushUndo(); p.deform = { type: 'ffd', cols: 2, rows: 2 }; menuCollapse.deform = false; save(); draw(); rebuild(); }
     };
-    dfrow.append(dfNone, dfPersp, dfFfd); m.appendChild(dfrow);
+    dfrow.append(dfNone, dfPersp, dfFfd);
+    if (p.deform) dfrow.append(mk('span', 'opacity:0.5;font-size:11px;align-self:center;margin-left:4px;', menuCollapse.deform ? '▸ налаштування' : '▾'));
+    m.appendChild(dfrow);
 
-    if (p.deform?.type === 'ffd') {
+    if (p.deform?.type === 'ffd' && !menuCollapse.deform) {
       const df = p.deform;
       m.appendChild(numRow('Стовпці', df.cols ?? 2, (v) => {
         const nc = Math.max(1, Math.min(16, Math.round(v)));
@@ -2404,7 +2455,7 @@ export function initLevelEditor(prefix: string): void {
       m.appendChild(mk('div', 'opacity:0.55;margin-top:3px;font-size:11px;', 'Зміна поділу скидає хендли'));
     }
 
-    if (p.deform) {
+    if (p.deform && !menuCollapse.deform) {
       const df = p.deform;
       const editBtn = mk('button', btnCss(state.deformEdit === p.id) + 'display:block;width:100%;margin-top:6px;', state.deformEdit === p.id ? 'Редагую хендли ✓' : 'Редагувати хендли');
       editBtn.onclick = () => { state.deformEdit = state.deformEdit === p.id ? null : p.id; draw(); rebuild(); };
@@ -2451,34 +2502,55 @@ export function initLevelEditor(prefix: string): void {
       const oNone   = mk('button', btnCss(!p.outline), 'Немає');
       const oStroke = mk('button', btnCss(p.outline?.mode === 'stroke'), 'Обводка');
       const oErode  = mk('button', btnCss(p.outline?.mode === 'erode'), 'Обрізати');
-      const setMode = (mode: 'stroke' | 'erode' | null): void => {
+      const setMode = (mode: 'stroke' | 'erode'): void => {
+        if (p.outline?.mode === mode) { menuCollapse.outline = !menuCollapse.outline; rebuild(); return; }
         pushUndo();
-        if (mode === null) delete p.outline;
-        else p.outline = { mode, width: p.outline?.width ?? (mode === 'stroke' ? 4 : 2), color: p.outline?.color ?? '#000000' };
-        save(); draw(); rebuild();
+        p.outline = mode === 'stroke'
+          ? { mode, width: p.outline?.width ?? 4, color: '#000000' }
+          : { mode, width: p.outline?.width ?? 3, color: p.outline?.color ?? '#000000', threshold: p.outline?.threshold ?? 60 };
+        menuCollapse.outline = false; save(); draw(); rebuild();
       };
-      oNone.onclick   = () => setMode(null);
+      oNone.onclick   = () => { pushUndo(); delete p.outline; menuCollapse.outline = false; save(); draw(); rebuild(); };
       oStroke.onclick = () => setMode('stroke');
       oErode.onclick  = () => setMode('erode');
-      orow.append(oNone, oStroke, oErode); m.appendChild(orow);
-      if (p.outline) {
+      orow.append(oNone, oStroke, oErode);
+      if (p.outline) orow.append(mk('span', 'opacity:0.5;font-size:11px;align-self:center;margin-left:4px;', menuCollapse.outline ? '▸ налаштування' : '▾'));
+      m.appendChild(orow);
+      if (p.outline && !menuCollapse.outline) {
+        const ol = p.outline;
         // Ширина
         const wrow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
         wrow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Ширина'));
         const wsl = document.createElement('input'); wsl.type = 'range'; wsl.min = '1'; wsl.max = '30'; wsl.step = '1';
-        wsl.value = String(p.outline.width); wsl.style.cssText = 'flex:1;accent-color:#39d0ff';
-        const wval = mk('span', 'flex:0 0 30px;text-align:right;opacity:0.8;', p.outline.width + 'px');
-        wsl.oninput = () => { p.outline!.width = Number(wsl.value); wval.textContent = wsl.value + 'px'; draw(); };
+        wsl.value = String(ol.width); wsl.style.cssText = 'flex:1;accent-color:#39d0ff';
+        const wval = mk('span', 'flex:0 0 30px;text-align:right;opacity:0.8;', ol.width + 'px');
+        wsl.oninput = () => { ol.width = Number(wsl.value); wval.textContent = wsl.value + 'px'; draw(); };
         wsl.onchange = () => { pushUndo(); save(); };
         wrow.append(wsl, wval); m.appendChild(wrow);
-        // Колір (тільки для обводки)
-        if (p.outline.mode === 'stroke') {
-          const crow = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer;');
-          crow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Колір'));
-          const cinp = document.createElement('input'); cinp.type = 'color'; cinp.value = p.outline.color ?? '#000000';
-          cinp.style.cssText = 'width:40px;height:22px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer';
-          cinp.oninput = () => { pushUndo(); p.outline!.color = cinp.value; save(); draw(); };
-          crow.appendChild(cinp); m.appendChild(crow);
+        // Колір (з піпеткою) — для обводки колір обводки, для обрізки колір-ціль зрізання
+        const crow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
+        crow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', ol.mode === 'stroke' ? 'Колір' : 'Колір краю'));
+        const cinp = document.createElement('input'); cinp.type = 'color'; cinp.value = ol.color ?? '#000000';
+        cinp.style.cssText = 'width:40px;height:22px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer';
+        cinp.oninput = () => { ol.color = cinp.value; draw(); };
+        cinp.onchange = () => { pushUndo(); save(); };
+        crow.appendChild(cinp);
+        const pick = mk('button', btnCss(eyedropPid === p.id) + 'padding:3px 7px;', '💧 Піпетка');
+        pick.title = 'Взяти колір кліком у вьюпорті';
+        pick.onclick = () => { eyedropPid = p.id; closeAssetMenu(); setStatus('Піпетка: клікни у вьюпорті, щоб узяти колір краю'); draw(); };
+        crow.appendChild(pick);
+        m.appendChild(crow);
+        // Поріг схожості (лише для обрізки) — наскільки близький до кольору край зрізається
+        if (ol.mode === 'erode') {
+          const trow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
+          trow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Поріг'));
+          const tsl = document.createElement('input'); tsl.type = 'range'; tsl.min = '0'; tsl.max = '200'; tsl.step = '2';
+          tsl.value = String(ol.threshold ?? 60); tsl.style.cssText = 'flex:1;accent-color:#39d0ff';
+          const tval = mk('span', 'flex:0 0 30px;text-align:right;opacity:0.8;', String(ol.threshold ?? 60));
+          tsl.oninput = () => { ol.threshold = Number(tsl.value); tval.textContent = tsl.value; draw(); };
+          tsl.onchange = () => { pushUndo(); save(); };
+          trow.append(tsl, tval); m.appendChild(trow);
+          m.appendChild(mk('div', 'opacity:0.5;margin-top:3px;font-size:11px;', 'Зрізає лише пікселі цього кольору з краю — трава/деталі лишаються'));
         }
       }
     }
@@ -2765,7 +2837,9 @@ export function initLevelEditor(prefix: string): void {
       } else { deleteSel(); }
     }
     else if (ev.code === 'Escape') {
-      if (state.openGroup) {
+      if (eyedropPid) {
+        eyedropPid = null; setStatus('Піпетку скасовано'); draw();
+      } else if (state.openGroup) {
         state.openGroup = null; draw();
       } else if (state.pendingEnemy) {
         state.pendingEnemy = null;
