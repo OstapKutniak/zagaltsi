@@ -268,6 +268,7 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
     // Поассетна планарність: у межах шару ассет із більшим plan — ближче (вище в стосі).
     if (p.plan) go.setDepth(depth + p.plan * 0.5);
     else go.setDepth(depth);
+    go.setData('lvl', true); // тег для cullLevel — лише ассети рівня, не гравець/тінь/HUD
     // Паралакс для шарів зі швидкістю, відмінною від карти (небо/хмари/задній/перед.фон/перед.план).
     if (p.cat in PARALLAX_FALLBACK) {
       let dist = doc.parallax?.[p.cat] ?? PARALLAX_FALLBACK[p.cat];

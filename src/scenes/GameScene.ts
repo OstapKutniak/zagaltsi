@@ -231,8 +231,8 @@ export class GameScene extends Phaser.Scene {
     this.weatherMid  = this.add.graphics().setDepth(8003);
     this.weatherNear = this.add.graphics().setDepth(8004);
     try {
-      this.weatherFar.postFX.addBlur(1, 2, 2, 1.0);
-      this.weatherNear.postFX.addBlur(1, 2, 2, 1.6);
+      this.weatherFar.postFX.addBlur(0, 2, 2, 0.5);
+      this.weatherNear.postFX.addBlur(0, 2, 2, 0.9);
     } catch { /* postFX недоступний на деяких рендерерах — лишаємо без блюру */ }
     // Блискавка: білий спалах на весь екран (world-space величезний прямокутник, як fog).
     this.lightningRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(8005);
@@ -463,9 +463,9 @@ export class GameScene extends Phaser.Scene {
       if (isPlx) this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
       const anim = im.getData('lvlAnim') as PlacedAnim | undefined;
       if (anim) this.levelAnims.push({ im, anim, isPlx, based: false, bx: 0, by: 0, br: 0 });
-      // Кулінг-кандидат: ассет ігрового шару (не паралакс-фон), із кінцевою шириною.
-      // Деформовані меші (lvlKfDeform/lvlBakedAnim) пропускаємо — їх мало і ширина не тривіальна.
-      if (!isPlx && !im.getData('lvlKfDeform') && !im.getData('lvlBakedAnim') && typeof im.displayWidth === 'number') {
+      // Кулінг-кандидат: лише ассети рівня (тег 'lvl'), не паралакс-фон, не деформ-меш.
+      // Перевірка 'lvl' виключає гравця/тінь/HUD з cullables, щоб setVisible(false) не скидалось.
+      if (im.getData('lvl') && !isPlx && !im.getData('lvlKfDeform') && !im.getData('lvlBakedAnim') && typeof im.displayWidth === 'number') {
         this.cullables.push({ im, halfW: Math.abs(im.displayWidth) / 2 });
       }
       const kfData = im.getData('lvlKfDeform') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number } | undefined;
