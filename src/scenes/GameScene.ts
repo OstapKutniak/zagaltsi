@@ -1021,22 +1021,21 @@ export class GameScene extends Phaser.Scene {
       const palette = this.rainPalette(ws.rainColor ?? '#aaddff');
       const hash = (n: number): number => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
 
-      // Три шари в ОДНОМУ Graphics. Кожен шар: один lineStyle + один strokePath на всі краплі
-      // (moveTo/lineTo накопичуються в один шлях) → мінімум викликів і батчів.
-      // Краплі рухаються ВЗДОВЖ нахилу; рандом per-drop (x, довжина, фаза) лишається.
+      // Три шари в ОДНОМУ Graphics (без postFX.blur). Per-drop прозорість і колір збережено
+      // (без них дощ стає тупими білими смугами); це лише ~170 strokePath/кадр — дешево,
+      // справжнім пожирачем був blur, а не ці виклики.
       const layers = [
-        { sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 60, seed: 11, col: palette[0] },
-        { sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 80, seed: 53, col: palette[2] },
-        { sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 24, seed: 97, col: palette[3] },
+        { sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 60, seed: 11 },
+        { sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 80, seed: 53 },
+        { sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 24, seed: 97 },
       ];
       for (const l of layers) {
         if (l.a < 0.01) continue;
         const speed = spd * l.sm;
-        g.lineStyle(l.w, l.col, Math.min(1, l.a));
-        g.beginPath();
         for (let i = 0; i < l.n; i++) {
           const rx   = hash(i + l.seed);
           const rlen = 0.6 + hash(i + l.seed + 7) * 0.9;
+          const ra   = 0.45 + hash(i + l.seed + 13) * 0.4; // варіація прозорості (0.45..0.85)
           const rph  = hash(i + l.seed + 23);
           const len   = baseLen * l.lm * rlen;
           const drift = Math.abs(angle) * (H + len);
@@ -1046,10 +1045,13 @@ export class GameScene extends Phaser.Scene {
           const phase = ((rph * OH) + t * speed) % OH;
           const sy    = Y0 - 40 + phase;
           const sx    = baseX + phase * angle;
+          const col   = palette[(i + l.seed) % palette.length];
+          g.lineStyle(l.w, col, Math.min(0.9, l.a * ra));
+          g.beginPath();
           g.moveTo(sx, sy);
           g.lineTo(sx + len * angle, sy + len);
+          g.strokePath();
         }
-        g.strokePath();
       }
     } else if (type === 'snow') {
       const SPEED = 70;
