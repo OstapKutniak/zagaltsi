@@ -88,7 +88,7 @@ export function initLevelEditor(prefix: string): void {
     showEnemySpawns: false,
     showPlayerSpawns: false,
     showAtm: false,
-    showAnim: false,
+    showAnim: true,
     hiddenCats: new Set<string>(),
     hiddenIds: new Set<string>(), // тимчасово приховані ассети (тільки редактор, H / Alt+H)
     multiSel: new Set<string>(),  // мультивибір (Shift+ЛКМ); primary = state.selected
@@ -363,7 +363,7 @@ export function initLevelEditor(prefix: string): void {
   let lastMenuX = 0, lastMenuY = 0;
   const hasAnims = (): boolean => !!level()?.placed.some((p) => p.anim || (p.deform?.keyframes && p.deform.keyframes.length >= 2));
   const previewActive = (): boolean =>
-    hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
+    state.showAnim && hasAnims() && canvas.offsetWidth > 0 && !drag && !state.mode && !panning && !painting
     && !state.pendingAsset && !state.markerDrag && state.animLinePid == null && !lineDraw
     && state.deformHandleIdx < 0;
   // Відображувані позиція/кут/масштаб ассета (з анімаційним зсувом або кейфреймами).
@@ -491,7 +491,8 @@ export function initLevelEditor(prefix: string): void {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (state.showGrid) {
+    {
+      // Сітка завжди видима (кнопку прибрано).
       ctx.strokeStyle = '#282828'; ctx.lineWidth = 1;
       const gs = 60 * sc();
       const ox = (state.origin.x % gs + gs) % gs;
@@ -914,6 +915,13 @@ export function initLevelEditor(prefix: string): void {
     if (state.showAtm) drawEditorRain();
   }
 
+  function rainPaletteEd(hex: string): string[] {
+    const h = hex.replace('#', '').padStart(6, '0');
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    const cl = (v: number): number => Math.max(0, Math.min(255, Math.round(v)));
+    const mk = (mr: number, mg: number, mb: number): string => `rgb(${cl(r * mr)},${cl(g * mg)},${cl(b * mb)})`;
+    return [mk(0.72, 0.78, 0.92), mk(0.9, 0.95, 1), mk(1, 1, 1), mk(1.12, 1.12, 1.18)];
+  }
   function drawEditorRain(): void {
     const lv = level();
     const wx = lv.atmosphere?.weather;
@@ -924,29 +932,42 @@ export function initLevelEditor(prefix: string): void {
     const t = performance.now() / 1000;
     const GR = 0.6180339887, GR2 = 0.7548776662;
     const angle = Math.tan((ph.rainDir ?? 15) * Math.PI / 180);
-    const spd = ph.rainSpeed ?? 600, baseLen = ph.rainDropLen ?? 16;
-    const color = ph.rainColor ?? '#aaddff';
+    const spd = (ph.rainSpeed ?? 600) * sc(), baseLen = (ph.rainDropLen ?? 16) * sc();
+    const palette = rainPaletteEd(ph.rainColor ?? '#aaddff');
+    // [speedMul, lenMul, widthPx, alpha, count, blurPx, seed] — як у грі
     const layers = [
-      { sm: 0.55, lm: 0.6,  w: 0.8, a: ph.rainFar  ?? 0.35, n: 80,  to: 0    },
-      { sm: 1.0,  lm: 1.0,  w: 1.5, a: ph.rainMid  ?? 0.7,  n: 100, to: 777  },
-      { sm: 1.55, lm: 1.55, w: 2.5, a: ph.rainNear ?? 1.0,  n: 40,  to: 1337 },
+      { sm: 0.7, lm: 0.5, w: 1.0, a: ph.rainFar  ?? 0.35, n: 70, blur: 2.5, seed: 0    },
+      { sm: 1.0, lm: 1.0, w: 1.6, a: ph.rainMid  ?? 0.7,  n: 90, blur: 0,   seed: 777  },
+      { sm: 2.4, lm: 3.2, w: 3.0, a: ph.rainNear ?? 1.0,  n: 26, blur: 3.5, seed: 1337 },
     ];
     for (const l of layers) {
       if (l.a < 0.01) continue;
       const speed = spd * l.sm, len = baseLen * l.lm;
-      const OW = W + len * Math.abs(angle) + 80, OH = H + len + 40, lt = t + l.to;
+      const OW = W + Math.abs(angle) * len + 80, OH = H + len + 60;
       ctx.save();
-      ctx.strokeStyle = color;
       ctx.globalAlpha = Math.min(1, l.a);
       ctx.lineWidth = l.w;
+      ctx.lineCap = 'round';
+      if (l.blur > 0) ctx.filter = `blur(${l.blur}px)`;
       for (let i = 0; i < l.n; i++) {
-        const hf = (i * GR) % 1, vf = (i * GR2) % 1;
-        const sy = ((vf * OH + lt * speed) % OH) - 20;
-        const sx = ((hf * OW + lt * speed * angle) % OW) - 40;
-        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + len * angle, sy + len); ctx.stroke();
+        const hf = ((i + l.seed) * GR) % 1, vf = ((i + l.seed) * GR2) % 1;
+        const baseX = -40 + hf * OW;
+        const sy = -40 + ((vf * OH + t * speed) % OH);
+        ctx.strokeStyle = palette[(i + l.seed) % palette.length];
+        ctx.beginPath(); ctx.moveTo(baseX, sy); ctx.lineTo(baseX + len * angle, sy + len); ctx.stroke();
       }
       ctx.restore();
     }
+  }
+  // Безперервний цикл перемалювання, поки увімкнена атмосфера у вьюпорті.
+  let atmRaf = 0;
+  function atmTick(): void {
+    if (!state.showAtm) { atmRaf = 0; return; }
+    _drawNow();
+    atmRaf = requestAnimationFrame(atmTick);
+  }
+  function ensureAtmLoop(): void {
+    if (state.showAtm && !atmRaf) atmRaf = requestAnimationFrame(atmTick);
   }
 
   function draw(): void {
@@ -2802,12 +2823,6 @@ export function initLevelEditor(prefix: string): void {
   window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && lvPreviewBig) setLvPreviewBig(false); });
   window.addEventListener('resize', () => { if (lvPreviewBig) setLvPreviewBig(true); });
 
-  const lv_gridBtn = $<HTMLButtonElement>('gridBtn');
-  lv_gridBtn?.addEventListener('click', () => {
-    state.showGrid = !state.showGrid;
-    lv_gridBtn.classList.toggle('on', state.showGrid);
-    draw();
-  });
   // showDebugBtn = колайдери + спавни (одна кнопка)
   const showDebugBtn = $<HTMLButtonElement>('showDebugBtn');
   showDebugBtn?.addEventListener('click', () => {
@@ -2833,12 +2848,14 @@ export function initLevelEditor(prefix: string): void {
   showAtmBtn?.addEventListener('click', () => {
     state.showAtm = !state.showAtm;
     showAtmBtn.classList.toggle('on', state.showAtm);
-    draw();
+    ensureAtmLoop(); draw();
   });
   const showAnimBtn = $<HTMLButtonElement>('showAnimBtn');
+  showAnimBtn?.classList.toggle('on', state.showAnim);
   showAnimBtn?.addEventListener('click', () => {
     state.showAnim = !state.showAnim;
     showAnimBtn.classList.toggle('on', state.showAnim);
+    ensureAnimLoop(); draw();
   });
   const constructorBtn = $<HTMLButtonElement>('constructorBtn');
   constructorBtn?.addEventListener('click', () => constructorBtn.classList.toggle('on', toggleConstructor()));
