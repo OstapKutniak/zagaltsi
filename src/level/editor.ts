@@ -1770,15 +1770,24 @@ export function initLevelEditor(prefix: string): void {
         // Блискавка
         const ltRow = document.createElement('label'); ltRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
         const ltCb = document.createElement('input'); ltCb.type = 'checkbox'; ltCb.checked = !!ph.lightning; ltCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
-        ltCb.addEventListener('change', () => { ph.lightning = ltCb.checked; save(); });
+        ltCb.addEventListener('change', () => { ph.lightning = ltCb.checked; save(); renderAtmPanel(); });
         ltRow.appendChild(ltCb); ltRow.appendChild(document.createTextNode('⚡ Блискавка (рідкі спалахи)'));
         rainBlock.appendChild(ltRow);
+        if (ph.lightning) {
+          rainBlock.appendChild(mkRangeAbs('Кожні', ph.lightningEvery ?? 10, 1, 40, ' с', (v) => { ph.lightningEvery = v; }));
+          rainBlock.appendChild(mkRangeAbs('Рандом', (ph.lightningVary ?? 0.5) * 100, 0, 100, '%', (v) => { ph.lightningVary = v / 100; }));
+        }
         // Пилюка від крапель
         const splRow = document.createElement('label'); splRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
         const splCb = document.createElement('input'); splCb.type = 'checkbox'; splCb.checked = !!ph.rainSplash; splCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
-        splCb.addEventListener('change', () => { ph.rainSplash = splCb.checked; save(); });
+        splCb.addEventListener('change', () => { ph.rainSplash = splCb.checked; save(); renderAtmPanel(); });
         splRow.appendChild(splCb); splRow.appendChild(document.createTextNode('💧 Пилюка від крапель (тільки на підлозі)'));
         rainBlock.appendChild(splRow);
+        if (ph.rainSplash) {
+          rainBlock.appendChild(mkRangeAbs('Розмір', (ph.splashSize ?? 1) * 100, 20, 300, '%', (v) => { ph.splashSize = v / 100; }));
+          rainBlock.appendChild(mkRangeAbs('Кількість', (ph.splashCount ?? 1) * 100, 20, 400, '%', (v) => { ph.splashCount = v / 100; }));
+          rainBlock.appendChild(mkRangeAbs('Інтенсивність', (ph.splashIntensity ?? 1) * 100, 0, 150, '%', (v) => { ph.splashIntensity = v / 100; }));
+        }
 
         // Туман / загальне
         fogBlock.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));

@@ -17,7 +17,12 @@ export interface WeatherPhase {
   rainMid?:     number;   // mid layer opacity 0-1, default 0.7
   rainFar?:     number;   // far layer opacity 0-1, default 0.35
   lightning?:   boolean;  // рідкі спалахи блискавки (білий блим по всьому екрану)
+  lightningEvery?: number; // середній інтервал між спалахами, сек (default 10)
+  lightningVary?:  number; // рандомізація інтервалу й тривалості 0..1 (default 0.5)
   rainSplash?:  boolean;  // пилюка від крапель (тільки в межах колайдерів підлоги)
+  splashSize?:      number; // множник розміру бризок (default 1)
+  splashCount?:     number; // множник частоти/кількості бризок (default 1)
+  splashIntensity?: number; // прозорість бризок, множник 0..1 (default 1)
 }
 
 export interface AtmSky     { enabled: boolean; static?: boolean; phases: SkyPhase[] }
@@ -74,6 +79,8 @@ export interface WeatherState {
   type: WeatherType; fogAlpha: number;
   rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number;
   rainNear: number; rainMid: number; rainFar: number; lightning: boolean; rainSplash: boolean;
+  lightningEvery: number; lightningVary: number;
+  splashSize: number; splashCount: number; splashIntensity: number;
 }
 
 export function evalSky(sky: AtmSky, wallSec: number): SkyState {
@@ -108,6 +115,11 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
     rainFar:     a.rainFar     ?? 0.35,
     lightning:   !!a.lightning,
     rainSplash:  !!a.rainSplash,
+    lightningEvery: a.lightningEvery ?? 10,
+    lightningVary:  a.lightningVary  ?? 0.5,
+    splashSize:      a.splashSize      ?? 1,
+    splashCount:     a.splashCount     ?? 1,
+    splashIntensity: a.splashIntensity ?? 1,
   };
 }
 

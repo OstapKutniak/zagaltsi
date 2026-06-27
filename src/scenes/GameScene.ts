@@ -63,6 +63,7 @@ export class GameScene extends Phaser.Scene {
   private lightningRect!: Phaser.GameObjects.Rectangle; // білий спалах на весь екран
   private lightningNext = 6;   // сек до наступного спалаху
   private lightningOn = 0;     // залишок тривалості поточного спалаху (сек)
+  private lightningDur = 0.35; // тривалість поточного спалаху (рандомізується)
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -266,7 +267,9 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, 90, this.bandBottom - 10);
     this.player.maxX = GATE_X - 30;
     this.controls = new InputController(this);
-    this.cameras.main.startFollow(this.player, false, 0.08, 0); // roundPixels=false → плавно, без дрожу частин персонажа
+    // Камеру НЕ через startFollow (його лерп працює щокадру, а світ рухається кроками симуляції
+    // 60Гц → при 0/2 кроках на кадр персонаж дрижить відносно камери). Натомість рухаємо камеру
+    // ВРУЧНУ всередині step() — у тому ж такті, що й персонаж, тож вони завжди синхронні.
 
     // Персонаж завантажується НЕ тут, а коли лобі дасть старт (подія 'lobbyStart'):
     // соло (порожній код) → свій персонаж; кооп → обраний у лобі + інші гравці.
@@ -902,22 +905,27 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Рідкі спалахи блискавки: білий блим по всьому екрану з різкою атакою і згасанням.
+  // Частота (lightningEvery) і рандомізація інтервалу/тривалості (lightningVary) — з налаштувань.
   private updateLightning(dt: number): void {
     const wx = this.atmosphere?.weather;
-    const on = wx?.enabled ? evalWeather(wx, this.atmTime).lightning : false;
-    if (!on) { if (this.lightningOn > 0) { this.lightningOn = 0; this.lightningRect.setVisible(false); } return; }
+    const ws = wx?.enabled ? evalWeather(wx, this.atmTime) : null;
+    if (!ws?.lightning) { if (this.lightningOn > 0) { this.lightningOn = 0; this.lightningRect.setVisible(false); } return; }
     if (this.lightningOn > 0) {
       this.lightningOn -= dt;
       // Подвійний блим: яскравий пік, спад, ще один менший — через синус по залишку
-      const k = Math.max(0, this.lightningOn / 0.35);
+      const k = Math.max(0, this.lightningOn / this.lightningDur);
       const a = Math.max(0, Math.sin(k * Math.PI) * 0.85 + (k > 0.5 ? 0.1 : 0));
       if (this.lightningOn <= 0) this.lightningRect.setVisible(false);
       else this.lightningRect.setFillStyle(0xffffff, Math.min(0.9, a)).setVisible(true);
     } else {
       this.lightningNext -= dt;
       if (this.lightningNext <= 0) {
-        this.lightningOn = 0.35;                    // тривалість спалаху
-        this.lightningNext = 5 + Math.random() * 12; // 5..17 сек до наступного
+        const every = Math.max(0.5, ws.lightningEvery ?? 10);
+        const vary = Math.max(0, Math.min(1, ws.lightningVary ?? 0.5));
+        // Тривалість 0.35с ± vary; інтервал every ± vary
+        this.lightningDur = 0.35 * (1 - vary * 0.6 + Math.random() * vary * 1.2);
+        this.lightningOn = this.lightningDur;
+        this.lightningNext = every * (1 - vary + Math.random() * vary * 2);
       }
     }
   }
@@ -932,7 +940,9 @@ export class GameScene extends Phaser.Scene {
     this.splashes = this.splashes.filter(sp => sp.age < LIFE);
     this.splashNextAt -= dt;
     if (this.splashNextAt <= 0) {
-      this.splashNextAt = 0.04 + Math.random() * 0.04;
+      // Кількість: вищий splashCount → коротший інтервал → більше бризок.
+      const cnt = Math.max(0.1, ws.splashCount ?? 1);
+      this.splashNextAt = (0.04 + Math.random() * 0.04) / cnt;
       const view = this.cameras.main.worldView;
       const tx = view.x + Math.random() * view.width;
       const ty = this.bandTop + Math.random() * (this.bandBottom - this.bandTop);
@@ -967,6 +977,13 @@ export class GameScene extends Phaser.Scene {
       this.character.setPosition(this.player.x, this.player.y - this.character.feetOffset());
       this.character.setDepth(this.player.depth + 0.1);
     }
+
+    // Камера слідує за гравцем У ТОМУ Ж такті, що й рух (step) → камера й персонаж завжди
+    // синхронні, без дрожу. Та сама формула центрування, що й Phaser startFollow:
+    // scrollX = target.x − width·0.5 (width — повна ширина камери, zoom застосовується окремо).
+    const cam = this.cameras.main;
+    const targetScrollX = this.player.x - cam.width * 0.5;
+    cam.scrollX += (targetScrollX - cam.scrollX) * 0.08;
 
     // Кооп: шлемо свою позицію й малюємо інших гравців
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); }
@@ -1109,18 +1126,20 @@ export class GameScene extends Phaser.Scene {
       if (ws.rainSplash && this.splashes.length) {
         const LIFE = 0.45;
         const baseCol = this.rainPalette(ws.rainColor ?? '#aaddff')[2];
+        const sz = Math.max(0.1, ws.splashSize ?? 1);       // множник розміру
+        const it = Math.max(0, Math.min(1.5, ws.splashIntensity ?? 1)); // множник прозорості
         for (const sp of this.splashes) {
           const p = sp.age / LIFE; // 0→1
           const a = 1 - p;
-          this.weatherNear.lineStyle(1, baseCol, a * 0.5);
-          this.weatherNear.strokeCircle(sp.x, sp.y, p * 7);
-          this.weatherNear.fillStyle(baseCol, a * 0.4);
+          this.weatherNear.lineStyle(1, baseCol, a * 0.5 * it);
+          this.weatherNear.strokeCircle(sp.x, sp.y, p * 7 * sz);
+          this.weatherNear.fillStyle(baseCol, a * 0.4 * it);
           for (let d = 0; d < 3; d++) {
-            const vx = (d - 1) * 5;
-            const vy = -(9 + d * 2);
+            const vx = (d - 1) * 5 * sz;
+            const vy = -(9 + d * 2) * sz;
             const ddx = vx * p;
-            const ddy = vy * p + 14 * p * p; // параболічна дуга вгору і назад
-            this.weatherNear.fillCircle(sp.x + ddx, sp.y + ddy, Math.max(0.4, 1.3 * (1 - p)));
+            const ddy = vy * p + 14 * p * p * sz; // параболічна дуга вгору і назад
+            this.weatherNear.fillCircle(sp.x + ddx, sp.y + ddy, Math.max(0.4, 1.3 * (1 - p)) * sz);
           }
         }
       }
