@@ -19,8 +19,10 @@ const game = new Phaser.Game({
   backgroundColor: '#2a2233',
   // backing-роздільність у RENDER_SCALE× більша; камера зумиться тим самим множником у
   // GameScene, тож поле огляду лишається LOGICAL_W×LOGICAL_H. viewport.ts CSS-вписує канвас
-  // у вікно (downscale → різко). roundPixels прибирає суб-піксельне миготіння при скролі.
-  render: { antialias: true, roundPixels: true },
+  // у вікно (downscale → різко). roundPixels ВИМКНЕНО: при плавному follow камери воно
+  // округлювало кожну частину персонажа окремо → дрож і «піксельність». Суперсемплінг
+  // (RENDER_SCALE) дає різкість і без округлення.
+  render: { antialias: true, roundPixels: false },
   scale: {
     mode: Phaser.Scale.NONE,
     width: LOGICAL_W * RENDER_SCALE,

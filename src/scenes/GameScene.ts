@@ -55,7 +55,9 @@ export class GameScene extends Phaser.Scene {
   private weatherTime = 0;
   private ambientRect!: Phaser.GameObjects.Rectangle;
   private fogRect!: Phaser.GameObjects.Rectangle;
-  private weatherGfx!: Phaser.GameObjects.Graphics;   // дощ/сніг — один Graphics на всі 3 шари (без blur)
+  private weatherFar!: Phaser.GameObjects.Graphics;   // дальній шар — розмитий, блідий, повільний
+  private weatherMid!: Phaser.GameObjects.Graphics;   // середній — чіткий
+  private weatherNear!: Phaser.GameObjects.Graphics;  // ближній — розмитий, швидкі довгі смуги
   private lightningRect!: Phaser.GameObjects.Rectangle; // білий спалах на весь екран
   private lightningNext = 6;   // сек до наступного спалаху
   private lightningOn = 0;     // залишок тривалості поточного спалаху (сек)
@@ -219,9 +221,15 @@ export class GameScene extends Phaser.Scene {
     // Переміщується з камерою → рівномірно тонує весь видимий рівень (час доби).
     this.ambientRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000000, 0).setDepth(8000);
     this.fogRect     = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x8899bb, 0).setDepth(8001);
-    // Дощ/сніг: один world-space Graphics (як спрайти), малюємо по camera.worldView → завжди
-    // покриває видимий екран. БЕЗ postFX.blur — він давав 2 повноекранні шейдер-проходи щокадру.
-    this.weatherGfx = this.add.graphics().setDepth(8004);
+    // Дощ/сніг: 3 world-space шари (як спрайти), малюємо по camera.worldView → завжди
+    // покриває видимий екран. Дальній і ближній — з блюром (кінематографічний дощ).
+    this.weatherFar  = this.add.graphics().setDepth(8002);
+    this.weatherMid  = this.add.graphics().setDepth(8003);
+    this.weatherNear = this.add.graphics().setDepth(8004);
+    try {
+      this.weatherFar.postFX.addBlur(1, 2, 2, 1.0);
+      this.weatherNear.postFX.addBlur(1, 2, 2, 1.6);
+    } catch { /* postFX недоступний на деяких рендерерах — лишаємо без блюру */ }
     // Блискавка: білий спалах на весь екран (world-space величезний прямокутник, як fog).
     this.lightningRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(8005);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
@@ -251,7 +259,7 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, 90, this.bandBottom - 10);
     this.player.maxX = GATE_X - 30;
     this.controls = new InputController(this);
-    this.cameras.main.startFollow(this.player, true, 0.08, 0);
+    this.cameras.main.startFollow(this.player, false, 0.08, 0); // roundPixels=false → плавно, без дрожу частин персонажа
 
     // Персонаж завантажується НЕ тут, а коли лобі дасть старт (подія 'lobbyStart'):
     // соло (порожній код) → свій персонаж; кооп → обраний у лобі + інші гравці.
@@ -338,7 +346,7 @@ export class GameScene extends Phaser.Scene {
     // Скидаємо overlays одразу, щоб не лишилось від минулого рівня
     this.ambientRect.setFillStyle(0x000000, 0);
     this.fogRect.setFillStyle(0x8899bb, 0);
-    this.weatherGfx.clear();
+    this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
     this.lightningRect.setFillStyle(0xffffff, 0).setVisible(false); this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
@@ -972,19 +980,18 @@ export class GameScene extends Phaser.Scene {
     // (інакше — зайвий повноекранний blend-пас щокадру).
     if (atm.tod?.enabled) {
       const s = evalTod(atm.tod, this.atmTime);
-      this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha).setVisible(s.ambientAlpha > 0.003);
+      this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha);
     } else {
-      this.ambientRect.setVisible(false);
+      this.ambientRect.setFillStyle(0x000000, 0);
     }
     // Погода
     if (atm.weather?.enabled) {
       const s = evalWeather(atm.weather, this.atmTime);
-      const fa = s.fogAlpha * 0.5;
-      this.fogRect.setFillStyle(0x8899bb, fa).setVisible(fa > 0.003);
+      this.fogRect.setFillStyle(0x8899bb, s.fogAlpha * 0.5);
       this.drawWeatherFx(s.type, s);
     } else {
-      this.fogRect.setVisible(false);
-      this.weatherGfx.clear();
+      this.fogRect.setFillStyle(0x8899bb, 0);
+      this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
     }
   }
 
@@ -1003,8 +1010,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawWeatherFx(type: WeatherType, ws: import('../level/atmosphere').WeatherState): void {
-    const g = this.weatherGfx;
-    g.clear();
+    this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
     if (type === 'clear' || type === 'fog') return;
 
     // Малюємо у світових координатах рівно по тому, що бачить камера зараз.
@@ -1021,13 +1027,11 @@ export class GameScene extends Phaser.Scene {
       const palette = this.rainPalette(ws.rainColor ?? '#aaddff');
       const hash = (n: number): number => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
 
-      // Три шари в ОДНОМУ Graphics (без postFX.blur). Per-drop прозорість і колір збережено
-      // (без них дощ стає тупими білими смугами); це лише ~170 strokePath/кадр — дешево,
-      // справжнім пожирачем був blur, а не ці виклики.
-      const layers = [
-        { sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 60, seed: 11 },
-        { sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 80, seed: 53 },
-        { sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 24, seed: 97 },
+      // Три паралакс-шари з блюром (далекий/ближній). Per-drop прозорість, колір, довжина, фаза.
+      const layers: Array<{ gfx: Phaser.GameObjects.Graphics; sm: number; lm: number; w: number; a: number; n: number; seed: number }> = [
+        { gfx: this.weatherFar,  sm: 0.7, lm: 0.5, w: 1.0, a: ws.rainFar  ?? 0.35, n: 70, seed: 11 },
+        { gfx: this.weatherMid,  sm: 1.0, lm: 1.0, w: 1.6, a: ws.rainMid  ?? 0.7,  n: 90, seed: 53 },
+        { gfx: this.weatherNear, sm: 2.4, lm: 3.2, w: 3.0, a: ws.rainNear ?? 1.0,  n: 26, seed: 97 },
       ];
       for (const l of layers) {
         if (l.a < 0.01) continue;
@@ -1035,7 +1039,7 @@ export class GameScene extends Phaser.Scene {
         for (let i = 0; i < l.n; i++) {
           const rx   = hash(i + l.seed);
           const rlen = 0.6 + hash(i + l.seed + 7) * 0.9;
-          const ra   = 0.45 + hash(i + l.seed + 13) * 0.4; // варіація прозорості (0.45..0.85)
+          const ra   = 0.55 + hash(i + l.seed + 13) * 0.45;
           const rph  = hash(i + l.seed + 23);
           const len   = baseLen * l.lm * rlen;
           const drift = Math.abs(angle) * (H + len);
@@ -1046,16 +1050,16 @@ export class GameScene extends Phaser.Scene {
           const sy    = Y0 - 40 + phase;
           const sx    = baseX + phase * angle;
           const col   = palette[(i + l.seed) % palette.length];
-          g.lineStyle(l.w, col, Math.min(0.9, l.a * ra));
-          g.beginPath();
-          g.moveTo(sx, sy);
-          g.lineTo(sx + len * angle, sy + len);
-          g.strokePath();
+          l.gfx.lineStyle(l.w, col, Math.min(1, l.a * ra));
+          l.gfx.beginPath();
+          l.gfx.moveTo(sx, sy);
+          l.gfx.lineTo(sx + len * angle, sy + len);
+          l.gfx.strokePath();
         }
       }
     } else if (type === 'snow') {
       const SPEED = 70;
-      g.fillStyle(0xffffff, 0.7);
+      this.weatherMid.fillStyle(0xffffff, 0.7);
       for (let i = 0; i < 70; i++) {
         const hf = (i * GR)  % 1;
         const vf = (i * GR2) % 1;
@@ -1063,7 +1067,7 @@ export class GameScene extends Phaser.Scene {
         const OH = H + 50, OW = W + 100;
         const sy = Y0 + ((vf * OH + t * SPEED) % OH) - 25;
         const sx = X0 + ((hf * OW + drift) % OW + OW) % OW - 50;
-        g.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
+        this.weatherMid.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
     }
   }
