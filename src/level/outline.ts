@@ -107,6 +107,22 @@ export function bakeOutline(src: Drawable, mod: OutlineMod): HTMLCanvasElement {
     if (!clear.length) break;
     for (const o of clear) d[o + 3] = 0;
   }
+  // Антиаліас нового краю: зменшуємо альфу пропорційно кількості прозорих сусідів,
+  // щоб зріз був м'яким, а не «сходинками».
+  const a0 = new Uint8ClampedArray(W * H);
+  for (let i = 0; i < W * H; i++) a0[i] = d[i * 4 + 3];
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      const i = py * W + px; if (a0[i] <= 16) continue;
+      let tc = 0, tot = 0;
+      for (let ny = -1; ny <= 1; ny++) for (let nx = -1; nx <= 1; nx++) {
+        if (!nx && !ny) continue; const qx = px + nx, qy = py + ny;
+        if (qx < 0 || qx >= W || qy < 0 || qy >= H) continue;
+        tot++; if (a0[qy * W + qx] <= 16) tc++;
+      }
+      if (tc > 0) d[i * 4 + 3] = Math.round(a0[i] * (1 - 0.55 * (tc / Math.max(1, tot))));
+    }
+  }
   x.putImageData(id, 0, 0);
   return c;
 }

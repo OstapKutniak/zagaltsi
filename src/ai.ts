@@ -98,3 +98,19 @@ export async function generateGameAsset(opts: GenOptions): Promise<string> {
 }
 
 export const hasFalKey = (): boolean => !!(AI_PROXY || OPENAI_KEY);
+
+// Чи доступний ШІ-виріз фону (потрібен воркер-проксі з REMOVEBG_KEY на сервері).
+export const hasAiBgRemoval = (): boolean => !!AI_PROXY;
+
+// ШІ виріз фону з готового зображення (через воркер remove.bg). Повертає dataURL прозорого PNG.
+export async function removeBackgroundAI(dataUrl: string): Promise<string> {
+  if (!AI_PROXY) throw new Error('Немає VITE_FAL_PROXY — ШІ виріз фону недоступний локально');
+  const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const res = await fetch(AI_PROXY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ removebg: true, image_b64: b64 }),
+  });
+  if (!res.ok) throw new Error(`Проксі: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  return openaiOutToDataUrl(await res.json());
+}

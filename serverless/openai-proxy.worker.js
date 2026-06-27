@@ -59,6 +59,21 @@ export default {
 
     const prompt = typeof payload?.prompt === 'string' ? payload.prompt.trim() : '';
     const size   = typeof payload?.size   === 'string' ? payload.size   : '1024x1024';
+
+    // ── Режим «виріз фону з готового зображення» ────────────────────────────
+    // {removebg:true, image_b64:"<base64 без префікса>"} → remove.bg → прозорий PNG.
+    if (payload?.removebg && typeof payload?.image_b64 === 'string') {
+      if (!env.REMOVEBG_KEY) return jsonResp(cors, 500, { error: 'REMOVEBG_KEY не налаштований' });
+      const rmbgRes = await fetch('https://api.remove.bg/v1.0/removebg', {
+        method: 'POST',
+        headers: { 'X-Api-Key': env.REMOVEBG_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_file_b64: payload.image_b64, size: 'auto' }),
+      });
+      if (!rmbgRes.ok) return jsonResp(cors, rmbgRes.status, { error: (await rmbgRes.text()).slice(0, 300) });
+      const pngBuf = await rmbgRes.arrayBuffer();
+      return jsonResp(cors, 200, { data: [{ b64_json: bufToB64(pngBuf) }] });
+    }
+
     if (!prompt) return new Response('need prompt', { status: 400, headers: cors });
 
     // ── 1. Генерація: dall-e-3 hd ──────────────────────────────────────────
