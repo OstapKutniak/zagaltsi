@@ -1,9 +1,33 @@
 export type WeatherType = 'clear' | 'rain' | 'snow' | 'fog';
 
+// ── Шари для per-layer тонування ────────────────────────────────────────────
+
+export type LayerKey = 'sky' | 'clouds' | 'bg' | 'frontbg' | 'map' | 'foreground';
+export const LAYER_KEYS: LayerKey[] = ['sky', 'clouds', 'bg', 'frontbg', 'map', 'foreground'];
+export const LAYER_LABELS: Record<LayerKey, string> = {
+  sky: 'Небо', clouds: 'Хмари', bg: 'Задній фон',
+  frontbg: 'Передній фон', map: 'Карта', foreground: 'Передній план',
+};
+export const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'add', 'darken', 'lighten', 'color-dodge', 'color-burn'] as const;
+export type BlendMode = typeof BLEND_MODES[number];
+export const BLEND_LABELS: Record<BlendMode, string> = {
+  normal: 'Нормальне', multiply: 'Мультиплай', screen: 'Екран',
+  overlay: 'Оверлей', add: 'Додавання', darken: 'Затемнення',
+  lighten: 'Засвітлення', 'color-dodge': 'Ухилення кольором', 'color-burn': 'Випалювання',
+};
+
+export interface LayerTint { color: string; alpha: number; blend: BlendMode; }
+export type TodLayers = Partial<Record<LayerKey, LayerTint>>;
+
 // ── Три незалежні секції атмосфери ──────────────────────────────────────────
 
 export interface SkyPhase     { durationSec: number; skyHex: string; groundHex: string }
-export interface TodPhase     { durationSec: number; ambientHex: string; ambientAlpha: number }
+export interface TodPhase {
+  durationSec: number;
+  ambientHex?: string;    // legacy
+  ambientAlpha?: number;  // legacy
+  layers?: TodLayers;     // нові per-layer тонти
+}
 export interface WeatherPhase {
   durationSec: number;
   type: WeatherType;
@@ -13,26 +37,56 @@ export interface WeatherPhase {
   rainDir?:     number;   // degrees tilt right, default 15
   rainSpeed?:   number;   // px/sec mid-layer, default 600
   rainDropLen?: number;   // px at mid layer, default 16
+  rainDrops?:   number;   // кількість крапель 10-500% від базової, default 100
   rainNear?:    number;   // near layer opacity 0-1, default 1
   rainMid?:     number;   // mid layer opacity 0-1, default 0.7
   rainFar?:     number;   // far layer opacity 0-1, default 0.35
-  lightning?:   boolean;  // рідкі спалахи блискавки (білий блим по всьому екрану)
-  lightningEvery?: number; // середній інтервал між спалахами, сек (default 10)
-  lightningVary?:  number; // рандомізація інтервалу й тривалості 0..1 (default 0.5)
-  rainSplash?:  boolean;  // пилюка від крапель (тільки в межах колайдерів підлоги)
-  splashSize?:      number; // множник розміру бризок (default 1)
-  splashCount?:     number; // множник частоти/кількості бризок (default 1)
-  splashIntensity?: number; // прозорість бризок, множник 0..1 (default 1)
+  lightning?:   boolean;
+  lightningFreq?:  number; // частота 1 (рідко) .. 10 (часто) — нова; якщо немає, fallback → lightningEvery
+  lightningEvery?: number; // legacy: середній інтервал сек
+  lightningVary?:  number; // рандомізація 0..1 (default 0.5)
+  rainSplash?:  boolean;
+  splashSize?:      number;
+  splashCount?:     number;
+  splashIntensity?: number;
 }
 
 export interface AtmSky     { enabled: boolean; static?: boolean; phases: SkyPhase[] }
 export interface AtmTod     { enabled: boolean; static?: boolean; phases: TodPhase[] }
 export interface AtmWeather { enabled: boolean; static?: boolean; phases: WeatherPhase[] }
 
+// ── Віньєтка ─────────────────────────────────────────────────────────────────
+
+export interface AtmVignette {
+  enabled: boolean;
+  strength?: number;   // 0-1, скільки темніє до країв; default 0.6
+  blend?: BlendMode;   // режим накладання; default 'multiply'
+  color?: string;      // колір краю (hex); default '#000000'
+}
+
+// ── Кольоровий баланс ────────────────────────────────────────────────────────
+
+export interface AtmColorBalance {
+  enabled: boolean;
+  brightness?: number;        // 0-2, default 1 (нейтральне)
+  contrast?: number;          // 0-2, default 1
+  saturation?: number;        // 0-2, default 1
+  hue?: number;               // 0-360, default 0
+  shadowColor?: string;       // відтінок тіней (hex)
+  shadowStrength?: number;    // 0-1
+  midColor?: string;
+  midStrength?: number;
+  highlightColor?: string;
+  highlightStrength?: number;
+  cavity?: number;            // 0-1, підсилення порожнин (прото-AO)
+}
+
 export interface Atmosphere {
-  sky?:     AtmSky;
-  tod?:     AtmTod;
-  weather?: AtmWeather;
+  sky?:          AtmSky;
+  tod?:          AtmTod;
+  weather?:      AtmWeather;
+  vignette?:     AtmVignette;
+  colorBalance?: AtmColorBalance;
 }
 
 // ── Кольорові утиліти ────────────────────────────────────────────────────────
@@ -46,6 +100,12 @@ export function lerpHex(a: string, b: string, f: number): number {
   const [ar, ag, ab] = parseHex(a);
   const [br, bg, bb] = parseHex(b);
   return (Math.round(ar + (br - ar) * f) << 16) | (Math.round(ag + (bg - ag) * f) << 8) | Math.round(ab + (bb - ab) * f);
+}
+
+// Hex string → Phaser int (0xRRGGBB)
+export function hexToInt(hex: string): number {
+  const h = hex.replace('#', '').padStart(6, '0');
+  return parseInt(h, 16);
 }
 
 // ── Пошук фази за часом (duration-based) ────────────────────────────────────
@@ -74,10 +134,10 @@ function staticOrFind<T extends { durationSec: number }>(arr: T[], wallSec: numb
 // ── Eval ─────────────────────────────────────────────────────────────────────
 
 export interface SkyState     { skyColor: number; groundColor: number }
-export interface TodState     { ambientColor: number; ambientAlpha: number }
+export interface TodState     { ambientColor: number; ambientAlpha: number; layers: TodLayers }
 export interface WeatherState {
   type: WeatherType; fogAlpha: number;
-  rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number;
+  rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number; rainDrops: number;
   rainNear: number; rainMid: number; rainFar: number; lightning: boolean; rainSplash: boolean;
   lightningEvery: number; lightningVary: number;
   splashSize: number; splashCount: number; splashIntensity: number;
@@ -97,12 +157,16 @@ export function evalTod(tod: AtmTod, wallSec: number): TodState {
   return {
     ambientColor: lerpHex(a.ambientHex ?? '#000000', b.ambientHex ?? '#000000', f),
     ambientAlpha: (a.ambientAlpha ?? 0) + ((b.ambientAlpha ?? 0) - (a.ambientAlpha ?? 0)) * f,
+    layers: a.layers ?? {},
   };
 }
 
 export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
   const { pA, pB, f } = staticOrFind(wx.phases, wallSec, wx.static);
   const a = pA as WeatherPhase, b = pB as WeatherPhase;
+  // Частота блискавки: нова freq (1-10) або legacy lightningEvery
+  const freq = a.lightningFreq;
+  const every = freq != null ? (30 / Math.max(1, freq)) : (a.lightningEvery ?? 10);
   return {
     type:        f < 0.5 ? (a.type ?? 'clear') : (b.type ?? 'clear'),
     fogAlpha:    (a.fogAlpha    ?? 0) + ((b.fogAlpha    ?? 0) - (a.fogAlpha    ?? 0)) * f,
@@ -110,12 +174,13 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
     rainDir:     a.rainDir     ?? 15,
     rainSpeed:   a.rainSpeed   ?? 600,
     rainDropLen: a.rainDropLen ?? 16,
+    rainDrops:   a.rainDrops   ?? 100,
     rainNear:    a.rainNear    ?? 1,
     rainMid:     a.rainMid     ?? 0.7,
     rainFar:     a.rainFar     ?? 0.35,
     lightning:   !!a.lightning,
     rainSplash:  !!a.rainSplash,
-    lightningEvery: a.lightningEvery ?? 10,
+    lightningEvery: every,
     lightningVary:  a.lightningVary  ?? 0.5,
     splashSize:      a.splashSize      ?? 1,
     splashCount:     a.splashCount     ?? 1,
@@ -126,5 +191,5 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
 // ── Дефолтні фази ────────────────────────────────────────────────────────────
 
 export const DEFAULT_SKY_PHASE:     SkyPhase     = { durationSec: 30, skyHex: '#3a3148', groundHex: '#4a3f2e' };
-export const DEFAULT_TOD_PHASE:     TodPhase     = { durationSec: 30, ambientHex: '#000000', ambientAlpha: 0 };
-export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, type: 'clear', fogAlpha: 0, rainColor: '#aaddff', rainDir: 15, rainSpeed: 600, rainDropLen: 16, rainNear: 1, rainMid: 0.7, rainFar: 0.35 };
+export const DEFAULT_TOD_PHASE:     TodPhase     = { durationSec: 30, ambientHex: '#000000', ambientAlpha: 0, layers: {} };
+export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, type: 'clear', fogAlpha: 0, rainColor: '#aaddff', rainDir: 15, rainSpeed: 600, rainDropLen: 16, rainDrops: 100, rainNear: 1, rainMid: 0.7, rainFar: 0.35 };

@@ -733,22 +733,14 @@
           <div id="lv-bodySettings" class="secBody" style="display:none">
             <button id="lv-fillBtn" style="width:100%;font-size:12px;padding:8px 4px">Наповнення</button>
             <div id="lv-fillLayers" style="display:none;flex-direction:column;gap:4px;margin-top:4px"></div>
-            <button id="lv-planToggle" style="width:100%;font-size:12px;padding:8px 4px">Плановість</button>
-            <div class="planPanel" id="lv-planPanel">
-              <div class="planHead">
-                <button id="lv-planBgBtn" class="on">Фонова</button>
-                <button id="lv-planGameBtn">Ігрова</button>
-              </div>
-              <div id="lv-planBg" class="planBody">
-                <button id="lv-zForward">Ближче</button>
-                <button id="lv-zBack">Дальше</button>
-                <button id="lv-zFront">Найближче</button>
-                <button id="lv-zBottom">Найдальше</button>
-              </div>
-              <div id="lv-planGame" class="planBody" style="display:none">
-                <button disabled>—</button>
-                <button disabled>—</button>
-              </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 0">
+              <span style="font-size:12px;color:var(--muted);white-space:nowrap">Якість</span>
+              <select id="lv-qualitySelect" style="flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font-size:12px;padding:3px;font-family:inherit">
+                <option value="">Авто</option>
+                <option value="1.5">1.5× (рек.)</option>
+                <option value="2">2×</option>
+                <option value="1">1× (низька)</option>
+              </select>
             </div>
             <button id="lv-atmToggle" style="width:100%;font-size:12px;padding:8px 4px;margin-top:4px">Атмосфера</button>
             <div id="lv-atmPanel" style="display:none;flex-direction:column;gap:4px;padding:4px 0"></div>
@@ -895,12 +887,6 @@
         </div>
         <div id="mobSettings" class="mob-panel">
           <button class="mob-tool" data-mob-mirror="lv-fillBtn">Наповнення</button>
-          <button class="mob-tool" data-mob-mirror="lv-planBgBtn">Фонова</button>
-          <button class="mob-tool" data-mob-mirror="lv-planGameBtn">Ігрова</button>
-          <button class="mob-tool" data-mob-mirror="lv-zForward">Ближче</button>
-          <button class="mob-tool" data-mob-mirror="lv-zBack">Дальше</button>
-          <button class="mob-tool" data-mob-mirror="lv-zFront">Найближче</button>
-          <button class="mob-tool" data-mob-mirror="lv-zBottom">Найдальше</button>
         </div>
         <div id="mob-prompt-row">
           <input type="text" id="mob-aiPrompt" placeholder="Опис декорації…">

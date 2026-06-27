@@ -8,7 +8,7 @@ import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
-import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
+import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, type LayerKey, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
 import { generateGameAsset, hasFalKey, hasAiBgRemoval, removeBackgroundAI } from '../ai';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
 
@@ -1528,15 +1528,17 @@ export function initLevelEditor(prefix: string): void {
   // Стіни тепер автоматичні (бічні грані піднятих клітинок) — ручний «Вертикальний шлях»
   // більше не потрібен. Ховаємо кнопку; стирання легасі-стін лишається через «Видалити».
   $('pathVBtn')?.style.setProperty('display', 'none');
-  // «Плановість» — заголовок, що згортає/розгортає тогл Фонова/Ігрова
-  const planToggle = $<HTMLButtonElement>('planToggle');
-  const planPanel = $<HTMLElement>('planPanel');
-  if (planToggle && planPanel) {
-    planPanel.style.display = 'none'; // звернуто за замовчуванням
-    planToggle.addEventListener('click', () => {
-      const open = planPanel.style.display === 'none';
-      planPanel.style.display = open ? '' : 'none';
-      planToggle.classList.toggle('on', open);
+  // Якість рендерингу (RENDER_SCALE): зберігаємо в localStorage і перезавантажуємо.
+  const qualSel = $<HTMLSelectElement>('qualitySelect');
+  if (qualSel) {
+    try { qualSel.value = String(localStorage.getItem('zag_render_scale') ?? ''); } catch {}
+    qualSel.addEventListener('change', () => {
+      try {
+        const v = qualSel.value;
+        if (v) localStorage.setItem('zag_render_scale', v);
+        else localStorage.removeItem('zag_render_scale');
+      } catch {}
+      location.reload();
     });
   }
 
@@ -1670,40 +1672,28 @@ export function initLevelEditor(prefix: string): void {
     wr.appendChild(sp); wr.appendChild(svg); wr.appendChild(sl); wr.appendChild(vl); return wr;
   }
 
+  // Будує select для режиму накладання
+  function mkBlendSelect(val: BlendMode, onChange: (v: BlendMode) => void): HTMLElement {
+    const wr = document.createElement('div'); wr.style.cssText = 'display:flex;align-items:center;gap:4px';
+    const sp = document.createElement('span'); sp.style.cssText = 'color:var(--muted);flex:0 0 60px;font-size:11px'; sp.textContent = 'Накладання';
+    const sel = document.createElement('select') as HTMLSelectElement;
+    sel.style.cssText = 'flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--ink);font-size:11px;padding:2px;font-family:inherit';
+    BLEND_MODES.forEach((m) => { const o = document.createElement('option'); o.value = m; o.textContent = BLEND_LABELS[m]; sel.appendChild(o); });
+    sel.value = val;
+    sel.addEventListener('change', () => { onChange(sel.value as BlendMode); save(); });
+    wr.appendChild(sp); wr.appendChild(sel); return wr;
+  }
+
   function renderAtmPanel(): void {
     if (!atmPanel) return;
     atmPanel.innerHTML = '';
     const lv = level();
     if (!lv.atmosphere) lv.atmosphere = {};
-
     const atm = lv.atmosphere;
 
-    // ── НЕБО ─────────────────────────────────────────────────────────────────
-    const skyEnabled = !!(atm.sky?.enabled);
-    const { wrap: skyWrap, body: skyBody, setOpen: skyOpen } = makeSection('Небо', skyEnabled, (en) => {
-      if (!atm.sky) atm.sky = { enabled: en, phases: [{ ...DEFAULT_SKY_PHASE }] };
-      else atm.sky.enabled = en;
-    }, !!(atm.sky?.static), (v) => { if (atm.sky) atm.sky.static = v; });
-    if (atm.sky?.enabled) {
-      skyOpen(true);
-      const sky = atm.sky;
-      sky.phases.forEach((ph: SkyPhase, i: number) => {
-        const { card, body } = makePhaseCard(ph.durationSec, (v) => { ph.durationSec = v; }, () => {
-          if (sky.phases.length > 1) { sky.phases.splice(i, 1); save(); renderAtmPanel(); } else setStatus('Мінімум 1 фаза');
-        });
-        body.appendChild(mkColorPicker('Небо', ph.skyHex, (v) => { ph.skyHex = v; }));
-        body.appendChild(mkColorPicker('Земля', ph.groundHex, (v) => { ph.groundHex = v; }));
-        skyBody.appendChild(card);
-      });
-      const addBtn = document.createElement('button'); addBtn.textContent = '+ Додати фазу'; addBtn.style.cssText = 'font-size:11px;padding:4px;width:100%';
-      addBtn.addEventListener('click', () => { sky.phases.push({ ...DEFAULT_SKY_PHASE }); save(); renderAtmPanel(); });
-      skyBody.appendChild(addBtn);
-    }
-    atmPanel.appendChild(skyWrap);
-
-    // ── ЧАС ДОБИ ─────────────────────────────────────────────────────────────
+    // ── ПЛАНОВІСТЬ (per-layer tint, renamed from Час доби) ───────────────────
     const todEnabled = !!(atm.tod?.enabled);
-    const { wrap: todWrap, body: todBody, setOpen: todOpen } = makeSection('Час доби', todEnabled, (en) => {
+    const { wrap: todWrap, body: todBody, setOpen: todOpen } = makeSection('Плановість', todEnabled, (en) => {
       if (!atm.tod) atm.tod = { enabled: en, phases: [{ ...DEFAULT_TOD_PHASE }] };
       else atm.tod.enabled = en;
     }, !!(atm.tod?.static), (v) => { if (atm.tod) atm.tod.static = v; });
@@ -1714,12 +1704,37 @@ export function initLevelEditor(prefix: string): void {
         const { card, body } = makePhaseCard(ph.durationSec, (v) => { ph.durationSec = v; }, () => {
           if (tod.phases.length > 1) { tod.phases.splice(i, 1); save(); renderAtmPanel(); } else setStatus('Мінімум 1 фаза');
         });
-        body.appendChild(mkColorPicker('Відтінок', ph.ambientHex, (v) => { ph.ambientHex = v; }));
-        body.appendChild(mkSlider('Сила', ph.ambientAlpha, 100, (v) => { ph.ambientAlpha = v; }));
+        if (!ph.layers) ph.layers = {};
+        const layersDiv = document.createElement('div'); layersDiv.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:4px';
+        LAYER_KEYS.forEach((lk: LayerKey) => {
+          const lt = ph.layers![lk];
+          // Заголовок шару з чекбоксом вмикання
+          const lhd = document.createElement('div'); lhd.style.cssText = 'display:flex;align-items:center;gap:6px';
+          const lcb = document.createElement('input'); lcb.type = 'checkbox'; lcb.checked = !!(lt?.alpha && lt.alpha > 0);
+          lcb.style.cssText = 'width:13px;height:13px;accent-color:var(--sel)';
+          const llbl = document.createElement('span'); llbl.style.cssText = 'font-size:11px;font-weight:600;flex:1'; llbl.textContent = LAYER_LABELS[lk];
+          lhd.appendChild(lcb); lhd.appendChild(llbl);
+          layersDiv.appendChild(lhd);
+          // Тіло шару (розгортається коли активний)
+          const lbody = document.createElement('div'); lbody.style.cssText = 'display:flex;flex-direction:column;gap:3px;padding-left:10px';
+          lbody.style.display = lt ? 'flex' : 'none';
+          if (!lt) ph.layers![lk] = { color: '#ffffff', alpha: 0.3, blend: 'multiply' };
+          const cur = () => ph.layers![lk]!;
+          lbody.appendChild(mkColorPicker('Відтінок', cur().color, (v) => { cur().color = v; }));
+          lbody.appendChild(mkSlider('Сила', cur().alpha, 100, (v) => { cur().alpha = v; }));
+          lbody.appendChild(mkBlendSelect(cur().blend, (v) => { cur().blend = v; }));
+          lcb.addEventListener('change', () => {
+            if (!lcb.checked) { ph.layers![lk] = undefined; lbody.style.display = 'none'; }
+            else { ph.layers![lk] = { color: '#ffffff', alpha: 0.3, blend: 'multiply' }; lbody.style.display = 'flex'; }
+            save(); renderAtmPanel();
+          });
+          layersDiv.appendChild(lbody);
+        });
+        body.appendChild(layersDiv);
         todBody.appendChild(card);
       });
       const addBtn = document.createElement('button'); addBtn.textContent = '+ Додати фазу'; addBtn.style.cssText = 'font-size:11px;padding:4px;width:100%';
-      addBtn.addEventListener('click', () => { tod.phases.push({ ...DEFAULT_TOD_PHASE }); save(); renderAtmPanel(); });
+      addBtn.addEventListener('click', () => { tod.phases.push({ ...DEFAULT_TOD_PHASE, layers: {} }); save(); renderAtmPanel(); });
       todBody.appendChild(addBtn);
     }
     atmPanel.appendChild(todWrap);
@@ -1737,7 +1752,6 @@ export function initLevelEditor(prefix: string): void {
         const { card, body } = makePhaseCard(ph.durationSec, (v) => { ph.durationSec = v; }, () => {
           if (wx.phases.length > 1) { wx.phases.splice(i, 1); save(); renderAtmPanel(); } else setStatus('Мінімум 1 фаза');
         });
-        // Тип погоди
         const wxRow = document.createElement('div'); wxRow.style.cssText = 'display:flex;align-items:center;gap:4px';
         const wxLbl = document.createElement('span'); wxLbl.style.cssText = 'color:var(--muted);flex:0 0 60px;font-size:11px'; wxLbl.textContent = 'Тип';
         const wxSel = document.createElement('select') as HTMLSelectElement;
@@ -1746,7 +1760,6 @@ export function initLevelEditor(prefix: string): void {
           const o = document.createElement('option'); o.value = w; o.textContent = WEATHER_LABELS[w]; wxSel.appendChild(o);
         });
         wxSel.value = ph.type;
-        // Rain-specific controls container
         const rainBlock = document.createElement('div'); rainBlock.style.cssText = 'display:flex;flex-direction:column;gap:3px';
         const fogBlock  = document.createElement('div'); fogBlock.style.cssText = 'display:flex;flex-direction:column;gap:3px';
         const refreshBlocks = () => {
@@ -1756,14 +1769,15 @@ export function initLevelEditor(prefix: string): void {
         wxSel.addEventListener('change', () => { ph.type = wxSel.value as WeatherType; refreshBlocks(); save(); });
         wxRow.appendChild(wxLbl); wxRow.appendChild(wxSel); body.appendChild(wxRow);
 
-        // Дощ: колір, напрямок, швидкість, довжина
+        // Дощ: базові параметри
         rainBlock.appendChild(mkColorPicker('Колір', ph.rainColor ?? '#aaddff', (v) => { ph.rainColor = v; }));
         rainBlock.appendChild(mkDirPicker(ph.rainDir ?? 15, (v) => { ph.rainDir = v; }));
         rainBlock.appendChild(mkRangeAbs('Швидкість', ph.rainSpeed ?? 600, 50, 2000, ' px/s', (v) => { ph.rainSpeed = v; }));
         rainBlock.appendChild(mkRangeAbs('Довжина', ph.rainDropLen ?? 16, 2, 80, ' px', (v) => { ph.rainDropLen = v; }));
-        // Непрозорість по шарах (ближній/середній/дальній)
-        const lbl = document.createElement('div'); lbl.textContent = 'Непрозорість шарів'; lbl.style.cssText = 'color:var(--muted);font-size:11px;margin-top:2px';
-        rainBlock.appendChild(lbl);
+        rainBlock.appendChild(mkRangeAbs('Кількість', ph.rainDrops ?? 100, 10, 500, '%', (v) => { ph.rainDrops = v; }));
+        // Непрозорість шарів
+        const opLbl = document.createElement('div'); opLbl.textContent = 'Непрозорість шарів'; opLbl.style.cssText = 'color:var(--muted);font-size:11px;margin-top:2px';
+        rainBlock.appendChild(opLbl);
         rainBlock.appendChild(mkSlider('Ближній', ph.rainNear ?? 1, 100, (v) => { ph.rainNear = v; }));
         rainBlock.appendChild(mkSlider('Середній', ph.rainMid ?? 0.7, 100, (v) => { ph.rainMid = v; }));
         rainBlock.appendChild(mkSlider('Дальній', ph.rainFar ?? 0.35, 100, (v) => { ph.rainFar = v; }));
@@ -1771,27 +1785,26 @@ export function initLevelEditor(prefix: string): void {
         const ltRow = document.createElement('label'); ltRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
         const ltCb = document.createElement('input'); ltCb.type = 'checkbox'; ltCb.checked = !!ph.lightning; ltCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
         ltCb.addEventListener('change', () => { ph.lightning = ltCb.checked; save(); renderAtmPanel(); });
-        ltRow.appendChild(ltCb); ltRow.appendChild(document.createTextNode('⚡ Блискавка (рідкі спалахи)'));
+        ltRow.appendChild(ltCb); ltRow.appendChild(document.createTextNode('Блискавка'));
         rainBlock.appendChild(ltRow);
         if (ph.lightning) {
-          rainBlock.appendChild(mkRangeAbs('Кожні', ph.lightningEvery ?? 10, 1, 40, ' с', (v) => { ph.lightningEvery = v; }));
+          // Частота: 1=рідко (30c), 10=часто (3с); зберігається як lightningFreq
+          const freqVal = ph.lightningFreq ?? (ph.lightningEvery ? Math.max(1, Math.min(10, Math.round(30 / ph.lightningEvery))) : 5);
+          rainBlock.appendChild(mkRangeAbs('Частота', freqVal, 1, 10, '', (v) => { ph.lightningFreq = v; delete (ph as WeatherPhase).lightningEvery; }));
           rainBlock.appendChild(mkRangeAbs('Рандом', (ph.lightningVary ?? 0.5) * 100, 0, 100, '%', (v) => { ph.lightningVary = v / 100; }));
         }
         // Пилюка від крапель
         const splRow = document.createElement('label'); splRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
         const splCb = document.createElement('input'); splCb.type = 'checkbox'; splCb.checked = !!ph.rainSplash; splCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
         splCb.addEventListener('change', () => { ph.rainSplash = splCb.checked; save(); renderAtmPanel(); });
-        splRow.appendChild(splCb); splRow.appendChild(document.createTextNode('💧 Пилюка від крапель (тільки на підлозі)'));
+        splRow.appendChild(splCb); splRow.appendChild(document.createTextNode('Пилюка від крапель'));
         rainBlock.appendChild(splRow);
         if (ph.rainSplash) {
           rainBlock.appendChild(mkRangeAbs('Розмір', (ph.splashSize ?? 1) * 100, 20, 300, '%', (v) => { ph.splashSize = v / 100; }));
           rainBlock.appendChild(mkRangeAbs('Кількість', (ph.splashCount ?? 1) * 100, 20, 400, '%', (v) => { ph.splashCount = v / 100; }));
           rainBlock.appendChild(mkRangeAbs('Інтенсивність', (ph.splashIntensity ?? 1) * 100, 0, 150, '%', (v) => { ph.splashIntensity = v / 100; }));
         }
-
-        // Туман / загальне
         fogBlock.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));
-
         body.appendChild(rainBlock); body.appendChild(fogBlock);
         refreshBlocks();
         wxBody.appendChild(card);
@@ -1801,6 +1814,50 @@ export function initLevelEditor(prefix: string): void {
       wxBody.appendChild(addBtn);
     }
     atmPanel.appendChild(wxWrap);
+
+    // ── ВІНЬЄТКА ─────────────────────────────────────────────────────────────
+    const vigEn = !!(atm.vignette?.enabled);
+    const { wrap: vigWrap, body: vigBody, setOpen: vigOpen } = makeSection('Віньєтка', vigEn, (en) => {
+      if (!atm.vignette) atm.vignette = { enabled: en, strength: 0.6, blend: 'multiply', color: '#000000' };
+      else atm.vignette.enabled = en;
+    });
+    if (atm.vignette?.enabled) {
+      vigOpen(true);
+      const vig = atm.vignette;
+      vigBody.appendChild(mkRangeAbs('Сила', (vig.strength ?? 0.6) * 100, 0, 100, '%', (v) => { vig.strength = v / 100; }));
+      vigBody.appendChild(mkBlendSelect(vig.blend ?? 'multiply', (v) => { vig.blend = v; }));
+      vigBody.appendChild(mkColorPicker('Колір', vig.color ?? '#000000', (v) => { vig.color = v; }));
+    }
+    atmPanel.appendChild(vigWrap);
+
+    // ── КОЛЬОРОВИЙ БАЛАНС ────────────────────────────────────────────────────
+    const cbEn = !!(atm.colorBalance?.enabled);
+    const { wrap: cbWrap, body: cbBody, setOpen: cbOpen } = makeSection('Кольоровий баланс', cbEn, (en) => {
+      if (!atm.colorBalance) atm.colorBalance = { enabled: en, brightness: 1, contrast: 1, saturation: 1, hue: 0 };
+      else atm.colorBalance.enabled = en;
+    });
+    if (atm.colorBalance?.enabled) {
+      cbOpen(true);
+      const cb = atm.colorBalance;
+      const pct2 = (v: number, max: number): number => Math.round(v * max);
+      cbBody.appendChild(mkRangeAbs('Яскравість', pct2(cb.brightness ?? 1, 100), 0, 200, '%', (v) => { cb.brightness = v / 100; }));
+      cbBody.appendChild(mkRangeAbs('Контраст', pct2(cb.contrast ?? 1, 100), 0, 200, '%', (v) => { cb.contrast = v / 100; }));
+      cbBody.appendChild(mkRangeAbs('Насиченість', pct2(cb.saturation ?? 1, 100), 0, 200, '%', (v) => { cb.saturation = v / 100; }));
+      cbBody.appendChild(mkRangeAbs('Тон (Hue)', cb.hue ?? 0, 0, 360, '°', (v) => { cb.hue = v; }));
+      const sepLbl = (t: string): HTMLElement => { const d = document.createElement('div'); d.textContent = t; d.style.cssText = 'color:var(--muted);font-size:11px;margin-top:4px;font-weight:600'; return d; };
+      cbBody.appendChild(sepLbl('Тіні'));
+      cbBody.appendChild(mkColorPicker('Відтінок', cb.shadowColor ?? '#000033', (v) => { cb.shadowColor = v; }));
+      cbBody.appendChild(mkSlider('Сила', cb.shadowStrength ?? 0, 100, (v) => { cb.shadowStrength = v; }));
+      cbBody.appendChild(sepLbl('Середні тони'));
+      cbBody.appendChild(mkColorPicker('Відтінок', cb.midColor ?? '#003300', (v) => { cb.midColor = v; }));
+      cbBody.appendChild(mkSlider('Сила', cb.midStrength ?? 0, 100, (v) => { cb.midStrength = v; }));
+      cbBody.appendChild(sepLbl('Світлини'));
+      cbBody.appendChild(mkColorPicker('Відтінок', cb.highlightColor ?? '#ffffee', (v) => { cb.highlightColor = v; }));
+      cbBody.appendChild(mkSlider('Сила', cb.highlightStrength ?? 0, 100, (v) => { cb.highlightStrength = v; }));
+      cbBody.appendChild(sepLbl('Деталізація'));
+      cbBody.appendChild(mkSlider('Cavity', cb.cavity ?? 0, 100, (v) => { cb.cavity = v; }));
+    }
+    atmPanel.appendChild(cbWrap);
   }
 
   function snapToEdge(): void {
