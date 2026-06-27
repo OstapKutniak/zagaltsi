@@ -10,6 +10,13 @@ export const LOGICAL_H = 576;
 // Можна зменшити через налаштування гри (зберігається в localStorage zag_render_scale).
 function _getRenderScale(): number {
   try { const v = localStorage.getItem('zag_render_scale'); if (v) { const n = Number(v); if (n > 0) return n; } } catch {}
+  // Авто: на мобільних/планшетах суперсемплінг 1.5× (усе ще різкіше за фактичну роздільність
+  // екрана, але ~2.25× дешевше за 2.0× по fill-rate). Десктоп лишається 2.0×.
+  try {
+    const touch = (navigator.maxTouchPoints ?? 0) > 0;
+    const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    if (touch && mobileUA) return 1.5;
+  } catch { /* SSR/no navigator */ }
   return 2;
 }
 export const RENDER_SCALE = _getRenderScale();

@@ -339,7 +339,7 @@ export class GameScene extends Phaser.Scene {
     this.ambientRect.setFillStyle(0x000000, 0);
     this.fogRect.setFillStyle(0x8899bb, 0);
     this.weatherGfx.clear();
-    this.lightningRect.setFillStyle(0xffffff, 0); this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
+    this.lightningRect.setFillStyle(0xffffff, 0).setVisible(false); this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.levelStart = doc.start ?? 0;
@@ -868,14 +868,14 @@ export class GameScene extends Phaser.Scene {
   private updateLightning(dt: number): void {
     const wx = this.atmosphere?.weather;
     const on = wx?.enabled ? evalWeather(wx, this.atmTime).lightning : false;
-    if (!on) { if (this.lightningOn > 0) { this.lightningOn = 0; this.lightningRect.setFillStyle(0xffffff, 0); } return; }
+    if (!on) { if (this.lightningOn > 0) { this.lightningOn = 0; this.lightningRect.setVisible(false); } return; }
     if (this.lightningOn > 0) {
       this.lightningOn -= dt;
       // Подвійний блим: яскравий пік, спад, ще один менший — через синус по залишку
       const k = Math.max(0, this.lightningOn / 0.35);
       const a = Math.max(0, Math.sin(k * Math.PI) * 0.85 + (k > 0.5 ? 0.1 : 0));
-      this.lightningRect.setFillStyle(0xffffff, Math.min(0.9, a));
-      if (this.lightningOn <= 0) this.lightningRect.setFillStyle(0xffffff, 0);
+      if (this.lightningOn <= 0) this.lightningRect.setVisible(false);
+      else this.lightningRect.setFillStyle(0xffffff, Math.min(0.9, a)).setVisible(true);
     } else {
       this.lightningNext -= dt;
       if (this.lightningNext <= 0) {
@@ -968,20 +968,22 @@ export class GameScene extends Phaser.Scene {
       this.skyRect.setFillStyle(s.skyColor);
       this.groundRect.setFillStyle(s.groundColor);
     }
-    // Час доби — ambient tint поверх всіх ассетів
+    // Час доби — ambient tint поверх всіх ассетів. Ховаємо квад, якщо прозорий
+    // (інакше — зайвий повноекранний blend-пас щокадру).
     if (atm.tod?.enabled) {
       const s = evalTod(atm.tod, this.atmTime);
-      this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha);
+      this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha).setVisible(s.ambientAlpha > 0.003);
     } else {
-      this.ambientRect.setFillStyle(0x000000, 0);
+      this.ambientRect.setVisible(false);
     }
     // Погода
     if (atm.weather?.enabled) {
       const s = evalWeather(atm.weather, this.atmTime);
-      this.fogRect.setFillStyle(0x8899bb, s.fogAlpha * 0.5);
+      const fa = s.fogAlpha * 0.5;
+      this.fogRect.setFillStyle(0x8899bb, fa).setVisible(fa > 0.003);
       this.drawWeatherFx(s.type, s);
     } else {
-      this.fogRect.setFillStyle(0x8899bb, 0);
+      this.fogRect.setVisible(false);
       this.weatherGfx.clear();
     }
   }
