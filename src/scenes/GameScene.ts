@@ -96,6 +96,10 @@ export class GameScene extends Phaser.Scene {
   private lvlAnimTime = 0;
   private lvlKfAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; idx: number[] }[] = [];
   private lvlBakedAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; anim: PlacedAnim; idx: number[] }[] = [];
+  // Кулінг: ассети ігрового шару (scrollFactor=1, не паралакс-фон). Поза кадром setVisible(false) —
+  // суто ЛОКАЛЬНА оптимізація рендера, не чіпає стан/мережу (у коопі кожен клієнт кулить під свою камеру).
+  private cullables: { im: Phaser.GameObjects.Image; halfW: number }[] = [];
+  private cullMargin = 260;
   private lvlKfTime = 0;
   private playerSpawned = false;
   private accumulator = 0;
@@ -451,6 +455,7 @@ export class GameScene extends Phaser.Scene {
     this.levelAnims = [];
     this.lvlKfAnims = [];
     this.lvlBakedAnims = [];
+    this.cullables = [];
     for (const o of this.children.list) {
       const im = o as Phaser.GameObjects.Image;
       if (!im.getData) continue;
@@ -458,6 +463,11 @@ export class GameScene extends Phaser.Scene {
       if (isPlx) this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
       const anim = im.getData('lvlAnim') as PlacedAnim | undefined;
       if (anim) this.levelAnims.push({ im, anim, isPlx, based: false, bx: 0, by: 0, br: 0 });
+      // Кулінг-кандидат: ассет ігрового шару (не паралакс-фон), із кінцевою шириною.
+      // Деформовані меші (lvlKfDeform/lvlBakedAnim) пропускаємо — їх мало і ширина не тривіальна.
+      if (!isPlx && !im.getData('lvlKfDeform') && !im.getData('lvlBakedAnim') && typeof im.displayWidth === 'number') {
+        this.cullables.push({ im, halfW: Math.abs(im.displayWidth) / 2 });
+      }
       const kfData = im.getData('lvlKfDeform') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number } | undefined;
       if (kfData) {
         const { deform, W, H, N, scale, flip } = kfData;
@@ -863,12 +873,26 @@ export class GameScene extends Phaser.Scene {
       this.step(FIXED_DT);
       this.accumulator -= FIXED_DT;
     }
+    this.cullLevel();
     if (this.atmosphere) {
       const dt = Math.min(delta / 1000, 0.1);
       this.atmTime += dt;
       this.weatherTime += dt;
       this.updateAtmosphere();
       this.updateLightning(dt);
+    }
+  }
+
+  // Кулінг ассетів ігрового шару: ховаємо ті, що повністю поза кадром (+ запас), показуємо ті,
+  // що в кадрі. Лише setVisible — стан гри не чіпаємо. Дешево: кілька порівнянь на об'єкт.
+  private cullLevel(): void {
+    if (!this.cullables.length) return;
+    const v = this.cameras.main.worldView;
+    const left = v.x - this.cullMargin, right = v.x + v.width + this.cullMargin;
+    for (const c of this.cullables) {
+      const x = c.im.x;
+      const vis = (x + c.halfW) >= left && (x - c.halfW) <= right;
+      if (c.im.visible !== vis) c.im.setVisible(vis);
     }
   }
 
