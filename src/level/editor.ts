@@ -1016,27 +1016,6 @@ export function initLevelEditor(prefix: string): void {
     }
     return data[(py * img.width + px) * 4 + 3] ?? 0;
   }
-  // RGB сирого пікселя ассета в локальних координатах (або null, якщо прозоро/поза межами).
-  function _rgbAt(img: HTMLImageElement, lx: number, ly: number): [number, number, number] | null {
-    if (_alphaAt(img, lx, ly) < 10) return null; // заодно наповнює кеш
-    const data = _alphaCache.get(img); if (!data?.length) return null;
-    const px = Math.round(lx + img.width / 2), py = Math.round(ly + img.height / 2);
-    const i = (py * img.width + px) * 4;
-    return [data[i], data[i + 1], data[i + 2]];
-  }
-  // Колір сирого пікселя розміщеного ассета під екранною точкою (#hex) — для піпетки.
-  function rawColorAt(p: Placed, sx: number, sy: number): string | null {
-    const img = imgOf(p); if (!img) return null;
-    const d2 = animDisp(p); const o = toScreen(d2.x, d2.y); o.x += plxDx(p.cat, p.plan);
-    const ang = rad(-d2.rot); const dx = sx - o.x, dy = sy - o.y;
-    const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
-    let lx = (dx * Math.cos(ang) - dy * Math.sin(ang)) / kx;
-    const ly = (dx * Math.sin(ang) + dy * Math.cos(ang)) / ky;
-    if (p.flip < 0) lx = -lx;
-    const rgb = _rgbAt(img, lx + (p.pivotX ?? 0), ly + (p.pivotY ?? 0));
-    if (!rgb) return null;
-    return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('');
-  }
   function hitTest(sx: number, sy: number): string | null {
     const list = placedSorted().filter(p =>
       !p.transparent &&                                          // прозорі ассети — невибирані
@@ -1940,18 +1919,6 @@ export function initLevelEditor(prefix: string): void {
   }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
-    // Піпетка: взяти колір пікселя з вьюпорта й записати в outline.color вибраного ассета.
-    if (eyedropPid && ev.button === 0) {
-      ev.preventDefault();
-      const pid = eyedropPid; eyedropPid = null;
-      const pl = level().placed.find((q) => q.id === pid);
-      const hex = pl ? rawColorAt(pl, x, y) : null; // колір із самого ассета, не з фону
-      if (pl?.outline && hex) { pushUndo(); pl.outline.color = hex; save(); setStatus('Колір узято: ' + hex); }
-      else setStatus('Промах — клікни по самому ассету');
-      draw();
-      if (pl) openAssetMenu(pl, lastMenuX, lastMenuY);
-      return;
-    }
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
     if (state.animLinePid && ev.button === 0) { lineDraw = { x0: x, y0: y, x1: x, y1: y }; return; } // режим «Задати лінію»
     const lv0 = level();
@@ -2360,8 +2327,6 @@ export function initLevelEditor(prefix: string): void {
   // Згорнуті секції меню (другий клік по активному модифікатору ховає його налаштування).
   let menuCollapse: Record<string, boolean> = {};
   let menuCollapseFor = '';
-  // Піпетка кольору з вьюпорта: pid ассета, чий outline.color заповнюємо наступним кліком.
-  let eyedropPid: string | null = null;
   const _menuOutside = (e: MouseEvent): void => { if (_assetMenuEl && !_assetMenuEl.contains(e.target as Node)) closeAssetMenu(); };
   function closeAssetMenu(): void { if (_assetMenuEl) { _assetMenuEl.remove(); _assetMenuEl = null; } document.removeEventListener('mousedown', _menuOutside, true); }
   function openAssetMenu(p: Placed, clientX: number, clientY: number): void {
@@ -2531,7 +2496,7 @@ export function initLevelEditor(prefix: string): void {
         pushUndo();
         p.outline = mode === 'stroke'
           ? { mode, width: p.outline?.width ?? 4, color: '#000000' }
-          : { mode, width: p.outline?.width ?? 3, color: p.outline?.color ?? '#000000', threshold: p.outline?.threshold ?? 60 };
+          : { mode, width: p.outline?.width ?? 3 };
         menuCollapse.outline = false; save(); draw(); rebuild();
       };
       oNone.onclick   = () => { pushUndo(); delete p.outline; menuCollapse.outline = false; save(); draw(); rebuild(); };
@@ -2551,35 +2516,15 @@ export function initLevelEditor(prefix: string): void {
         wsl.oninput = () => { ol.width = Number(wsl.value); wval.textContent = wsl.value + 'px'; draw(); };
         wsl.onchange = () => { pushUndo(); save(); };
         wrow.append(wsl, wval); m.appendChild(wrow);
-        // Колір. Обводка — звичайний пікер. Обрізка — свотч-піпетка: клік бере колір з ассета.
-        const crow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
-        crow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', ol.mode === 'stroke' ? 'Колір' : 'Колір краю'));
+        // Колір обводки (лише для режиму «Обводка»)
         if (ol.mode === 'stroke') {
+          const crow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
+          crow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Колір'));
           const cinp = document.createElement('input'); cinp.type = 'color'; cinp.value = ol.color ?? '#000000';
           cinp.style.cssText = 'width:40px;height:22px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer';
           cinp.oninput = () => { ol.color = cinp.value; draw(); };
           cinp.onchange = () => { pushUndo(); save(); };
-          crow.appendChild(cinp);
-        } else {
-          // Свотч = піпетка: клік → візьми колір краю з самого ассета у вьюпорті
-          const sw = mk('div', `width:40px;height:22px;border:1px solid ${eyedropPid === p.id ? '#39d0ff' : '#555'};border-radius:3px;background:${ol.color ?? '#000000'};cursor:crosshair;`);
-          sw.title = 'Клікни, потім клікни по краю ассета у вьюпорті';
-          sw.onclick = () => { eyedropPid = p.id; closeAssetMenu(); setStatus('Клікни по краю ассета у вьюпорті, щоб узяти колір'); draw(); };
-          crow.appendChild(sw);
-          crow.appendChild(mk('span', 'opacity:0.5;font-size:11px;', eyedropPid === p.id ? '← обери у вьюпорті' : ol.color ?? '#000000'));
-        }
-        m.appendChild(crow);
-        // Поріг схожості (лише для обрізки) — наскільки близький до кольору край зрізається
-        if (ol.mode === 'erode') {
-          const trow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
-          trow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Поріг'));
-          const tsl = document.createElement('input'); tsl.type = 'range'; tsl.min = '0'; tsl.max = '200'; tsl.step = '2';
-          tsl.value = String(ol.threshold ?? 60); tsl.style.cssText = 'flex:1;accent-color:#39d0ff';
-          const tval = mk('span', 'flex:0 0 30px;text-align:right;opacity:0.8;', String(ol.threshold ?? 60));
-          tsl.oninput = () => { ol.threshold = Number(tsl.value); tval.textContent = tsl.value; draw(); };
-          tsl.onchange = () => { pushUndo(); save(); };
-          trow.append(tsl, tval); m.appendChild(trow);
-          m.appendChild(mk('div', 'opacity:0.5;margin-top:3px;font-size:11px;', 'Зрізає лише пікселі цього кольору з краю — трава/деталі лишаються'));
+          crow.appendChild(cinp); m.appendChild(crow);
         }
       }
     }
@@ -2866,9 +2811,7 @@ export function initLevelEditor(prefix: string): void {
       } else { deleteSel(); }
     }
     else if (ev.code === 'Escape') {
-      if (eyedropPid) {
-        eyedropPid = null; setStatus('Піпетку скасовано'); draw();
-      } else if (state.openGroup) {
+      if (state.openGroup) {
         state.openGroup = null; draw();
       } else if (state.pendingEnemy) {
         state.pendingEnemy = null;

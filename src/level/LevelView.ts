@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { footprintWorldCells, footprintFrontEditorY } from './footprint';
 import type { Atmosphere } from './atmosphere';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
+import { RENDER_SCALE } from '../config';
 
 // Малює рівень (з редактора рівнів) у грі: тайли/фон/небо/декор як спрайти у світі.
 // Координати рівня: x — уздовж рівня, y — від лінії землі (0 = підлога, де ноги).
@@ -170,11 +171,27 @@ function layerScrollFactor(cat: string, dist: number): number {
   return cat === 'foreground' ? 1 + dist : Math.max(0, 1 - dist);
 }
 
-function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
+// Завантажує текстуру; downscale ∈ (0..1] — коефіцієнт зменшення до фактичного розміру в кадрі
+// (sourceDim · максимальний масштаб розміщення · RENDER_SCALE), щоб не тримати у VRAM 1024²,
+// коли ассет видно дрібним. Економить пам'ять і прискорює завантаження/семплінг.
+function loadTex(scene: Phaser.Scene, key: string, url: string, downscale = 1): Promise<void> {
   return new Promise((res) => {
     if (scene.textures.exists(key)) { res(); return; }
     const img = new Image();
-    img.onload = () => { if (!scene.textures.exists(key)) scene.textures.addImage(key, img); res(); };
+    img.onload = () => {
+      if (!scene.textures.exists(key)) {
+        if (downscale < 0.92 && Math.max(img.width, img.height) > 8) {
+          const cw = Math.max(1, Math.round(img.width * downscale));
+          const ch = Math.max(1, Math.round(img.height * downscale));
+          const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+          const cx = cv.getContext('2d'); if (cx) { cx.imageSmoothingQuality = 'high'; cx.drawImage(img, 0, 0, cw, ch); }
+          scene.textures.addCanvas(key, cv);
+        } else {
+          scene.textures.addImage(key, img);
+        }
+      }
+      res();
+    };
     img.onerror = () => res();
     img.src = url;
   });
@@ -182,7 +199,11 @@ function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
 
 // Будує спрайти рівня. floorY — світова Y лінії підлоги (де стоять ноги).
 export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY: number): Promise<void> {
-  await Promise.all(doc.assets.map((a) => loadTex(scene, 'lvl_' + a.id, a.url)));
+  // Максимальний масштаб розміщення кожного ассета → коеф. даунскейлу текстури до розміру в кадрі.
+  const maxScale = new Map<string, number>();
+  for (const p of doc.placed) maxScale.set(p.asset, Math.max(maxScale.get(p.asset) ?? 0, Math.abs(p.scale) || 1));
+  const dsFactor = (id: string): number => Math.min(1, (maxScale.get(id) ?? 1) * RENDER_SCALE);
+  await Promise.all(doc.assets.map((a) => loadTex(scene, 'lvl_' + a.id, a.url, dsFactor(a.id))));
   // Запечена обводка/обрізка: для кожного недеформованого розміщення з outline бейкаємо
   // окрему текстуру 'lvl_<asset>_<outlineKey>'. Сирі джерела вантажимо раз на ассет.
   const outAssets = new Map<string, string>(); // assetId → url (лише ті, що мають outline-розміщення)

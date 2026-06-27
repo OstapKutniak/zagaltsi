@@ -7,13 +7,7 @@
 export interface OutlineMod {
   mode: 'stroke' | 'erode';
   width: number;
-  color?: string;      // stroke: колір обводки; erode: цільовий колір, який зрізаємо
-  threshold?: number;  // erode: поріг схожості кольору (0..255 евклідова відстань у RGB)
-}
-
-function parseHex(hex: string): [number, number, number] {
-  const h = (hex || '#000000').replace('#', '').padStart(6, '0');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  color?: string;      // stroke: колір обводки
 }
 
 type Drawable = HTMLImageElement | HTMLCanvasElement;
@@ -80,54 +74,13 @@ export function bakeOutline(src: Drawable, mod: OutlineMod): HTMLCanvasElement {
     x.drawImage(inner, 0, 0);
     return out;
   }
-  // erode: зрізаємо зовнішні пікселі, але ЛИШЕ ті, що збігаються з цільовим кольором у межах
-  // порога. Пошарове «обчищення» країв: матч-пікселі на краю стають прозорими, інші (трава тощо)
-  // зупиняють обчищення й захищають усе за ними. Так зрізається жирна чорна обводка, а не трава.
-  const W = w, H = h;
-  const c = mkCanvas(W, H); const x = c.getContext('2d')!;
-  x.drawImage(src, 0, 0);
-  const id = x.getImageData(0, 0, W, H); const d = id.data;
-  const [tr, tg, tb] = parseHex(color);
-  const thr = Math.max(0, mod.threshold ?? 60);
-  const thr2 = thr * thr;
-  const aOf = (px: number, py: number): number => (px < 0 || px >= W || py < 0 || py >= H) ? 0 : d[(py * W + px) * 4 + 3];
-  const iters = Math.max(1, Math.round(width));
-  for (let it = 0; it < iters; it++) {
-    const clear: number[] = [];
-    for (let py = 0; py < H; py++) {
-      for (let px = 0; px < W; px++) {
-        const o = (py * W + px) * 4;
-        if (d[o + 3] <= 16) continue;                       // вже прозорий
-        // край = має прозорого 4-сусіда
-        if (aOf(px - 1, py) > 16 && aOf(px + 1, py) > 16 && aOf(px, py - 1) > 16 && aOf(px, py + 1) > 16) continue;
-        const dr = d[o] - tr, dg = d[o + 1] - tg, db = d[o + 2] - tb;
-        if (dr * dr + dg * dg + db * db <= thr2) clear.push(o);
-      }
-    }
-    if (!clear.length) break;
-    for (const o of clear) d[o + 3] = 0;
-  }
-  // Антиаліас нового краю: зменшуємо альфу пропорційно кількості прозорих сусідів,
-  // щоб зріз був м'яким, а не «сходинками».
-  const a0 = new Uint8ClampedArray(W * H);
-  for (let i = 0; i < W * H; i++) a0[i] = d[i * 4 + 3];
-  for (let py = 0; py < H; py++) {
-    for (let px = 0; px < W; px++) {
-      const i = py * W + px; if (a0[i] <= 16) continue;
-      let tc = 0, tot = 0;
-      for (let ny = -1; ny <= 1; ny++) for (let nx = -1; nx <= 1; nx++) {
-        if (!nx && !ny) continue; const qx = px + nx, qy = py + ny;
-        if (qx < 0 || qx >= W || qy < 0 || qy >= H) continue;
-        tot++; if (a0[qy * W + qx] <= 16) tc++;
-      }
-      if (tc > 0) d[i * 4 + 3] = Math.round(a0[i] * (1 - 0.55 * (tc / Math.max(1, tot))));
-    }
-  }
-  x.putImageData(id, 0, 0);
-  return c;
+  // erode: просто зрізаємо width пікселів зовнішнього краю (альфа-ерозія).
+  return erode((() => { const c = mkCanvas(w, h); c.getContext('2d')!.drawImage(src, 0, 0); return c; })(), Math.max(1, Math.round(width)));
 }
 
 // Ключ кешу/текстури за модифікатором.
 export function outlineKey(mod: OutlineMod): string {
-  return `o_${mod.mode}_${Math.round(mod.width)}_${(mod.color ?? '#000000').replace('#', '')}_${Math.round(mod.threshold ?? 60)}`;
+  return mod.mode === 'stroke'
+    ? `o_stroke_${Math.round(mod.width)}_${(mod.color ?? '#000000').replace('#', '')}`
+    : `o_erode_${Math.round(mod.width)}`;
 }
