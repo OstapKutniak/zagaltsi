@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { footprintWorldCells, footprintFrontEditorY } from './footprint';
 import type { Atmosphere } from './atmosphere';
+import { bakeOutline, outlineKey, type OutlineMod } from './outline';
 
 // Малює рівень (з редактора рівнів) у грі: тайли/фон/небо/декор як спрайти у світі.
 // Координати рівня: x — уздовж рівня, y — від лінії землі (0 = підлога, де ноги).
@@ -138,7 +139,7 @@ export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: numb
   return { rot: 0, dx: dx * d, dy: dy * d };
 }
 
-export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform }
+export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; outline?: OutlineMod }
 export interface LevelDoc {
   name?: string;
   placed: LevelPlaced[];
@@ -182,6 +183,25 @@ function loadTex(scene: Phaser.Scene, key: string, url: string): Promise<void> {
 // Будує спрайти рівня. floorY — світова Y лінії підлоги (де стоять ноги).
 export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY: number): Promise<void> {
   await Promise.all(doc.assets.map((a) => loadTex(scene, 'lvl_' + a.id, a.url)));
+  // Запечена обводка/обрізка: для кожного недеформованого розміщення з outline бейкаємо
+  // окрему текстуру 'lvl_<asset>_<outlineKey>'. Сирі джерела вантажимо раз на ассет.
+  const outAssets = new Map<string, string>(); // assetId → url (лише ті, що мають outline-розміщення)
+  for (const p of doc.placed) if (p.outline && p.outline.width > 0 && !p.deform) {
+    const a = doc.assets.find((x) => x.id === p.asset); if (a) outAssets.set(p.asset, a.url);
+  }
+  if (outAssets.size) {
+    const srcImgs = new Map<string, HTMLImageElement>();
+    await Promise.all([...outAssets].map(([id, url]) => new Promise<void>((res) => {
+      const img = new Image(); img.onload = () => { srcImgs.set(id, img); res(); }; img.onerror = () => res(); img.src = url;
+    })));
+    for (const p of doc.placed) {
+      if (!p.outline || p.outline.width <= 0 || p.deform) continue;
+      const okey = 'lvl_' + p.asset + '_' + outlineKey(p.outline);
+      if (scene.textures.exists(okey)) continue;
+      const src = srcImgs.get(p.asset); if (!src) continue;
+      try { scene.textures.addCanvas(okey, bakeOutline(src, p.outline)); } catch { /* ignore */ }
+    }
+  }
   const gs = doc.grid ?? 48;
   // Футпринти ассетів: глибина декору = передній край футпринта (а не фіксований шар),
   // щоб персонаж за деревом малювався позаду, а перед — попереду. Та сама ізо-математика.
@@ -227,7 +247,13 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       }
       go = mesh as unknown as Phaser.GameObjects.Image;
     } else {
-      const im = scene.add.image(p.x, floorY + p.y, key).setOrigin(0.5, 0.5);
+      // Обводка/обрізка: якщо запекли текстуру — рендеримо її замість сирої.
+      let imgKey = key;
+      if (p.outline && p.outline.width > 0) {
+        const okey = 'lvl_' + p.asset + '_' + outlineKey(p.outline);
+        if (scene.textures.exists(okey)) imgKey = okey;
+      }
+      const im = scene.add.image(p.x, floorY + p.y, imgKey).setOrigin(0.5, 0.5);
       im.setRotation((p.rot * Math.PI) / 180);
       im.setScale(p.scale * p.flip, p.scale);
       go = im;

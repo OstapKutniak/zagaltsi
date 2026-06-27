@@ -10,6 +10,7 @@ import { footprintWorldCells } from './footprint';
 import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
 import { generateGameAsset, hasFalKey } from '../ai';
+import { bakeOutline, outlineKey, type OutlineMod } from './outline';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -46,7 +47,7 @@ const GAME_VIEW_W = 1280; // ширина ігрового кадру — для
 const LAYER_LINE_COLOR: Record<string, string> = { sky: '#6aa9ff', clouds: '#9ad0ff', bg: '#7ad0a0', frontbg: '#d0c060', foreground: '#ff9a4f' };
 
 interface Asset { id: string; cat: string; name: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }
-interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; pivotX?: number; pivotY?: number; group?: string; transparent?: boolean }
+interface Placed { id: string; cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; pivotX?: number; pivotY?: number; group?: string; transparent?: boolean; outline?: OutlineMod }
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
@@ -128,6 +129,17 @@ export function initLevelEditor(prefix: string): void {
   const toScreen = (wx: number, wy: number) => ({ x: state.origin.x + wx * sc(), y: state.origin.y + wy * sc() });
   const toWorld = (sx: number, sy: number) => ({ x: (sx - state.origin.x) / sc(), y: (sy - state.origin.y) / sc() });
   const imgOf = (p: Placed): HTMLImageElement | undefined => state.images.get(p.asset);
+  // Кеш запеченої обводки: ключ = assetId|mode|width|color. Перебудовуємо при зміні модифікатора.
+  const outlineCache = new Map<string, HTMLCanvasElement>();
+  // Зображення для РЕНДЕРУ: з обводкою (якщо задана) або сире. Хіт-тест лишається на сирому.
+  const renderImg = (p: Placed): HTMLImageElement | HTMLCanvasElement | undefined => {
+    const raw = imgOf(p); if (!raw) return raw;
+    if (!p.outline || p.outline.width <= 0 || p.deform) return raw; // обводка лише для недеформованих
+    const k = p.asset + '|' + outlineKey(p.outline);
+    let c = outlineCache.get(k);
+    if (!c) { c = bakeOutline(raw, p.outline); outlineCache.set(k, c); }
+    return c;
+  };
   // Паралакс-корекція X для режиму камери (camView). Виведено зі scrollFactor Phaser.
   const plxDx = (cat: string, plan?: number): number => {
     if (!state.camView) return 0;
@@ -521,7 +533,8 @@ export function initLevelEditor(prefix: string): void {
         ctx.rotate(rad(d2.rot));
         const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
         ctx.scale(p.flip * kx, ky);
-        ctx.drawImage(img, -img.width / 2 - (p.pivotX ?? 0), -img.height / 2 - (p.pivotY ?? 0));
+        const ri = renderImg(p) ?? img;
+        ctx.drawImage(ri, -ri.width / 2 - (p.pivotX ?? 0), -ri.height / 2 - (p.pivotY ?? 0));
         ctx.restore();
       }
       if (p.id === state.selected && !dim) {
@@ -568,7 +581,8 @@ export function initLevelEditor(prefix: string): void {
           ctx.rotate(rad(d2.rot));
           const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
           ctx.scale(p.flip * kx, ky);
-          ctx.drawImage(img, -img.width / 2 - (p.pivotX ?? 0), -img.height / 2 - (p.pivotY ?? 0));
+          const ri = renderImg(p) ?? img;
+          ctx.drawImage(ri, -ri.width / 2 - (p.pivotX ?? 0), -ri.height / 2 - (p.pivotY ?? 0));
           ctx.restore();
         }
         if (p.id === state.selected) { ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5; ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12); }
@@ -1744,6 +1758,12 @@ export function initLevelEditor(prefix: string): void {
         rainBlock.appendChild(mkSlider('Ближній', ph.rainNear ?? 1, 100, (v) => { ph.rainNear = v; }));
         rainBlock.appendChild(mkSlider('Середній', ph.rainMid ?? 0.7, 100, (v) => { ph.rainMid = v; }));
         rainBlock.appendChild(mkSlider('Дальній', ph.rainFar ?? 0.35, 100, (v) => { ph.rainFar = v; }));
+        // Блискавка
+        const ltRow = document.createElement('label'); ltRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
+        const ltCb = document.createElement('input'); ltCb.type = 'checkbox'; ltCb.checked = !!ph.lightning; ltCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
+        ltCb.addEventListener('change', () => { ph.lightning = ltCb.checked; save(); });
+        ltRow.appendChild(ltCb); ltRow.appendChild(document.createTextNode('⚡ Блискавка (рідкі спалахи)'));
+        rainBlock.appendChild(ltRow);
 
         // Туман / загальне
         fogBlock.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));
@@ -2421,6 +2441,45 @@ export function initLevelEditor(prefix: string): void {
         const kfResetBtn = mk('button', 'padding:4px 9px;margin-top:4px;border-radius:6px;border:1px solid #a04040;background:#3a2020;color:#ffaaaa;cursor:pointer;font:12px sans-serif;', 'Скинути кейфрейми');
         kfResetBtn.onclick = () => { pushUndo(); df.keyframes = []; save(); draw(); rebuild(); };
         m.appendChild(kfResetBtn);
+      }
+    }
+
+    // Обводка / обрізка по контуру (тільки для недеформованих ассетів)
+    if (!p.deform) {
+      m.appendChild(mk('div', 'opacity:0.7;margin:10px 0 2px;', 'Обводка'));
+      const orow = mk('div', 'display:flex;flex-wrap:wrap;');
+      const oNone   = mk('button', btnCss(!p.outline), 'Немає');
+      const oStroke = mk('button', btnCss(p.outline?.mode === 'stroke'), 'Обводка');
+      const oErode  = mk('button', btnCss(p.outline?.mode === 'erode'), 'Обрізати');
+      const setMode = (mode: 'stroke' | 'erode' | null): void => {
+        pushUndo();
+        if (mode === null) delete p.outline;
+        else p.outline = { mode, width: p.outline?.width ?? (mode === 'stroke' ? 4 : 2), color: p.outline?.color ?? '#000000' };
+        save(); draw(); rebuild();
+      };
+      oNone.onclick   = () => setMode(null);
+      oStroke.onclick = () => setMode('stroke');
+      oErode.onclick  = () => setMode('erode');
+      orow.append(oNone, oStroke, oErode); m.appendChild(orow);
+      if (p.outline) {
+        // Ширина
+        const wrow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
+        wrow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Ширина'));
+        const wsl = document.createElement('input'); wsl.type = 'range'; wsl.min = '1'; wsl.max = '30'; wsl.step = '1';
+        wsl.value = String(p.outline.width); wsl.style.cssText = 'flex:1;accent-color:#39d0ff';
+        const wval = mk('span', 'flex:0 0 30px;text-align:right;opacity:0.8;', p.outline.width + 'px');
+        wsl.oninput = () => { p.outline!.width = Number(wsl.value); wval.textContent = wsl.value + 'px'; draw(); };
+        wsl.onchange = () => { pushUndo(); save(); };
+        wrow.append(wsl, wval); m.appendChild(wrow);
+        // Колір (тільки для обводки)
+        if (p.outline.mode === 'stroke') {
+          const crow = mk('label', 'display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer;');
+          crow.appendChild(mk('span', 'opacity:0.7;flex:0 0 54px;', 'Колір'));
+          const cinp = document.createElement('input'); cinp.type = 'color'; cinp.value = p.outline.color ?? '#000000';
+          cinp.style.cssText = 'width:40px;height:22px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer';
+          cinp.oninput = () => { pushUndo(); p.outline!.color = cinp.value; save(); draw(); };
+          crow.appendChild(cinp); m.appendChild(crow);
+        }
       }
     }
 

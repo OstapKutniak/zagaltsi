@@ -16,6 +16,7 @@ export interface WeatherPhase {
   rainNear?:    number;   // near layer opacity 0-1, default 1
   rainMid?:     number;   // mid layer opacity 0-1, default 0.7
   rainFar?:     number;   // far layer opacity 0-1, default 0.35
+  lightning?:   boolean;  // рідкі спалахи блискавки (білий блим по всьому екрану)
 }
 
 export interface AtmSky     { enabled: boolean; static?: boolean; phases: SkyPhase[] }
@@ -71,7 +72,7 @@ export interface TodState     { ambientColor: number; ambientAlpha: number }
 export interface WeatherState {
   type: WeatherType; fogAlpha: number;
   rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number;
-  rainNear: number; rainMid: number; rainFar: number;
+  rainNear: number; rainMid: number; rainFar: number; lightning: boolean;
 }
 
 export function evalSky(sky: AtmSky, wallSec: number): SkyState {
@@ -104,6 +105,7 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
     rainNear:    a.rainNear    ?? 1,
     rainMid:     a.rainMid     ?? 0.7,
     rainFar:     a.rainFar     ?? 0.35,
+    lightning:   !!a.lightning,
   };
 }
 

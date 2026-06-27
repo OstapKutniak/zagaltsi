@@ -58,6 +58,9 @@ export class GameScene extends Phaser.Scene {
   private weatherFar!: Phaser.GameObjects.Graphics;   // дальній шар — розмитий, блідий, повільний
   private weatherMid!: Phaser.GameObjects.Graphics;   // середній — чіткий
   private weatherNear!: Phaser.GameObjects.Graphics;  // ближній — розмитий, швидкі довгі смуги
+  private lightningRect!: Phaser.GameObjects.Rectangle; // білий спалах на весь екран
+  private lightningNext = 6;   // сек до наступного спалаху
+  private lightningOn = 0;     // залишок тривалості поточного спалаху (сек)
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -227,7 +230,10 @@ export class GameScene extends Phaser.Scene {
       this.weatherFar.postFX.addBlur(1, 2, 2, 1.0);
       this.weatherNear.postFX.addBlur(1, 2, 2, 1.6);
     } catch { /* postFX недоступний на деяких рендерерах — лишаємо без блюру */ }
+    // Блискавка: білий спалах на весь екран (world-space величезний прямокутник, як fog).
+    this.lightningRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(8005);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
+    this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
 
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
@@ -341,6 +347,7 @@ export class GameScene extends Phaser.Scene {
     this.ambientRect.setFillStyle(0x000000, 0);
     this.fogRect.setFillStyle(0x8899bb, 0);
     this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
+    this.lightningRect.setFillStyle(0xffffff, 0); this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
     for (const e of this.enemies) e.destroy();
     this.enemies = [];
     this.levelStart = doc.start ?? 0;
@@ -683,6 +690,7 @@ export class GameScene extends Phaser.Scene {
     const H = this.worldH;
     this.ambientRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.fogRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
+    this.lightningRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
   }
 
   private onResize(): void {
@@ -860,6 +868,28 @@ export class GameScene extends Phaser.Scene {
       this.atmTime += dt;
       this.weatherTime += dt;
       this.updateAtmosphere();
+      this.updateLightning(dt);
+    }
+  }
+
+  // Рідкі спалахи блискавки: білий блим по всьому екрану з різкою атакою і згасанням.
+  private updateLightning(dt: number): void {
+    const wx = this.atmosphere?.weather;
+    const on = wx?.enabled ? evalWeather(wx, this.atmTime).lightning : false;
+    if (!on) { if (this.lightningOn > 0) { this.lightningOn = 0; this.lightningRect.setFillStyle(0xffffff, 0); } return; }
+    if (this.lightningOn > 0) {
+      this.lightningOn -= dt;
+      // Подвійний блим: яскравий пік, спад, ще один менший — через синус по залишку
+      const k = Math.max(0, this.lightningOn / 0.35);
+      const a = Math.max(0, Math.sin(k * Math.PI) * 0.85 + (k > 0.5 ? 0.1 : 0));
+      this.lightningRect.setFillStyle(0xffffff, Math.min(0.9, a));
+      if (this.lightningOn <= 0) this.lightningRect.setFillStyle(0xffffff, 0);
+    } else {
+      this.lightningNext -= dt;
+      if (this.lightningNext <= 0) {
+        this.lightningOn = 0.35;                    // тривалість спалаху
+        this.lightningNext = 5 + Math.random() * 12; // 5..17 сек до наступного
+      }
     }
   }
 
