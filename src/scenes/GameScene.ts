@@ -53,6 +53,8 @@ export class GameScene extends Phaser.Scene {
   private atmosphere: Atmosphere | null = null;
   private atmTime = 0;
   private weatherTime = 0;
+  private splashes: { x: number; y: number; age: number }[] = [];
+  private splashNextAt = 0;
   private ambientRect!: Phaser.GameObjects.Rectangle;
   private fogRect!: Phaser.GameObjects.Rectangle;
   private weatherFar!: Phaser.GameObjects.Graphics;   // дальній шар — розмитий, блідий, повільний
@@ -237,6 +239,7 @@ export class GameScene extends Phaser.Scene {
     // Блискавка: білий спалах на весь екран (world-space величезний прямокутник, як fog).
     this.lightningRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(8005);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
+    this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
 
     // Магазин — ціль рівня
@@ -347,6 +350,7 @@ export class GameScene extends Phaser.Scene {
     this.skyRect.setVisible(hasSky); this.groundRect.setVisible(hasSky); this.horizon.setVisible(hasSky);
     this.gateLine.setVisible(false); this.goal.setVisible(false); this.goalLabel.setVisible(false);
     this.atmosphere = doc.atmosphere ?? null; this.atmTime = 0; this.weatherTime = 0;
+    this.splashes = []; this.splashNextAt = 0;
     // Скидаємо overlays одразу, щоб не лишилось від минулого рівня
     this.ambientRect.setFillStyle(0x000000, 0);
     this.fogRect.setFillStyle(0x8899bb, 0);
@@ -880,6 +884,7 @@ export class GameScene extends Phaser.Scene {
       this.weatherTime += dt;
       this.updateAtmosphere();
       this.updateLightning(dt);
+      this.updateRainSplash(dt);
     }
   }
 
@@ -914,6 +919,25 @@ export class GameScene extends Phaser.Scene {
         this.lightningOn = 0.35;                    // тривалість спалаху
         this.lightningNext = 5 + Math.random() * 12; // 5..17 сек до наступного
       }
+    }
+  }
+
+  // Пилюка від крапель: спавнить маленькі бризки на поверхнях підлоги в кадрі.
+  private updateRainSplash(dt: number): void {
+    if (!this.atmosphere?.weather?.enabled) { this.splashes = []; return; }
+    const ws = evalWeather(this.atmosphere.weather, this.atmTime);
+    if (ws.type !== 'rain' || !ws.rainSplash) { this.splashes = []; return; }
+    const LIFE = 0.45;
+    for (const sp of this.splashes) sp.age += dt;
+    this.splashes = this.splashes.filter(sp => sp.age < LIFE);
+    this.splashNextAt -= dt;
+    if (this.splashNextAt <= 0) {
+      this.splashNextAt = 0.04 + Math.random() * 0.04;
+      const view = this.cameras.main.worldView;
+      const tx = view.x + Math.random() * view.width;
+      const ty = this.bandTop + Math.random() * (this.bandBottom - this.bandTop);
+      const elev = this.surfaceAt(tx, ty);
+      if (elev !== null) this.splashes.push({ x: tx, y: ty - elev, age: 0 });
     }
   }
 
@@ -1079,6 +1103,25 @@ export class GameScene extends Phaser.Scene {
           l.gfx.moveTo(sx, sy);
           l.gfx.lineTo(sx + len * angle, sy + len);
           l.gfx.strokePath();
+        }
+      }
+      // Пилюка від крапель — маленькі бризки на поверхні підлоги
+      if (ws.rainSplash && this.splashes.length) {
+        const LIFE = 0.45;
+        const baseCol = this.rainPalette(ws.rainColor ?? '#aaddff')[2];
+        for (const sp of this.splashes) {
+          const p = sp.age / LIFE; // 0→1
+          const a = 1 - p;
+          this.weatherNear.lineStyle(1, baseCol, a * 0.5);
+          this.weatherNear.strokeCircle(sp.x, sp.y, p * 7);
+          this.weatherNear.fillStyle(baseCol, a * 0.4);
+          for (let d = 0; d < 3; d++) {
+            const vx = (d - 1) * 5;
+            const vy = -(9 + d * 2);
+            const ddx = vx * p;
+            const ddy = vy * p + 14 * p * p; // параболічна дуга вгору і назад
+            this.weatherNear.fillCircle(sp.x + ddx, sp.y + ddy, Math.max(0.4, 1.3 * (1 - p)));
+          }
         }
       }
     } else if (type === 'snow') {

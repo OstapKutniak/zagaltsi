@@ -1773,6 +1773,12 @@ export function initLevelEditor(prefix: string): void {
         ltCb.addEventListener('change', () => { ph.lightning = ltCb.checked; save(); });
         ltRow.appendChild(ltCb); ltRow.appendChild(document.createTextNode('⚡ Блискавка (рідкі спалахи)'));
         rainBlock.appendChild(ltRow);
+        // Пилюка від крапель
+        const splRow = document.createElement('label'); splRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin-top:2px';
+        const splCb = document.createElement('input'); splCb.type = 'checkbox'; splCb.checked = !!ph.rainSplash; splCb.style.cssText = 'width:14px;height:14px;accent-color:var(--sel)';
+        splCb.addEventListener('change', () => { ph.rainSplash = splCb.checked; save(); });
+        splRow.appendChild(splCb); splRow.appendChild(document.createTextNode('💧 Пилюка від крапель (тільки на підлозі)'));
+        rainBlock.appendChild(splRow);
 
         // Туман / загальне
         fogBlock.appendChild(mkSlider('Туман', ph.fogAlpha, 100, (v) => { ph.fogAlpha = v; }));
