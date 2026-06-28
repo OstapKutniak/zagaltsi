@@ -328,33 +328,79 @@ function closePicker(value) {
 }
 
 // ── IMPORT ────────────────────────────────────────────────
-async function importCSV(file) {
-  const text = await file.text();
-  const lines = text.split('\n').filter(l => l.trim());
-  const header = lines[0].replace(/^﻿/, '').toLowerCase().split(',');
-  const idx = {
-    date: header.indexOf('date'), type: header.indexOf('type'),
-    account: header.indexOf('account'), category: header.indexOf('category'),
-    amount: header.indexOf('amount'), note: header.indexOf('note'),
-  };
-  const TYPE_MAP = {
-    'витрата':'expense','expense':'expense','дохід':'income','income':'income',
-    'переказ':'transfer','transfer':'transfer','повернення':'return','return':'return',
-    'інше':'other','other':'other',
-  };
+const TYPE_MAP = {
+  'витрата':'expense','expense':'expense','дохід':'income','income':'income',
+  'переказ':'transfer','transfer':'transfer','повернення':'return','return':'return',
+  'інше':'other','other':'other',
+};
+
+// Native 1money export: ДАТА,ТИП,З РАХУНКУ,НА РАХУНОК/ДО КАТЕГОРІЇ,КІЛЬКІСТЬ,
+//                       ВАЛЮТА,КІЛЬКІСТЬ 2,ВАЛЮТА 2,ПОМІТКИ,НОТАТКИ
+function parse1money(lines, h) {
+  const col = n => h.indexOf(n);
+  const iDate = col('дата'), iType = col('тип'), iFrom = col('з рахунку'),
+        iTo = col('на рахунок/до категорії'), iAmt = col('кількість'), iCur = col('валюта'),
+        iAmt2 = col('кількість 2'), iCur2 = col('валюта 2'),
+        iTags = col('помітки'), iNote = col('нотатки');
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const cols = parseCSVLine(lines[i]);
-    const amount = parseFloat((cols[idx.amount] || '0').replace(',', '.'));
+    const c = parseCSVLine(lines[i]);
+    const type = TYPE_MAP[(c[iType] || '').trim().toLowerCase()];
+    if (!type) continue;                         // skips balance section + junk lines
+    const m = (c[iDate] || '').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+    if (!m) continue;
+    const yr = m[3].length === 2 ? '20' + m[3] : m[3];
+    const dateISO = `${yr}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T12:00:00`;
+    const origCur = (c[iCur] || '').trim();
+    const cur2 = (c[iCur2] || '').trim();
+    let amount, foreign = '';
+    if (origCur === 'UAH' || origCur === '') {
+      amount = parseFloat((c[iAmt] || '0').replace(',', '.'));
+    } else if (cur2 === 'UAH') {                  // use UAH-converted value
+      amount = parseFloat((c[iAmt2] || '0').replace(',', '.'));
+      foreign = `${c[iAmt]} ${origCur}`;
+    } else {                                      // both foreign (rare currency-exchange)
+      amount = parseFloat((c[iAmt] || '0').replace(',', '.'));
+      foreign = `${c[iAmt]} ${origCur}`;
+    }
     if (!amount) continue;
+    const note = [(c[iNote]||'').trim(), (c[iTags]||'').trim(), foreign].filter(Boolean).join(' · ');
     rows.push({
-      date: new Date(cols[idx.date] || Date.now()).toISOString(),
-      type: TYPE_MAP[cols[idx.type]?.trim().toLowerCase()] || 'expense',
-      account: cols[idx.account]?.trim() || null,
-      category: cols[idx.category]?.trim() || null,
-      amount, note: cols[idx.note]?.trim() || null,
+      date: new Date(dateISO).toISOString(), type,
+      account: (c[iFrom] || '').trim() || null,
+      category: (c[iTo] || '').trim() || null,
+      amount, note: note || null,
     });
   }
+  return rows;
+}
+
+// Our own format: date,type,account,category,amount,note
+function parseSimple(lines, h) {
+  const idx = { date:h.indexOf('date'), type:h.indexOf('type'), account:h.indexOf('account'),
+                category:h.indexOf('category'), amount:h.indexOf('amount'), note:h.indexOf('note') };
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = parseCSVLine(lines[i]);
+    const amount = parseFloat((c[idx.amount] || '0').replace(',', '.'));
+    if (!amount) continue;
+    rows.push({
+      date: new Date(c[idx.date] || Date.now()).toISOString(),
+      type: TYPE_MAP[(c[idx.type]||'').trim().toLowerCase()] || 'expense',
+      account: c[idx.account]?.trim() || null,
+      category: c[idx.category]?.trim() || null,
+      amount, note: c[idx.note]?.trim() || null,
+    });
+  }
+  return rows;
+}
+
+async function importCSV(file) {
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const h = parseCSVLine(lines[0].replace(/^﻿/, '')).map(x => x.trim().toLowerCase());
+  const isNative = h.includes('з рахунку') || h.includes('на рахунок/до категорії');
+  const rows = isNative ? parse1money(lines, h) : parseSimple(lines, h);
 
   const prog = document.getElementById('import-progress');
   const bar  = document.getElementById('progress-bar');
