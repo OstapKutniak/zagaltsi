@@ -870,6 +870,29 @@ function bindEvents() {
     renderAll();
   };
 
+  // Swipe left/right to switch tabs
+  const TABS = ['accounts', 'categories', 'records', 'overview'];
+  let swipeStartX = 0, swipeStartY = 0, swipeTarget = null;
+  const appEl = document.getElementById('app');
+  appEl.addEventListener('touchstart', e => {
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+    swipeTarget = e.target;
+  }, { passive: true });
+  appEl.addEventListener('touchend', e => {
+    if (document.getElementById('add-view').classList.contains('active')) return;
+    if (document.querySelector('.sheet-overlay.open')) return;
+    if (swipeTarget && swipeTarget.closest('.subchips')) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    const dy = e.changedTouches[0].clientY - swipeStartY;
+    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+    const idx = TABS.indexOf(state.tab);
+    if (dx < 0 && idx < TABS.length - 1) state.tab = TABS[idx + 1];
+    else if (dx > 0 && idx > 0) state.tab = TABS[idx - 1];
+    else return;
+    syncTabs(); renderAll();
+  }, { passive: true });
+
   document.getElementById('btn-profile').onclick = () => document.getElementById('settings-overlay').classList.add('open');
   document.getElementById('settings-overlay').onclick = e => { if (e.target.id === 'settings-overlay') e.currentTarget.classList.remove('open'); };
   document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
