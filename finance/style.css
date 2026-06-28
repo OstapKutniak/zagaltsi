@@ -526,26 +526,30 @@ html, body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* ── TX DELETE ── */
-.tx-delete-btn {
+/* ── TX ACTIONS (edit / delete) ── */
+.tx-actions {
   position: absolute;
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(248,113,113,0.2);
-  border: none;
-  color: var(--expense);
-  font-size: 16px;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  cursor: pointer;
   display: none;
+  gap: 8px;
+}
+.tx-edit-btn, .tx-delete-btn {
+  border: none;
+  font-size: 16px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
 }
-.tx-item.show-delete .tx-delete-btn { display: flex; }
-.tx-item.show-delete .tx-amount { visibility: hidden; }
+.tx-edit-btn   { background: rgba(96,165,250,0.2); color: var(--transfer); }
+.tx-delete-btn { background: rgba(248,113,113,0.2); color: var(--expense); }
+.tx-item.show-actions .tx-actions { display: flex; }
+.tx-item.show-actions .tx-amount { visibility: hidden; }
 
 /* ── LOADING ── */
 .spinner {

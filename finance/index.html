@@ -15,30 +15,6 @@
 <body>
 <div id="app">
 
-  <!-- SETUP -->
-  <div class="view" id="setup-view">
-    <div class="setup-logo">💰</div>
-    <div class="setup-title">Фінанси</div>
-    <div class="setup-subtitle">Введи дані Supabase щоб розпочати.<br>Вони зберігаються тільки на твоєму пристрої.</div>
-    <div class="setup-card">
-      <div>
-        <label>Project URL</label>
-        <input id="setup-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" autocorrect="off" spellcheck="false">
-      </div>
-      <div>
-        <label>Anon key</label>
-        <input id="setup-key" type="text" placeholder="eyJhbGci..." autocomplete="off" autocorrect="off" spellcheck="false">
-      </div>
-      <button class="btn btn-primary" id="setup-save">Підключити</button>
-    </div>
-    <div class="setup-steps">
-      <b>Як отримати?</b><br>
-      1. supabase.com → New project<br>
-      2. SQL Editor → вставити <b>schema.sql</b><br>
-      3. Settings → API → скопіювати URL і anon key
-    </div>
-  </div>
-
   <!-- LIST -->
   <div class="view" id="list-view">
     <div class="header">
@@ -136,13 +112,13 @@
         <div class="settings-row-text">Імпорт CSV</div>
         <span class="settings-row-arrow">›</span>
       </div>
-      <div class="settings-row" id="btn-reset-sb">
+      <div class="settings-row">
         <span class="settings-row-icon">🔗</span>
         <div>
-          <div class="settings-row-text">Підключення Supabase</div>
-          <div class="settings-row-sub" id="sb-url-label">—</div>
+          <div class="settings-row-text">Синхронізація</div>
+          <div class="settings-row-sub">Firebase · horugva-ff8bd</div>
         </div>
-        <span class="settings-row-arrow">›</span>
+        <span class="settings-row-arrow" style="color:var(--income)">●</span>
       </div>
     </div>
     <div class="bottom-nav">
