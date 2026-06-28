@@ -640,9 +640,9 @@ export function initLevelEditor(prefix: string): void {
       const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      // Вінь'єтка від лінії карти (toScreen(0,0) = floor baseline) до низу канваса.
-      const g0y = toScreen(0, 0).y;
-      const by0 = Math.max(0, g0y);
+      // Верхній край шару карта = toScreen(0, -BAND_DEPTH).y (задня межа прохідної смуги).
+      // toScreen(0,0).y — це лише НИЖНІЙ край (front edge), вінь'єтка від нього виходить занадто маленька.
+      const by0 = Math.max(0, toScreen(0, -BAND_DEPTH).y);
       const groundH = H - by0;
       if (groundH > 4) {
         const cx = W / 2, cy = by0 + groundH / 2;
