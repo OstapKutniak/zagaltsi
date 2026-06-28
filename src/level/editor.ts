@@ -640,9 +640,19 @@ export function initLevelEditor(prefix: string): void {
       const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      // Верхній край шару карта = toScreen(0, -BAND_DEPTH).y (задня межа прохідної смуги).
-      // toScreen(0,0).y — це лише НИЖНІЙ край (front edge), вінь'єтка від нього виходить занадто маленька.
-      const by0 = Math.max(0, toScreen(0, -BAND_DEPTH).y);
+      // Верхній край шару карта = найвищий спрайт категорії 'map' на екрані.
+      // BAND_DEPTH — лише запасний варіант якщо map-спрайтів немає.
+      let mapTopY = toScreen(0, -BAND_DEPTH).y;
+      for (const p of (level().placed ?? [])) {
+        if (p.cat !== 'map') continue;
+        const img = renderImg(p) ?? imgOf(p);
+        if (!img) continue;
+        const sy = toScreen(p.x, p.y).y;
+        const ky = (p.scale ?? 1) * (p.scaleH ?? 1) * sc();
+        const spriteTop = sy - (img.height / 2 + (p.pivotY ?? 0)) * ky;
+        if (spriteTop < mapTopY) mapTopY = spriteTop;
+      }
+      const by0 = Math.max(0, mapTopY);
       const groundH = H - by0;
       if (groundH > 4) {
         const cx = W / 2, cy = by0 + groundH / 2;
