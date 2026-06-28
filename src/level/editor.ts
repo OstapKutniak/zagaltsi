@@ -640,10 +640,9 @@ export function initLevelEditor(prefix: string): void {
       const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      // Верхня лінія шару карта: задня межа прохідної смуги (BAND_DEPTH вгору від лінії підлоги)
-      // → те саме що bandTop у грі. Починаємо вінь'єтку ЗВІДТИ до низу канваса.
-      const bandTopScreenY = toScreen(0, -BAND_DEPTH).y;
-      const by0 = Math.max(0, bandTopScreenY);
+      // Вінь'єтка від лінії карти (toScreen(0,0) = floor baseline) до низу канваса.
+      const g0y = toScreen(0, 0).y;
+      const by0 = Math.max(0, g0y);
       const groundH = H - by0;
       if (groundH > 4) {
         const cx = W / 2, cy = by0 + groundH / 2;
@@ -701,8 +700,8 @@ export function initLevelEditor(prefix: string): void {
           if (sStr > 0.005) { const w = Math.max(0, 1 - luma * 2) * sStr; r = (r + (sr - r) * w) | 0; g = (g + (sg - g) * w) | 0; b = (b + (sb - b) * w) | 0; }
           // Середні тони: вага 1 при luma=0.5, 0 при luma=0 або 1
           if (mStr > 0.005) { const w = Math.max(0, 1 - Math.abs(luma - 0.5) * 4) * mStr; r = (r + (mr - r) * w) | 0; g = (g + (mg - g) * w) | 0; b = (b + (mb - b) * w) | 0; }
-          // Світлини: вага 1 при luma=1, 0 при luma≤0.5
-          if (hStr > 0.005) { const w = Math.max(0, luma * 2 - 1) * hStr; r = (r + (hr2 - r) * w) | 0; g = (g + (hg2 - g) * w) | 0; b = (b + (hb2 - b) * w) | 0; }
+          // Світлини: вага 1 при luma=1, поріг знижено до 0.35 (охоплює більше пікселів у темних сценах)
+          if (hStr > 0.005) { const w = Math.max(0, (luma - 0.35) / 0.65) * hStr; r = (r + (hr2 - r) * w) | 0; g = (g + (hg2 - g) * w) | 0; b = (b + (hb2 - b) * w) | 0; }
           d[i] = r; d[i + 1] = g; d[i + 2] = b;
         }
         ctx.putImageData(imgData, 0, 0);
