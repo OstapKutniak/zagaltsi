@@ -64,17 +64,13 @@ export class GameScene extends Phaser.Scene {
   private lightningNext = 6;   // сек до наступного спалаху
   private lightningOn = 0;     // залишок тривалості поточного спалаху (сек)
   private lightningDur = 0.35; // тривалість поточного спалаху (рандомізується)
-  // Per-layer TOD tint overlays (Плановість): rect per layer, world-space
-  private todOverlays: Partial<Record<string, Phaser.GameObjects.Rectangle>> = {};
+  // Per-layer TOD tint: setTint() на спрайтах, згрупованих за категорією
+  private levelCatGOs: Map<string, Phaser.GameObjects.Image[]> = new Map();
   // Splash на окремому шарі між картою і переднім планом/персонажем
   private splashGfx!: Phaser.GameObjects.Graphics;
-  // Vignette: screen-space зображення між foreground і weather
+  // Vignette: screen-space зображення, текстура band-aware
   private vignetteImg: Phaser.GameObjects.Image | null = null;
   private vignetteKey = '';
-  // Кольоровий баланс: shadow/mid/highlight color overlays
-  private cbShadowRect!: Phaser.GameObjects.Rectangle;
-  private cbMidRect!: Phaser.GameObjects.Rectangle;
-  private cbHighRect!: Phaser.GameObjects.Rectangle;
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -250,20 +246,8 @@ export class GameScene extends Phaser.Scene {
     } catch { /* postFX недоступний на деяких рендерерах — лишаємо без блюру */ }
     // Блискавка: білий спалах на весь екран (world-space величезний прямокутник, як fog).
     this.lightningRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(8005);
-    // Per-layer TOD tint overlays — між шарами (0.9..6.9), прозорі за замовч.
-    const TOD_LAYER_DEPTHS: [string, number][] = [
-      ['sky', 0.9], ['clouds', 1.9], ['bg', 2.9], ['frontbg', 3.9], ['map', 5.9], ['foreground', 6.9],
-    ];
-    this.todOverlays = {};
-    for (const [lk, d] of TOD_LAYER_DEPTHS) {
-      this.todOverlays[lk] = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffff, 0).setDepth(d);
-    }
     // Пилюка від крапель на шарі між картою і персонажем/переднім планом
     this.splashGfx = this.add.graphics().setDepth(5.9);
-    // Кольоровий баланс: shadow/mid/highlight tint rectangles (depth > lightning 8005)
-    this.cbShadowRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000033, 0).setDepth(8006);
-    this.cbMidRect    = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x003300, 0).setDepth(8007);
-    this.cbHighRect   = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0xffffee, 0).setDepth(8008);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
     this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
@@ -489,9 +473,16 @@ export class GameScene extends Phaser.Scene {
     this.lvlKfAnims = [];
     this.lvlBakedAnims = [];
     this.cullables = [];
+    this.levelCatGOs.clear();
     for (const o of this.children.list) {
       const im = o as Phaser.GameObjects.Image;
       if (!im.getData) continue;
+      // Per-layer tint grouping
+      const cat = im.getData('lvlCat') as string | undefined;
+      if (cat) {
+        if (!this.levelCatGOs.has(cat)) this.levelCatGOs.set(cat, []);
+        this.levelCatGOs.get(cat)!.push(im);
+      }
       const isPlx = im.getData('plxSf') != null;
       if (isPlx) this.parallaxLayers.push({ im, baseX: im.getData('plxBaseX') as number, sf: im.getData('plxSf') as number });
       const anim = im.getData('lvlAnim') as PlacedAnim | undefined;
@@ -734,11 +725,6 @@ export class GameScene extends Phaser.Scene {
     this.ambientRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.fogRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.lightningRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
-    for (const r of Object.values(this.todOverlays)) r?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
-    this.cbShadowRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
-    this.cbMidRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
-    this.cbHighRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
-    // Vignette: переміщуємо до центру екрану (в onResize теж викличеться)
     if (this.vignetteImg) {
       this.vignetteImg.setPosition(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 + this.uiOffY);
       this.vignetteImg.setDisplaySize(this.logicalW, this.logicalH);
@@ -1078,7 +1064,6 @@ export class GameScene extends Phaser.Scene {
   private applyPostFX(): void {
     const cam = this.cameras.main;
     cam.postFX.clear();
-    // 1. Кольоровий баланс (brightness/contrast/sat/hue через ColorMatrix)
     const cb = this.atmosphere?.colorBalance;
     if (cb?.enabled) {
       const mat = cam.postFX.addColorMatrix();
@@ -1087,8 +1072,10 @@ export class GameScene extends Phaser.Scene {
       if (co !== 1) mat.contrast(co - 1);
       if (sa !== 1) mat.saturate(sa - 1);
       if (hu !== 0) mat.hue(hu, false);
+      // Cavity: підсилення порожнин — додатковий контраст
+      const cav = cb.cavity ?? 0;
+      if (cav > 0.005) mat.contrast(cav * 1.5);
     }
-    // 2. Ч/б для тривожності поверх
     if (this.bwActive) cam.postFX.addColorMatrix().grayscale(1);
   }
 
@@ -1100,31 +1087,32 @@ export class GameScene extends Phaser.Scene {
       this.skyRect.setFillStyle(s.skyColor);
       this.groundRect.setFillStyle(s.groundColor);
     }
-    // Плановість — per-layer tints
+    // Плановість — per-layer tint через setTint() на спрайтах кожного шару
     if (atm.tod?.enabled) {
       const s = evalTod(atm.tod, this.atmTime);
-      // Legacy single ambient (якщо layers порожній, а ambientAlpha > 0)
-      const hasLayers = s.layers && Object.keys(s.layers).length > 0;
-      if (!hasLayers && s.ambientAlpha > 0) {
-        this.ambientRect.setFillStyle(s.ambientColor, s.ambientAlpha);
-      } else {
-        this.ambientRect.setFillStyle(0x000000, 0);
-      }
-      // Per-layer tint overlays
-      for (const [lk, rect] of Object.entries(this.todOverlays)) {
-        const lt = s.layers[lk as keyof typeof s.layers];
-        if (!rect) continue;
+      // Legacy single ambient
+      this.ambientRect.setFillStyle(s.ambientAlpha > 0 && !Object.keys(s.layers).length ? s.ambientColor : 0x000000, s.ambientAlpha > 0 && !Object.keys(s.layers).length ? s.ambientAlpha : 0);
+      // Per-layer: lerp від білого (нейтраль) до кольору тінту
+      for (const [cat, sprites] of this.levelCatGOs) {
+        // cat: sky/clouds/bg/frontbg/map/decor/collider/interactive/trap/foreground
+        // Маппинг decor/collider/interactive/trap → 'map' layer key
+        const lk = (cat === 'decor' || cat === 'collider' || cat === 'interactive' || cat === 'trap') ? 'map' : cat;
+        const lt = s.layers[lk as import('../level/atmosphere').LayerKey];
         if (lt && lt.alpha > 0.005) {
-          rect.setFillStyle(hexToInt(lt.color), lt.alpha)
-              .setBlendMode(this.toBlendMode(lt.blend))
-              .setVisible(true);
+          const [cr, cg, cb] = parseHex(lt.color);
+          const r = Math.round(255 + (cr - 255) * lt.alpha);
+          const g = Math.round(255 + (cg - 255) * lt.alpha);
+          const b = Math.round(255 + (cb - 255) * lt.alpha);
+          const tint = (r << 16) | (g << 8) | b;
+          for (const sp of sprites) sp.setTint(tint);
         } else {
-          rect.setVisible(false);
+          for (const sp of sprites) (sp as Phaser.GameObjects.Image).clearTint();
         }
       }
     } else {
       this.ambientRect.setFillStyle(0x000000, 0);
-      for (const rect of Object.values(this.todOverlays)) rect?.setVisible(false);
+      for (const sprites of this.levelCatGOs.values())
+        for (const sp of sprites) (sp as Phaser.GameObjects.Image).clearTint();
     }
     // Погода
     if (atm.weather?.enabled) {
@@ -1148,59 +1136,51 @@ export class GameScene extends Phaser.Scene {
     const strength = Math.max(0, Math.min(1, vig.strength ?? 0.6));
     const color = vig.color ?? '#000000';
     const blend = vig.blend ?? 'multiply';
-    const key = `${strength.toFixed(2)}_${color}_${blend}`;
+    // bandFrac: яка частина висоти екрану — зона карти (0..bandBottom)
+    const bandFrac = this.logicalH > 0 ? Math.max(0.1, Math.min(1, this.bandBottom / this.logicalH)) : 0.7;
+    const key = `${strength.toFixed(2)}_${color}_${blend}_${bandFrac.toFixed(3)}`;
     if (key !== this.vignetteKey) {
       this.vignetteKey = key;
-      // Перебудовуємо текстуру при зміні параметрів
       if (this.textures.exists('_vignette')) this.textures.remove('_vignette');
-      const vc = document.createElement('canvas'); vc.width = 512; vc.height = 512;
+      const SZ = 512;
+      const vc = document.createElement('canvas'); vc.width = SZ; vc.height = SZ;
       const vx = vc.getContext('2d')!;
-      vx.fillStyle = 'white'; vx.fillRect(0, 0, 512, 512);
+      // Білий фон: нейтраль для MULTIPLY (небо і передній план не потемніють)
+      vx.fillStyle = 'white'; vx.fillRect(0, 0, SZ, SZ);
       const [er, eg, eb] = parseHex(color);
-      const grd = vx.createRadialGradient(256, 256, 0, 256, 256, 300);
-      grd.addColorStop(0, 'rgba(0,0,0,0)');
-      grd.addColorStop(1, `rgba(${er},${eg},${eb},${strength})`);
-      vx.fillStyle = grd; vx.fillRect(0, 0, 512, 512);
+      // Band area: від 0 до bandFrac*SZ (зона де є карта)
+      const bandPx = Math.round(SZ * bandFrac);
+      const cx = SZ / 2, cy = bandPx / 2;
+      const rx = SZ / 2, ry = bandPx / 2;
+      // Малюємо темний овал тільки в band area за допомогою еліптичного transform
+      vx.save();
+      vx.beginPath();
+      vx.rect(0, 0, SZ, bandPx); // clip to band area
+      vx.clip();
+      vx.scale(1, ry / rx); // squash to create ellipse
+      const grd = vx.createRadialGradient(cx, cy * rx / ry, 0, cx, cy * rx / ry, rx);
+      grd.addColorStop(0,    'rgba(0,0,0,0)');
+      grd.addColorStop(0.55, 'rgba(0,0,0,0)');
+      grd.addColorStop(1,    `rgba(${er},${eg},${eb},${strength})`);
+      vx.fillStyle = grd;
+      vx.fillRect(0, 0, SZ, SZ * (rx / ry)); // fill in scaled space
+      vx.restore();
       this.textures.addCanvas('_vignette', vc);
       if (this.vignetteImg) { this.vignetteImg.destroy(); this.vignetteImg = null; }
     }
     if (!this.vignetteImg) {
       this.vignetteImg = this.add.image(0, 0, '_vignette')
-        .setScrollFactor(0)
-        .setDepth(7000)
-        .setOrigin(0.5, 0.5);
+        .setScrollFactor(0).setDepth(5.95).setOrigin(0.5, 0);
     }
     this.vignetteImg
       .setVisible(true)
       .setBlendMode(this.toBlendMode(blend))
-      .setPosition(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 + this.uiOffY)
+      .setPosition(this.logicalW / 2 + this.uiOffX, this.uiOffY)
       .setDisplaySize(this.logicalW, this.logicalH);
   }
 
   private updateColorBalance(): void {
-    const cb = this.atmosphere?.colorBalance;
-    if (!cb?.enabled) {
-      this.cbShadowRect.setFillStyle(0x000000, 0);
-      this.cbMidRect.setFillStyle(0x000000, 0);
-      this.cbHighRect.setFillStyle(0xffffff, 0);
-      return;
-    }
-    const H = this.worldH;
-    // Shadow/mid/highlight tint overlays
-    if (cb.shadowStrength && cb.shadowStrength > 0.005) {
-      this.cbShadowRect.setFillStyle(hexToInt(cb.shadowColor ?? '#000033'), cb.shadowStrength)
-        .setBlendMode('MULTIPLY').setSize(WORLD_WIDTH * 3, H * 3).setVisible(true);
-    } else { this.cbShadowRect.setFillStyle(0x000000, 0); }
-    if (cb.midStrength && cb.midStrength > 0.005) {
-      this.cbMidRect.setFillStyle(hexToInt(cb.midColor ?? '#003300'), cb.midStrength)
-        .setBlendMode('OVERLAY').setSize(WORLD_WIDTH * 3, H * 3).setVisible(true);
-    } else { this.cbMidRect.setFillStyle(0x000000, 0); }
-    if (cb.highlightStrength && cb.highlightStrength > 0.005) {
-      this.cbHighRect.setFillStyle(hexToInt(cb.highlightColor ?? '#ffffee'), cb.highlightStrength)
-        .setBlendMode('SCREEN').setSize(WORLD_WIDTH * 3, H * 3).setVisible(true);
-    } else { this.cbHighRect.setFillStyle(0xffffff, 0); }
-    // Яскравість/контраст/насиченість/тон — через camera postFX ColorMatrix
-    this.applyPostFX();
+    this.applyPostFX(); // brightness/contrast/sat/hue через camera ColorMatrix
   }
 
   // Палітра крапель: варіації базового кольору (яскравість + легкий зсув у синь).
@@ -1246,7 +1226,9 @@ export class GameScene extends Phaser.Scene {
         if (l.a < 0.01) continue;
         const speed = spd * l.sm;
         for (let i = 0; i < l.n; i++) {
-          const rx   = hash(i + l.seed);
+          // Jittered grid: рівний розподіл по ширині + малий шум (~±25%)
+          // При зменшенні n краплі рівномірно рідшають, а не зникають «рядами».
+          const rx   = (i + 0.5 + (hash(i + l.seed) - 0.5) * 0.5) / l.n;
           const rlen = 0.6 + hash(i + l.seed + 7) * 0.9;
           const ra   = 0.55 + hash(i + l.seed + 13) * 0.45;
           const rph  = hash(i + l.seed + 23);

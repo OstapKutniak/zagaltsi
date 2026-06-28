@@ -8,7 +8,7 @@ import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
-import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, type LayerKey, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE } from './atmosphere';
+import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, type LayerKey, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE, evalTod } from './atmosphere';
 import { generateGameAsset, hasFalKey, hasAiBgRemoval, removeBackgroundAI } from '../ai';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
 
@@ -63,7 +63,8 @@ export function initLevelEditor(prefix: string): void {
   const ensureLevelId = (lv: Level): Level => { if (!lv.id) lv.id = 'L:' + lv.name; return lv; };
 
   const canvas = $<HTMLCanvasElement>('stage');
-  const ctx = canvas.getContext('2d')!;
+  let ctx: CanvasRenderingContext2D = canvas.getContext('2d')!;
+  const mainCtx: CanvasRenderingContext2D = ctx;
 
   const state = {
     levels: [] as Level[],
@@ -497,8 +498,33 @@ export function initLevelEditor(prefix: string): void {
     });
   }
 
+  // Малює ТІЛЬКИ зображення одного ассета (без UI-оверлеїв).
+  // Використовує `ctx` як замикання — можна перенаправити на offscreen перед викликом.
+  function drawOneItem(p: Placed): void {
+    const img = imgOf(p); if (!img) return;
+    const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
+    s2.x += plxDx(p.cat, p.plan);
+    const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
+    if (p.deform) {
+      ctx.save(); if (dim) ctx.filter = 'grayscale(1)';
+      drawDeformedAsset(p, img);
+      ctx.restore();
+    } else {
+      ctx.save();
+      if (dim) ctx.filter = 'grayscale(1)';
+      ctx.translate(s2.x, s2.y);
+      ctx.rotate(rad(d2.rot));
+      const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
+      ctx.scale(p.flip * kx, ky);
+      const ri = renderImg(p) ?? img;
+      ctx.drawImage(ri, -ri.width / 2 - (p.pivotX ?? 0), -ri.height / 2 - (p.pivotY ?? 0));
+      ctx.restore();
+    }
+  }
+
   function _drawNow(): void {
     if (!canvas.width) return;
+    ctx = mainCtx; // завжди починаємо з основного контексту
     ctx.imageSmoothingEnabled = !_panning;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#1a1a1a';
@@ -516,31 +542,69 @@ export function initLevelEditor(prefix: string): void {
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(0, g0.y); ctx.lineTo(canvas.width, g0.y); ctx.stroke();
 
+    // ── Малювання ассетів (per-layer з тонтами якщо є атмосфера) ─────────────
+    const lv = level();
+    const atm = lv.atmosphere;
+    const todEnabled = state.showAtm && !!atm?.tod?.enabled;
+    const todLayers = todEnabled ? evalTod(atm!.tod!, animClock).layers : {};
+
+    // Групуємо ассети за шаром (LAYER_ORDER)
+    const LAYER_ORDER = ['sky', 'clouds', 'bg', 'frontbg', 'map', 'foreground'] as const;
+    type LK = typeof LAYER_ORDER[number];
+    const catToLk = (cat: string): LK => {
+      if (cat === 'decor' || cat === 'collider' || cat === 'interactive' || cat === 'trap') return 'map';
+      return (LAYER_ORDER.includes(cat as LK) ? cat : 'map') as LK;
+    };
+
+    if (todEnabled) {
+      // Per-layer offscreen: кожен шар малюється на окремому canvas → тінт → composite
+      const W = canvas.width, H = canvas.height;
+      const grouped = new Map<LK, Placed[]>();
+      for (const p of placedSorted()) {
+        const lk = catToLk(p.cat);
+        if (!grouped.has(lk)) grouped.set(lk, []);
+        grouped.get(lk)!.push(p);
+      }
+      for (const lk of LAYER_ORDER) {
+        const items = grouped.get(lk) ?? [];
+        if (!items.length) continue;
+        const lt = todLayers[lk];
+        const needTint = lt && lt.alpha > 0.005;
+        if (!needTint) {
+          for (const p of items) drawOneItem(p);
+        } else {
+          // Малюємо шар на offscreen, щоб тінт не торкнувся попередніх шарів
+          const off = document.createElement('canvas');
+          off.width = W; off.height = H;
+          ctx = off.getContext('2d')!;
+          ctx.imageSmoothingEnabled = !_panning;
+          for (const p of items) drawOneItem(p);
+          // Накладаємо тінт на offscreen canvas
+          ctx.globalCompositeOperation = (lt.blend as GlobalCompositeOperation) || 'multiply';
+          ctx.globalAlpha = lt.alpha;
+          ctx.fillStyle = lt.color;
+          ctx.fillRect(0, 0, W, H);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1;
+          ctx = mainCtx;
+          ctx.drawImage(off, 0, 0);
+        }
+      }
+    } else {
+      // Без атмосфери — єдиний прохід як раніше
+      for (const p of placedSorted()) drawOneItem(p);
+    }
+
+    // ── UI-оверлеї поверх (selection, transparent, group) ────────────────────
+    ctx = mainCtx;
     for (const p of placedSorted()) {
       const img = imgOf(p); if (!img) continue;
       const d2 = animDisp(p); const s2 = toScreen(d2.x, d2.y);
       s2.x += plxDx(p.cat, p.plan);
       const dim = state.soloFillCat !== null && p.cat !== state.soloFillCat;
-      if (p.deform) {
-        // Деформований ассет: квадрова сітка через Canvas 2D afine mapping
-        ctx.save(); if (dim) ctx.filter = 'grayscale(1)';
-        drawDeformedAsset(p, img);
-        ctx.restore();
-      } else {
-        ctx.save();
-        if (dim) ctx.filter = 'grayscale(1)';
-        ctx.translate(s2.x, s2.y);
-        ctx.rotate(rad(d2.rot));
-        const kx = d2.scale * (p.scaleW ?? 1) * sc(); const ky = d2.scale * (p.scaleH ?? 1) * sc();
-        ctx.scale(p.flip * kx, ky);
-        const ri = renderImg(p) ?? img;
-        ctx.drawImage(ri, -ri.width / 2 - (p.pivotX ?? 0), -ri.height / 2 - (p.pivotY ?? 0));
-        ctx.restore();
-      }
       if (p.id === state.selected && !dim) {
         ctx.strokeStyle = '#ffd000'; ctx.lineWidth = 1.5;
         ctx.strokeRect(s2.x - 6, s2.y - 6, 12, 12);
-        // Pivot-хрест
         if (p.pivotX || p.pivotY) {
           const cosR = Math.cos(rad(d2.rot)), sinR = Math.sin(rad(d2.rot));
           const kxf = d2.scale * (p.scaleW ?? 1) * p.flip * sc(), kyf = d2.scale * (p.scaleH ?? 1) * sc();
@@ -553,16 +617,57 @@ export function initLevelEditor(prefix: string): void {
         ctx.strokeStyle = '#55aaff'; ctx.lineWidth = 1.2;
         ctx.strokeRect(s2.x - 5, s2.y - 5, 10, 10);
       }
-      // Прозорий ассет: пунктирна рамка навколо точки опори
       if (p.transparent && !dim) {
         ctx.save(); ctx.strokeStyle = 'rgba(180,180,255,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
         ctx.strokeRect(s2.x - 8, s2.y - 8, 16, 16); ctx.setLineDash([]); ctx.restore();
       }
-      // Індикатор групи: маленький квадратик у лівому верхньому куті
       if (p.group && !dim) {
         ctx.fillStyle = state.openGroup === p.group ? 'rgba(255,200,0,0.9)' : 'rgba(255,200,0,0.5)';
         ctx.fillRect(s2.x - 9, s2.y - 9, 4, 4);
       }
+    }
+
+    // ── Вінь'єтка (атмосферний прев'ю) ───────────────────────────────────────
+    if (state.showAtm && atm?.vignette?.enabled) {
+      const vig = atm.vignette;
+      const W = canvas.width, H = canvas.height;
+      const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
+      const col = vig.color ?? '#000000';
+      const bfrac = 0.7; // ~70% висоти = зона карти в редакторі
+      const bandH = Math.round(H * bfrac);
+      const cx = W / 2, cy = bandH / 2;
+      const rx = W / 2, ry = bandH / 2;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, bandH); ctx.clip();
+      ctx.scale(1, ry / rx);
+      const grd = ctx.createRadialGradient(cx, cy * rx / ry, 0, cx, cy * rx / ry, rx);
+      grd.addColorStop(0, 'rgba(0,0,0,0)');
+      grd.addColorStop(0.55, 'rgba(0,0,0,0)');
+      const h = parseInt(col.slice(1, 3), 16), s = parseInt(col.slice(3, 5), 16), v = parseInt(col.slice(5, 7), 16);
+      grd.addColorStop(1, `rgba(${h},${s},${v},${str})`);
+      ctx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, W, H * (rx / ry));
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // ── Кольоровий баланс (CSS filter на canvas) ─────────────────────────────
+    if (state.showAtm && atm?.colorBalance?.enabled) {
+      const cb = atm.colorBalance;
+      const br = Math.round((cb.brightness ?? 1) * 100);
+      const co = Math.round((cb.contrast ?? 1) * 100);
+      const sa = Math.round((cb.saturation ?? 1) * 100);
+      const hu = cb.hue ?? 0;
+      const W = canvas.width, H = canvas.height;
+      // Знімаємо знімок, накладаємо з CSS filter
+      const snap = document.createElement('canvas');
+      snap.width = W; snap.height = H;
+      snap.getContext('2d')!.drawImage(canvas, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.filter = `brightness(${br}%) contrast(${co}%) saturate(${sa}%) hue-rotate(${hu}deg)`;
+      ctx.drawImage(snap, 0, 0);
+      ctx.filter = 'none';
     }
     // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
     if (state.soloFillCat !== null) {
@@ -790,7 +895,6 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
-    const lv = level();
     if (state.showMarkers) {
       const sx = toScreen(lv.start, 0).x, ex = toScreen(lv.end, 0).x;
       ctx.font = '11px monospace';
