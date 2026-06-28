@@ -4,7 +4,7 @@ import {
   onChildAdded, onChildChanged, onChildRemoved
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
 
-// ── FIREBASE (reuse existing game project) ─────────────────
+// ── FIREBASE ────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: 'AIzaSyBvg2av881ZTi9op-bzwicL70vh2UENItw',
   authDomain: 'horugva-ff8bd.firebaseapp.com',
@@ -50,6 +50,12 @@ const ICONS = {
   card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 9h20"/>',
   scooter:'<circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M14 6h3l-3 11M14 6l-6 12"/>',
   tag:'<path d="M3 12l9-9 9 9-9 9z"/><circle cx="12" cy="9" r="1.5" class="fill"/>',
+  arrow_up:'<path d="M12 19V5M5 12l7-7 7 7"/>',
+  arrow_down:'<path d="M12 5v14M5 12l7 7 7-7"/>',
+  arrows:'<path d="M4 9h13l-4-4M20 15H7l4 4"/>',
+  ops:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6"/>',
+  pencil:'<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  chart:'<path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/>',
 };
 const ic = k => `<svg viewBox="0 0 24 24">${ICONS[k] || ICONS.tag}</svg>`;
 
@@ -88,8 +94,8 @@ const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].
 
 // ── STATE ──────────────────────────────────────────────────
 let txMap = {};
-let accountsList = [];          // [{name,balance,currency,uah,group}] from balance table
-let selectedAccounts = null;    // null = all
+let accountsList = [];
+let selectedAccounts = null;
 let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
@@ -100,6 +106,10 @@ let formState = {};
 let pickerResolve = null;
 let openRecId = null;
 let renderTimer = null;
+let importedUpTo = null;
+let ovExpanded = new Set();
+let accActionCurrent = null;
+let catFilter = null;
 
 // ── INIT ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -117,12 +127,32 @@ function subscribe() {
   onChildChanged(r, s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
   onChildRemoved(r, s => { delete txMap[s.key]; scheduleRender(); });
   onValue(ref(db, ACC_PATH), s => { accountsList = s.val() || []; scheduleRender(); });
+  onValue(ref(db, 'finance/meta/importedUpTo'), s => { importedUpTo = s.val() || null; });
 }
 function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
 
 async function saveTx(tx) { await set(push(ref(db, TX_PATH)), tx); }
 async function updateTx(id, tx) { await update(ref(db, `${TX_PATH}/${id}`), tx); }
 async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
+
+// ── LIVE BALANCE ───────────────────────────────────────────
+// accountsList.balance = snapshot at import time; delta = sum of new ops after that date
+function computeLiveBalance(accName) {
+  const snap = accountsList.find(a => a.name === accName);
+  if (!snap) return null;
+  let delta = 0;
+  Object.values(txMap).forEach(t => {
+    if (importedUpTo && new Date(t.date).getTime() <= importedUpTo) return;
+    const amt = Number(t.amount);
+    if (t.type === 'expense' && t.account === accName) delta -= amt;
+    else if (t.type === 'income' && t.account === accName) delta += amt;
+    else if (t.type === 'transfer') {
+      if (t.account === accName) delta -= amt;
+      if (t.category === accName) delta += amt;
+    }
+  });
+  return snap.balance + delta;
+}
 
 // ── DERIVED ────────────────────────────────────────────────
 function rebuildLookups() {
@@ -182,6 +212,7 @@ function renderHeader() {
   document.getElementById('daycount').textContent = day;
 }
 
+// ── CATEGORIES ─────────────────────────────────────────────
 function renderCategories() {
   const dir = state.catDir;
   const txs = periodTxs();
@@ -190,12 +221,12 @@ function renderCategories() {
     const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
   });
   const names = [...new Set([...catsParent[dir], ...sums.keys()])];
-  const list = names.map(n => ({ name: n, v: sums.get(n) || 0 }))
-                    .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name));
+  const catList = names.map(n => ({ name: n, v: sums.get(n) || 0 }))
+                       .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name));
 
   const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
   const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  const segs = list.filter(x => x.v > 0).map(x => ({ v: x.v, c: catStyle(x.name).color }));
+  const segs = catList.filter(x => x.v > 0).map(x => ({ v: x.v, c: catStyle(x.name).color }));
   const main = dir === 'expense' ? expTotal : incTotal;
   const sub  = dir === 'expense' ? incTotal : expTotal;
   const mc = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
@@ -210,7 +241,7 @@ function renderCategories() {
       </div>
     </div></div>`;
 
-  const cats = list.map(x => {
+  const cats = catList.map(x => {
     const st = catStyle(x.name);
     return `<button class="cat ${x.v ? '' : 'zero'}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
       <div class="cat-name">${esc(x.name)}</div>
@@ -225,7 +256,20 @@ function renderCategories() {
     state.catDir = dir === 'expense' ? 'income' : 'expense';
     renderCategories();
   };
-  grid.querySelectorAll('.cat').forEach(el => el.onclick = () => openForm(null, el.dataset.cat, state.catDir));
+
+  // Short tap → add form; long press → category detail sheet
+  grid.querySelectorAll('.cat').forEach(el => {
+    let lpTimer = null, activated = false;
+    const startLP = () => { lpTimer = setTimeout(() => { activated = true; openCatSheet(el.dataset.cat, dir, catList); }, 500); };
+    const cancelLP = () => clearTimeout(lpTimer);
+    el.addEventListener('touchstart', startLP, { passive: true });
+    el.addEventListener('touchend', cancelLP, { passive: true });
+    el.addEventListener('touchmove', cancelLP, { passive: true });
+    el.addEventListener('mousedown', startLP);
+    el.addEventListener('mouseup', cancelLP);
+    el.addEventListener('mouseleave', cancelLP);
+    el.onclick = () => { if (activated) { activated = false; return; } openForm(null, el.dataset.cat, state.catDir); };
+  });
 }
 
 function donutSVG(segs) {
@@ -244,11 +288,75 @@ function donutSVG(segs) {
   return `<svg viewBox="0 0 ${size} ${size}">${parts.join('')}</svg>`;
 }
 
+// ── CATEGORY DETAIL SHEET ──────────────────────────────────
+function openCatSheet(catName, dir, catList) {
+  const txs = periodTxs();
+  const catTxs = txs.filter(t => t.type === dir && parentCat(t.category) === catName);
+  const total = catTxs.reduce((s, t) => s + Number(t.amount), 0);
+  const count = catTxs.length;
+  const periodTotal = txs.filter(t => t.type === dir).reduce((s, t) => s + Number(t.amount), 0);
+  const pct = periodTotal ? Math.round(total / periodTotal * 100) : 0;
+  const st = catStyle(catName);
+
+  const subMap = new Map();
+  catTxs.forEach(t => { const s = subCat(t.category); if (s) subMap.set(s, (subMap.get(s) || 0) + Number(t.amount)); });
+  const subs = [...subMap.entries()].sort((a, b) => b[1] - a[1]);
+
+  const el = document.getElementById('cat-action-overlay');
+  el.querySelector('.cas-head').style.background = st.color;
+  el.querySelector('.cas-ic').innerHTML = st.icon;
+  el.querySelector('.cas-name').textContent = catName;
+  el.querySelector('.cas-count').textContent = `${count} операцій`;
+  el.querySelector('.cas-total-val').textContent = `${fmt(total)} UAH`;
+  el.querySelector('.cas-pct').textContent = `${pct}%`;
+  el.querySelector('.cas-period-val').textContent = `${fmt(periodTotal)} UAH`;
+
+  const subsEl = el.querySelector('.cas-subs');
+  subsEl.innerHTML = subs.map(([name, v]) => {
+    const sp = total ? Math.round(v / total * 100) : 0;
+    const sst = catStyle(name);
+    return `<div class="cas-sub-row">
+      <div class="cas-sub-ic" style="--c:${sst.color}">${sst.icon}</div>
+      <div class="cas-sub-body">
+        <div class="cas-sub-top"><span>${esc(name)}</span><span>${fmt(v)} <span class="cas-cur">UAH</span></span></div>
+        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div><span class="ov-pct">${sp}%</span></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelector('.cas-ops-btn').onclick = () => {
+    closeCatSheet();
+    catFilter = catName;
+    state.tab = 'records';
+    syncTabs(); renderAll();
+  };
+  el.classList.add('open');
+}
+function closeCatSheet() { document.getElementById('cat-action-overlay').classList.remove('open'); }
+
+// ── RECORDS ────────────────────────────────────────────────
 const CARD_MINI = '<svg viewBox="0 0 24 24" style="width:15px;height:15px;vertical-align:-2px;stroke:#aaa;fill:none;stroke-width:1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 9h20"/></svg>';
 
 function renderRecords() {
-  const txs = periodTxs().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const filtered = catFilter
+    ? periodTxs().filter(t => parentCat(t.category) === catFilter)
+    : periodTxs();
+  const txs = filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
   const el = document.getElementById('rec-list');
+
+  // Category filter chip
+  const chip = document.getElementById('rec-cat-chip');
+  if (chip) {
+    if (catFilter) {
+      const st = catStyle(catFilter);
+      chip.innerHTML = `<span class="rcc-ic" style="--c:${st.color}">${st.icon}</span><span>${esc(catFilter)}</span><button class="rcc-x" id="rcc-x">✕</button>`;
+      chip.style.display = 'flex';
+      document.getElementById('rcc-x').onclick = () => { catFilter = null; renderAll(); };
+    } else {
+      chip.style.display = 'none';
+    }
+  }
+
   if (!txs.length) { el.innerHTML = `<div class="empty"><div class="ic">📭</div>Немає операцій за період</div>`; return; }
 
   const groups = {};
@@ -305,16 +413,19 @@ function recItem(t) {
   </div>`;
 }
 
+// ── ACCOUNTS ───────────────────────────────────────────────
 function accRow(a) {
   const st = catStyle(a.name);
   const cur = CUR_SUFFIX[a.currency] || a.currency || 'UAH';
-  const v = a.currency === 'UAH' ? fmt(a.balance) : fmtDec(a.balance);
-  return `<div class="acc-row">
+  const lb = computeLiveBalance(a.name) ?? a.balance;
+  const v = a.currency === 'UAH' ? fmt(lb) : fmtDec(lb);
+  return `<div class="acc-row" data-acc="${escAttr(a.name)}">
     <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
     <div class="acc-name">${esc(a.name)}</div>
-    <div class="acc-bal" style="color:${a.balance < 0 ? 'var(--exp)' : 'var(--text)'}">${v} <span style="font-size:11px;color:var(--text3)">${cur}</span></div>
+    <div class="acc-bal" style="color:${lb < 0 ? 'var(--exp)' : 'var(--text)'}">${v} <span style="font-size:11px;color:var(--text3)">${cur}</span></div>
   </div>`;
 }
+
 function renderAccounts() {
   const el = document.getElementById('acc-list');
   if (!accountsList.length) {
@@ -323,9 +434,60 @@ function renderAccounts() {
   }
   const reg = accountsList.filter(a => !isSavings(a.name) && a.group !== 'savings');
   const sav = accountsList.filter(a => isSavings(a.name) || a.group === 'savings');
-  const sum = arr => arr.reduce((s, a) => s + (Number(a.uah) || 0), 0);
-  const section = (title, arr) => arr.length ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${sum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(sum(arr))} UAH</span></div>${arr.map(accRow).join('')}` : '';
+  const liveSum = arr => arr.reduce((s, a) => {
+    const lb = computeLiveBalance(a.name) ?? a.balance;
+    return s + (a.currency === 'UAH' ? lb : (a.uah || 0));
+  }, 0);
+  const section = (title, arr) => arr.length
+    ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${liveSum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(liveSum(arr))} UAH</span></div>${arr.map(a => accRow(a)).join('')}`
+    : '';
   el.innerHTML = section('Рахунки', reg) + section('Заощадження', sav);
+  el.querySelectorAll('.acc-row').forEach(row => {
+    row.onclick = () => openAccAction(row.dataset.acc);
+  });
+}
+
+// ── ACCOUNT ACTION SHEET ───────────────────────────────────
+function openAccAction(accName) {
+  accActionCurrent = accName;
+  const a = accountsList.find(x => x.name === accName);
+  const st = catStyle(accName);
+  const lb = computeLiveBalance(accName) ?? (a?.balance ?? 0);
+  const cur = a ? (CUR_SUFFIX[a.currency] || a.currency || 'UAH') : 'UAH';
+  const v = a?.currency === 'UAH' ? fmt(lb) : fmtDec(lb);
+  document.getElementById('aas-ic').style.background = st.color;
+  document.getElementById('aas-ic').innerHTML = st.icon;
+  document.getElementById('aas-name').textContent = accName;
+  document.getElementById('aas-bal').innerHTML = `${v} <span>${cur}</span>`;
+  document.getElementById('aas-bal').style.color = lb < 0 ? 'var(--exp)' : 'var(--text)';
+  document.getElementById('acc-action-overlay').classList.add('open');
+}
+function closeAccAction() { document.getElementById('acc-action-overlay').classList.remove('open'); }
+
+// ── OVERVIEW ───────────────────────────────────────────────
+function renderBarChart(txs, dir) {
+  if (state.period === 'all') return '';
+  const col = dir === 'expense' ? '#eb3b7e' : '#27ae60';
+  let vals;
+  if (state.period === 'year') {
+    vals = Array.from({ length: 12 }, (_, m) =>
+      txs.filter(t => t.type === dir && new Date(t.date).getMonth() === m).reduce((s, t) => s + Number(t.amount), 0)
+    );
+  } else {
+    const year = state.cursor.getFullYear(), month = state.cursor.getMonth();
+    const days = new Date(year, month + 1, 0).getDate();
+    const dm = {};
+    txs.filter(t => t.type === dir).forEach(t => { const d = new Date(t.date).getDate(); dm[d] = (dm[d] || 0) + Number(t.amount); });
+    vals = Array.from({ length: days }, (_, i) => dm[i + 1] || 0);
+  }
+  const max = Math.max(...vals, 1);
+  const n = vals.length, H = 42, gap = 2;
+  const bw = Math.max(2, Math.floor((320 - (n - 1) * gap) / n));
+  const bars = vals.map((v, i) => {
+    const h = v > 0 ? Math.max(3, Math.round(v / max * H)) : 0;
+    return `<rect x="${i * (bw + gap)}" y="${H - h}" width="${bw}" height="${h}" fill="${v > 0 ? col : '#eee'}" rx="1.5"/>`;
+  }).join('');
+  return `<div class="ov-barchart"><svg viewBox="0 0 ${n * (bw + gap)} ${H}" preserveAspectRatio="none" style="width:100%;height:52px;display:block">${bars}</svg></div>`;
 }
 
 function renderOverview() {
@@ -343,16 +505,31 @@ function renderOverview() {
   const breakdown = list.map(x => {
     const st = catStyle(x.name);
     const pct = total ? Math.round(x.v / total * 100) : 0;
-    return `<div class="ov-cat">
+    const expanded = ovExpanded.has(x.name);
+    const subs = [...(subsByDir[dir].get(x.name) || [])].filter(Boolean);
+    const subRows = expanded && subs.length ? subs.map(sub => {
+      const sv = txs.filter(t => t.type === dir && parentCat(t.category) === x.name && subCat(t.category) === sub).reduce((s, t) => s + Number(t.amount), 0);
+      const sp = x.v ? Math.round(sv / x.v * 100) : 0;
+      return `<div class="ov-sub">
+        <div class="ov-sub-dot" style="background:${st.color}"></div>
+        <div class="ov-sub-body">
+          <div class="ov-sub-top"><span>${esc(sub)}</span><span class="ov-cat-amt">${fmt(sv)} <span>UAH</span></span></div>
+          <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div><span class="ov-pct">${sp}%</span></div>
+        </div>
+      </div>`;
+    }).join('') : '';
+    return `<div class="ov-cat${subs.length ? ' clickable' : ''}" data-cat="${escAttr(x.name)}">
       <div class="ov-cat-ic" style="--c:${st.color}">${st.icon}</div>
       <div class="ov-cat-body">
         <div class="ov-cat-top"><span>${esc(x.name)}</span><span class="ov-cat-amt">${fmt(x.v)} <span>UAH</span></span></div>
         <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${pct}%"></div><span class="ov-pct">${pct}%</span></div>
       </div>
-    </div>`;
+      ${subs.length ? `<span class="ov-chevron">${expanded ? '▲' : '▼'}</span>` : ''}
+    </div>${subRows}`;
   }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
 
   document.getElementById('ov-wrap').innerHTML = `
+    ${renderBarChart(txs, dir)}
     <div class="ov-balance-label">Баланс</div>
     <div class="ov-balance" style="color:${balance < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(balance)} UAH</div>
     <div class="ov-toggle">
@@ -362,6 +539,13 @@ function renderOverview() {
     ${breakdown}`;
 
   document.querySelectorAll('#ov-wrap .ov-tg').forEach(b => b.onclick = () => { state.ovDir = b.dataset.ov; renderOverview(); });
+  document.querySelectorAll('#ov-wrap .ov-cat[data-cat]').forEach(el => {
+    el.onclick = () => {
+      const cat = el.dataset.cat;
+      if (ovExpanded.has(cat)) ovExpanded.delete(cat); else ovExpanded.add(cat);
+      renderOverview();
+    };
+  });
 }
 
 // ── TABS ───────────────────────────────────────────────────
@@ -374,14 +558,17 @@ function syncTabs() {
 let calcExpr = '';
 const ARROW_ICON = '<svg viewBox="0 0 24 24" style="stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 9h13l-4-4M20 15H7l4 4"/></svg>';
 
-function openForm(tx = null, presetParent = null, presetDir = null) {
+function openForm(tx = null, presetParent = null, presetDir = null, presetAccount = null) {
   editingTx = tx;
   const dir = tx ? tx.type : (presetDir || (state.catDir === 'income' ? 'income' : 'expense'));
+  const defaultAcc = presetAccount
+    || accountsList.find(a => !isSavings(a.name) && a.group !== 'savings')?.name
+    || accountsAll[0] || '';
   formState = {
     type: dir,
     parent: tx ? (tx.type === 'transfer' ? '' : parentCat(tx.category)) : (presetParent || ''),
     sub: tx ? subCat(tx.category) : '',
-    account: tx ? (tx.account || '') : '',
+    account: tx ? (tx.account || '') : defaultAcc,
     toAccount: tx && tx.type === 'transfer' ? (tx.category || '') : '',
     date: tx ? toLocal(tx.date) : nowLocal(),
   };
@@ -393,7 +580,16 @@ function openForm(tx = null, presetParent = null, presetDir = null) {
 }
 function closeForm() { document.getElementById('add-view').classList.remove('active'); editingTx = null; }
 
-function setFormType(t) { formState.type = t; if (t === 'transfer') { formState.parent = ''; formState.sub = ''; } renderForm(); }
+function setFormType(t) {
+  const old = formState.type;
+  formState.type = t;
+  if (t === 'transfer') {
+    formState.parent = ''; formState.sub = '';
+  } else if ((old === 'expense' && t === 'income') || (old === 'income' && t === 'expense')) {
+    formState.parent = ''; formState.sub = '';
+  }
+  renderForm();
+}
 
 function renderForm() {
   const t = formState.type;
@@ -619,6 +815,11 @@ async function importCSV(file) {
     st.textContent = `${done} / ${rows.length}`;
   }
   if (accounts.length) await set(ref(db, ACC_PATH), accounts);
+
+  // Save cutoff so computeLiveBalance knows what's already in snapshot
+  const maxDate = rows.reduce((m, r) => Math.max(m, new Date(r.date).getTime()), 0);
+  if (maxDate) { await set(ref(db, 'finance/meta/importedUpTo'), maxDate); importedUpTo = maxDate; }
+
   tt.textContent = `✓ Імпортовано ${done} операцій, ${accounts.length} рахунків`;
   toast('Імпорт завершено!');
 }
@@ -674,7 +875,22 @@ function bindEvents() {
   document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
   document.getElementById('import-file').onchange = e => { const f = e.target.files[0]; if (f) importCSV(f); };
 
+  // Account action sheet
+  document.getElementById('acc-action-overlay').onclick = e => { if (e.target.id === 'acc-action-overlay') closeAccAction(); };
+  document.getElementById('aab-ops').onclick = () => {
+    closeAccAction();
+    selectedAccounts = new Set([accActionCurrent]);
+    state.tab = 'records'; syncTabs(); renderAll();
+  };
+  document.getElementById('aab-top').onclick = () => { closeAccAction(); openForm(null, null, 'income', accActionCurrent); };
+  document.getElementById('aab-spend').onclick = () => { closeAccAction(); openForm(null, null, 'expense', accActionCurrent); };
+  document.getElementById('aab-transfer').onclick = () => { closeAccAction(); openForm(null, null, 'transfer', accActionCurrent); };
+
+  // Category detail sheet
+  document.getElementById('cat-action-overlay').onclick = e => { if (e.target.id === 'cat-action-overlay') closeCatSheet(); };
+  document.getElementById('cas-close').onclick = closeCatSheet;
 }
+
 function shift(d) {
   if (state.period === 'all') return;
   if (state.period === 'year') state.cursor = new Date(state.cursor.getFullYear() + d, 0, 1);
@@ -726,7 +942,7 @@ function openPeriod() {
 
 // ── HELPERS ────────────────────────────────────────────────
 function fmt(n) { const v = Math.round(Number(n) || 0); return v.toLocaleString('uk-UA').replace(/,/g, ' '); }
-function fmtDec(n) { return (Number(n) || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/ /g, ' '); }
+function fmtDec(n) { return (Number(n) || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/ /g, ' '); }
 function relDay(d) {
   const t = new Date(); t.setHours(0,0,0,0);
   const y = new Date(t); y.setDate(t.getDate() - 1);

@@ -47,6 +47,7 @@
 
   <!-- RECORDS -->
   <div class="screen" id="records-screen">
+    <div class="rec-cat-chip" id="rec-cat-chip" style="display:none"></div>
     <div class="rec-scroll" id="rec-list"></div>
   </div>
 
@@ -185,6 +186,55 @@
         <div id="import-progress-text" style="font-weight:600;text-align:center;font-size:14px"></div>
         <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
         <div class="import-status" id="import-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT ACTION SHEET -->
+  <div class="sheet-overlay" id="acc-action-overlay">
+    <div class="sheet aas-sheet">
+      <div class="sheet-handle"></div>
+      <div class="aas-header">
+        <div class="aas-ic" id="aas-ic"></div>
+        <div class="aas-info">
+          <div class="aas-name" id="aas-name"></div>
+          <div class="aas-bal" id="aas-bal"></div>
+        </div>
+      </div>
+      <div class="aas-actions">
+        <button class="aab" id="aab-ops">Операції</button>
+        <button class="aab" id="aab-top">Поповнення</button>
+        <button class="aab" id="aab-spend">Списати</button>
+        <button class="aab" id="aab-transfer">Переказ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY DETAIL SHEET -->
+  <div class="sheet-overlay" id="cat-action-overlay">
+    <div class="sheet cas-sheet">
+      <div class="cas-head">
+        <div class="cas-ic"></div>
+        <div class="cas-name"></div>
+        <button class="cas-close-btn" id="cas-close">✕</button>
+      </div>
+      <div class="cas-stats">
+        <div class="cas-stat">
+          <div class="cas-count"></div>
+          <div class="cas-total-val"></div>
+        </div>
+        <div class="cas-stat">
+          <div class="cas-stat-lbl">від загальних</div>
+          <div class="cas-pct"></div>
+        </div>
+        <div class="cas-stat">
+          <div class="cas-stat-lbl">за період</div>
+          <div class="cas-period-val"></div>
+        </div>
+      </div>
+      <div class="cas-subs"></div>
+      <div class="cas-foot">
+        <button class="cas-ops-btn">Операції</button>
       </div>
     </div>
   </div>
