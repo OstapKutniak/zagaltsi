@@ -462,3 +462,69 @@ Root-нода (будівля/НПС, перетягнута з бібліоте
 - **`RENDER_SCALE`** (`config.ts`): десктоп 2.0×, мобільні (touch+UA) **1.5×** за замовчуванням; `localStorage.zag_render_scale` перебиває.
 - **Кулінг**: ассети ігрового шару (scrollFactor=1, не паралакс, не деформ-меш) `setVisible(false)` поза `camera.worldView` (+260px). Локальна оптимізація, кооп-безпечна (кожен клієнт кулить під свою камеру).
 - Зелений квадрат на персонажі = частина кутаута з НЕпрозорим (зеленим) фоном у щойно експортованому character.json — кеїти/перезберегти ассет, не код.
+
+---
+
+## ОНОВЛЕННЯ (2026-06-28) — Плановість, Вінь'єтка, Кольоровий баланс
+
+### Плановість (per-layer tint, `src/level/editor.ts`)
+
+- Блок «Час доби» в правій панелі перейменовано на **«Плановість»** (`atmLayerTints`).
+- 6 шарів: `sky / clouds / bg / frontbg / map / foreground`. Кожен — колір + Сила (alpha 0..1) + режим накладання (`multiply`/`screen`/`overlay` тощо).
+- **Реалізація (ВАЖЛИВО):** offscreen canvas per-layer з `destination-in` маскою:
+  1. Малюємо спрайти шару на `off` (offscreen canvas).
+  2. Окремий `tintCv`: заливаємо кольором тінту → `globalCompositeOperation='destination-in'` → `drawImage(off)` — залишається тільки там, де є непрозорі пікселі спрайтів.
+  3. Накладаємо `tintCv` на `off` з обраним blend-mode.
+  4. `drawImage(off)` на `mainCtx`.
+  - Таким чином тінт ніколи не виходить за межі власних спрайтів шару.
+- **Бігунок «Сила»:** `mkSlider('Сила', lt.alpha, 100, v => { cur().alpha = v; })` — `val` передається 0..1, `max=100`. НЕ множити alpha×100 при передачі у mkSlider (інакше бігунок показує 3000%).
+
+### Вінь'єтка (`src/level/editor.ts` + `src/scenes/GameScene.ts`)
+
+**Концепт:** овал на зоні шару «Карта» (підлога). Центр рівня чистий, краї (ліво/право/низ) темніші. Верхня межа = видима лінія «фон ↔ підлога».
+
+**Редактор (`drawScene`):**
+```typescript
+const g0y = toScreen(0, 0).y;  // floor baseline = лінія карти
+const by0 = Math.max(0, g0y);
+const groundH = H - by0;
+// Овал: cx=W/2, cy=by0+groundH/2, rx=W/2, ry=groundH/2
+// Застосовується через scale(1, ry/rx) → createRadialGradient → restore
+```
+- **НЕ** використовувати `toScreen(0, -BAND_DEPTH).y` — це точка ВИЩЕ лінії карти (у зоні фону).
+
+**Гра (`GameScene.updateVignette`):**
+```typescript
+const floorFrac = this.logicalH > 0
+  ? Math.max(0.05, Math.min(0.95, this.bandTop / this.logicalH))
+  : 0.55;
+```
+- `bandTop = max(logicalH*0.28, bandBottom - BAND_DEPTH)` ≈ 63.5% висоти екрана.
+- Текстура 512×512: білий (нейтральний для multiply) вище floorFrac; овальний радіальний градієнт нижче.
+- Ключ кешу включає `floorFrac.toFixed(3)` → перебудова при зміні розміру.
+
+**Blend у грі:** `'multiply'` через Phaser blend mode (рядок, не константа). Depth = 5.95 (поверх карти, під HUD).
+
+### Кольоровий баланс (`src/level/editor.ts`, `drawScene`)
+
+Pixel-level обробка через `getImageData / putImageData` на весь canvas після рендера.
+
+```typescript
+// Тіні: повна дія при luma=0, нуль при luma≥0.5
+const sw = Math.max(0, 1 - luma * 2) * sStr;
+// Середні тони: пік при luma=0.5
+const mw = Math.max(0, 1 - Math.abs(luma - 0.5) * 4) * mStr;
+// Світлини: поріг ЗНИЖЕНО до 0.35 (було luma*2-1, поріг 0.5)
+// → у темних сценах більшість пікселів < 0.5, тому без зниження ефект нульовий
+const hw = Math.max(0, (luma - 0.35) / 0.65) * hStr;
+```
+
+- `luma = (r*0.299 + g*0.587 + b*0.114) / 255`
+- Кожен канал: `d[i] = (d[i] + (targetR - d[i]) * weight) | 0`
+- Прозорі пікселі (`d[i+3] === 0`) пропускаються.
+
+### TODO / відкладено
+
+- **Рандомізатор дощу:** при малій кількості крапель — помітні рядки/колонки (рандом поганий). Потребує кращого per-drop хешу.
+- **Вінь'єтка (game):** перевірити, що `floorFrac` відповідає видимій лінії карти в конкретному рівні (може залежати від вмісту рівня).
+- **Селектор якості рендера (GAME):** кнопка 1.5× повинна бути в лобі/налаштуваннях гри (`index.html`), а НЕ в редакторі. Поки не зроблено.
