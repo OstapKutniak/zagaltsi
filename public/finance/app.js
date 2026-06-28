@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js';
 import {
-  getDatabase, ref, push, set, update, remove, onValue,
+  getDatabase, ref, get, push, set, update, remove, onValue,
   onChildAdded, onChildChanged, onChildRemoved
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
 
@@ -132,13 +132,45 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── SYNC ───────────────────────────────────────────────────
+let baseMigrationDone = false;
+async function migrateBaseBalances() {
+  if (baseMigrationDone) return;
+  if (!importedUpTo || !accountsList.length) return;
+  if (!accountsList.some(a => a.baseBalance === undefined)) { baseMigrationDone = true; return; }
+  baseMigrationDone = true;
+  const txSnap = await get(ref(db, TX_PATH));
+  const allTx = Object.values(txSnap.val() || {});
+  const updated = accountsList.map(a => {
+    if (a.baseBalance !== undefined) return a;
+    let delta = 0;
+    allTx.forEach(t => {
+      const amt = Number(t.amount);
+      if (t.type === 'expense' && t.account === a.name) delta -= amt;
+      else if (t.type === 'income' && t.account === a.name) delta += amt;
+      else if (t.type === 'transfer') {
+        if (t.account === a.name) delta -= amt;
+        if (t.category === a.name) delta += amt;
+      }
+    });
+    return { ...a, baseBalance: a.balance - delta };
+  });
+  await set(ref(db, ACC_PATH), updated);
+}
+
 function subscribe() {
   const r = ref(db, TX_PATH);
   onChildAdded(r,   s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
   onChildChanged(r, s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
   onChildRemoved(r, s => { delete txMap[s.key]; scheduleRender(); });
-  onValue(ref(db, ACC_PATH), s => { accountsList = s.val() || []; scheduleRender(); });
-  onValue(ref(db, 'finance/meta/importedUpTo'), s => { importedUpTo = s.val() || null; });
+  onValue(ref(db, ACC_PATH), s => {
+    accountsList = s.val() || [];
+    scheduleRender();
+    migrateBaseBalances();
+  });
+  onValue(ref(db, 'finance/meta/importedUpTo'), s => {
+    importedUpTo = s.val() || null;
+    migrateBaseBalances();
+  });
 }
 function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
 
@@ -465,7 +497,7 @@ function renderAccounts() {
   }
   const reg = accountsList.filter(a => !a.archived && !isSavings(a.name) && a.group !== 'savings');
   const sav = accountsList.filter(a => !a.archived && (isSavings(a.name) || a.group === 'savings'));
-  const liveSum = arr => arr.reduce((s, a) => {
+  const liveSum = arr => arr.filter(accIncluded).reduce((s, a) => {
     const lb = computeLiveBalance(a.name) ?? a.balance;
     return s + (a.currency === 'UAH' ? lb : (a.uah || 0));
   }, 0);
