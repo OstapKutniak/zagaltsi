@@ -8,6 +8,7 @@ import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
+import { BAND_DEPTH } from '../config';
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, type LayerKey, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE, evalTod } from './atmosphere';
 import { generateGameAsset, hasFalKey, hasAiBgRemoval, removeBackgroundAI } from '../ai';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
@@ -579,13 +580,19 @@ export function initLevelEditor(prefix: string): void {
           ctx = off.getContext('2d')!;
           ctx.imageSmoothingEnabled = !_panning;
           for (const p of items) drawOneItem(p);
-          // Накладаємо тінт на offscreen canvas
-          ctx.globalCompositeOperation = (lt.blend as GlobalCompositeOperation) || 'multiply';
-          ctx.globalAlpha = lt.alpha;
-          ctx.fillStyle = lt.color;
-          ctx.fillRect(0, 0, W, H);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = 1;
+          // Тінт-канвас: колір шару, замаскований формою спрайтів (destination-in)
+          // → множиться ТІЛЬКИ на пікселі ассетів, не на прозорий фон
+          const tintCv = document.createElement('canvas'); tintCv.width = W; tintCv.height = H;
+          const tc = tintCv.getContext('2d')!;
+          tc.fillStyle = lt.color; tc.fillRect(0, 0, W, H);
+          tc.globalCompositeOperation = 'destination-in';
+          tc.drawImage(off, 0, 0); // маска: залишити колір тільки де є спрайти
+          // Накладаємо замаскований тінт на спрайти з вибраним режимом
+          const offCtx = off.getContext('2d')!;
+          offCtx.globalCompositeOperation = (lt.blend as GlobalCompositeOperation) || 'multiply';
+          offCtx.globalAlpha = Math.min(1, lt.alpha);
+          offCtx.drawImage(tintCv, 0, 0);
+          offCtx.globalCompositeOperation = 'source-over'; offCtx.globalAlpha = 1;
           ctx = mainCtx;
           ctx.drawImage(off, 0, 0);
         }
@@ -633,10 +640,10 @@ export function initLevelEditor(prefix: string): void {
       const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      // Лінія карти в редакторі = toScreen(0,0).y
-      const g0y = toScreen(0, 0).y;
-      // Вінь'єтка від g0y (лінія карти) до низу екрана
-      const by0 = Math.max(0, g0y);
+      // Верхня лінія шару карта: задня межа прохідної смуги (BAND_DEPTH вгору від лінії підлоги)
+      // → те саме що bandTop у грі. Починаємо вінь'єтку ЗВІДТИ до низу канваса.
+      const bandTopScreenY = toScreen(0, -BAND_DEPTH).y;
+      const by0 = Math.max(0, bandTopScreenY);
       const groundH = H - by0;
       if (groundH > 4) {
         const cx = W / 2, cy = by0 + groundH / 2;
@@ -674,19 +681,32 @@ export function initLevelEditor(prefix: string): void {
       ctx.filter = `brightness(${br}%) contrast(${co}%) saturate(${sa}%) hue-rotate(${hu}deg)`;
       ctx.drawImage(snap, 0, 0);
       ctx.filter = 'none';
-      // Shadow/mid/highlight: наближення через глобальні оверлеї
-      const applyOverlay = (col: string, alpha: number, mode: GlobalCompositeOperation) => {
-        if (alpha < 0.005) return;
-        ctx.save();
-        ctx.globalCompositeOperation = mode;
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = col;
-        ctx.fillRect(0, 0, W, H);
-        ctx.restore();
-      };
-      applyOverlay(cb.shadowColor    ?? '#000033', cb.shadowStrength    ?? 0, 'multiply');
-      applyOverlay(cb.midColor       ?? '#003300', cb.midStrength       ?? 0, 'overlay');
-      applyOverlay(cb.highlightColor ?? '#ffffee', cb.highlightStrength ?? 0, 'screen');
+      // Shadow/mid/highlight: піксельна обробка по яскравості (тільки потрібні зони)
+      const sStr = Math.min(1, cb.shadowStrength    ?? 0);
+      const mStr = Math.min(1, cb.midStrength       ?? 0);
+      const hStr = Math.min(1, cb.highlightStrength ?? 0);
+      if (sStr > 0.005 || mStr > 0.005 || hStr > 0.005) {
+        const imgData = ctx.getImageData(0, 0, W, H);
+        const d = imgData.data;
+        const ph = (hex: string, o: number): number => parseInt((hex.replace('#', '').padStart(6, '0')).slice(o, o + 2), 16);
+        const pc = (h: string): [number, number, number] => [ph(h, 0), ph(h, 2), ph(h, 4)];
+        const [sr, sg, sb] = pc(cb.shadowColor    ?? '#000033');
+        const [mr, mg, mb] = pc(cb.midColor       ?? '#003300');
+        const [hr2, hg2, hb2] = pc(cb.highlightColor ?? '#ffffee');
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] === 0) continue;
+          let r = d[i], g = d[i + 1], b = d[i + 2];
+          const luma = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+          // Тіні: вага 1 при luma=0, 0 при luma≥0.5
+          if (sStr > 0.005) { const w = Math.max(0, 1 - luma * 2) * sStr; r = (r + (sr - r) * w) | 0; g = (g + (sg - g) * w) | 0; b = (b + (sb - b) * w) | 0; }
+          // Середні тони: вага 1 при luma=0.5, 0 при luma=0 або 1
+          if (mStr > 0.005) { const w = Math.max(0, 1 - Math.abs(luma - 0.5) * 4) * mStr; r = (r + (mr - r) * w) | 0; g = (g + (mg - g) * w) | 0; b = (b + (mb - b) * w) | 0; }
+          // Світлини: вага 1 при luma=1, 0 при luma≤0.5
+          if (hStr > 0.005) { const w = Math.max(0, luma * 2 - 1) * hStr; r = (r + (hr2 - r) * w) | 0; g = (g + (hg2 - g) * w) | 0; b = (b + (hb2 - b) * w) | 0; }
+          d[i] = r; d[i + 1] = g; d[i + 2] = b;
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
     }
     // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
     if (state.soloFillCat !== null) {
@@ -1831,7 +1851,7 @@ export function initLevelEditor(prefix: string): void {
           const cur = (): import('./atmosphere').LayerTint => ph.layers![lk]!;
           if (lt) {
             lbody.appendChild(mkColorPicker('Відтінок', lt.color, (v) => { cur().color = v; }));
-            lbody.appendChild(mkSlider('Сила', lt.alpha * 100, 100, (v) => { cur().alpha = v / 100; }));
+            lbody.appendChild(mkSlider('Сила', lt.alpha, 100, (v) => { cur().alpha = v; }));
             lbody.appendChild(mkBlendSelect(lt.blend, (v) => { cur().blend = v; }));
           }
           lcb.addEventListener('change', () => {

@@ -1136,9 +1136,9 @@ export class GameScene extends Phaser.Scene {
     const strength = Math.max(0, Math.min(1, vig.strength ?? 0.6));
     const color = vig.color ?? '#000000';
     const blend = vig.blend ?? 'multiply';
-    // floorFrac: де на екрані проходить лінія карти (bandBottom / logicalH).
-    // Вінь'єтка малюється НИЖЧЕ цієї лінії — від підлоги до низу екрана.
-    const floorFrac = this.logicalH > 0 ? Math.max(0.05, Math.min(0.98, this.bandBottom / this.logicalH)) : 0.65;
+    // floorFrac: верхня межа шару карта (bandTop) — звідти вінь'єтка до низу екрана.
+    // bandTop = задня межа прохідної смуги (вища на екрані), відповідає toScreen(0,-BAND_DEPTH) в редакторі.
+    const floorFrac = this.logicalH > 0 ? Math.max(0.05, Math.min(0.95, this.bandTop / this.logicalH)) : 0.55;
     const key = `v2_${strength.toFixed(2)}_${color}_${blend}_${floorFrac.toFixed(3)}`;
     if (key !== this.vignetteKey) {
       this.vignetteKey = key;
