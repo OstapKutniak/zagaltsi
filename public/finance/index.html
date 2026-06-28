@@ -82,54 +82,41 @@
 
   <button class="fab show" id="fab">+</button>
 
-  <!-- ADD / EDIT FORM -->
+  <!-- ADD / EDIT FORM (1money-style calculator) -->
   <div class="sheet-full" id="add-view">
-    <div class="form-header">
-      <button class="form-close" id="add-close">Скасувати</button>
-      <span class="form-title" id="add-title">Нова операція</span>
-      <button class="form-save" id="add-save">Зберегти</button>
-    </div>
-    <div class="type-toggle">
-      <button class="type-btn active expense" data-type="expense">Витрата</button>
-      <button class="type-btn income" data-type="income">Дохід</button>
-      <button class="type-btn transfer" data-type="transfer">Переказ</button>
-    </div>
-    <div class="amount-block">
-      <input class="amount-input" id="amount-input" type="text" inputmode="decimal" placeholder="0" autocomplete="off">
-    </div>
-    <div class="form-scroll">
-      <div class="form-row">
-        <div class="form-field" id="field-category">
-          <span class="field-icon" id="cat-icon">🏷️</span>
-          <span class="field-label">Категорія</span>
-          <span class="field-value placeholder" id="cat-value">Обрати</span>
-        </div>
-        <div class="form-field" id="field-account">
-          <span class="field-icon">💳</span>
-          <span class="field-label">Рахунок</span>
-          <span class="field-value placeholder" id="acc-value">Обрати</span>
-        </div>
-        <div class="form-field" id="field-to-account" style="display:none">
-          <span class="field-icon">→</span>
-          <span class="field-label">На рахунок</span>
-          <span class="field-value placeholder" id="to-acc-value">Обрати</span>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-field">
-          <span class="field-icon">📅</span>
-          <span class="field-label">Дата</span>
-          <input class="field-input" id="date-input" type="datetime-local">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-field">
-          <span class="field-icon">📝</span>
-          <span class="field-label">Коментар</span>
-          <input class="field-input" id="note-input" type="text" placeholder="Необов'язково">
-        </div>
+    <div class="calc-bar">
+      <button class="calc-x" id="add-close">✕</button>
+      <div class="calc-types">
+        <button class="ct expense active" data-type="expense">Витрата</button>
+        <button class="ct income" data-type="income">Дохід</button>
+        <button class="ct transfer" data-type="transfer">Переказ</button>
       </div>
     </div>
+    <div class="calc-top">
+      <button class="calc-side" id="side-left">
+        <span class="cs-label" id="left-label">З рахунку</span>
+        <span class="cs-val" id="left-val">Рахунок</span>
+      </button>
+      <div class="calc-orb" id="calc-orb"></div>
+      <button class="calc-side right" id="side-right">
+        <span class="cs-label" id="right-label">До категорії</span>
+        <span class="cs-val" id="right-val">Категорія</span>
+      </button>
+    </div>
+    <div class="subchips" id="subchips"></div>
+    <div class="calc-amount">
+      <div class="ca-label" id="ca-label">Витрата</div>
+      <div class="ca-val" id="ca-display">0 <span>UAH</span></div>
+    </div>
+    <input class="calc-note" id="note-input" type="text" placeholder="Нотатки…">
+    <div class="keypad" id="keypad">
+      <button data-k="÷" class="kop">÷</button><button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="back" class="kop">⌫</button>
+      <button data-k="×" class="kop">×</button><button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="cal" class="kop">📅</button>
+      <button data-k="−" class="kop">−</button><button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="ok" class="kok">✓</button>
+      <button data-k="+" class="kop">+</button><button data-k="cur" class="kop">UAH</button><button data-k="0">0</button><button data-k="," >,</button>
+    </div>
+    <div class="calc-date" id="calc-date-label"></div>
+    <input type="datetime-local" id="date-input" class="hidden-date">
   </div>
 
   <!-- PICKER / GENERIC SHEET -->

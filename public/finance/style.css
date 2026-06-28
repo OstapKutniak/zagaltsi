@@ -213,39 +213,50 @@ html, body {
 .fab.show { display: flex; }
 .fab:active { transform: scale(0.93); }
 
-/* ── ADD / EDIT FORM ── */
+/* ── ADD / EDIT FORM (calculator) ── */
 .sheet-full {
   position: fixed; inset: 0; background: var(--bg); z-index: 100;
   transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
   display: flex; flex-direction: column;
 }
 .sheet-full.active { transform: translateY(0); }
-.form-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: calc(var(--top) + 14px) 18px 10px; flex-shrink: 0;
-}
-.form-title { font-size: 17px; font-weight: 600; }
-.form-close { background: none; border: none; color: var(--text2); font-size: 15px; cursor: pointer; }
-.form-save { background: none; border: none; color: var(--active-ink); font-size: 16px; font-weight: 700; cursor: pointer; }
-.type-toggle { display: flex; background: #f1f1f4; border-radius: 12px; padding: 4px; margin: 0 16px 14px; flex-shrink: 0; }
-.type-btn { flex: 1; background: none; border: none; color: var(--text2); padding: 9px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.type-btn.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.type-btn.active.expense { color: var(--exp); }
-.type-btn.active.income { color: var(--inc); }
-.type-btn.active.transfer { color: #2f80ed; }
-.amount-block { padding: 10px 20px 18px; flex-shrink: 0; text-align: center; }
-.amount-input { background: none; border: none; outline: none; font-size: 46px; font-weight: 700; color: var(--text); text-align: center; width: 100%; caret-color: var(--active-ink); }
-.amount-input::placeholder { color: #d8d8de; }
-.form-scroll { flex: 1; overflow-y: auto; padding: 0 16px calc(var(--bottom) + 20px); display: flex; flex-direction: column; gap: 10px; }
-.form-row { background: #f6f6f8; border-radius: 14px; overflow: hidden; }
-.form-field { display: flex; align-items: center; padding: 14px 16px; gap: 12px; border-bottom: 1px solid #ececec; cursor: pointer; }
-.form-field:last-child { border-bottom: none; }
-.form-field:active { background: #eeeef1; }
-.field-icon { font-size: 18px; width: 24px; text-align: center; }
-.field-label { font-size: 15px; color: var(--text2); min-width: 80px; }
-.field-value { flex: 1; font-size: 15px; text-align: right; }
-.field-value.placeholder { color: var(--text3); }
-.field-input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 15px; text-align: right; font-family: inherit; }
+.calc-bar { display: flex; align-items: center; gap: 10px; padding: calc(var(--top) + 10px) 14px 8px; flex-shrink: 0; }
+.calc-x { background: none; border: none; font-size: 20px; color: var(--text2); cursor: pointer; width: 32px; }
+.calc-types { display: flex; background: #f1f1f4; border-radius: 11px; padding: 3px; flex: 1; }
+.ct { flex: 1; background: none; border: none; color: var(--text2); padding: 7px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ct.active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.ct.active.expense { color: var(--exp); } .ct.active.income { color: var(--inc); } .ct.active.transfer { color: #2f80ed; }
+
+.calc-top { display: flex; position: relative; margin: 4px 0 0; flex-shrink: 0; }
+.calc-side { flex: 1; border: none; cursor: pointer; color: #fff; text-align: left; padding: 16px 18px; min-width: 0; }
+.calc-side.right { text-align: right; }
+.cs-label { display: block; font-size: 12px; opacity: 0.85; margin-bottom: 3px; }
+.cs-val { display: block; font-size: 19px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calc-orb { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 60px; height: 60px; border-radius: 50%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; z-index: 2; }
+.calc-orb svg { width: 30px; height: 30px; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.calc-orb svg .fill { fill: #fff; stroke: none; }
+
+.subchips { display: flex; gap: 8px; overflow-x: auto; padding: 12px 14px; flex-shrink: 0; }
+.subchips::-webkit-scrollbar { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; background: #fff; border: 1.5px solid var(--line); color: var(--text2); border-radius: 20px; padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+.chip.on { border-color: var(--active-ink); color: var(--active-ink); }
+.chip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.chip.add { color: var(--active-ink); font-size: 18px; padding: 6px 14px; }
+
+.calc-amount { text-align: center; padding: 6px 20px 10px; flex-shrink: 0; }
+.ca-label { font-size: 13px; color: var(--text2); margin-bottom: 2px; }
+.ca-val { font-size: 38px; font-weight: 700; }
+.ca-val span { font-size: 16px; color: var(--text3); font-weight: 600; }
+.calc-note { margin: 0 16px 6px; background: #f4f4f6; border: none; border-radius: 12px; padding: 12px 14px; font-size: 15px; outline: none; font-family: inherit; flex-shrink: 0; text-align: center; }
+
+.keypad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 4px 8px; flex: 1; min-height: 0; }
+.keypad button { border: none; background: #fff; border-radius: 14px; font-size: 24px; color: var(--text); cursor: pointer; font-family: inherit; }
+.keypad button:active { background: #ededf0; }
+.keypad .kop { color: #6b6b70; font-size: 22px; }
+.keypad .kok { background: var(--active-ink); color: #fff; grid-row: span 2; font-size: 26px; }
+.keypad .kok:active { opacity: 0.85; background: var(--active-ink); }
+.calc-date { text-align: center; font-size: 13px; color: var(--text2); padding: 6px 0 calc(var(--bottom) + 8px); flex-shrink: 0; }
+.hidden-date { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
 
 /* ── BOTTOM SHEET (picker / settings / period) ── */
 .sheet-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: flex-end; }

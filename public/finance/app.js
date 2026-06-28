@@ -84,6 +84,7 @@ function catStyle(name) {
   return { color: `hsl(${h} 52% 56%)`, icon: ic('tag') };
 }
 const parentCat = n => (n || 'Інше').split(' (')[0].trim();
+const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].trim() : ''; };
 
 // ── STATE ──────────────────────────────────────────────────
 let txMap = {};
@@ -92,6 +93,7 @@ let selectedAccounts = null;    // null = all
 let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
+let subsByDir = { expense: new Map(), income: new Map() };
 let accountsAll = [];
 let editingTx = null;
 let formState = {};
@@ -125,14 +127,18 @@ async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
 // ── DERIVED ────────────────────────────────────────────────
 function rebuildLookups() {
   const ce = new Set(), ci = new Set(), pe = new Set(), pi = new Set(), acc = new Set();
+  const se = new Map(), si = new Map();
+  const addSub = (map, parent, sub) => { if (!sub) return; if (!map.has(parent)) map.set(parent, new Set()); map.get(parent).add(sub); };
   Object.values(txMap).forEach(t => {
     if (t.account) acc.add(t.account);
-    if (t.type === 'expense') { if (t.category) { ce.add(t.category); pe.add(parentCat(t.category)); } }
-    else if (t.type === 'income') { if (t.category) { ci.add(t.category); pi.add(parentCat(t.category)); } }
+    if (t.type === 'expense') { if (t.category) { ce.add(t.category); pe.add(parentCat(t.category)); addSub(se, parentCat(t.category), subCat(t.category)); } }
+    else if (t.type === 'income') { if (t.category) { ci.add(t.category); pi.add(parentCat(t.category)); addSub(si, parentCat(t.category), subCat(t.category)); } }
     else if (t.type === 'transfer') { if (t.category) acc.add(t.category); }
   });
+  accountsList.forEach(a => acc.add(a.name));
   catsByDir = { expense: [...ce], income: [...ci] };
   catsParent = { expense: [...pe], income: [...pi] };
+  subsByDir = { expense: se, income: si };
   accountsAll = [...acc];
 }
 
@@ -219,9 +225,7 @@ function renderCategories() {
     state.catDir = dir === 'expense' ? 'income' : 'expense';
     renderCategories();
   };
-  grid.querySelectorAll('.cat').forEach(el => el.onclick = () => {
-    state.tab = 'records'; syncTabs(); renderAll();
-  });
+  grid.querySelectorAll('.cat').forEach(el => el.onclick = () => openForm(null, el.dataset.cat, state.catDir));
 }
 
 function donutSVG(segs) {
@@ -366,61 +370,135 @@ function syncTabs() {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === state.tab + '-screen'));
 }
 
-// ── ADD / EDIT ─────────────────────────────────────────────
-function openForm(tx = null) {
+// ── ADD / EDIT (calculator) ────────────────────────────────
+let calcExpr = '';
+const ARROW_ICON = '<svg viewBox="0 0 24 24" style="stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 9h13l-4-4M20 15H7l4 4"/></svg>';
+
+function openForm(tx = null, presetParent = null, presetDir = null) {
   editingTx = tx;
-  formState = tx ? {
-    type: tx.type,
-    category: tx.type === 'transfer' ? '' : (tx.category || ''),
-    account: tx.account || '',
-    toAccount: tx.type === 'transfer' ? (tx.category || '') : '',
-    date: toLocal(tx.date), note: tx.note || ''
-  } : { type: state.catDir === 'income' ? 'income' : 'expense', category: '', account: '', toAccount: '', date: nowLocal(), note: '' };
-  document.getElementById('add-title').textContent = tx ? 'Редагувати' : 'Нова операція';
-  document.getElementById('amount-input').value = tx ? tx.amount : '';
-  setType(formState.type);
-  fillForm();
+  const dir = tx ? tx.type : (presetDir || (state.catDir === 'income' ? 'income' : 'expense'));
+  formState = {
+    type: dir,
+    parent: tx ? (tx.type === 'transfer' ? '' : parentCat(tx.category)) : (presetParent || ''),
+    sub: tx ? subCat(tx.category) : '',
+    account: tx ? (tx.account || '') : '',
+    toAccount: tx && tx.type === 'transfer' ? (tx.category || '') : '',
+    date: tx ? toLocal(tx.date) : nowLocal(),
+  };
+  calcExpr = tx ? String(tx.amount) : '';
+  document.getElementById('note-input').value = tx ? (tx.note || '') : '';
+  document.getElementById('date-input').value = formState.date;
+  renderForm();
   document.getElementById('add-view').classList.add('active');
-  if (!tx) setTimeout(() => document.getElementById('amount-input').focus(), 300);
 }
 function closeForm() { document.getElementById('add-view').classList.remove('active'); editingTx = null; }
-function setType(t) {
-  formState.type = t;
-  document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === t));
-  document.getElementById('field-to-account').style.display = t === 'transfer' ? '' : 'none';
-  document.getElementById('field-category').style.display = t === 'transfer' ? 'none' : '';
+
+function setFormType(t) { formState.type = t; if (t === 'transfer') { formState.parent = ''; formState.sub = ''; } renderForm(); }
+
+function renderForm() {
+  const t = formState.type;
+  document.querySelectorAll('.ct').forEach(b => b.classList.toggle('active', b.dataset.type === t));
+  const ll = document.getElementById('left-label'), lv = document.getElementById('left-val');
+  const rl = document.getElementById('right-label'), rv = document.getElementById('right-val');
+  const L = document.getElementById('side-left'), R = document.getElementById('side-right');
+  const ACC = '#2D9CDB', CYAN = '#17B9CE';
+  const pcol = formState.parent ? catStyle(formState.parent).color : '#c7c7cc';
+  if (t === 'income') {
+    ll.textContent = 'З категорії'; lv.textContent = formState.parent || 'Категорія'; L.style.background = pcol;
+    rl.textContent = 'На рахунок'; rv.textContent = formState.account || 'Рахунок'; R.style.background = CYAN;
+  } else if (t === 'transfer') {
+    ll.textContent = 'З рахунку'; lv.textContent = formState.account || 'Рахунок'; L.style.background = ACC;
+    rl.textContent = 'На рахунок'; rv.textContent = formState.toAccount || 'Рахунок'; R.style.background = ACC;
+  } else {
+    ll.textContent = 'З рахунку'; lv.textContent = formState.account || 'Рахунок'; L.style.background = ACC;
+    rl.textContent = 'До категорії'; rv.textContent = formState.parent || 'Категорія'; R.style.background = pcol;
+  }
+  const orb = document.getElementById('calc-orb');
+  orb.innerHTML = t === 'transfer' ? ARROW_ICON : (formState.parent ? catStyle(formState.parent).icon : '');
+  orb.querySelectorAll('svg').forEach(s => s.style.stroke = t === 'transfer' ? '#2D9CDB' : pcol);
+  renderSubchips();
+  renderDisplay();
+  document.getElementById('calc-date-label').textContent = dateLabel(formState.date);
 }
-function fillForm() {
-  const set1 = (id, val) => { const e = document.getElementById(id); e.textContent = val || 'Обрати'; e.className = 'field-value' + (val ? '' : ' placeholder'); };
-  set1('cat-value', formState.category);
-  set1('acc-value', formState.account);
-  set1('to-acc-value', formState.toAccount);
-  document.getElementById('cat-icon').textContent = '🏷️';
-  document.getElementById('date-input').value = formState.date || nowLocal();
-  document.getElementById('note-input').value = formState.note;
+
+function renderSubchips() {
+  const box = document.getElementById('subchips');
+  if (formState.type === 'transfer' || !formState.parent) { box.innerHTML = ''; return; }
+  const subs = [...(subsByDir[formState.type].get(formState.parent) || [])].filter(Boolean).sort();
+  box.innerHTML = subs.map(s => `<button class="chip ${formState.sub === s ? 'on' : ''}" data-sub="${escAttr(s)}">${esc(s)}</button>`).join('')
+    + `<button class="chip add" data-sub="__new">＋</button>`;
+  box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const s = c.dataset.sub;
+    if (s === '__new') { const n = prompt('Назва підкатегорії:'); if (n && n.trim()) formState.sub = n.trim(); }
+    else formState.sub = formState.sub === s ? '' : s;
+    renderForm();
+  });
 }
-async function submitForm() {
-  const amount = parseFloat(document.getElementById('amount-input').value.replace(',', '.'));
+
+function renderDisplay() {
+  const col = formState.type === 'expense' ? 'var(--exp)' : formState.type === 'income' ? 'var(--inc)' : '#2f80ed';
+  document.getElementById('ca-label').textContent = formState.type === 'expense' ? 'Витрата' : formState.type === 'income' ? 'Дохід' : 'Переказ';
+  document.getElementById('ca-label').style.color = col;
+  const d = document.getElementById('ca-display');
+  d.innerHTML = `${esc(calcExpr || '0')} <span>UAH</span>`;
+  d.style.color = col;
+}
+
+function keyPress(k) {
+  if (k === 'back') calcExpr = calcExpr.slice(0, -1);
+  else if (k === 'cal') { const el = document.getElementById('date-input'); el.showPicker ? el.showPicker() : el.click(); return; }
+  else if (k === 'cur') return;
+  else if (k === 'ok') return saveCalc();
+  else if ('÷×−+'.includes(k)) { if (calcExpr && !/[÷×−+]$/.test(calcExpr)) calcExpr += k; }
+  else calcExpr += k;
+  renderDisplay();
+}
+
+function evalExpr(s) {
+  s = s.replace(/÷/g, '/').replace(/×/g, '*').replace(/−/g, '-').replace(/,/g, '.');
+  const toks = s.match(/(\d+\.?\d*|[+\-*/])/g);
+  if (!toks) return NaN;
+  const prec = o => (o === '+' || o === '-') ? 1 : 2;
+  const out = [], st = [];
+  for (const tk of toks) {
+    if (/[0-9.]/.test(tk[0])) out.push(parseFloat(tk));
+    else { while (st.length && prec(st[st.length - 1]) >= prec(tk)) out.push(st.pop()); st.push(tk); }
+  }
+  while (st.length) out.push(st.pop());
+  const stk = [];
+  for (const tk of out) {
+    if (typeof tk === 'number') stk.push(tk);
+    else { const b = stk.pop(), a = stk.pop(); stk.push(tk === '+' ? a + b : tk === '-' ? a - b : tk === '*' ? a * b : a / b); }
+  }
+  return stk[0];
+}
+
+async function saveCalc() {
+  const amount = Math.round((evalExpr(calcExpr) || 0) * 100) / 100;
   if (!amount || amount <= 0) return toast('Введи суму');
-  if (formState.type !== 'transfer' && !formState.category) return toast('Оберіть категорію');
+  const t = formState.type;
+  if (t !== 'transfer' && !formState.parent) return toast('Оберіть категорію');
   if (!formState.account) return toast('Оберіть рахунок');
-  if (formState.type === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
-  const dv = document.getElementById('date-input').value;
+  if (t === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
+  const category = t === 'transfer' ? formState.toAccount : (formState.sub ? `${formState.parent} (${formState.sub})` : formState.parent);
   const note = document.getElementById('note-input').value.trim();
-  const tx = {
-    type: formState.type, amount,
-    account: formState.account,
-    category: formState.type === 'transfer' ? formState.toAccount : formState.category,
-    date: dv ? new Date(dv).toISOString() : new Date().toISOString(),
-    note: note || null,
-  };
-  const btn = document.getElementById('add-save'); btn.disabled = true;
+  const dv = document.getElementById('date-input').value;
+  const tx = { type: t, amount, account: formState.account, category, date: dv ? new Date(dv).toISOString() : new Date().toISOString(), note: note || null };
   try {
     if (editingTx) { await updateTx(editingTx.id, tx); toast('Оновлено ✓'); }
     else { await saveTx(tx); toast('Збережено ✓'); }
     closeForm();
   } catch (e) { toast('Помилка: ' + e.message); }
-  finally { btn.disabled = false; }
+}
+
+async function pickSideLeft() {
+  if (formState.type === 'income') { const v = await openPicker('Категорія', catsParent.income); if (v) { formState.parent = v; formState.sub = ''; renderForm(); } }
+  else { const v = await openPicker('Рахунок', accountsAll); if (v) { formState.account = v; renderForm(); } }
+}
+async function pickSideRight() {
+  if (formState.type === 'expense') { const v = await openPicker('Категорія', catsParent.expense); if (v) { formState.parent = v; formState.sub = ''; renderForm(); } }
+  else if (formState.type === 'transfer') { const v = await openPicker('На рахунок', accountsAll); if (v) { formState.toAccount = v; renderForm(); } }
+  else { const v = await openPicker('Рахунок', accountsAll); if (v) { formState.account = v; renderForm(); } }
 }
 
 // ── PICKER ─────────────────────────────────────────────────
@@ -563,15 +641,11 @@ function bindEvents() {
 
   document.getElementById('fab').onclick = () => openForm();
   document.getElementById('add-close').onclick = closeForm;
-  document.getElementById('add-save').onclick = submitForm;
-  document.querySelectorAll('.type-btn').forEach(b => b.onclick = () => { setType(b.dataset.type); fillForm(); });
-
-  document.getElementById('field-category').onclick = async () => {
-    const items = formState.type === 'income' ? catsByDir.income : catsByDir.expense;
-    const v = await openPicker('Категорія', [...items]); if (v) { formState.category = v; fillForm(); }
-  };
-  document.getElementById('field-account').onclick = async () => { const v = await openPicker('Рахунок', [...accountsAll]); if (v) { formState.account = v; fillForm(); } };
-  document.getElementById('field-to-account').onclick = async () => { const v = await openPicker('На рахунок', [...accountsAll]); if (v) { formState.toAccount = v; fillForm(); } };
+  document.querySelectorAll('.ct').forEach(b => b.onclick = () => setFormType(b.dataset.type));
+  document.getElementById('keypad').querySelectorAll('button').forEach(b => b.onclick = () => keyPress(b.dataset.k));
+  document.getElementById('side-left').onclick = pickSideLeft;
+  document.getElementById('side-right').onclick = pickSideRight;
+  document.getElementById('date-input').onchange = e => { formState.date = e.target.value; document.getElementById('calc-date-label').textContent = dateLabel(formState.date); };
 
   document.getElementById('sheet-overlay').onclick = e => { if (e.target.id === 'sheet-overlay') closePicker(null); };
 
@@ -600,7 +674,6 @@ function bindEvents() {
   document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
   document.getElementById('import-file').onchange = e => { const f = e.target.files[0]; if (f) importCSV(f); };
 
-  document.getElementById('amount-input').oninput = function () { this.value = this.value.replace(/[^0-9.,]/g, ''); };
 }
 function shift(d) {
   if (state.period === 'all') return;
@@ -661,6 +734,14 @@ function relDay(d) {
   if (x.getTime() === t.getTime()) return 'СЬОГОДНІ';
   if (x.getTime() === y.getTime()) return 'ВЧОРА';
   return WEEKDAYS[d.getDay()].toUpperCase();
+}
+const MON_SHORT = ['січ.','лют.','бер.','кві.','тра.','чер.','лип.','сер.','вер.','жов.','лис.','гру.'];
+function dateLabel(local) {
+  const d = local ? new Date(local) : new Date();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const x = new Date(d); x.setHours(0,0,0,0);
+  const base = `${d.getDate()} ${MON_SHORT[d.getMonth()]} ${d.getFullYear()} р.`;
+  return x.getTime() === today.getTime() ? `Сьогодні, ${base}` : base;
 }
 function nowLocal() { const d = new Date(), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function toLocal(iso) { const d = new Date(iso), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
