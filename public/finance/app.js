@@ -147,12 +147,26 @@ async function updateTx(id, tx) { await update(ref(db, `${TX_PATH}/${id}`), tx);
 async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
 
 // ── LIVE BALANCE ───────────────────────────────────────────
-// accountsList.balance = snapshot at import time; delta = sum of new ops after that date
+// New model: baseBalance (before any transactions) + sum of ALL txMap entries.
+// Legacy fallback (no baseBalance): snap.balance + only post-importedUpTo delta.
+function txDeltaFor(accName) {
+  let delta = 0;
+  Object.values(txMap).forEach(t => {
+    const amt = Number(t.amount);
+    if (t.type === 'expense' && t.account === accName) delta -= amt;
+    else if (t.type === 'income' && t.account === accName) delta += amt;
+    else if (t.type === 'transfer') {
+      if (t.account === accName) delta -= amt;
+      if (t.category === accName) delta += amt;
+    }
+  });
+  return delta;
+}
 function computeLiveBalance(accName) {
   const snap = accountsList.find(a => a.name === accName);
   if (!snap) return null;
-  // If importedUpTo is not set, historical transactions are already in snap.balance
-  // — adding them again would double-count. Return snapshot as-is.
+  if (snap.baseBalance !== undefined) return snap.baseBalance + txDeltaFor(accName);
+  // Legacy: no baseBalance stored yet — use importedUpTo cutoff
   if (!importedUpTo) return snap.balance;
   let delta = 0;
   Object.values(txMap).forEach(t => {
@@ -521,12 +535,15 @@ async function saveAccForm() {
   const include = document.getElementById('acc-form-include').checked;
   const archived = accFormMode === 'edit' ? document.getElementById('acc-form-archived').checked : false;
   const currency = accFormCurrency;
+  // baseBalance = entered balance minus all existing txMap entries for this account,
+  // so computeLiveBalance returns the entered value as the current balance.
+  const baseBalance = balance - txDeltaFor(name);
   const newList = [...accountsList];
   if (accFormMode === 'edit' && accFormEditIdx >= 0) {
     const old = newList[accFormEditIdx];
-    newList[accFormEditIdx] = { ...old, name, balance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived };
+    newList[accFormEditIdx] = { ...old, name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived };
   } else {
-    newList.push({ name, balance, currency, uah: currency === 'UAH' ? balance : 0, group: isSavings(name) ? 'savings' : 'regular', includeInTotal: include, archived: false });
+    newList.push({ name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : 0, group: isSavings(name) ? 'savings' : 'regular', includeInTotal: include, archived: false });
   }
   try {
     await set(ref(db, ACC_PATH), newList);
@@ -894,7 +911,24 @@ async function importCSV(file) {
     bar.style.width = Math.round(done / rows.length * 100) + '%';
     st.textContent = `${done} / ${rows.length}`;
   }
-  if (accounts.length) await set(ref(db, ACC_PATH), accounts);
+  if (accounts.length) {
+    // Compute baseBalance = balance at export minus effect of all imported transactions.
+    // This lets computeLiveBalance work correctly for any txMap changes (add/delete).
+    accounts.forEach(a => {
+      let delta = 0;
+      rows.forEach(r => {
+        const amt = Number(r.amount);
+        if (r.type === 'expense' && r.account === a.name) delta -= amt;
+        else if (r.type === 'income' && r.account === a.name) delta += amt;
+        else if (r.type === 'transfer') {
+          if (r.account === a.name) delta -= amt;
+          if (r.category === a.name) delta += amt;
+        }
+      });
+      a.baseBalance = a.balance - delta;
+    });
+    await set(ref(db, ACC_PATH), accounts);
+  }
 
   // Save cutoff so computeLiveBalance knows what's already in snapshot
   const maxDate = rows.reduce((m, r) => Math.max(m, new Date(r.date).getTime()), 0);
