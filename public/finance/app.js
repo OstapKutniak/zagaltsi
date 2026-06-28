@@ -151,9 +151,12 @@ async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
 function computeLiveBalance(accName) {
   const snap = accountsList.find(a => a.name === accName);
   if (!snap) return null;
+  // If importedUpTo is not set, historical transactions are already in snap.balance
+  // — adding them again would double-count. Return snapshot as-is.
+  if (!importedUpTo) return snap.balance;
   let delta = 0;
   Object.values(txMap).forEach(t => {
-    if (importedUpTo && new Date(t.date).getTime() <= importedUpTo) return;
+    if (new Date(t.date).getTime() <= importedUpTo) return;
     const amt = Number(t.amount);
     if (t.type === 'expense' && t.account === accName) delta -= amt;
     else if (t.type === 'income' && t.account === accName) delta += amt;
