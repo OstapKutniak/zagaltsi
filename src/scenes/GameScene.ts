@@ -1136,35 +1136,42 @@ export class GameScene extends Phaser.Scene {
     const strength = Math.max(0, Math.min(1, vig.strength ?? 0.6));
     const color = vig.color ?? '#000000';
     const blend = vig.blend ?? 'multiply';
-    // bandFrac: яка частина висоти екрану — зона карти (0..bandBottom)
-    const bandFrac = this.logicalH > 0 ? Math.max(0.1, Math.min(1, this.bandBottom / this.logicalH)) : 0.7;
-    const key = `${strength.toFixed(2)}_${color}_${blend}_${bandFrac.toFixed(3)}`;
+    // floorFrac: де на екрані проходить лінія карти (bandBottom / logicalH).
+    // Вінь'єтка малюється НИЖЧЕ цієї лінії — від підлоги до низу екрана.
+    const floorFrac = this.logicalH > 0 ? Math.max(0.05, Math.min(0.98, this.bandBottom / this.logicalH)) : 0.65;
+    const key = `v2_${strength.toFixed(2)}_${color}_${blend}_${floorFrac.toFixed(3)}`;
     if (key !== this.vignetteKey) {
       this.vignetteKey = key;
       if (this.textures.exists('_vignette')) this.textures.remove('_vignette');
       const SZ = 512;
       const vc = document.createElement('canvas'); vc.width = SZ; vc.height = SZ;
       const vx = vc.getContext('2d')!;
-      // Білий фон: нейтраль для MULTIPLY (небо і передній план не потемніють)
+      // Суцільно білий — нейтраль MULTIPLY для неба / персонажів / переднього плану
       vx.fillStyle = 'white'; vx.fillRect(0, 0, SZ, SZ);
       const [er, eg, eb] = parseHex(color);
-      // Band area: від 0 до bandFrac*SZ (зона де є карта)
-      const bandPx = Math.round(SZ * bandFrac);
-      const cx = SZ / 2, cy = bandPx / 2;
-      const rx = SZ / 2, ry = bandPx / 2;
-      // Малюємо темний овал тільки в band area за допомогою еліптичного transform
-      vx.save();
-      vx.beginPath();
-      vx.rect(0, 0, SZ, bandPx); // clip to band area
-      vx.clip();
-      vx.scale(1, ry / rx); // squash to create ellipse
-      const grd = vx.createRadialGradient(cx, cy * rx / ry, 0, cx, cy * rx / ry, rx);
-      grd.addColorStop(0,    'rgba(0,0,0,0)');
-      grd.addColorStop(0.55, 'rgba(0,0,0,0)');
-      grd.addColorStop(1,    `rgba(${er},${eg},${eb},${strength})`);
-      vx.fillStyle = grd;
-      vx.fillRect(0, 0, SZ, SZ * (rx / ry)); // fill in scaled space
-      vx.restore();
+      // Зона підлоги: від floorFrac до низу
+      const by0 = Math.round(SZ * floorFrac);  // Y лінії карти в текстурі
+      const groundH = SZ - by0;                 // висота зони підлоги
+      if (groundH > 4) {
+        const cx = SZ / 2;
+        const cy = by0 + groundH / 2;  // центр зони підлоги
+        const rx = SZ / 2;
+        const ry = groundH / 2;
+        vx.save();
+        vx.scale(1, ry / rx); // витягуємо по вертикалі → коло стає еліпсом
+        // В масштабованих координатах:
+        const by0_sc = by0 * rx / ry;
+        const cy_sc  = cy  * rx / ry;
+        const gh_sc  = groundH * rx / ry;
+        vx.beginPath(); vx.rect(0, by0_sc, SZ, gh_sc); vx.clip();
+        const grd = vx.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
+        grd.addColorStop(0,    'rgba(0,0,0,0)');
+        grd.addColorStop(0.45, 'rgba(0,0,0,0)');
+        grd.addColorStop(1,    `rgba(${er},${eg},${eb},${strength})`);
+        vx.fillStyle = grd;
+        vx.fillRect(0, 0, SZ, SZ);
+        vx.restore();
+      }
       this.textures.addCanvas('_vignette', vc);
       if (this.vignetteImg) { this.vignetteImg.destroy(); this.vignetteImg = null; }
     }

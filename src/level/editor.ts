@@ -633,34 +633,40 @@ export function initLevelEditor(prefix: string): void {
       const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      const bfrac = 0.7; // ~70% висоти = зона карти в редакторі
-      const bandH = Math.round(H * bfrac);
-      const cx = W / 2, cy = bandH / 2;
-      const rx = W / 2, ry = bandH / 2;
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, W, bandH); ctx.clip();
-      ctx.scale(1, ry / rx);
-      const grd = ctx.createRadialGradient(cx, cy * rx / ry, 0, cx, cy * rx / ry, rx);
-      grd.addColorStop(0, 'rgba(0,0,0,0)');
-      grd.addColorStop(0.55, 'rgba(0,0,0,0)');
-      const h = parseInt(col.slice(1, 3), 16), s = parseInt(col.slice(3, 5), 16), v = parseInt(col.slice(5, 7), 16);
-      grd.addColorStop(1, `rgba(${h},${s},${v},${str})`);
-      ctx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
-      ctx.fillStyle = grd;
-      ctx.fillRect(0, 0, W, H * (rx / ry));
-      ctx.restore();
-      ctx.globalCompositeOperation = 'source-over';
+      // Лінія карти в редакторі = toScreen(0,0).y
+      const g0y = toScreen(0, 0).y;
+      // Вінь'єтка від g0y (лінія карти) до низу екрана
+      const by0 = Math.max(0, g0y);
+      const groundH = H - by0;
+      if (groundH > 4) {
+        const cx = W / 2, cy = by0 + groundH / 2;
+        const rx = W / 2, ry = groundH / 2;
+        const [er, eg, eb] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
+        ctx.save();
+        ctx.scale(1, ry / rx);
+        const by0_sc = by0 * rx / ry, cy_sc = cy * rx / ry, gh_sc = groundH * rx / ry;
+        ctx.beginPath(); ctx.rect(0, by0_sc, W, gh_sc); ctx.clip();
+        const grd = ctx.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
+        grd.addColorStop(0, 'rgba(0,0,0,0)');
+        grd.addColorStop(0.45, 'rgba(0,0,0,0)');
+        grd.addColorStop(1, `rgba(${er},${eg},${eb},${str})`);
+        ctx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, W, H * (rx / ry));
+        ctx.restore();
+        ctx.globalCompositeOperation = 'source-over';
+      }
     }
 
-    // ── Кольоровий баланс (CSS filter на canvas) ─────────────────────────────
+    // ── Кольоровий баланс (CSS filter + shadow/mid/highlight оверлеї) ────────
     if (state.showAtm && atm?.colorBalance?.enabled) {
       const cb = atm.colorBalance;
       const br = Math.round((cb.brightness ?? 1) * 100);
-      const co = Math.round((cb.contrast ?? 1) * 100);
+      const co = Math.round(((cb.contrast ?? 1) + (cb.cavity ?? 0) * 0.5) * 100);
       const sa = Math.round((cb.saturation ?? 1) * 100);
       const hu = cb.hue ?? 0;
       const W = canvas.width, H = canvas.height;
-      // Знімаємо знімок, накладаємо з CSS filter
+      // Знімок + CSS filter (brightness/contrast/saturation/hue)
       const snap = document.createElement('canvas');
       snap.width = W; snap.height = H;
       snap.getContext('2d')!.drawImage(canvas, 0, 0);
@@ -668,6 +674,19 @@ export function initLevelEditor(prefix: string): void {
       ctx.filter = `brightness(${br}%) contrast(${co}%) saturate(${sa}%) hue-rotate(${hu}deg)`;
       ctx.drawImage(snap, 0, 0);
       ctx.filter = 'none';
+      // Shadow/mid/highlight: наближення через глобальні оверлеї
+      const applyOverlay = (col: string, alpha: number, mode: GlobalCompositeOperation) => {
+        if (alpha < 0.005) return;
+        ctx.save();
+        ctx.globalCompositeOperation = mode;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = col;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      };
+      applyOverlay(cb.shadowColor    ?? '#000033', cb.shadowStrength    ?? 0, 'multiply');
+      applyOverlay(cb.midColor       ?? '#003300', cb.midStrength       ?? 0, 'overlay');
+      applyOverlay(cb.highlightColor ?? '#ffffee', cb.highlightStrength ?? 0, 'screen');
     }
     // Соло-режим: білий оверлей на весь канвас + перемалювати соло-шар зверху
     if (state.soloFillCat !== null) {
@@ -1632,19 +1651,6 @@ export function initLevelEditor(prefix: string): void {
   // Стіни тепер автоматичні (бічні грані піднятих клітинок) — ручний «Вертикальний шлях»
   // більше не потрібен. Ховаємо кнопку; стирання легасі-стін лишається через «Видалити».
   $('pathVBtn')?.style.setProperty('display', 'none');
-  // Якість рендерингу (RENDER_SCALE): зберігаємо в localStorage і перезавантажуємо.
-  const qualSel = $<HTMLSelectElement>('qualitySelect');
-  if (qualSel) {
-    try { qualSel.value = String(localStorage.getItem('zag_render_scale') ?? ''); } catch {}
-    qualSel.addEventListener('change', () => {
-      try {
-        const v = qualSel.value;
-        if (v) localStorage.setItem('zag_render_scale', v);
-        else localStorage.removeItem('zag_render_scale');
-      } catch {}
-      location.reload();
-    });
-  }
 
   // ── Атмосфера: три незалежні секції ─────────────────────────────────────────
   const atmToggle = $<HTMLButtonElement>('atmToggle');
@@ -1811,25 +1817,31 @@ export function initLevelEditor(prefix: string): void {
         if (!ph.layers) ph.layers = {};
         const layersDiv = document.createElement('div'); layersDiv.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:4px';
         LAYER_KEYS.forEach((lk: LayerKey) => {
-          const lt = ph.layers![lk];
-          // Заголовок шару з чекбоксом вмикання
+          const lt = ph.layers![lk]; // undefined якщо не активний
           const lhd = document.createElement('div'); lhd.style.cssText = 'display:flex;align-items:center;gap:6px';
-          const lcb = document.createElement('input'); lcb.type = 'checkbox'; lcb.checked = !!(lt?.alpha && lt.alpha > 0);
+          const lcb = document.createElement('input'); lcb.type = 'checkbox'; lcb.checked = !!lt; // перевіряємо наявність запису, не alpha
           lcb.style.cssText = 'width:13px;height:13px;accent-color:var(--sel)';
           const llbl = document.createElement('span'); llbl.style.cssText = 'font-size:11px;font-weight:600;flex:1'; llbl.textContent = LAYER_LABELS[lk];
           lhd.appendChild(lcb); lhd.appendChild(llbl);
           layersDiv.appendChild(lhd);
-          // Тіло шару (розгортається коли активний)
+          // Тіло шару — без default-запису поки не увімкнено!
           const lbody = document.createElement('div'); lbody.style.cssText = 'display:flex;flex-direction:column;gap:3px;padding-left:10px';
           lbody.style.display = lt ? 'flex' : 'none';
-          if (!lt) ph.layers![lk] = { color: '#ffffff', alpha: 0.3, blend: 'multiply' };
-          const cur = () => ph.layers![lk]!;
-          lbody.appendChild(mkColorPicker('Відтінок', cur().color, (v) => { cur().color = v; }));
-          lbody.appendChild(mkSlider('Сила', cur().alpha, 100, (v) => { cur().alpha = v; }));
-          lbody.appendChild(mkBlendSelect(cur().blend, (v) => { cur().blend = v; }));
+          // Lazy accessor — створює запис лише при першому доступі після ввімкнення
+          const cur = (): import('./atmosphere').LayerTint => ph.layers![lk]!;
+          if (lt) {
+            lbody.appendChild(mkColorPicker('Відтінок', lt.color, (v) => { cur().color = v; }));
+            lbody.appendChild(mkSlider('Сила', lt.alpha * 100, 100, (v) => { cur().alpha = v / 100; }));
+            lbody.appendChild(mkBlendSelect(lt.blend, (v) => { cur().blend = v; }));
+          }
           lcb.addEventListener('change', () => {
-            if (!lcb.checked) { ph.layers![lk] = undefined; lbody.style.display = 'none'; }
-            else { ph.layers![lk] = { color: '#ffffff', alpha: 0.3, blend: 'multiply' }; lbody.style.display = 'flex'; }
+            if (!lcb.checked) {
+              ph.layers![lk] = undefined;
+              lbody.style.display = 'none';
+            } else {
+              ph.layers![lk] = { color: '#ffffff', alpha: 0.3, blend: 'multiply' };
+              lbody.style.display = 'flex';
+            }
             save(); renderAtmPanel();
           });
           layersDiv.appendChild(lbody);
