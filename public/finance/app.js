@@ -19,6 +19,7 @@ const TX_PATH = 'finance/transactions';
 const ACC_PATH = 'finance/accounts';
 const CUR_SUFFIX = { UAH: 'UAH', USD: '$', EUR: 'EUR', PLN: 'zł' };
 const isSavings = n => /лежить|скарбничк|заощад/i.test(n || '');
+const accIncluded = a => a.includeInTotal !== undefined ? a.includeInTotal : !(isSavings(a.name) || a.group === 'savings');
 
 // ── CONST ──────────────────────────────────────────────────
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
@@ -110,6 +111,16 @@ let importedUpTo = null;
 let ovExpanded = new Set();
 let accActionCurrent = null;
 let catFilter = null;
+let accFormMode = null;
+let accFormEditIdx = -1;
+let accFormCurrency = 'UAH';
+
+const CURRENCIES_LIST = [
+  { code: 'UAH', label: 'Українська гривня — UAH' },
+  { code: 'USD', label: 'Долар США — USD' },
+  { code: 'EUR', label: 'Євро — EUR' },
+  { code: 'PLN', label: 'Польський злотий — PLN' },
+];
 
 // ── INIT ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -194,13 +205,16 @@ function renderAll() {
   else if (state.tab === 'records') renderRecords();
   else if (state.tab === 'accounts') renderAccounts();
   else if (state.tab === 'overview') renderOverview();
-  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records');
+  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts');
 }
 
 function renderHeader() {
   let net;
-  if (accountsList.length) net = accountsList.reduce((s, a) => s + (Number(a.uah) || 0), 0);
-  else { net = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') net -= Number(t.amount); else if (t.type === 'income') net += Number(t.amount); }); }
+  if (accountsList.length) {
+    net = accountsList
+      .filter(a => !a.archived && accIncluded(a))
+      .reduce((s, a) => s + (a.currency === 'UAH' ? (computeLiveBalance(a.name) ?? a.balance) : (Number(a.uah) || 0)), 0);
+  } else { net = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') net -= Number(t.amount); else if (t.type === 'income') net += Number(t.amount); }); }
   document.getElementById('total-amount').innerHTML = `${fmt(net)} <span>UAH</span>`;
 
   const c = state.cursor;
@@ -432,8 +446,8 @@ function renderAccounts() {
     el.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ic">💳</div>Імпортуй CSV з 1money — й тут з'являться рахунки з балансами.</div>`;
     return;
   }
-  const reg = accountsList.filter(a => !isSavings(a.name) && a.group !== 'savings');
-  const sav = accountsList.filter(a => isSavings(a.name) || a.group === 'savings');
+  const reg = accountsList.filter(a => !a.archived && !isSavings(a.name) && a.group !== 'savings');
+  const sav = accountsList.filter(a => !a.archived && (isSavings(a.name) || a.group === 'savings'));
   const liveSum = arr => arr.reduce((s, a) => {
     const lb = computeLiveBalance(a.name) ?? a.balance;
     return s + (a.currency === 'UAH' ? lb : (a.uah || 0));
@@ -463,6 +477,69 @@ function openAccAction(accName) {
   document.getElementById('acc-action-overlay').classList.add('open');
 }
 function closeAccAction() { document.getElementById('acc-action-overlay').classList.remove('open'); }
+
+// ── ACCOUNT FORM ───────────────────────────────────────────
+function openAccForm(accName = null) {
+  const editSection = document.getElementById('acc-form-edit-section');
+  if (accName) {
+    accFormMode = 'edit';
+    accFormEditIdx = accountsList.findIndex(a => a.name === accName);
+    const a = accountsList[accFormEditIdx];
+    document.getElementById('acc-form-title').textContent = 'Редагувати рахунок';
+    document.getElementById('acc-form-name').value = a.name;
+    accFormCurrency = a.currency || 'UAH';
+    document.getElementById('acc-form-balance').value = String(computeLiveBalance(a.name) ?? a.balance);
+    document.getElementById('acc-form-include').checked = accIncluded(a);
+    document.getElementById('acc-form-archived').checked = !!a.archived;
+    editSection.style.display = '';
+  } else {
+    accFormMode = 'create';
+    accFormEditIdx = -1;
+    document.getElementById('acc-form-title').textContent = 'Новий рахунок';
+    document.getElementById('acc-form-name').value = '';
+    accFormCurrency = 'UAH';
+    document.getElementById('acc-form-balance').value = '0';
+    document.getElementById('acc-form-include').checked = true;
+    document.getElementById('acc-form-archived').checked = false;
+    editSection.style.display = 'none';
+  }
+  updateAccFormCurrency();
+  document.getElementById('acc-form-view').classList.add('active');
+}
+function updateAccFormCurrency() {
+  const c = CURRENCIES_LIST.find(x => x.code === accFormCurrency);
+  document.getElementById('acc-form-currency-val').textContent = c ? c.label : accFormCurrency;
+}
+function closeAccForm() { document.getElementById('acc-form-view').classList.remove('active'); }
+async function saveAccForm() {
+  const name = document.getElementById('acc-form-name').value.trim();
+  if (!name) return toast('Введи назву рахунку');
+  const balance = parseFloat(document.getElementById('acc-form-balance').value.replace(',', '.')) || 0;
+  const include = document.getElementById('acc-form-include').checked;
+  const archived = accFormMode === 'edit' ? document.getElementById('acc-form-archived').checked : false;
+  const currency = accFormCurrency;
+  const newList = [...accountsList];
+  if (accFormMode === 'edit' && accFormEditIdx >= 0) {
+    const old = newList[accFormEditIdx];
+    newList[accFormEditIdx] = { ...old, name, balance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived };
+  } else {
+    newList.push({ name, balance, currency, uah: currency === 'UAH' ? balance : 0, group: isSavings(name) ? 'savings' : 'regular', includeInTotal: include, archived: false });
+  }
+  try {
+    await set(ref(db, ACC_PATH), newList);
+    toast(accFormMode === 'edit' ? 'Рахунок оновлено ✓' : 'Рахунок створено ✓');
+    closeAccForm();
+  } catch(e) { toast('Помилка: ' + e.message); }
+}
+async function deleteAccForm() {
+  if (!confirm('Видалити рахунок? Операції залишаться.')) return;
+  const newList = accountsList.filter((_, i) => i !== accFormEditIdx);
+  try {
+    await set(ref(db, ACC_PATH), newList);
+    toast('Рахунок видалено');
+    closeAccForm();
+  } catch(e) { toast('Помилка: ' + e.message); }
+}
 
 // ── OVERVIEW ───────────────────────────────────────────────
 function renderBarChart(txs, dir) {
@@ -840,7 +917,7 @@ function bindEvents() {
   document.getElementById('prev-month').onclick = () => shift(-1);
   document.getElementById('next-month').onclick = () => shift(1);
 
-  document.getElementById('fab').onclick = () => openForm();
+  document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : openForm();
   document.getElementById('add-close').onclick = closeForm;
   document.querySelectorAll('.ct').forEach(b => b.onclick = () => setFormType(b.dataset.type));
   document.getElementById('keypad').querySelectorAll('button').forEach(b => b.onclick = () => keyPress(b.dataset.k));
@@ -912,6 +989,17 @@ function bindEvents() {
   document.getElementById('aab-top').onclick = () => { closeAccAction(); openForm(null, null, 'income', accActionCurrent); };
   document.getElementById('aab-spend').onclick = () => { closeAccAction(); openForm(null, null, 'expense', accActionCurrent); };
   document.getElementById('aab-transfer').onclick = () => { closeAccAction(); openForm(null, null, 'transfer', accActionCurrent); };
+  document.getElementById('aab-edit').onclick = () => { closeAccAction(); openAccForm(accActionCurrent); };
+
+  // Account form
+  document.getElementById('acc-form-close').onclick = closeAccForm;
+  document.getElementById('acc-form-done').onclick = saveAccForm;
+  document.getElementById('acc-form-delete').onclick = deleteAccForm;
+  document.getElementById('acc-form-currency-row').onclick = async () => {
+    const labels = CURRENCIES_LIST.map(c => c.label);
+    const chosen = await openPicker('Валюта', labels);
+    if (chosen) { const c = CURRENCIES_LIST.find(x => x.label === chosen); if (c) { accFormCurrency = c.code; updateAccFormCurrency(); } }
+  };
 
   // Category detail sheet
   document.getElementById('cat-action-overlay').onclick = e => { if (e.target.id === 'cat-action-overlay') closeCatSheet(); };

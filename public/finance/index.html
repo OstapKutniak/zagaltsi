@@ -206,6 +206,7 @@
         <button class="aab" id="aab-top">Поповнення</button>
         <button class="aab" id="aab-spend">Списати</button>
         <button class="aab" id="aab-transfer">Переказ</button>
+        <button class="aab aab-wide" id="aab-edit">Редагувати</button>
       </div>
     </div>
   </div>
@@ -235,6 +236,40 @@
       <div class="cas-subs"></div>
       <div class="cas-foot">
         <button class="cas-ops-btn">Операції</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT CREATE / EDIT FORM -->
+  <div class="sheet-full" id="acc-form-view">
+    <div class="afv-bar">
+      <button class="calc-x" id="acc-form-close">✕</button>
+      <div class="afv-title" id="acc-form-title">Новий рахунок</div>
+      <button class="afv-done" id="acc-form-done">Готово</button>
+    </div>
+    <div class="afv-scroll">
+      <input class="afv-name" id="acc-form-name" type="text" placeholder="Назва рахунку">
+      <div class="afv-section">Рахунок</div>
+      <div class="afv-row afv-row-tap" id="acc-form-currency-row">
+        <span class="afv-row-label">Валюта</span>
+        <span class="afv-row-val" id="acc-form-currency-val">Українська гривня — UAH</span>
+      </div>
+      <div class="afv-section">Баланс</div>
+      <div class="afv-row">
+        <span class="afv-row-label">Початковий баланс</span>
+        <input class="afv-row-input" id="acc-form-balance" type="number" inputmode="decimal" placeholder="0">
+      </div>
+      <div class="afv-row">
+        <span class="afv-row-label">Враховувати в загальному балансі</span>
+        <label class="tog"><input type="checkbox" id="acc-form-include" checked><span class="tog-track"></span></label>
+      </div>
+      <div id="acc-form-edit-section" style="display:none">
+        <div class="afv-section"></div>
+        <div class="afv-row">
+          <span class="afv-row-label">Архівний рахунок</span>
+          <label class="tog"><input type="checkbox" id="acc-form-archived"><span class="tog-track"></span></label>
+        </div>
+        <button class="afv-delete" id="acc-form-delete">Видалити рахунок</button>
       </div>
     </div>
   </div>
