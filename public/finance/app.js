@@ -14,526 +14,567 @@ const firebaseConfig = {
   messagingSenderId: '1011491870660',
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const db = getDatabase(initializeApp(firebaseConfig));
 const TX_PATH = 'finance/transactions';
 
-// ── CONSTANTS ──────────────────────────────────────────────
-const MONTHS_UK = ['Січень','Лютий','Березень','Квітень','Травень','Червень',
-                   'Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+// ── CONST ──────────────────────────────────────────────────
+const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
+const WEEKDAYS = ['Неділя','Понеділок','Вівторок','Середа','Четвер','П\'ятниця','Субота'];
 
-const CATEGORY_EMOJI = {
-  'їжа':'🍽️','продукти':'🛒','кафе':'☕','ресторан':'🍴','піца':'🍕',
-  'дозвілля':'🎭','розваги':'🎮','кіно':'🎬','самокат':'🛴','спорт':'⚽',
-  'транспорт':'🚗','таксі':'🚕','метро':'🚇','паркінг':'🅿️',
-  'придбання':'🛍️','одяг':'👕','техніка':'📱','взуття':'👟',
-  'здоров\'я':'💊','ліки':'💉','лікар':'🏥','психотерапія':'🧠','адалімумаб':'💉',
-  'комунальні':'🏠','оренда':'🏘️','щомісячне':'📅','підписка':'📺',
-  'подарунки':'🎁','квіти':'💐',
-  'борг':'💸','переказ':'↔️',
-  'зарплата':'💰','дохід':'📈',
-  'готівка':'💵','карта':'💳',
-  'інше':'📦','другое':'📦',
-  'добирання':'🚌','покупки':'🛍️','сім\'я':'👨‍👩‍👧',
+const ICONS = {
+  bowl:'<path d="M3 11h18a9 9 0 01-18 0z"/><path d="M8 11V8M12 11V6.5M16 11V8"/>',
+  bus:'<rect x="4" y="4" width="16" height="13" rx="2"/><path d="M4 11h16"/><circle cx="8" cy="18" r="1.3" class="fill"/><circle cx="16" cy="18" r="1.3" class="fill"/>',
+  phone:'<path d="M5 4l3-1 2 4-2 2a12 12 0 005 5l2-2 4 2-1 3a2 2 0 01-2 1A16 16 0 014 6a2 2 0 011-2z"/>',
+  ticket:'<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M9 6v12"/><path d="M9 9h0M9 13h0"/>',
+  gift:'<rect x="4" y="10" width="16" height="10" rx="1"/><path d="M3 10h18M12 10v10M8 10a2 2 0 110-4c2 0 4 4 4 4M16 10a2 2 0 100-4c-2 0-4 4-4 4"/>',
+  beer:'<path d="M7 8h8v11a2 2 0 01-2 2H9a2 2 0 01-2-2z"/><path d="M15 10h2a2 2 0 012 2v3a2 2 0 01-2 2h-2"/><path d="M8 8a2 2 0 011-3 2 2 0 013 0 2 2 0 013 3"/>',
+  bag:'<path d="M6 8h12l-1 12H7z"/><path d="M9 8a3 3 0 016 0"/>',
+  owl:'<path d="M5 9a4 4 0 014-4h6a4 4 0 014 4v3a7 7 0 01-14 0z"/><circle cx="9.5" cy="10" r="1.6" class="fill"/><circle cx="14.5" cy="10" r="1.6" class="fill"/><path d="M9 16l3 2 3-2"/>',
+  health:'<rect x="4" y="4" width="16" height="16" rx="5"/><path d="M12 9v6M9 12h6"/>',
+  plane:'<path d="M2 12l20-8-8 20-2-8-10-4z"/>',
+  wand:'<path d="M4 20l9-9"/><path d="M15 4l.9 2.1L18 7l-2.1.9L15 10l-.9-2.1L12 7l2.1-.9z" class="fill"/>',
+  percent:'<path d="M5 19L19 5"/><circle cx="7.5" cy="7.5" r="2"/><circle cx="16.5" cy="16.5" r="2"/>',
+  laptop:'<rect x="4" y="5" width="16" height="11" rx="1"/><path d="M2 20h20"/>',
+  cube:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
+  building:'<rect x="6" y="3" width="12" height="18" rx="1"/><path d="M9.5 7h1M13.5 7h1M9.5 11h1M13.5 11h1M9.5 15h1M13.5 15h1"/>',
+  coins:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3 3 7 3s7-1.3 7-3v-6"/>',
+  printer:'<path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="1"/><rect x="7" y="14" width="10" height="6"/>',
+  dice:'<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" class="fill"/><circle cx="12" cy="12" r="1.2" class="fill"/><circle cx="15" cy="15" r="1.2" class="fill"/>',
+  game:'<rect x="2" y="7" width="20" height="10" rx="5"/><path d="M6 11v3M4.5 12.5h3"/><circle cx="16" cy="11" r="1" class="fill"/><circle cx="18.5" cy="13.5" r="1" class="fill"/>',
+  money:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>',
+  wallet:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="17" cy="14" r="1.3" class="fill"/>',
+  card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 9h20"/>',
+  scooter:'<circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M14 6h3l-3 11M14 6l-6 12"/>',
+  tag:'<path d="M3 12l9-9 9 9-9 9z"/><circle cx="12" cy="9" r="1.5" class="fill"/>',
 };
+const ic = k => `<svg viewBox="0 0 24 24">${ICONS[k] || ICONS.tag}</svg>`;
+
+const STYLE = [
+  ['їжа','#2D9CDB','bowl'],['кафе','#2D9CDB','bowl'],['продукт','#2D9CDB','bowl'],['ресторан','#2D9CDB','bowl'],['піца','#2D9CDB','bowl'],
+  ['транспорт','#F2994A','bus'],['добир','#F2994A','bus'],['проїзд','#F2994A','bus'],['таксі','#F2994A','bus'],
+  ['самокат','#9B51E0','scooter'],
+  ['щомісяч','#5D4037','phone'],['підписк','#5D4037','phone'],
+  ['дозвілл','#EB5C8B','ticket'],['розваг','#EB5C8B','ticket'],['кіно','#EB5C8B','ticket'],['відвід','#EB5C8B','ticket'],
+  ['подарун','#F2C94C','gift'],['квіт','#F2C94C','gift'],
+  ['випивк','#9E9D24','beer'],['алко','#9E9D24','beer'],['бар','#9E9D24','beer'],['напо','#9E9D24','beer'],
+  ['придбан','#9B51E0','bag'],['покупк','#9B51E0','bag'],['одяг','#9B51E0','bag'],['потреб','#9B51E0','bag'],
+  ['навчан','#7E8BD9','owl'],['освіт','#7E8BD9','owl'],['виклада','#B39DDB','owl'],
+  ['здоров','#1ABC9C','health'],['ліки','#1ABC9C','health'],['лікар','#1ABC9C','health'],['психотер','#1ABC9C','health'],['адалім','#1ABC9C','health'],
+  ['поїздк','#4CAF7D','plane'],['подорож','#4CAF7D','plane'],['житло','#4CAF7D','plane'],
+  ['борг','#2F80ED','percent'],
+  ['геймдев','#EB3B7E','laptop'],['геймдизайн','#EB3B7E','laptop'],
+  ['візуаліз','#9CCC9C','cube'],
+  ['архдизайн','#E0B84D','building'],
+  ['стипенд','#D7B98E','coins'],
+  ['друк','#607D8B','printer'],['k.o.d','#F0A0A0','printer'],['kod','#F0A0A0','printer'],
+  ['продаж','#C9BE7E','dice'],
+  ['спільняк','#9E9E9E','game'],
+  ['зарплат','#27AE60','money'],
+  ['готівк','#27AE60','wallet'],['монобанк','#2D9CDB','card'],['карт','#2D9CDB','card'],['рахунок','#2D9CDB','card'],['кешбек','#1ABC9C','wallet'],
+  ['інше','#EB5757','wand'],['друге','#EB5757','wand'],
+];
+function catStyle(name) {
+  const key = (name || '').toLowerCase();
+  for (const [k, c, i] of STYLE) if (key.includes(k)) return { color: c, icon: ic(i) };
+  let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return { color: `hsl(${h} 52% 56%)`, icon: ic('tag') };
+}
+const parentCat = n => (n || 'Інше').split(' (')[0].trim();
 
 // ── STATE ──────────────────────────────────────────────────
-let txMap = {};                 // id -> transaction (all, in memory)
-let currentMonth = new Date();
+let txMap = {};
+let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
+let catsByDir = { expense: [], income: [] };
+let catsParent = { expense: [], income: [] };
+let accountsAll = [];
 let editingTx = null;
-let formState = { type: 'expense', category: '', account: '', toAccount: '', date: '', note: '' };
-let knownCategories = [];
-let knownAccounts = [];
+let formState = {};
 let pickerResolve = null;
-let openTxId = null;
+let openRecId = null;
 let renderTimer = null;
 
 // ── INIT ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator)
     navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/' }).catch(() => {});
-  }
-  loadKnownValues();
   bindEvents();
-  showView('list');
   subscribe();
+  renderAll();
 });
 
-// ── FIREBASE SYNC ──────────────────────────────────────────
+// ── SYNC ───────────────────────────────────────────────────
 function subscribe() {
   const r = ref(db, TX_PATH);
-  onChildAdded(r,   snap => { txMap[snap.key] = { id: snap.key, ...snap.val() }; scheduleRender(); });
-  onChildChanged(r, snap => { txMap[snap.key] = { id: snap.key, ...snap.val() }; scheduleRender(); });
-  onChildRemoved(r, snap => { delete txMap[snap.key]; scheduleRender(); });
+  onChildAdded(r,   s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
+  onChildChanged(r, s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
+  onChildRemoved(r, s => { delete txMap[s.key]; scheduleRender(); });
 }
+function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
 
-function scheduleRender() {
-  clearTimeout(renderTimer);
-  renderTimer = setTimeout(renderList, 60);
-}
+async function saveTx(tx) { await set(push(ref(db, TX_PATH)), tx); }
+async function updateTx(id, tx) { await update(ref(db, `${TX_PATH}/${id}`), tx); }
+async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
 
-async function saveTransaction(tx) {
-  const r = push(ref(db, TX_PATH));
-  await set(r, tx);
-}
-
-async function updateTransaction(id, tx) {
-  await update(ref(db, `${TX_PATH}/${id}`), tx);
-}
-
-async function deleteTransaction(id) {
-  await remove(ref(db, `${TX_PATH}/${id}`));
-}
-
-// ── KNOWN VALUES (localStorage) ────────────────────────────
-function loadKnownValues() {
-  const stored = localStorage.getItem('fin_known');
-  if (stored) {
-    const d = JSON.parse(stored);
-    knownCategories = d.categories || [];
-    knownAccounts   = d.accounts   || [];
-  }
-}
-function saveKnownValues() {
-  localStorage.setItem('fin_known', JSON.stringify({ categories: knownCategories, accounts: knownAccounts }));
-}
-function learnFromTx(tx) {
-  if (tx.category) knownCategories = [tx.category, ...knownCategories.filter(c => c !== tx.category)].slice(0, 80);
-  if (tx.account)  knownAccounts   = [tx.account,  ...knownAccounts.filter(a => a !== tx.account)].slice(0, 40);
-  saveKnownValues();
-}
-// learn categories/accounts from everything synced (so pickers are full)
-function rebuildKnownFromData() {
-  const cats = new Set(knownCategories), accs = new Set(knownAccounts);
+// ── DERIVED ────────────────────────────────────────────────
+function rebuildLookups() {
+  const ce = new Set(), ci = new Set(), pe = new Set(), pi = new Set(), acc = new Set();
   Object.values(txMap).forEach(t => {
-    if (t.category) cats.add(t.category);
-    if (t.account)  accs.add(t.account);
+    if (t.account) acc.add(t.account);
+    if (t.type === 'expense') { if (t.category) { ce.add(t.category); pe.add(parentCat(t.category)); } }
+    else if (t.type === 'income') { if (t.category) { ci.add(t.category); pi.add(parentCat(t.category)); } }
+    else if (t.type === 'transfer') { if (t.category) acc.add(t.category); }
   });
-  knownCategories = [...cats];
-  knownAccounts   = [...accs];
-  saveKnownValues();
+  catsByDir = { expense: [...ce], income: [...ci] };
+  catsParent = { expense: [...pe], income: [...pi] };
+  accountsAll = [...acc];
 }
 
-// ── VIEWS ──────────────────────────────────────────────────
-function showView(name) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(name + '-view').classList.add('active');
+function inPeriod(t) {
+  const d = new Date(t.date);
+  if (state.period === 'all') return true;
+  if (state.period === 'year') return d.getFullYear() === state.cursor.getFullYear();
+  return d.getFullYear() === state.cursor.getFullYear() && d.getMonth() === state.cursor.getMonth();
+}
+function periodTxs() { return Object.values(txMap).filter(inPeriod); }
+
+// ── RENDER ─────────────────────────────────────────────────
+function renderAll() {
+  rebuildLookups();
+  renderHeader();
+  if (state.tab === 'categories') renderCategories();
+  else if (state.tab === 'records') renderRecords();
+  else if (state.tab === 'accounts') renderAccounts();
+  else if (state.tab === 'overview') renderOverview();
+  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records');
 }
 
-// ── RENDER LIST ────────────────────────────────────────────
-function monthTxs() {
-  const y = currentMonth.getFullYear(), m = currentMonth.getMonth();
-  return Object.values(txMap)
-    .filter(t => { const d = new Date(t.date); return d.getFullYear() === y && d.getMonth() === m; })
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+function renderHeader() {
+  let net = 0;
+  Object.values(txMap).forEach(t => {
+    if (t.type === 'expense') net -= Number(t.amount);
+    else if (t.type === 'income') net += Number(t.amount);
+  });
+  document.getElementById('total-amount').innerHTML = `${fmt(net)} <span>UAH</span>`;
+
+  const c = state.cursor;
+  let label, day;
+  if (state.period === 'all') { label = 'ВЕСЬ ЧАС'; day = '∞'; }
+  else if (state.period === 'year') { label = String(c.getFullYear()); day = '365'; }
+  else { label = `${MONTHS[c.getMonth()].toUpperCase()} ${c.getFullYear()}`; day = String(new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate()); }
+  document.getElementById('month-label').textContent = label;
+  document.getElementById('daycount').textContent = day;
 }
 
-function renderList() {
-  const list = document.getElementById('tx-list');
-  const txs = monthTxs();
-  updateHeader(txs);
-  rebuildKnownFromData();
+function renderCategories() {
+  const dir = state.catDir;
+  const txs = periodTxs();
+  const sums = new Map();
+  txs.filter(t => t.type === dir).forEach(t => {
+    const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
+  });
+  const names = [...new Set([...catsParent[dir], ...sums.keys()])];
+  const list = names.map(n => ({ name: n, v: sums.get(n) || 0 }))
+                    .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name));
 
-  if (!txs.length) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>Немає операцій за цей місяць</p></div>`;
-    return;
-  }
+  const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+  const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const segs = list.filter(x => x.v > 0).map(x => ({ v: x.v, c: catStyle(x.name).color }));
+  const main = dir === 'expense' ? expTotal : incTotal;
+  const sub  = dir === 'expense' ? incTotal : expTotal;
+  const mc = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
+  const sc = dir === 'expense' ? 'var(--inc)' : 'var(--exp)';
+
+  const donut = `<div class="donut-cell" id="donut-cell">
+    <div class="donut">${donutSVG(segs)}
+      <div class="donut-center">
+        <div class="donut-label">${dir === 'expense' ? 'Витрати' : 'Доходи'}</div>
+        <div class="donut-main" style="color:${mc}">${fmt(main)} <span>UAH</span></div>
+        <div class="donut-sub" style="color:${sc}">${fmt(sub)} <span>UAH</span></div>
+      </div>
+    </div></div>`;
+
+  const cats = list.map(x => {
+    const st = catStyle(x.name);
+    return `<button class="cat ${x.v ? '' : 'zero'}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
+      <div class="cat-name">${esc(x.name)}</div>
+      <div class="cat-circle">${st.icon}</div>
+      <div class="cat-amt">${fmt(x.v)} <span>UAH</span></div>
+    </button>`;
+  }).join('');
+
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML = donut + cats;
+  document.getElementById('donut-cell').onclick = () => {
+    state.catDir = dir === 'expense' ? 'income' : 'expense';
+    renderCategories();
+  };
+  grid.querySelectorAll('.cat').forEach(el => el.onclick = () => {
+    state.tab = 'records'; syncTabs(); renderAll();
+  });
+}
+
+function donutSVG(segs) {
+  const size = 200, stroke = 22, r = (size - stroke) / 2, C = 2 * Math.PI * r, cx = size / 2;
+  const total = segs.reduce((s, x) => s + x.v, 0);
+  if (total <= 0)
+    return `<svg viewBox="0 0 ${size} ${size}"><circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#eee" stroke-width="${stroke}"/></svg>`;
+  const gap = segs.length > 1 ? 2 : 0;
+  let off = 0;
+  const parts = segs.map(s => {
+    const len = C * s.v / total;
+    const dash = Math.max(len - gap, 0.6);
+    const c = `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${s.c}" stroke-width="${stroke}" stroke-dasharray="${dash} ${C - dash}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cx})"/>`;
+    off += len; return c;
+  });
+  return `<svg viewBox="0 0 ${size} ${size}">${parts.join('')}</svg>`;
+}
+
+const CARD_MINI = '<svg viewBox="0 0 24 24" style="width:15px;height:15px;vertical-align:-2px;stroke:#aaa;fill:none;stroke-width:1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 9h20"/></svg>';
+
+function renderRecords() {
+  const txs = periodTxs().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const el = document.getElementById('rec-list');
+  if (!txs.length) { el.innerHTML = `<div class="empty"><div class="ic">📭</div>Немає операцій за період</div>`; return; }
 
   const groups = {};
-  txs.forEach(tx => {
-    const d = new Date(tx.date);
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    if (!groups[key]) groups[key] = { date: d, txs: [] };
-    groups[key].txs.push(tx);
+  txs.forEach(t => {
+    const d = new Date(t.date);
+    const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    (groups[k] = groups[k] || { d, items: [] }).items.push(t);
   });
 
-  list.innerHTML = Object.values(groups).map(g => {
-    const dayTotal = g.txs.reduce((s, tx) => {
-      if (tx.type === 'expense' || tx.type === 'return') return s - Number(tx.amount);
-      if (tx.type === 'income')  return s + Number(tx.amount);
-      return s;
-    }, 0);
-    const totalClass = dayTotal < 0 ? 'expense' : dayTotal > 0 ? 'income' : '';
-    const totalStr   = (dayTotal > 0 ? '+' : '') + fmtAmt(dayTotal);
-    return `<div class="day-group">
-      <div class="day-header">
-        <span>${fmtDay(g.date)}</span>
-        <span class="day-total" style="color:var(--${totalClass || 'text2'})">${totalStr} ₴</span>
+  el.innerHTML = Object.values(groups).map(g => {
+    const net = g.items.reduce((s, t) => s + (t.type === 'income' ? Number(t.amount) : t.type === 'expense' ? -Number(t.amount) : 0), 0);
+    const col = net > 0 ? 'var(--inc)' : net < 0 ? 'var(--exp)' : 'var(--text2)';
+    return `<div class="rec-day">
+      <div class="rec-day-head">
+        <div class="rec-day-left">
+          <span class="rec-day-num">${g.d.getDate()}</span>
+          <span class="rec-day-meta">${relDay(g.d)}<br>${MONTHS_GEN[g.d.getMonth()].toUpperCase()} ${g.d.getFullYear()}</span>
+        </div>
+        <span class="rec-day-total" style="color:${col}">${fmt(Math.abs(net))} UAH</span>
       </div>
-      ${g.txs.map(txHTML).join('')}
+      ${g.items.map(recItem).join('')}
     </div>`;
   }).join('');
 
-  list.querySelectorAll('.tx-item').forEach(el => {
-    el.addEventListener('click', e => {
-      if (e.target.closest('.tx-delete-btn') || e.target.closest('.tx-edit-btn')) return;
-      const id = el.dataset.id;
-      if (openTxId === id) { el.classList.remove('show-actions'); openTxId = null; }
-      else {
-        document.querySelectorAll('.tx-item.show-actions').forEach(x => x.classList.remove('show-actions'));
-        el.classList.add('show-actions'); openTxId = id;
-      }
-    });
-    const delBtn = el.querySelector('.tx-delete-btn');
-    if (delBtn) delBtn.addEventListener('click', async e => {
-      e.stopPropagation();
-      if (!confirm('Видалити операцію?')) return;
-      try { await deleteTransaction(el.dataset.id); toast('Видалено'); }
-      catch (err) { toast('Помилка: ' + err.message); }
-    });
-    const editBtn = el.querySelector('.tx-edit-btn');
-    if (editBtn) editBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      openAddForm(txMap[el.dataset.id]);
-    });
+  el.querySelectorAll('.rec-item').forEach(it => {
+    it.onclick = e => {
+      if (e.target.closest('.rec-act-btn')) return;
+      const id = it.dataset.id;
+      if (openRecId === id) { it.classList.remove('open'); openRecId = null; }
+      else { el.querySelectorAll('.rec-item.open').forEach(x => x.classList.remove('open')); it.classList.add('open'); openRecId = id; }
+    };
+    it.querySelector('.rec-edit').onclick = () => openForm(txMap[it.dataset.id]);
+    it.querySelector('.rec-del').onclick = async () => { if (confirm('Видалити операцію?')) { await deleteTx(it.dataset.id); toast('Видалено'); } };
   });
 }
 
-function txHTML(tx) {
-  const emoji = getCategoryEmoji(tx.category || tx.account || '');
-  const typeClass = tx.type === 'return' ? 'income' : (tx.type || 'expense');
-  const sign  = tx.type === 'expense' ? '−' : tx.type === 'income' ? '+' : '';
-  const sub   = tx.type === 'transfer'
-    ? `${tx.account} → ${tx.category}`
-    : `${tx.account || ''}${tx.note ? (tx.account ? ' · ' : '') + tx.note : ''}`;
-  return `<div class="tx-item" data-id="${tx.id}">
-    <div class="tx-icon ${typeClass}">${emoji}</div>
-    <div class="tx-info">
-      <div class="tx-cat">${escHtml(tx.category || tx.account || '—')}</div>
-      ${sub ? `<div class="tx-sub">${escHtml(sub)}</div>` : ''}
+function recItem(t) {
+  const st = catStyle(t.category || t.account);
+  const sign = t.type === 'expense' ? '−' : t.type === 'income' ? '+' : '';
+  const col = t.type === 'expense' ? 'var(--exp)' : t.type === 'income' ? 'var(--inc)' : '#2f80ed';
+  const sub = t.type === 'transfer' ? `${esc(t.account)} → ${esc(t.category)}` : `${CARD_MINI} ${esc(t.account || '')}`;
+  return `<div class="rec-item" data-id="${t.id}">
+    <div class="rec-icon" style="--c:${st.color}">${st.icon}</div>
+    <div class="rec-info">
+      <div class="rec-cat">${esc(t.category || t.account || '—')}</div>
+      <div class="rec-acc">${sub}</div>
+      ${t.note ? `<div class="rec-note">${esc(t.note)}</div>` : ''}
     </div>
-    <span class="tx-amount ${typeClass}">${sign}${fmtAmt(tx.amount)} ₴</span>
-    <div class="tx-actions">
-      <button class="tx-edit-btn" title="Редагувати">✎</button>
-      <button class="tx-delete-btn" title="Видалити">✕</button>
+    <span class="rec-amt" style="color:${col}">${sign}${fmt(t.amount)} <span style="font-size:11px;color:var(--text3)">UAH</span></span>
+    <div class="rec-actions">
+      <button class="rec-act-btn rec-edit">✎</button>
+      <button class="rec-act-btn rec-del">✕</button>
     </div>
   </div>`;
 }
 
-function updateHeader(txs) {
-  document.getElementById('month-label').textContent =
-    `${MONTHS_UK[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
-  const exp = txs.filter(t => t.type === 'expense' || t.type === 'return').reduce((s, t) => s + Number(t.amount), 0);
-  const inc = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  document.getElementById('total-exp').textContent = fmtAmt(exp) + ' ₴';
-  document.getElementById('total-inc').textContent = fmtAmt(inc) + ' ₴';
-  const bal = inc - exp;
-  const balEl = document.getElementById('total-bal');
-  balEl.textContent = (bal >= 0 ? '+' : '') + fmtAmt(bal) + ' ₴';
-  balEl.style.color = bal >= 0 ? 'var(--income)' : 'var(--expense)';
+function renderAccounts() {
+  const bal = {};
+  Object.values(txMap).forEach(t => {
+    const a = t.account, amt = Number(t.amount);
+    if (t.type === 'expense') bal[a] = (bal[a] || 0) - amt;
+    else if (t.type === 'income') bal[a] = (bal[a] || 0) + amt;
+    else if (t.type === 'transfer') { bal[a] = (bal[a] || 0) - amt; bal[t.category] = (bal[t.category] || 0) + amt; }
+  });
+  const list = Object.entries(bal).sort((a, b) => b[1] - a[1]);
+  const total = list.reduce((s, x) => s + x[1], 0);
+  const el = document.getElementById('acc-list');
+  el.innerHTML = `<div class="acc-section-title">Рахунки<span class="acc-section-sum" style="color:${total < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(total)} UAH</span></div>`
+    + list.map(([name, v]) => {
+      const st = catStyle(name);
+      return `<div class="acc-row">
+        <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
+        <div class="acc-name">${esc(name)}</div>
+        <div class="acc-bal" style="color:${v < 0 ? 'var(--exp)' : 'var(--text)'}">${fmt(v)} <span style="font-size:11px;color:var(--text3)">UAH</span></div>
+      </div>`;
+    }).join('')
+    + `<div class="empty" style="padding:24px 20px;font-size:13px">Баланси пораховані з операцій (без стартових залишків 1money).</div>`;
 }
 
-// ── ADD / EDIT FORM ────────────────────────────────────────
-function openAddForm(tx = null) {
+function renderOverview() {
+  const dir = state.ovDir;
+  const txs = periodTxs();
+  const exp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+  const inc = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const balance = inc - exp;
+
+  const sums = new Map();
+  txs.filter(t => t.type === dir).forEach(t => { const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount)); });
+  const list = [...sums.entries()].map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
+  const total = dir === 'expense' ? exp : inc;
+
+  const breakdown = list.map(x => {
+    const st = catStyle(x.name);
+    const pct = total ? Math.round(x.v / total * 100) : 0;
+    return `<div class="ov-cat">
+      <div class="ov-cat-ic" style="--c:${st.color}">${st.icon}</div>
+      <div class="ov-cat-body">
+        <div class="ov-cat-top"><span>${esc(x.name)}</span><span class="ov-cat-amt">${fmt(x.v)} <span>UAH</span></span></div>
+        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${pct}%"></div><span class="ov-pct">${pct}%</span></div>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
+
+  document.getElementById('ov-wrap').innerHTML = `
+    <div class="ov-balance-label">Баланс</div>
+    <div class="ov-balance" style="color:${balance < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(balance)} UAH</div>
+    <div class="ov-toggle">
+      <button class="ov-tg ${dir === 'expense' ? 'exp' : 'dim'}" data-ov="expense"><div class="l">Витрати</div><div class="v">${fmt(exp)} UAH</div></button>
+      <button class="ov-tg ${dir === 'income' ? 'inc' : 'dim'}" data-ov="income"><div class="l">Доходи</div><div class="v">${fmt(inc)} UAH</div></button>
+    </div>
+    ${breakdown}`;
+
+  document.querySelectorAll('#ov-wrap .ov-tg').forEach(b => b.onclick = () => { state.ovDir = b.dataset.ov; renderOverview(); });
+}
+
+// ── TABS ───────────────────────────────────────────────────
+function syncTabs() {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === state.tab + '-screen'));
+}
+
+// ── ADD / EDIT ─────────────────────────────────────────────
+function openForm(tx = null) {
   editingTx = tx;
   formState = tx ? {
-    type: tx.type, category: tx.type === 'transfer' ? '' : (tx.category || ''),
-    account: tx.account || '', toAccount: tx.type === 'transfer' ? (tx.category || '') : '',
-    date: tx.date ? toLocalInput(tx.date) : nowLocal(), note: tx.note || ''
-  } : { type: 'expense', category: '', account: '', toAccount: '', date: nowLocal(), note: '' };
-
+    type: tx.type,
+    category: tx.type === 'transfer' ? '' : (tx.category || ''),
+    account: tx.account || '',
+    toAccount: tx.type === 'transfer' ? (tx.category || '') : '',
+    date: toLocal(tx.date), note: tx.note || ''
+  } : { type: state.catDir === 'income' ? 'income' : 'expense', category: '', account: '', toAccount: '', date: nowLocal(), note: '' };
   document.getElementById('add-title').textContent = tx ? 'Редагувати' : 'Нова операція';
   document.getElementById('amount-input').value = tx ? tx.amount : '';
-  setFormType(formState.type);
-  updateFormFields();
-  showView('add');
+  setType(formState.type);
+  fillForm();
+  document.getElementById('add-view').classList.add('active');
   if (!tx) setTimeout(() => document.getElementById('amount-input').focus(), 300);
 }
-
-function setFormType(type) {
-  formState.type = type;
-  document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
-  document.getElementById('field-to-account').style.display = type === 'transfer' ? '' : 'none';
-  document.getElementById('field-category').style.display   = type === 'transfer' ? 'none' : '';
+function closeForm() { document.getElementById('add-view').classList.remove('active'); editingTx = null; }
+function setType(t) {
+  formState.type = t;
+  document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === t));
+  document.getElementById('field-to-account').style.display = t === 'transfer' ? '' : 'none';
+  document.getElementById('field-category').style.display = t === 'transfer' ? 'none' : '';
 }
-
-function updateFormFields() {
-  const catVal = document.getElementById('cat-value');
-  catVal.textContent = formState.category || 'Обрати';
-  catVal.className = 'field-value' + (formState.category ? '' : ' placeholder');
-  document.getElementById('cat-icon').textContent = getCategoryEmoji(formState.category);
-  const accVal = document.getElementById('acc-value');
-  accVal.textContent = formState.account || 'Обрати';
-  accVal.className = 'field-value' + (formState.account ? '' : ' placeholder');
-  const toVal = document.getElementById('to-acc-value');
-  toVal.textContent = formState.toAccount || 'Обрати';
-  toVal.className = 'field-value' + (formState.toAccount ? '' : ' placeholder');
+function fillForm() {
+  const set1 = (id, val) => { const e = document.getElementById(id); e.textContent = val || 'Обрати'; e.className = 'field-value' + (val ? '' : ' placeholder'); };
+  set1('cat-value', formState.category);
+  set1('acc-value', formState.account);
+  set1('to-acc-value', formState.toAccount);
+  document.getElementById('cat-icon').textContent = '🏷️';
   document.getElementById('date-input').value = formState.date || nowLocal();
   document.getElementById('note-input').value = formState.note;
 }
-
 async function submitForm() {
   const amount = parseFloat(document.getElementById('amount-input').value.replace(',', '.'));
-  if (!amount || amount <= 0) { toast('Введи суму'); return; }
-  const dateVal = document.getElementById('date-input').value;
-  const note    = document.getElementById('note-input').value.trim();
-  if (formState.type !== 'transfer' && !formState.category) { toast('Оберіть категорію'); return; }
-  if (!formState.account) { toast('Оберіть рахунок'); return; }
-  if (formState.type === 'transfer' && !formState.toAccount) { toast('Оберіть рахунок призначення'); return; }
-
+  if (!amount || amount <= 0) return toast('Введи суму');
+  if (formState.type !== 'transfer' && !formState.category) return toast('Оберіть категорію');
+  if (!formState.account) return toast('Оберіть рахунок');
+  if (formState.type === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
+  const dv = document.getElementById('date-input').value;
+  const note = document.getElementById('note-input').value.trim();
   const tx = {
-    type: formState.type,
-    amount,
+    type: formState.type, amount,
     account: formState.account,
     category: formState.type === 'transfer' ? formState.toAccount : formState.category,
-    date: dateVal ? new Date(dateVal).toISOString() : new Date().toISOString(),
+    date: dv ? new Date(dv).toISOString() : new Date().toISOString(),
     note: note || null,
   };
-
-  const btn = document.getElementById('add-save');
-  btn.disabled = true;
+  const btn = document.getElementById('add-save'); btn.disabled = true;
   try {
-    if (editingTx) { await updateTransaction(editingTx.id, tx); toast('Оновлено ✓'); }
-    else { await saveTransaction(tx); toast('Збережено ✓'); }
-    learnFromTx(tx);
-    editingTx = null;
-    showView('list');
-  } catch (e) {
-    toast('Помилка: ' + e.message);
-  } finally {
-    btn.disabled = false;
-  }
+    if (editingTx) { await updateTx(editingTx.id, tx); toast('Оновлено ✓'); }
+    else { await saveTx(tx); toast('Збережено ✓'); }
+    closeForm();
+  } catch (e) { toast('Помилка: ' + e.message); }
+  finally { btn.disabled = false; }
 }
 
-// ── PICKER ────────────────────────────────────────────────
+// ── PICKER ─────────────────────────────────────────────────
 function openPicker(title, items) {
-  return new Promise(resolve => {
-    pickerResolve = resolve;
+  return new Promise(res => {
+    pickerResolve = res;
     document.getElementById('sheet-title').textContent = title;
     document.getElementById('sheet-search').value = '';
-    renderPickerList(items);
+    drawPicker(items);
     document.getElementById('sheet-overlay').classList.add('open');
-    const search = document.getElementById('sheet-search');
-    search.oninput = () => renderPickerList(
-      items.filter(i => i.toLowerCase().includes(search.value.toLowerCase())), search.value);
-    setTimeout(() => search.focus(), 200);
+    const s = document.getElementById('sheet-search');
+    s.oninput = () => drawPicker(items.filter(i => i.toLowerCase().includes(s.value.toLowerCase())), s.value);
+    setTimeout(() => s.focus(), 200);
   });
 }
-function renderPickerList(items, newValue = '') {
+function drawPicker(items, nv = '') {
   const list = document.getElementById('sheet-list');
-  const rows = items.map(item => `
-    <div class="sheet-item" data-val="${escHtml(item)}">
-      <span class="sheet-item-icon">${getCategoryEmoji(item)}</span><span>${escHtml(item)}</span>
-    </div>`).join('');
-  const addNew = newValue && !items.includes(newValue)
-    ? `<div class="sheet-item" data-val="${escHtml(newValue)}">
-        <span class="sheet-item-icon">➕</span><span>Додати «${escHtml(newValue)}»</span></div>` : '';
-  list.innerHTML = rows + addNew;
-  list.querySelectorAll('.sheet-item').forEach(el =>
-    el.addEventListener('click', () => closePicker(el.dataset.val)));
+  const rows = items.map(i => { const st = catStyle(i); return `<div class="sheet-item" data-v="${escAttr(i)}"><span class="sheet-item-ic" style="--c:${st.color}">${st.icon}</span><span>${esc(i)}</span></div>`; }).join('');
+  const add = nv && !items.includes(nv) ? `<div class="sheet-item" data-v="${escAttr(nv)}"><span class="sheet-item-ic" style="--c:#bbb">${ic('tag')}</span><span>Додати «${esc(nv)}»</span></div>` : '';
+  list.innerHTML = rows + add;
+  list.querySelectorAll('.sheet-item').forEach(el => el.onclick = () => closePicker(el.dataset.v));
 }
-function closePicker(value) {
-  document.getElementById('sheet-overlay').classList.remove('open');
-  if (pickerResolve) { pickerResolve(value); pickerResolve = null; }
-}
+function closePicker(v) { document.getElementById('sheet-overlay').classList.remove('open'); if (pickerResolve) { pickerResolve(v); pickerResolve = null; } }
 
-// ── IMPORT ────────────────────────────────────────────────
-const TYPE_MAP = {
-  'витрата':'expense','expense':'expense','дохід':'income','income':'income',
-  'переказ':'transfer','transfer':'transfer','повернення':'return','return':'return',
-  'інше':'other','other':'other',
-};
+// ── IMPORT ─────────────────────────────────────────────────
+const TYPE_MAP = { 'витрата':'expense','expense':'expense','дохід':'income','income':'income','переказ':'transfer','transfer':'transfer','повернення':'return','return':'return' };
 
-// Native 1money export: ДАТА,ТИП,З РАХУНКУ,НА РАХУНОК/ДО КАТЕГОРІЇ,КІЛЬКІСТЬ,
-//                       ВАЛЮТА,КІЛЬКІСТЬ 2,ВАЛЮТА 2,ПОМІТКИ,НОТАТКИ
 function parse1money(lines, h) {
   const col = n => h.indexOf(n);
-  const iDate = col('дата'), iType = col('тип'), iFrom = col('з рахунку'),
-        iTo = col('на рахунок/до категорії'), iAmt = col('кількість'), iCur = col('валюта'),
-        iAmt2 = col('кількість 2'), iCur2 = col('валюта 2'),
-        iTags = col('помітки'), iNote = col('нотатки');
+  const I = { date: col('дата'), type: col('тип'), from: col('з рахунку'), to: col('на рахунок/до категорії'), amt: col('кількість'), cur: col('валюта'), amt2: col('кількість 2'), cur2: col('валюта 2'), tags: col('помітки'), note: col('нотатки') };
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const c = parseCSVLine(lines[i]);
-    const type = TYPE_MAP[(c[iType] || '').trim().toLowerCase()];
-    if (!type) continue;                         // skips balance section + junk lines
-    const m = (c[iDate] || '').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+    const c = parseLine(lines[i]);
+    const type = TYPE_MAP[(c[I.type] || '').trim().toLowerCase()];
+    if (!type) continue;
+    const m = (c[I.date] || '').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
     if (!m) continue;
     const yr = m[3].length === 2 ? '20' + m[3] : m[3];
-    const dateISO = `${yr}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T12:00:00`;
-    const origCur = (c[iCur] || '').trim();
-    const cur2 = (c[iCur2] || '').trim();
+    const iso = new Date(`${yr}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T12:00:00`).toISOString();
+    const oc = (c[I.cur] || '').trim(), c2 = (c[I.cur2] || '').trim();
     let amount, foreign = '';
-    if (origCur === 'UAH' || origCur === '') {
-      amount = parseFloat((c[iAmt] || '0').replace(',', '.'));
-    } else if (cur2 === 'UAH') {                  // use UAH-converted value
-      amount = parseFloat((c[iAmt2] || '0').replace(',', '.'));
-      foreign = `${c[iAmt]} ${origCur}`;
-    } else {                                      // both foreign (rare currency-exchange)
-      amount = parseFloat((c[iAmt] || '0').replace(',', '.'));
-      foreign = `${c[iAmt]} ${origCur}`;
-    }
+    if (oc === 'UAH' || oc === '') amount = parseFloat((c[I.amt] || '0').replace(',', '.'));
+    else if (c2 === 'UAH') { amount = parseFloat((c[I.amt2] || '0').replace(',', '.')); foreign = `${c[I.amt]} ${oc}`; }
+    else { amount = parseFloat((c[I.amt] || '0').replace(',', '.')); foreign = `${c[I.amt]} ${oc}`; }
     if (!amount) continue;
-    const note = [(c[iNote]||'').trim(), (c[iTags]||'').trim(), foreign].filter(Boolean).join(' · ');
-    rows.push({
-      date: new Date(dateISO).toISOString(), type,
-      account: (c[iFrom] || '').trim() || null,
-      category: (c[iTo] || '').trim() || null,
-      amount, note: note || null,
-    });
+    const note = [(c[I.note] || '').trim(), (c[I.tags] || '').trim(), foreign].filter(Boolean).join(' · ');
+    rows.push({ date: iso, type, account: (c[I.from] || '').trim() || null, category: (c[I.to] || '').trim() || null, amount, note: note || null });
   }
   return rows;
 }
-
-// Our own format: date,type,account,category,amount,note
 function parseSimple(lines, h) {
-  const idx = { date:h.indexOf('date'), type:h.indexOf('type'), account:h.indexOf('account'),
-                category:h.indexOf('category'), amount:h.indexOf('amount'), note:h.indexOf('note') };
+  const I = { date: h.indexOf('date'), type: h.indexOf('type'), account: h.indexOf('account'), category: h.indexOf('category'), amount: h.indexOf('amount'), note: h.indexOf('note') };
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const c = parseCSVLine(lines[i]);
-    const amount = parseFloat((c[idx.amount] || '0').replace(',', '.'));
+    const c = parseLine(lines[i]);
+    const amount = parseFloat((c[I.amount] || '0').replace(',', '.'));
     if (!amount) continue;
-    rows.push({
-      date: new Date(c[idx.date] || Date.now()).toISOString(),
-      type: TYPE_MAP[(c[idx.type]||'').trim().toLowerCase()] || 'expense',
-      account: c[idx.account]?.trim() || null,
-      category: c[idx.category]?.trim() || null,
-      amount, note: c[idx.note]?.trim() || null,
-    });
+    rows.push({ date: new Date(c[I.date] || Date.now()).toISOString(), type: TYPE_MAP[(c[I.type] || '').trim().toLowerCase()] || 'expense', account: c[I.account]?.trim() || null, category: c[I.category]?.trim() || null, amount, note: c[I.note]?.trim() || null });
   }
   return rows;
 }
-
 async function importCSV(file) {
   const text = await file.text();
   const lines = text.split(/\r?\n/).filter(l => l.trim());
-  const h = parseCSVLine(lines[0].replace(/^﻿/, '')).map(x => x.trim().toLowerCase());
-  const isNative = h.includes('з рахунку') || h.includes('на рахунок/до категорії');
-  const rows = isNative ? parse1money(lines, h) : parseSimple(lines, h);
+  const h = parseLine(lines[0].replace(/^﻿/, '')).map(x => x.trim().toLowerCase());
+  const native = h.includes('з рахунку') || h.includes('на рахунок/до категорії');
+  const rows = native ? parse1money(lines, h) : parseSimple(lines, h);
 
-  const prog = document.getElementById('import-progress');
-  const bar  = document.getElementById('progress-bar');
-  const statusEl = document.getElementById('import-status');
-  const titleEl  = document.getElementById('import-progress-text');
-  prog.style.display = '';
-  titleEl.textContent = `Завантаження ${rows.length} операцій...`;
+  const box = document.getElementById('import-progress');
+  const bar = document.getElementById('progress-bar');
+  const st = document.getElementById('import-status');
+  const tt = document.getElementById('import-progress-text');
+  box.style.display = ''; tt.textContent = `Завантаження ${rows.length} операцій...`;
 
-  const BATCH = 500;
-  let done = 0;
+  const BATCH = 500; let done = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
-    const batch = rows.slice(i, i + BATCH);
-    const updates = {};
-    for (const row of batch) {
-      const key = push(ref(db, TX_PATH)).key;
-      updates[key] = row;
-    }
-    await update(ref(db, TX_PATH), updates);
-    done += batch.length;
-    const pct = Math.round(done / rows.length * 100);
-    bar.style.width = pct + '%';
-    statusEl.textContent = `${done} / ${rows.length}`;
+    const upd = {};
+    for (const row of rows.slice(i, i + BATCH)) upd[push(ref(db, TX_PATH)).key] = row;
+    await update(ref(db, TX_PATH), upd);
+    done += Object.keys(upd).length;
+    bar.style.width = Math.round(done / rows.length * 100) + '%';
+    st.textContent = `${done} / ${rows.length}`;
   }
-  titleEl.textContent = `✓ Імпортовано ${done} операцій`;
-  document.getElementById('import-result').style.display = '';
+  tt.textContent = `✓ Імпортовано ${done} операцій`;
   toast('Імпорт завершено!');
 }
-
-function parseCSVLine(line) {
-  const result = []; let cur = ''; let q = false;
+function parseLine(line) {
+  const out = []; let cur = '', q = false;
   for (let i = 0; i < line.length; i++) {
     if (line[i] === '"') { q = !q; continue; }
-    if (line[i] === ',' && !q) { result.push(cur); cur = ''; continue; }
+    if (line[i] === ',' && !q) { out.push(cur); cur = ''; continue; }
     cur += line[i];
   }
-  result.push(cur);
-  return result;
+  out.push(cur); return out;
 }
 
-// ── BIND EVENTS ────────────────────────────────────────────
+// ── EVENTS ─────────────────────────────────────────────────
 function bindEvents() {
-  document.getElementById('prev-month').addEventListener('click', () => {
-    currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); renderList();
-  });
-  document.getElementById('next-month').addEventListener('click', () => {
-    currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); renderList();
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.tab = t.dataset.tab; syncTabs(); renderAll(); });
+
+  document.getElementById('prev-month').onclick = () => shift(-1);
+  document.getElementById('next-month').onclick = () => shift(1);
+
+  document.getElementById('fab').onclick = () => openForm();
+  document.getElementById('add-close').onclick = closeForm;
+  document.getElementById('add-save').onclick = submitForm;
+  document.querySelectorAll('.type-btn').forEach(b => b.onclick = () => { setType(b.dataset.type); fillForm(); });
+
+  document.getElementById('field-category').onclick = async () => {
+    const items = formState.type === 'income' ? catsByDir.income : catsByDir.expense;
+    const v = await openPicker('Категорія', [...items]); if (v) { formState.category = v; fillForm(); }
+  };
+  document.getElementById('field-account').onclick = async () => { const v = await openPicker('Рахунок', [...accountsAll]); if (v) { formState.account = v; fillForm(); } };
+  document.getElementById('field-to-account').onclick = async () => { const v = await openPicker('На рахунок', [...accountsAll]); if (v) { formState.toAccount = v; fillForm(); } };
+
+  document.getElementById('sheet-overlay').onclick = e => { if (e.target.id === 'sheet-overlay') closePicker(null); };
+
+  document.getElementById('btn-period').onclick = openPeriod;
+  document.getElementById('period-overlay').onclick = e => { if (e.target.id === 'period-overlay') e.currentTarget.classList.remove('open'); };
+  document.querySelectorAll('.period-btn').forEach(b => b.onclick = () => {
+    state.period = b.dataset.period;
+    document.getElementById('period-overlay').classList.remove('open');
+    renderAll();
   });
 
-  document.getElementById('add-btn').addEventListener('click', () => openAddForm());
-  document.getElementById('add-close').addEventListener('click', () => { editingTx = null; showView('list'); });
-  document.getElementById('add-save').addEventListener('click', submitForm);
+  const toAcc = () => { state.tab = 'accounts'; syncTabs(); renderAll(); };
+  document.getElementById('btn-accounts-filter').onclick = toAcc;
+  document.getElementById('btn-accounts-filter2').onclick = toAcc;
 
-  document.querySelectorAll('.type-btn').forEach(btn =>
-    btn.addEventListener('click', () => { setFormType(btn.dataset.type); updateFormFields(); }));
+  document.getElementById('btn-profile').onclick = () => document.getElementById('settings-overlay').classList.add('open');
+  document.getElementById('settings-overlay').onclick = e => { if (e.target.id === 'settings-overlay') e.currentTarget.classList.remove('open'); };
+  document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
+  document.getElementById('import-file').onchange = e => { const f = e.target.files[0]; if (f) importCSV(f); };
 
-  document.getElementById('field-category').addEventListener('click', async () => {
-    const val = await openPicker('Категорія', [...knownCategories]);
-    if (val) { formState.category = val; updateFormFields(); }
-  });
-  document.getElementById('field-account').addEventListener('click', async () => {
-    const val = await openPicker('Рахунок', [...knownAccounts]);
-    if (val) { formState.account = val; updateFormFields(); }
-  });
-  document.getElementById('field-to-account').addEventListener('click', async () => {
-    const val = await openPicker('На рахунок', [...knownAccounts]);
-    if (val) { formState.toAccount = val; updateFormFields(); }
-  });
-
-  document.getElementById('sheet-overlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('sheet-overlay')) closePicker(null);
-  });
-
-  document.getElementById('nav-settings').addEventListener('click', () => showView('settings'));
-  document.getElementById('nav-list').addEventListener('click', () => showView('list'));
-  document.getElementById('nav-list-from-settings').addEventListener('click', () => showView('list'));
-
-  document.getElementById('btn-import').addEventListener('click', () => {
-    document.getElementById('import-progress').style.display = 'none';
-    document.getElementById('import-result').style.display = 'none';
-    document.getElementById('progress-bar').style.width = '0%';
-    showView('import');
-  });
-
-  document.getElementById('import-back').addEventListener('click', () => showView('settings'));
-  document.getElementById('import-back2').addEventListener('click', () => showView('settings'));
-  document.getElementById('import-zone').addEventListener('click', () => document.getElementById('import-file').click());
-  document.getElementById('import-file').addEventListener('change', e => {
-    const file = e.target.files[0]; if (file) importCSV(file);
-  });
-
-  document.getElementById('tx-list').addEventListener('click', e => {
-    if (!e.target.closest('.tx-item')) {
-      document.querySelectorAll('.tx-item.show-actions').forEach(x => x.classList.remove('show-actions'));
-      openTxId = null;
-    }
-  });
-
-  document.getElementById('amount-input').addEventListener('input', function() {
-    this.value = this.value.replace(/[^0-9.,]/g, '');
-  });
+  document.getElementById('amount-input').oninput = function () { this.value = this.value.replace(/[^0-9.,]/g, ''); };
+}
+function shift(d) {
+  if (state.period === 'all') return;
+  if (state.period === 'year') state.cursor = new Date(state.cursor.getFullYear() + d, 0, 1);
+  else state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + d, 1);
+  renderAll();
+}
+function openPeriod() {
+  const c = state.cursor;
+  document.getElementById('pb-month-day').textContent = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
+  document.getElementById('pb-month-sub').textContent = `${MONTHS[c.getMonth()]} ${c.getFullYear()}`;
+  document.getElementById('pb-year-sub').textContent = `Рік ${c.getFullYear()}`;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === state.period));
+  document.getElementById('period-overlay').classList.add('open');
 }
 
 // ── HELPERS ────────────────────────────────────────────────
-function fmtAmt(n) { return Math.abs(n).toLocaleString('uk-UA', { maximumFractionDigits: 0 }); }
-function fmtDay(d) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const yday = new Date(today); yday.setDate(today.getDate() - 1);
-  const dd = new Date(d); dd.setHours(0,0,0,0);
-  if (dd.getTime() === today.getTime()) return 'Сьогодні';
-  if (dd.getTime() === yday.getTime())  return 'Вчора';
-  return `${d.getDate()} ${MONTHS_UK[d.getMonth()].toLowerCase()}`;
+function fmt(n) { const v = Math.round(Number(n) || 0); return v.toLocaleString('uk-UA').replace(/,/g, ' '); }
+function relDay(d) {
+  const t = new Date(); t.setHours(0,0,0,0);
+  const y = new Date(t); y.setDate(t.getDate() - 1);
+  const x = new Date(d); x.setHours(0,0,0,0);
+  if (x.getTime() === t.getTime()) return 'СЬОГОДНІ';
+  if (x.getTime() === y.getTime()) return 'ВЧОРА';
+  return WEEKDAYS[d.getDay()].toUpperCase();
 }
-function nowLocal() {
-  const d = new Date(); const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function toLocalInput(iso) {
-  const d = new Date(iso); const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function getCategoryEmoji(name) {
-  if (!name) return '💳';
-  const key = name.toLowerCase().trim();
-  for (const [k, v] of Object.entries(CATEGORY_EMOJI)) if (key.includes(k)) return v;
-  return '🏷️';
-}
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-let toastTimer;
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
-}
+function nowLocal() { const d = new Date(), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function toLocal(iso) { const d = new Date(iso), p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return esc(s).replace(/"/g,'&quot;'); }
+let tT;
+function toast(m) { const e = document.getElementById('toast'); e.textContent = m; e.classList.add('show'); clearTimeout(tT); tT = setTimeout(() => e.classList.remove('show'), 2400); }

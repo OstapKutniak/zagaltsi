@@ -2,11 +2,11 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Фінанси">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#f4f4f7">
   <title>Фінанси</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,45 +15,75 @@
 <body>
 <div id="app">
 
-  <!-- LIST -->
-  <div class="view" id="list-view">
-    <div class="header">
-      <div class="header-month">
-        <button class="month-nav" id="prev-month">‹</button>
-        <span class="month-label" id="month-label">Червень 2026</span>
-        <button class="month-nav" id="next-month">›</button>
+  <!-- HEADER -->
+  <div class="header">
+    <div class="topbar">
+      <button class="icon-btn" id="btn-profile" title="Налаштування">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+      <div class="total" id="btn-accounts-filter">
+        <div class="total-label">Всі рахунки</div>
+        <div class="total-amount" id="total-amount">0 <span>UAH</span></div>
       </div>
-      <div class="balance-row">
-        <div class="balance-card exp">
-          <div class="label">Витрати</div>
-          <div class="amount" id="total-exp">0 ₴</div>
-        </div>
-        <div class="balance-card inc">
-          <div class="label">Доходи</div>
-          <div class="amount" id="total-inc">0 ₴</div>
-        </div>
-        <div class="balance-card total">
-          <div class="label">Баланс</div>
-          <div class="amount" id="total-bal">0 ₴</div>
-        </div>
-      </div>
+      <button class="icon-btn" id="btn-accounts-filter2" title="Рахунки">
+        <svg viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/></svg>
+      </button>
     </div>
-    <div class="list-scroll" id="tx-list"></div>
-    <div class="bottom-nav">
-      <button class="nav-btn active" id="nav-list">
-        <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
-        Список
+    <div class="month-row">
+      <button class="mchevron" id="prev-month">«</button>
+      <button class="month-pill" id="btn-period">
+        <span class="daycount" id="daycount">30</span>
+        <span id="month-label">ЧЕРВЕНЬ 2026</span>
+        <span class="caret">▼</span>
       </button>
-      <button class="fab" id="add-btn">+</button>
-      <button class="nav-btn" id="nav-settings">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Налашт.
-      </button>
+      <button class="mchevron" id="next-month">»</button>
     </div>
   </div>
 
-  <!-- ADD FORM -->
-  <div class="view" id="add-view">
+  <!-- CATEGORIES -->
+  <div class="screen active" id="categories-screen">
+    <div class="cat-grid" id="cat-grid"></div>
+  </div>
+
+  <!-- RECORDS -->
+  <div class="screen" id="records-screen">
+    <div class="rec-scroll" id="rec-list"></div>
+  </div>
+
+  <!-- ACCOUNTS -->
+  <div class="screen" id="accounts-screen">
+    <div id="acc-list"></div>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="screen" id="overview-screen">
+    <div class="ov-wrap" id="ov-wrap"></div>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tabbar">
+    <button class="tab" data-tab="accounts">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/></svg></span>
+      Рахунки
+    </button>
+    <button class="tab active" data-tab="categories">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 109 9h-9z"/><path d="M12 3v9h9"/></svg></span>
+      Категорії
+    </button>
+    <button class="tab" data-tab="records">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6"/></svg></span>
+      Операції
+    </button>
+    <button class="tab" data-tab="overview">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></svg></span>
+      Огляд
+    </button>
+  </div>
+
+  <button class="fab show" id="fab">+</button>
+
+  <!-- ADD / EDIT FORM -->
+  <div class="sheet-full" id="add-view">
     <div class="form-header">
       <button class="form-close" id="add-close">Скасувати</button>
       <span class="form-title" id="add-title">Нова операція</span>
@@ -61,7 +91,7 @@
     </div>
     <div class="type-toggle">
       <button class="type-btn active expense" data-type="expense">Витрата</button>
-      <button class="type-btn income"  data-type="income">Дохід</button>
+      <button class="type-btn income" data-type="income">Дохід</button>
       <button class="type-btn transfer" data-type="transfer">Переказ</button>
     </div>
     <div class="amount-block">
@@ -86,10 +116,10 @@
         </div>
       </div>
       <div class="form-row">
-        <div class="form-field" id="field-date">
+        <div class="form-field">
           <span class="field-icon">📅</span>
           <span class="field-label">Дата</span>
-          <input class="field-input" id="date-input" type="datetime-local" style="color:var(--text);">
+          <input class="field-input" id="date-input" type="datetime-local">
         </div>
       </div>
       <div class="form-row">
@@ -102,63 +132,7 @@
     </div>
   </div>
 
-  <!-- SETTINGS -->
-  <div class="view" id="settings-view">
-    <div class="settings-header">Налаштування</div>
-    <div class="settings-section-label">Дані</div>
-    <div class="settings-section">
-      <div class="settings-row" id="btn-import">
-        <span class="settings-row-icon">⬆️</span>
-        <div class="settings-row-text">Імпорт CSV</div>
-        <span class="settings-row-arrow">›</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-row-icon">🔗</span>
-        <div>
-          <div class="settings-row-text">Синхронізація</div>
-          <div class="settings-row-sub">Firebase · horugva-ff8bd</div>
-        </div>
-        <span class="settings-row-arrow" style="color:var(--income)">●</span>
-      </div>
-    </div>
-    <div class="bottom-nav">
-      <button class="nav-btn" id="nav-list-from-settings">
-        <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
-        Список
-      </button>
-      <div style="width:52px"></div>
-      <button class="nav-btn active" id="nav-settings-2">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Налашт.
-      </button>
-    </div>
-  </div>
-
-  <!-- IMPORT -->
-  <div class="view" id="import-view">
-    <div class="import-header">
-      <button class="import-back" id="import-back">‹</button>
-      <span class="import-title">Імпорт CSV</span>
-    </div>
-    <div class="import-body">
-      <div class="import-zone" id="import-zone">
-        <div class="icon">📂</div>
-        <p><b>Обрати CSV файл</b></p>
-        <p style="margin-top:8px;font-size:13px">Формат: date, type, account, category, amount, note</p>
-      </div>
-      <input type="file" id="import-file" accept=".csv,.txt">
-      <div class="import-progress" id="import-progress" style="display:none">
-        <div id="import-progress-text" style="font-size:15px;font-weight:600;text-align:center">Завантаження...</div>
-        <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
-        <div class="import-status" id="import-status">0 / 0</div>
-      </div>
-      <div id="import-result" style="display:none;margin-top:16px">
-        <button class="btn btn-secondary" id="import-back2">← Назад до налаштувань</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- PICKER SHEET -->
+  <!-- PICKER / GENERIC SHEET -->
   <div class="sheet-overlay" id="sheet-overlay">
     <div class="sheet">
       <div class="sheet-handle"></div>
@@ -168,6 +142,54 @@
     </div>
   </div>
 
+  <!-- PERIOD SHEET -->
+  <div class="sheet-overlay" id="period-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Період</div>
+      <div class="period-grid">
+        <button class="period-btn wide" data-period="month" id="pb-month">
+          <div class="pb-ic" id="pb-month-day">30</div>
+          <div class="pb-lbl">Місяць</div>
+          <div class="pb-sub" id="pb-month-sub">Червень 2026</div>
+        </button>
+        <button class="period-btn" data-period="all">
+          <div class="pb-ic">∞</div>
+          <div class="pb-lbl">Весь час</div>
+        </button>
+        <button class="period-btn" data-period="year">
+          <div class="pb-ic">365</div>
+          <div class="pb-lbl">Рік</div>
+          <div class="pb-sub" id="pb-year-sub">Рік 2026</div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS SHEET -->
+  <div class="sheet-overlay" id="settings-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Налаштування</div>
+      <div class="settings-row" id="btn-import">
+        <span class="r-ic">⬆️</span>
+        <div class="r-tx">Імпорт CSV<div class="r-sub">Завантажити дані з 1money</div></div>
+        <span style="color:var(--text3)">›</span>
+      </div>
+      <div class="settings-row">
+        <span class="r-ic">🔗</span>
+        <div class="r-tx">Синхронізація<div class="r-sub">Firebase · horugva-ff8bd</div></div>
+        <span class="dot"></span>
+      </div>
+      <div class="import-progress" id="import-progress" style="display:none">
+        <div id="import-progress-text" style="font-weight:600;text-align:center;font-size:14px"></div>
+        <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+        <div class="import-status" id="import-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="import-file" accept=".csv,.txt">
   <div class="toast" id="toast"></div>
 </div>
 
