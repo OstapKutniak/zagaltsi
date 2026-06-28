@@ -276,6 +276,24 @@ html, body {
 .period-btn .pb-lbl { font-size: 15px; font-weight: 600; color: var(--text); }
 .period-btn .pb-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
 
+/* account filter sheet */
+.filter-head { display: flex; align-items: center; gap: 10px; padding: 0 16px 12px; }
+.filter-x { background: none; border: none; font-size: 20px; color: var(--text2); cursor: pointer; }
+.filter-list { overflow-y: auto; flex: 1; padding: 0 16px; }
+.filter-sub { font-size: 16px; font-weight: 700; color: var(--active-ink); margin: 10px 2px 8px; }
+.filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.fa-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: #fff; }
+.fa-card.on { border-color: var(--active-ink); }
+.fa-card .fa-ic { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--c); flex-shrink: 0; }
+.fa-card .fa-ic svg { width: 17px; height: 17px; fill: none; stroke: #fff; stroke-width: 1.9; }
+.fa-card .fa-tx { min-width: 0; }
+.fa-card .fa-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fa-card .fa-bal { font-size: 13px; font-weight: 700; }
+.fa-card.off { opacity: 0.4; }
+.filter-foot { display: flex; gap: 12px; padding: 12px 16px; }
+.filter-reset { flex: 1; background: var(--pill); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--text); }
+.filter-done { flex: 1; background: var(--active-ink); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; color: #fff; }
+
 /* import progress */
 .import-progress { padding: 16px 20px; }
 .progress-bar-bg { background: #eee; border-radius: 4px; height: 6px; margin: 10px 0; overflow: hidden; }

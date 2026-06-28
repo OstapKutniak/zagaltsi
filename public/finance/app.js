@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js';
 import {
-  getDatabase, ref, push, set, update, remove,
+  getDatabase, ref, push, set, update, remove, onValue,
   onChildAdded, onChildChanged, onChildRemoved
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
 
@@ -16,6 +16,9 @@ const firebaseConfig = {
 };
 const db = getDatabase(initializeApp(firebaseConfig));
 const TX_PATH = 'finance/transactions';
+const ACC_PATH = 'finance/accounts';
+const CUR_SUFFIX = { UAH: 'UAH', USD: '$', EUR: 'EUR', PLN: 'zł' };
+const isSavings = n => /лежить|скарбничк|заощад/i.test(n || '');
 
 // ── CONST ──────────────────────────────────────────────────
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
@@ -84,6 +87,8 @@ const parentCat = n => (n || 'Інше').split(' (')[0].trim();
 
 // ── STATE ──────────────────────────────────────────────────
 let txMap = {};
+let accountsList = [];          // [{name,balance,currency,uah,group}] from balance table
+let selectedAccounts = null;    // null = all
 let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
@@ -109,6 +114,7 @@ function subscribe() {
   onChildAdded(r,   s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
   onChildChanged(r, s => { txMap[s.key] = { id: s.key, ...s.val() }; scheduleRender(); });
   onChildRemoved(r, s => { delete txMap[s.key]; scheduleRender(); });
+  onValue(ref(db, ACC_PATH), s => { accountsList = s.val() || []; scheduleRender(); });
 }
 function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
 
@@ -136,7 +142,13 @@ function inPeriod(t) {
   if (state.period === 'year') return d.getFullYear() === state.cursor.getFullYear();
   return d.getFullYear() === state.cursor.getFullYear() && d.getMonth() === state.cursor.getMonth();
 }
-function periodTxs() { return Object.values(txMap).filter(inPeriod); }
+function inFilter(t) {
+  if (!selectedAccounts) return true;
+  if (selectedAccounts.has(t.account)) return true;
+  if (t.type === 'transfer' && selectedAccounts.has(t.category)) return true;
+  return false;
+}
+function periodTxs() { return Object.values(txMap).filter(t => inPeriod(t) && inFilter(t)); }
 
 // ── RENDER ─────────────────────────────────────────────────
 function renderAll() {
@@ -150,11 +162,9 @@ function renderAll() {
 }
 
 function renderHeader() {
-  let net = 0;
-  Object.values(txMap).forEach(t => {
-    if (t.type === 'expense') net -= Number(t.amount);
-    else if (t.type === 'income') net += Number(t.amount);
-  });
+  let net;
+  if (accountsList.length) net = accountsList.reduce((s, a) => s + (Number(a.uah) || 0), 0);
+  else { net = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') net -= Number(t.amount); else if (t.type === 'income') net += Number(t.amount); }); }
   document.getElementById('total-amount').innerHTML = `${fmt(net)} <span>UAH</span>`;
 
   const c = state.cursor;
@@ -291,27 +301,27 @@ function recItem(t) {
   </div>`;
 }
 
+function accRow(a) {
+  const st = catStyle(a.name);
+  const cur = CUR_SUFFIX[a.currency] || a.currency || 'UAH';
+  const v = a.currency === 'UAH' ? fmt(a.balance) : fmtDec(a.balance);
+  return `<div class="acc-row">
+    <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
+    <div class="acc-name">${esc(a.name)}</div>
+    <div class="acc-bal" style="color:${a.balance < 0 ? 'var(--exp)' : 'var(--text)'}">${v} <span style="font-size:11px;color:var(--text3)">${cur}</span></div>
+  </div>`;
+}
 function renderAccounts() {
-  const bal = {};
-  Object.values(txMap).forEach(t => {
-    const a = t.account, amt = Number(t.amount);
-    if (t.type === 'expense') bal[a] = (bal[a] || 0) - amt;
-    else if (t.type === 'income') bal[a] = (bal[a] || 0) + amt;
-    else if (t.type === 'transfer') { bal[a] = (bal[a] || 0) - amt; bal[t.category] = (bal[t.category] || 0) + amt; }
-  });
-  const list = Object.entries(bal).sort((a, b) => b[1] - a[1]);
-  const total = list.reduce((s, x) => s + x[1], 0);
   const el = document.getElementById('acc-list');
-  el.innerHTML = `<div class="acc-section-title">Рахунки<span class="acc-section-sum" style="color:${total < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(total)} UAH</span></div>`
-    + list.map(([name, v]) => {
-      const st = catStyle(name);
-      return `<div class="acc-row">
-        <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
-        <div class="acc-name">${esc(name)}</div>
-        <div class="acc-bal" style="color:${v < 0 ? 'var(--exp)' : 'var(--text)'}">${fmt(v)} <span style="font-size:11px;color:var(--text3)">UAH</span></div>
-      </div>`;
-    }).join('')
-    + `<div class="empty" style="padding:24px 20px;font-size:13px">Баланси пораховані з операцій (без стартових залишків 1money).</div>`;
+  if (!accountsList.length) {
+    el.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ic">💳</div>Імпортуй CSV з 1money — й тут з'являться рахунки з балансами.</div>`;
+    return;
+  }
+  const reg = accountsList.filter(a => !isSavings(a.name) && a.group !== 'savings');
+  const sav = accountsList.filter(a => isSavings(a.name) || a.group === 'savings');
+  const sum = arr => arr.reduce((s, a) => s + (Number(a.uah) || 0), 0);
+  const section = (title, arr) => arr.length ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${sum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(sum(arr))} UAH</span></div>${arr.map(accRow).join('')}` : '';
+  el.innerHTML = section('Рахунки', reg) + section('Заощадження', sav);
 }
 
 function renderOverview() {
@@ -472,19 +482,55 @@ function parseSimple(lines, h) {
   }
   return rows;
 }
+function parseBalances(lines, rates) {
+  const out = []; let started = false;
+  const RATE = { UAH: 1, USD: rates.USD || 41, EUR: rates.EUR || 47, PLN: rates.PLN || 11 };
+  for (const ln of lines) {
+    const c = parseLine(ln);
+    if (!started) { if ((c[0] || '').toLowerCase().includes('назва') && (c[1] || '').toLowerCase().includes('баланс')) started = true; continue; }
+    if (c.length < 3) continue;
+    const name = (c[0] || '').trim();
+    if (!name) continue;
+    const balance = parseFloat((c[1] || '0').replace(',', '.')) || 0;
+    const currency = (c[2] || 'UAH').trim() || 'UAH';
+    out.push({ name, balance, currency, uah: Math.round(balance * (RATE[currency] || 1)), group: isSavings(name) ? 'savings' : 'regular' });
+  }
+  return out;
+}
+function deriveRates(lines, h) {
+  const ai = h.indexOf('кількість'), ci = h.indexOf('валюта'), ai2 = h.indexOf('кількість 2'), ci2 = h.indexOf('валюта 2');
+  const acc = {};
+  for (let i = 1; i < lines.length; i++) {
+    const c = parseLine(lines[i]);
+    const oc = (c[ci] || '').trim(), c2 = (c[ci2] || '').trim();
+    if (!oc || oc === 'UAH' || c2 !== 'UAH') continue;
+    const a = parseFloat((c[ai] || '').replace(',', '.')), u = parseFloat((c[ai2] || '').replace(',', '.'));
+    if (a > 0 && u > 0) (acc[oc] = acc[oc] || []).push(u / a);
+  }
+  const rates = {};
+  for (const k in acc) { const arr = acc[k].sort((x, y) => x - y); rates[k] = arr[Math.floor(arr.length / 2)]; }
+  return rates;
+}
 async function importCSV(file) {
   const text = await file.text();
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   const h = parseLine(lines[0].replace(/^﻿/, '')).map(x => x.trim().toLowerCase());
   const native = h.includes('з рахунку') || h.includes('на рахунок/до категорії');
   const rows = native ? parse1money(lines, h) : parseSimple(lines, h);
+  const rates = native ? deriveRates(lines, h) : {};
+  const accounts = native ? parseBalances(lines, rates) : [];
+
+  if (Object.keys(txMap).length && !confirm('Замінити всі наявні дані новим імпортом? (старі записи буде видалено, щоб не було дублів)')) return;
 
   const box = document.getElementById('import-progress');
   const bar = document.getElementById('progress-bar');
   const st = document.getElementById('import-status');
   const tt = document.getElementById('import-progress-text');
-  box.style.display = ''; tt.textContent = `Завантаження ${rows.length} операцій...`;
+  box.style.display = ''; tt.textContent = 'Очищення старих даних...';
+  await remove(ref(db, TX_PATH));
+  txMap = {};
 
+  tt.textContent = `Завантаження ${rows.length} операцій...`;
   const BATCH = 500; let done = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
     const upd = {};
@@ -494,7 +540,8 @@ async function importCSV(file) {
     bar.style.width = Math.round(done / rows.length * 100) + '%';
     st.textContent = `${done} / ${rows.length}`;
   }
-  tt.textContent = `✓ Імпортовано ${done} операцій`;
+  if (accounts.length) await set(ref(db, ACC_PATH), accounts);
+  tt.textContent = `✓ Імпортовано ${done} операцій, ${accounts.length} рахунків`;
   toast('Імпорт завершено!');
 }
 function parseLine(line) {
@@ -536,9 +583,17 @@ function bindEvents() {
     renderAll();
   });
 
-  const toAcc = () => { state.tab = 'accounts'; syncTabs(); renderAll(); };
-  document.getElementById('btn-accounts-filter').onclick = toAcc;
-  document.getElementById('btn-accounts-filter2').onclick = toAcc;
+  document.getElementById('btn-accounts-filter').onclick = openFilter;
+  document.getElementById('btn-accounts-filter2').onclick = () => { state.tab = 'accounts'; syncTabs(); renderAll(); };
+  document.getElementById('filter-overlay').onclick = e => { if (e.target.id === 'filter-overlay') e.currentTarget.classList.remove('open'); };
+  document.getElementById('filter-x').onclick = () => document.getElementById('filter-overlay').classList.remove('open');
+  document.getElementById('filter-reset').onclick = () => { filterTemp = new Set(filterNames()); drawFilter(); };
+  document.getElementById('filter-done').onclick = () => {
+    const all = filterNames();
+    selectedAccounts = (filterTemp && filterTemp.size && filterTemp.size < all.length) ? new Set(filterTemp) : null;
+    document.getElementById('filter-overlay').classList.remove('open');
+    renderAll();
+  };
 
   document.getElementById('btn-profile').onclick = () => document.getElementById('settings-overlay').classList.add('open');
   document.getElementById('settings-overlay').onclick = e => { if (e.target.id === 'settings-overlay') e.currentTarget.classList.remove('open'); };
@@ -553,6 +608,40 @@ function shift(d) {
   else state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + d, 1);
   renderAll();
 }
+let filterTemp = null;
+function filterNames() { return accountsList.length ? accountsList.map(a => a.name) : [...accountsAll]; }
+function openFilter() {
+  const all = filterNames();
+  if (!all.length) { toast('Спочатку імпортуй дані'); return; }
+  filterTemp = new Set(selectedAccounts ? [...selectedAccounts] : all);
+  drawFilter();
+  document.getElementById('filter-overlay').classList.add('open');
+}
+function faCard(name, balText) {
+  const st = catStyle(name);
+  const on = filterTemp.has(name);
+  return `<div class="fa-card ${on ? 'on' : 'off'}" data-name="${escAttr(name)}">
+    <div class="fa-ic" style="--c:${st.color}">${st.icon}</div>
+    <div class="fa-tx"><div class="fa-name">${esc(name)}</div>${balText ? `<div class="fa-bal" style="color:${st.color}">${balText}</div>` : ''}</div>
+  </div>`;
+}
+function drawFilter() {
+  const el = document.getElementById('filter-list');
+  if (accountsList.length) {
+    const reg = accountsList.filter(a => a.group !== 'savings' && !isSavings(a.name));
+    const sav = accountsList.filter(a => a.group === 'savings' || isSavings(a.name));
+    const cards = a => `<div class="filter-grid">${a.map(x => { const cur = CUR_SUFFIX[x.currency] || x.currency; const v = x.currency === 'UAH' ? fmt(x.balance) : fmtDec(x.balance); return faCard(x.name, `${v} ${cur}`); }).join('')}</div>`;
+    el.innerHTML = (reg.length ? `<div class="filter-sub">Рахунки</div>${cards(reg)}` : '')
+                 + (sav.length ? `<div class="filter-sub">Накопичувальні рахунки</div>${cards(sav)}` : '');
+  } else {
+    el.innerHTML = `<div class="filter-grid">${[...accountsAll].map(n => faCard(n, '')).join('')}</div>`;
+  }
+  el.querySelectorAll('.fa-card').forEach(c => c.onclick = () => {
+    const n = c.dataset.name;
+    if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
+    drawFilter();
+  });
+}
 function openPeriod() {
   const c = state.cursor;
   document.getElementById('pb-month-day').textContent = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
@@ -564,6 +653,7 @@ function openPeriod() {
 
 // ── HELPERS ────────────────────────────────────────────────
 function fmt(n) { const v = Math.round(Number(n) || 0); return v.toLocaleString('uk-UA').replace(/,/g, ' '); }
+function fmtDec(n) { return (Number(n) || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/ /g, ' '); }
 function relDay(d) {
   const t = new Date(); t.setHours(0,0,0,0);
   const y = new Date(t); y.setDate(t.getDate() - 1);
