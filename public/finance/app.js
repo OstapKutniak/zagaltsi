@@ -114,6 +114,7 @@ let catFilter = null;
 let accFormMode = null;
 let accFormEditIdx = -1;
 let accFormCurrency = 'UAH';
+const SWIPE_TABS = ['accounts', 'categories', 'records', 'overview'];
 
 const CURRENCIES_LIST = [
   { code: 'UAH', label: 'Українська гривня — UAH' },
@@ -126,6 +127,7 @@ const CURRENCIES_LIST = [
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
     navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/' }).catch(() => {});
+  initSwipeLayout();
   bindEvents();
   subscribe();
   renderAll();
@@ -680,7 +682,66 @@ function renderOverview() {
 // ── TABS ───────────────────────────────────────────────────
 function syncTabs() {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
-  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === state.tab + '-screen'));
+  const cur = SWIPE_TABS.indexOf(state.tab);
+  SWIPE_TABS.forEach((t, i) => {
+    const s = document.getElementById(t + '-screen');
+    if (!s) return;
+    s.style.transition = '';
+    s.style.transform = `translateX(${(i - cur) * 100}%)`;
+    s.classList.toggle('active', t === state.tab);
+  });
+}
+
+// ── SWIPE LAYOUT INIT ──────────────────────────────────────
+function initSwipeLayout() {
+  const wrap = document.createElement('div');
+  wrap.id = 'screen-wrap';
+  const first = document.getElementById('accounts-screen');
+  first.parentNode.insertBefore(wrap, first);
+  // append screens in SWIPE_TABS order
+  SWIPE_TABS.forEach(t => wrap.appendChild(document.getElementById(t + '-screen')));
+  syncTabs();
+
+  let swX = 0, swY = 0, swActive = false, swLocked = false;
+
+  wrap.addEventListener('touchstart', e => {
+    swX = e.touches[0].clientX;
+    swY = e.touches[0].clientY;
+    swActive = true;
+    swLocked = false;
+  }, { passive: true });
+
+  wrap.addEventListener('touchmove', e => {
+    if (!swActive) return;
+    const dx = e.touches[0].clientX - swX;
+    const dy = e.touches[0].clientY - swY;
+    if (!swLocked) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) >= Math.abs(dx)) { swActive = false; return; }
+      swLocked = true;
+    }
+    e.preventDefault();
+    const cur = SWIPE_TABS.indexOf(state.tab);
+    const W = wrap.offsetWidth;
+    SWIPE_TABS.forEach((t, i) => {
+      const s = document.getElementById(t + '-screen');
+      s.style.transition = 'none';
+      s.style.transform = `translateX(${(i - cur) * W + dx}px)`;
+    });
+  }, { passive: false });
+
+  wrap.addEventListener('touchend', e => {
+    if (!swActive || !swLocked) { swActive = false; return; }
+    swActive = false;
+    const dx = e.changedTouches[0].clientX - swX;
+    const threshold = wrap.offsetWidth * 0.28;
+    const cur = SWIPE_TABS.indexOf(state.tab);
+    let next = cur;
+    if (dx < -threshold && cur < SWIPE_TABS.length - 1) next = cur + 1;
+    else if (dx > threshold && cur > 0) next = cur - 1;
+    if (next !== cur) { state.tab = SWIPE_TABS[next]; renderAll(); }
+    syncTabs();
+  }, { passive: true });
 }
 
 // ── ADD / EDIT (calculator) ────────────────────────────────
@@ -711,12 +772,18 @@ function closeForm() { document.getElementById('add-view').classList.remove('act
 
 function setFormType(t) {
   const old = formState.type;
+  if (t === old) return;
   formState.type = t;
   if (t === 'transfer') {
     formState.parent = ''; formState.sub = '';
   } else if ((old === 'expense' && t === 'income') || (old === 'income' && t === 'expense')) {
     formState.parent = ''; formState.sub = '';
   }
+  // Animate the orb: shrink + spin then restore
+  const orb = document.getElementById('calc-orb');
+  orb.style.animation = 'none';
+  orb.offsetWidth; // force reflow
+  orb.style.animation = 'orbSwitch 0.28s cubic-bezier(0.4,0,0.2,1)';
   renderForm();
 }
 
@@ -1016,32 +1083,7 @@ function bindEvents() {
     renderAll();
   };
 
-  // Swipe left/right to switch tabs
-  const TABS = ['accounts', 'categories', 'records', 'overview'];
-  let swX = 0, swY = 0, swActive = false;
-  document.addEventListener('touchstart', e => {
-    swX = e.touches[0].clientX; swY = e.touches[0].clientY; swActive = true;
-  }, { passive: true });
-  document.addEventListener('touchmove', e => {
-    if (!swActive) return;
-    const dx = Math.abs(e.touches[0].clientX - swX);
-    const dy = Math.abs(e.touches[0].clientY - swY);
-    if (dy > dx && dy > 8) swActive = false; // вертикальний скрол — скасувати свайп
-  }, { passive: true });
-  document.addEventListener('touchend', e => {
-    if (!swActive) return;
-    swActive = false;
-    if (document.getElementById('add-view').classList.contains('active')) return;
-    if (document.querySelector('.sheet-overlay.open')) return;
-    if (e.target.closest && e.target.closest('.subchips, .tabbar')) return;
-    const dx = e.changedTouches[0].clientX - swX;
-    if (Math.abs(dx) < 50) return;
-    const idx = TABS.indexOf(state.tab);
-    if (dx < 0 && idx < TABS.length - 1) state.tab = TABS[idx + 1];
-    else if (dx > 0 && idx > 0) state.tab = TABS[idx - 1];
-    else return;
-    syncTabs(); renderAll();
-  }, { passive: true });
+  // Swipe is handled via #screen-wrap listeners in initSwipeLayout()
 
   document.getElementById('btn-profile').onclick = () => document.getElementById('settings-overlay').classList.add('open');
   document.getElementById('settings-overlay').onclick = e => { if (e.target.id === 'settings-overlay') e.currentTarget.classList.remove('open'); };
