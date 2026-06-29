@@ -544,10 +544,13 @@ const hw = Math.max(0, (luma - 0.35) / 0.65) * hStr;
 - Реєстрація: `main.ts` game config `pipeline:{ ColorGrade: ColorGradePipeline }` (Phaser перевіряє `isPostFX` → `postPipelineClasses`). Прикріплення: `GameScene.create()` → `cam.resetPostPipeline(true); cam.setPostPipeline(ColorGradePipeline)`, інстанс у `this.colorGradePipe`. Uniforms пушаться в `applyPostFX()` (замість старого ланцюга ColorMatrix). `onPreRender()` шле їх у шейдер. Інстанс має `.name='ColorGradePipeline'` (клас), зареєстрований під ключем `'ColorGrade'`.
 - **Не повертати ColorMatrix-підхід** — він не вмів тіні/середні/світлини.
 
-**2. Вінь'єтка в грі — bitmap-маску ПРИБРАНО.**
-- `vigMaskRT` (world-space RenderTexture) + `createBitmapMask()` на screen-space зображенні **ховали вінь'єтку в грі** (мисалайн/порожня маска). Прибрано `buildVignetteMask()` і поле `vigMaskRT`.
-- Гра тепер як ДО маскування: овал у смузі (білий вище `vig.top`), depth **4999** (під foreground=5000, над персонажем). `floorFrac = vig.top` (ручний повзунок «Верх»).
-- **Розбіжність (follow-up):** редактор ВСЕ ЩЕ маскує вінь'єтку по map-площині (`drawVignette`/`vigCv`/`maskCv`), а гра — ні. Якщо в грі темнітиме низ фонових дерев — зробити робочу world-space масковану RT (depth 4999), а не bitmap-mask на screen-space.
+**2. Вінь'єтка в грі — bitmap-маска по map-площині (ПОВЕРНУТА, тепер робоча).**
+- Без маски multiply-вінь'єтка темнила фон (ліс/хату), що в смузі підлоги. Глибиною не вирішити — multiply ЗАВЖДИ темнить усе позаду карти (фон має нижчий depth за map). Редактор маскує по map-площині → гра має теж.
+- **Чому стара маска ховала вінь'єтку:** маск-обʼєкт був `this.add.renderTexture(...).setVisible(false)` — доданий у display list + `visible=false`. Прихований GO НЕ рендериться в маск-буфер → маска порожня → вінь'єтка зникала. Phaser-док: джерело маски НЕ має бути в display list — створювати з `add:false`.
+- **Робоча версія (`buildVignetteMask`):** world-space `DynamicTexture` `'_vigMask'` (розмір рівня × worldH), у неї `tex.draw(sprites)` шарів `map/decor/collider/interactive/trap` при `tex.camera.scroll=levelStart`. Обгортка `this.make.image({key:'_vigMask', add:false})` у світі (levelStart,0), origin(0,0), scrollFactor 1 (їде з картою). `vignetteImg.setMask(vigMaskImg.createBitmapMask())`.
+- Персонаж темніє через карту ПОЗАДУ нього (площа карти маскує і його екранну позицію); верх голови вище лінії карти — без вінь'єтки (норм, це підлоговий ефект).
+- Маска статична (карта нерухома) → будується раз у `collectParallaxLayers`. Depth вінь'єтки **4999** (під foreground=5000).
+- **Верифіковано (preview):** маск-текстура alpha=255 на підлозі, 0 у небі; маска чіпляється (BitmapMask2), 0 помилок.
 
 **3. Плановість (per-layer tint) у грі — обмеження blend-режиму.**
 - Гра застосовує тінт через `setTint()` = ТІЛЬКИ multiply. Редактор підтримує `multiply/overlay/screen`. Шари з `overlay`/`screen` (напр. `bg` overlay 41%) у грі виглядають інакше; `multiply` (напр. foreground) збігається.
@@ -558,7 +561,6 @@ const hw = Math.max(0, (luma - 0.35) / 0.65) * hStr;
 ### TODO / відкладено
 
 - **Плановість overlay/screen у грі** (див. вище п.3) — поки лише multiply.
-- **Вінь'єтка: маскування в грі по map-площині** (див. вище п.2) — зараз unmasked, редактор masked.
 - **Авто-прив'язка «Верх» вінь'єтки** — зараз ручний повзунок `vig.top`; повернутись до авто-визначення лінії карти.
 - **Рандомізатор дощу:** при малій кількості крапель — помітні рядки/колонки (рандом поганий). Потребує кращого per-drop хешу.
 - **Селектор якості рендера (GAME):** кнопка 1.5× повинна бути в лобі/налаштуваннях гри (`index.html`), а НЕ в редакторі. Поки не зроблено.
