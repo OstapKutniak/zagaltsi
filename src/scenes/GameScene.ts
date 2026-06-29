@@ -71,6 +71,8 @@ export class GameScene extends Phaser.Scene {
   // Vignette: screen-space зображення, текстура band-aware
   private vignetteImg: Phaser.GameObjects.Image | null = null;
   private vignetteKey = '';
+  // Маска map-площини: вінь'єтка лягає ТІЛЬКИ на карту+ассети+персонажа, не на фон.
+  private vigMaskRT: Phaser.GameObjects.RenderTexture | null = null;
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -252,6 +254,7 @@ export class GameScene extends Phaser.Scene {
     this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
     this.vignetteImg = null; this.vignetteKey = '';
+    if (this.vigMaskRT) { this.vigMaskRT.destroy(); this.vigMaskRT = null; }
 
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
@@ -513,6 +516,25 @@ export class GameScene extends Phaser.Scene {
         this.lvlBakedAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, anim, idx });
       }
     }
+    this.buildVignetteMask();
+  }
+
+  // Статична маска map-площини (карта+decor/collider/...) у world-space.
+  // Вінь'єтка (BitmapMask) проявляється тільки де є map-пікселі → фон не темніє.
+  // Персонаж стоїть у межах підлоги, тож площа карти під ним теж маскує його.
+  private buildVignetteMask(): void {
+    if (this.vigMaskRT) { this.vigMaskRT.destroy(); this.vigMaskRT = null; }
+    const cats = ['map', 'decor', 'collider', 'interactive', 'trap'];
+    const sprites: Phaser.GameObjects.GameObject[] = [];
+    for (const c of cats) for (const sp of (this.levelCatGOs.get(c) ?? [])) sprites.push(sp);
+    if (!sprites.length) return;
+    const x0 = this.levelMode ? this.levelStart : 0;
+    const w = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
+    const rt = this.add.renderTexture(x0, 0, w, this.worldH).setOrigin(0, 0).setVisible(false);
+    rt.camera.setScroll(x0, 0);
+    rt.draw(sprites);
+    this.vigMaskRT = rt;
+    if (this.vignetteImg) this.vignetteImg.clearMask(true);
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -1198,6 +1220,12 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode(this.toBlendMode(blend))
       .setPosition(this.logicalW / 2 + this.uiOffX, this.uiOffY)
       .setDisplaySize(this.logicalW, this.logicalH);
+    // Маска map-площини: проявляти вінь'єтку лише на карті+ассетах+персонажі
+    if (this.vigMaskRT && !this.vignetteImg.mask) {
+      this.vignetteImg.setMask(this.vigMaskRT.createBitmapMask());
+    } else if (!this.vigMaskRT && this.vignetteImg.mask) {
+      this.vignetteImg.clearMask(true);
+    }
   }
 
   private updateColorBalance(): void {

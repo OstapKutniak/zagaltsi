@@ -556,12 +556,12 @@ export function initLevelEditor(prefix: string): void {
       return (LAYER_ORDER.includes(cat as LK) ? cat : 'map') as LK;
     };
 
-    // Вінь'єтка малюється МІЖ шаром «карта» (+ ассети карти) і переднім планом —
-    // тобто площина вінь'єтки = площина карти/персонажа, а foreground лишається поверх.
+    // Вінь'єтка лягає ТІЛЬКИ на площину карти (map+decor/collider/...) — НЕ на фон і
+    // не на передній план. Маска = форма map-площини (destination-in), потім multiply на main.
     const drawVignette = (): void => {
       if (!(state.showAtm && atm?.vignette?.enabled)) return;
       const vig = atm.vignette;
-      const vc = mainCtx;
+      const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
       const topF = Math.max(0, Math.min(0.98, vig.top ?? 0.5));
@@ -575,6 +575,9 @@ export function initLevelEditor(prefix: string): void {
       const cx = gx + gw / 2, cy = by0 + groundH / 2;
       const rx = gw / 2, ry = groundH / 2;
       const [er, eg, eb] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
+      // 1) Градієнт-овал на окремому канвасі
+      const vigCv = document.createElement('canvas'); vigCv.width = W; vigCv.height = H;
+      const vc = vigCv.getContext('2d')!;
       vc.save();
       vc.scale(1, ry / rx);
       const by0_sc = by0 * rx / ry, gh_sc = groundH * rx / ry, cy_sc = cy * rx / ry;
@@ -583,11 +586,24 @@ export function initLevelEditor(prefix: string): void {
       grd.addColorStop(0, 'rgba(0,0,0,0)');
       grd.addColorStop(0.45, 'rgba(0,0,0,0)');
       grd.addColorStop(1, `rgba(${er},${eg},${eb},${str})`);
-      vc.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
       vc.fillStyle = grd;
       vc.fillRect(gx, by0_sc, gw, gh_sc);
       vc.restore();
+      // 2) Маска: малюємо map-площину на окремий канвас, лишаємо вінь'єтку тільки там
+      const maskCv = document.createElement('canvas'); maskCv.width = W; maskCv.height = H;
+      const saved = ctx;
+      ctx = maskCv.getContext('2d')!;
+      ctx.imageSmoothingEnabled = !_panning;
+      for (const p of placedSorted()) if (catToLk(p.cat) === 'map') drawOneItem(p);
+      ctx = saved;
+      vc.globalCompositeOperation = 'destination-in';
+      vc.drawImage(maskCv, 0, 0);
       vc.globalCompositeOperation = 'source-over';
+      // 3) Накладаємо замасковану вінь'єтку на основний канвас
+      mainCtx.save();
+      mainCtx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
+      mainCtx.drawImage(vigCv, 0, 0);
+      mainCtx.restore();
     };
 
     if (todEnabled) {
