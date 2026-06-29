@@ -84,6 +84,10 @@ void main(void) {
     float d = sqrt(dx * dx + dy * dy);
     // canvas-градієнт: 0 до 0.45 радіуса, далі лінійно до uVigStr на краю
     float a = clamp((d - 0.45) / 0.55, 0.0, 1.0) * uVigStr;
+    // Вертикальний фейд: затемнення плавно сповзає до 0 від центру смуги ДО ВЕРХУ
+    // (верхній край овалу інакше давав горизонтальну смугу на персонажі, що стирчить
+    // вище лінії підлоги; на фоні він невидимий через маску, а на персонажі — видно).
+    a *= smoothstep(uVigTop, cyN, sy);
     float mAlpha = 1.0;
     if (uVigHasMask > 0.5) {
       float mu = outTexCoord.x * uMaskXf.x + uMaskXf.y;
