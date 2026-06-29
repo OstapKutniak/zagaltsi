@@ -781,17 +781,17 @@ function setFormType(t) {
   }
   // Update tab buttons immediately
   document.querySelectorAll('.ct').forEach(b => b.classList.toggle('active', b.dataset.type === t));
-  // Orb two-phase animation via setTimeout (reliable on iOS)
-  const orb = document.getElementById('calc-orb');
-  orb.style.animation = 'none';
-  orb.offsetWidth;
-  orb.style.animation = 'orbOut 0.14s ease-in both';
+  // Animate orb-inner (no base transform conflict) with two-phase setTimeout
+  const orbInner = document.getElementById('orb-inner');
+  orbInner.style.animation = 'none';
+  orbInner.offsetWidth; // force reflow
+  orbInner.style.animation = 'orbOut 0.14s ease-in both';
   setTimeout(() => {
     renderForm();
-    orb.style.animation = 'none';
-    orb.offsetWidth;
-    orb.style.animation = 'orbIn 0.24s ease-out both';
-    setTimeout(() => { orb.style.animation = ''; }, 260);
+    orbInner.style.animation = 'none';
+    orbInner.offsetWidth; // force reflow
+    orbInner.style.animation = 'orbIn 0.24s ease-out both';
+    setTimeout(() => { orbInner.style.animation = ''; }, 260);
   }, 140);
 }
 
@@ -813,9 +813,9 @@ function renderForm() {
     ll.textContent = 'З рахунку'; lv.textContent = formState.account || 'Рахунок'; L.style.background = ACC;
     rl.textContent = 'До категорії'; rv.textContent = formState.parent || 'Категорія'; R.style.background = pcol;
   }
-  const orb = document.getElementById('calc-orb');
-  orb.innerHTML = t === 'transfer' ? ARROW_ICON : (formState.parent ? catStyle(formState.parent).icon : '');
-  orb.querySelectorAll('svg').forEach(s => s.style.stroke = t === 'transfer' ? '#2D9CDB' : pcol);
+  const orbInner = document.getElementById('orb-inner');
+  orbInner.innerHTML = t === 'transfer' ? ARROW_ICON : (formState.parent ? catStyle(formState.parent).icon : '');
+  orbInner.querySelectorAll('svg').forEach(s => s.style.stroke = t === 'transfer' ? '#2D9CDB' : pcol);
   renderSubchips();
   renderDisplay();
   document.getElementById('calc-date-label').textContent = dateLabel(formState.date);
