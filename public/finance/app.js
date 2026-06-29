@@ -318,8 +318,16 @@ function renderCategories() {
   const grid = document.getElementById('cat-grid');
   grid.innerHTML = donut + cats;
   document.getElementById('donut-cell').onclick = () => {
-    state.catDir = dir === 'expense' ? 'income' : 'expense';
-    renderCategories();
+    const donutEl = document.querySelector('#donut-cell .donut');
+    if (!donutEl || donutEl._animating) return;
+    donutEl._animating = true;
+    donutEl.style.animation = 'donutOut 0.22s ease-in both';
+    setTimeout(() => {
+      state.catDir = state.catDir === 'expense' ? 'income' : 'expense';
+      renderCategories();
+      const newDonut = document.querySelector('#donut-cell .donut');
+      if (newDonut) newDonut.style.animation = 'donutIn 0.32s cubic-bezier(0.34,1.56,0.64,1) both';
+    }, 220);
   };
 
   // Short tap → add form; long press → category detail sheet
@@ -1183,16 +1191,14 @@ function drawFilter() {
   }
   el.querySelectorAll('.fa-card').forEach(c => {
     const n = c.dataset.name;
-    // tap icon → close filter + open account action sheet
-    c.querySelector('.fa-ic').onclick = e => {
-      e.stopPropagation();
-      document.getElementById('filter-overlay').classList.remove('open');
-      openAccAction(n);
-    };
-    // tap card body → toggle filter
-    c.onclick = () => {
-      if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
-      drawFilter();
+    c.onclick = e => {
+      if (e.target.closest('.fa-ic')) {
+        document.getElementById('filter-overlay').classList.remove('open');
+        setTimeout(() => openAccAction(n), 60);
+      } else {
+        if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
+        drawFilter();
+      }
     };
   });
 }
