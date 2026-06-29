@@ -22,6 +22,16 @@ uniform float uMidStr;
 uniform float uHighStr;
 uniform float uGray;
 
+// Вінь'єтка (раніше — окремий BitmapMask-спрайт, що конфліктував з цим post-pipeline
+// через спільні framebuffer'и → на проді зникала). Тепер усе в одному шейдері.
+uniform float uVigStr;     // сила (0 = вимкнено)
+uniform vec3  uVigCol;     // колір вінь'єтки (multiply), 0..1
+uniform float uVigTop;     // floorFrac: частка висоти екрана, де починається підлога
+uniform float uVigHasMask; // 1 = темнити лише по масці площини-карти, 0 = по всьому кадру
+uniform sampler2D uMaskSampler;
+uniform vec4  uMaskXf;     // x=scaleX y=offX z=scaleY w=offY (екранний UV → UV маски)
+uniform float uMaskFlipV;  // 1 = перевернути V маски
+
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 
 vec3 hueRotate(vec3 c0, float c, float s) {
@@ -62,6 +72,30 @@ void main(void) {
   // Ч/б (тривожність = 100)
   if (uGray > 0.001) col = mix(col, vec3(dot(col, LUMA)), uGray);
 
+  // Вінь'єтка — еліпс-градієнт у смузі підлоги (та сама математика, що в редакторі),
+  // замаскований по площині-карти (щоб не темнити фон/небо).
+  // sy: 0 = верх кадру, 1 = низ. У post-shader outTexCoord.y=0 — це НИЗ, тож інвертуємо.
+  float sy = 1.0 - outTexCoord.y;
+  if (uVigStr > 0.001 && sy > uVigTop) {
+    float ry = (1.0 - uVigTop) * 0.5;
+    float cyN = uVigTop + ry;
+    float dx = (outTexCoord.x - 0.5) / 0.5;
+    float dy = (sy - cyN) / ry;
+    float d = sqrt(dx * dx + dy * dy);
+    // canvas-градієнт: 0 до 0.45 радіуса, далі лінійно до uVigStr на краю
+    float a = clamp((d - 0.45) / 0.55, 0.0, 1.0) * uVigStr;
+    float mAlpha = 1.0;
+    if (uVigHasMask > 0.5) {
+      float mu = outTexCoord.x * uMaskXf.x + uMaskXf.y;
+      float mvRaw = sy * uMaskXf.z + uMaskXf.w;
+      float mv = mix(mvRaw, 1.0 - mvRaw, uMaskFlipV);
+      mAlpha = (mu < 0.0 || mu > 1.0 || mv < 0.0 || mv > 1.0)
+        ? 0.0 : texture2D(uMaskSampler, vec2(mu, mv)).a;
+    }
+    a *= mAlpha;
+    col = col * (1.0 - a + a * uVigCol); // multiply-blend із кольором вінь'єтки
+  }
+
   gl_FragColor = vec4(col, tex.a);
 }
 `;
@@ -78,6 +112,16 @@ export class ColorGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPi
   midStr = 0;
   highStr = 0;
   gray = 0;
+
+  // Вінь'єтка
+  vigStr = 0;
+  vigCol: [number, number, number] = [0, 0, 0];
+  vigTop = 0.5;
+  vigHasMask = false;
+  maskXf: [number, number, number, number] = [1, 0, 1, 0];
+  maskFlipV = false;
+  // WebGLTextureWrapper текстури-маски (_vigMask); ставить GameScene після buildVignetteMask
+  maskTex: { webGLTexture: WebGLTexture } | null = null;
 
   constructor(game: Phaser.Game) {
     super({ game, fragShader: FRAG });
@@ -105,5 +149,23 @@ export class ColorGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPi
     this.set1f('uMidStr', this.midStr);
     this.set1f('uHighStr', this.highStr);
     this.set1f('uGray', this.gray);
+    // Вінь'єтка
+    this.set1f('uVigStr', this.vigStr);
+    this.set3f('uVigCol', this.vigCol[0], this.vigCol[1], this.vigCol[2]);
+    this.set1f('uVigTop', this.vigTop);
+    const useMask = this.vigHasMask && !!this.maskTex;
+    this.set1f('uVigHasMask', useMask ? 1 : 0);
+    this.set4f('uMaskXf', this.maskXf[0], this.maskXf[1], this.maskXf[2], this.maskXf[3]);
+    this.set1f('uMaskFlipV', this.maskFlipV ? 1 : 0);
+    if (useMask) this.set1i('uMaskSampler', 1);
+  }
+
+  // Прив'язуємо текстуру-маску до юніта 1 перед малюванням (bindAndDraw чіпає лише юніт 0,
+  // тож наша прив'язка зберігається). uMainSampler (юніт 0) ставить сам bindAndDraw.
+  onDraw(renderTarget: Phaser.Renderer.WebGL.RenderTarget): void {
+    if (this.vigStr > 0.001 && this.vigHasMask && this.maskTex) {
+      this.bindTexture(this.maskTex as unknown as Phaser.Renderer.WebGL.Wrappers.WebGLTextureWrapper, 1);
+    }
+    this.bindAndDraw(renderTarget);
   }
 }

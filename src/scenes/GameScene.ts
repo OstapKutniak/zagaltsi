@@ -16,7 +16,7 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import type { NodeGraph } from '../node-editor';
-import { type Atmosphere, type WeatherType, type BlendMode, parseHex, hexToInt, evalSky, evalTod, evalWeather } from '../level/atmosphere';
+import { type Atmosphere, type WeatherType, parseHex, hexToInt, evalSky, evalTod, evalWeather } from '../level/atmosphere';
 import { ColorGradePipeline } from './ColorGradePipeline';
 
 interface Remote {
@@ -69,12 +69,10 @@ export class GameScene extends Phaser.Scene {
   private levelCatGOs: Map<string, Phaser.GameObjects.Image[]> = new Map();
   // Splash на окремому шарі між картою і переднім планом/персонажем
   private splashGfx!: Phaser.GameObjects.Graphics;
-  // Vignette: screen-space зображення, текстура band-aware
-  private vignetteImg: Phaser.GameObjects.Image | null = null;
-  private vignetteKey = '';
-  // Маска вінь'єтки по map-площині (як у редакторі — НЕ темнити фон).
+  // Вінь'єтка тепер малюється всередині ColorGradePipeline (post-shader), а не окремим
+  // спрайтом із BitmapMask (той конфліктував з post-pipeline і зникав на проді).
+  // Лишається лише запечена маска площини-карти, яку подаємо в шейдер як текстуру.
   private vigMaskTex: Phaser.Textures.DynamicTexture | null = null;
-  private vigMaskImg: Phaser.GameObjects.Image | null = null; // НЕ в display list (add:false)
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -261,9 +259,8 @@ export class GameScene extends Phaser.Scene {
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
     this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
-    this.vignetteImg = null; this.vignetteKey = '';
-    if (this.vigMaskImg) { this.vigMaskImg.destroy(); this.vigMaskImg = null; }
     if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
+    if (this.colorGradePipe) { this.colorGradePipe.vigStr = 0; this.colorGradePipe.maskTex = null; this.colorGradePipe.vigHasMask = false; }
 
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
@@ -533,8 +530,8 @@ export class GameScene extends Phaser.Scene {
   // World-space DynamicTexture з map-спрайтами; Image-обгортка з add:false (НЕ в display
   // list → рендериться лише як маска). scrollFactor 1 → їде з камерою синхронно з картою.
   private buildVignetteMask(): void {
-    if (this.vigMaskImg) { this.vigMaskImg.destroy(); this.vigMaskImg = null; }
     if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
+    if (this.colorGradePipe) { this.colorGradePipe.maskTex = null; this.colorGradePipe.vigHasMask = false; }
     const cats = ['map', 'decor', 'collider', 'interactive', 'trap'];
     const sprites: Phaser.GameObjects.GameObject[] = [];
     for (const c of cats) for (const sp of (this.levelCatGOs.get(c) ?? [])) sprites.push(sp);
@@ -547,8 +544,12 @@ export class GameScene extends Phaser.Scene {
     tex.camera.setScroll(x0, 0); // спрайт у світі x → у текстуру в (x - x0)
     tex.draw(sprites);
     this.vigMaskTex = tex;
-    // Обгортка-Image у світі (x0,0), origin (0,0), НЕ в display list — лише для маски.
-    this.vigMaskImg = this.make.image({ x: x0, y: 0, key: '_vigMask', add: false }).setOrigin(0, 0);
+    // Віддаємо WebGL-текстуру маски пайплайну (шейдер семплить її в юніті 1).
+    if (this.colorGradePipe) {
+      const src = this.textures.get('_vigMask').source[0] as Phaser.Textures.TextureSource;
+      this.colorGradePipe.maskTex = (src.glTexture as { webGLTexture: WebGLTexture } | null) ?? null;
+      this.colorGradePipe.vigHasMask = !!this.colorGradePipe.maskTex;
+    }
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -761,10 +762,6 @@ export class GameScene extends Phaser.Scene {
     this.ambientRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.fogRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.lightningRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
-    if (this.vignetteImg) {
-      this.vignetteImg.setPosition(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 + this.uiOffY);
-      this.vignetteImg.setDisplaySize(this.logicalW, this.logicalH);
-    }
   }
 
   private onResize(): void {
@@ -1087,16 +1084,6 @@ export class GameScene extends Phaser.Scene {
     if (this.player.hp <= 0) this.scene.restart();
   }
 
-  // Конвертує рядковий режим накладання у рядок для Phaser.setBlendMode()
-  private toBlendMode(b: BlendMode | string): string {
-    const map: Record<string, string> = {
-      normal: 'NORMAL', multiply: 'MULTIPLY', screen: 'SCREEN', overlay: 'OVERLAY',
-      add: 'ADD', darken: 'DARKEN', lighten: 'LIGHTEN',
-      'color-dodge': 'COLOR_DODGE', 'color-burn': 'COLOR_BURN',
-    };
-    return map[b] ?? 'NORMAL';
-  }
-
   private applyPostFX(): void {
     const p = this.colorGradePipe;
     if (!p) return;
@@ -1184,67 +1171,27 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateVignette(): void {
+    const p = this.colorGradePipe;
+    if (!p) return;
     const vig = this.atmosphere?.vignette;
-    if (!vig?.enabled) { if (this.vignetteImg) this.vignetteImg.setVisible(false); return; }
-    const strength = Math.max(0, Math.min(1, vig.strength ?? 0.6));
-    const color = vig.color ?? '#000000';
-    const blend = vig.blend ?? 'multiply';
+    if (!vig?.enabled) { p.vigStr = 0; return; }
+    p.vigStr = Math.max(0, Math.min(1, vig.strength ?? 0.6));
+    p.vigCol = ColorGradePipeline.parse(vig.color ?? '#000000');
     // floorFrac: ручний повзунок vig.top (0..1 частка висоти екрана). Збігається з редактором.
-    const floorFrac = Math.max(0.02, Math.min(0.98, vig.top ?? 0.5));
-    const key = `v2_${strength.toFixed(2)}_${color}_${blend}_${floorFrac.toFixed(3)}`;
-    if (key !== this.vignetteKey) {
-      this.vignetteKey = key;
-      if (this.textures.exists('_vignette')) this.textures.remove('_vignette');
-      const SZ = 512;
-      const vc = document.createElement('canvas'); vc.width = SZ; vc.height = SZ;
-      const vx = vc.getContext('2d')!;
-      // Суцільно білий — нейтраль MULTIPLY для неба / персонажів / переднього плану
-      vx.fillStyle = 'white'; vx.fillRect(0, 0, SZ, SZ);
-      const [er, eg, eb] = parseHex(color);
-      // Зона підлоги: від floorFrac до низу
-      const by0 = Math.round(SZ * floorFrac);  // Y лінії карти в текстурі
-      const groundH = SZ - by0;                 // висота зони підлоги
-      if (groundH > 4) {
-        const cx = SZ / 2;
-        const cy = by0 + groundH / 2;  // центр зони підлоги
-        const rx = SZ / 2;
-        const ry = groundH / 2;
-        vx.save();
-        vx.scale(1, ry / rx); // витягуємо по вертикалі → коло стає еліпсом
-        // В масштабованих координатах:
-        const by0_sc = by0 * rx / ry;
-        const cy_sc  = cy  * rx / ry;
-        const gh_sc  = groundH * rx / ry;
-        vx.beginPath(); vx.rect(0, by0_sc, SZ, gh_sc); vx.clip();
-        const grd = vx.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
-        grd.addColorStop(0,    'rgba(0,0,0,0)');
-        grd.addColorStop(0.45, 'rgba(0,0,0,0)');
-        grd.addColorStop(1,    `rgba(${er},${eg},${eb},${strength})`);
-        vx.fillStyle = grd;
-        vx.fillRect(0, 0, SZ, SZ);
-        vx.restore();
-      }
-      this.textures.addCanvas('_vignette', vc);
-      if (this.vignetteImg) { this.vignetteImg.destroy(); this.vignetteImg = null; }
-    }
-    if (!this.vignetteImg) {
-      // depth 4999 = одразу ПІД переднім планом (foreground=5000), але НАД персонажем
-      // (depth=fy≈340..520) та картою → вінь'єтка лягає на площину карти+ассети+персонажа,
-      // а передній план лишається поверх. Фон вище горизонту нейтральний (текстура біла).
-      this.vignetteImg = this.add.image(0, 0, '_vignette')
-        .setScrollFactor(0).setDepth(4999).setOrigin(0.5, 0);
-    }
-    this.vignetteImg
-      .setVisible(true)
-      .setBlendMode(this.toBlendMode(blend))
-      .setPosition(this.logicalW / 2 + this.uiOffX, this.uiOffY)
-      .setDisplaySize(this.logicalW, this.logicalH);
-    // Маска по map-площині (як редактор): темнити лише карту+ассети+персонажа, не фон.
-    if (this.vigMaskImg && !this.vignetteImg.mask) {
-      this.vignetteImg.setMask(this.vigMaskImg.createBitmapMask());
-    } else if (!this.vigMaskImg && this.vignetteImg.mask) {
-      this.vignetteImg.clearMask(true);
-    }
+    p.vigTop = Math.max(0.02, Math.min(0.98, vig.top ?? 0.5));
+    // Екранний UV → UV маски (world-space текстура площини-карти). Беремо worldView
+    // (РЕАЛЬНИЙ видимий світовий прямокутник), бо камера суперсемплиться (zoom=RENDER_SCALE):
+    // cam.width/height — це пікселі бекбуфера, а не світові одиниці. sy у шейдері 0=верх.
+    const wv = this.cameras.main.worldView;
+    const x0 = this.levelMode ? this.levelStart : 0;
+    const maskW = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
+    const maskH = this.worldH;
+    p.maskXf = [
+      wv.width / maskW,            // scaleX (screenU → maskU)
+      (wv.x - x0) / maskW,         // offX
+      wv.height / maskH,           // scaleY (sy → maskV)
+      wv.y / maskH,                // offY
+    ];
   }
 
   private updateColorBalance(): void {
