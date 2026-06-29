@@ -128,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
     navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/' }).catch(() => {});
   initSwipeLayout();
+  initMonthSwipe();
   bindEvents();
   subscribe();
   renderAll();
@@ -1083,8 +1084,8 @@ function parseLine(line) {
 function bindEvents() {
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.tab = t.dataset.tab; syncTabs(); renderAll(); });
 
-  document.getElementById('prev-month').onclick = () => shift(-1);
-  document.getElementById('next-month').onclick = () => shift(1);
+  document.getElementById('prev-month').onclick = () => shiftWithAnim(-1);
+  document.getElementById('next-month').onclick = () => shiftWithAnim(1);
 
   document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : openForm();
   document.getElementById('add-close').onclick = closeForm;
@@ -1160,6 +1161,43 @@ function shift(d) {
   if (state.period === 'year') state.cursor = new Date(state.cursor.getFullYear() + d, 0, 1);
   else state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + d, 1);
   renderAll();
+}
+function shiftWithAnim(d) {
+  if (state.period === 'all') return;
+  const inner = document.getElementById('month-inner');
+  if (!inner) { shift(d); return; }
+  inner.style.animation = d > 0 ? 'monthOutLeft 0.15s ease-in both' : 'monthOutRight 0.15s ease-in both';
+  setTimeout(() => {
+    shift(d);
+    inner.style.animation = 'none';
+    inner.offsetWidth;
+    inner.style.animation = d > 0 ? 'monthInLeft 0.2s ease-out both' : 'monthInRight 0.2s ease-out both';
+    setTimeout(() => { inner.style.animation = ''; }, 220);
+  }, 150);
+}
+function initMonthSwipe() {
+  const row = document.querySelector('.month-row');
+  let sx = 0, sy = 0, active = false, locked = false;
+  row.addEventListener('touchstart', e => {
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+    active = true; locked = false;
+  }, { passive: true });
+  row.addEventListener('touchmove', e => {
+    if (!active) return;
+    const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+    if (!locked) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) >= Math.abs(dx)) { active = false; return; }
+      locked = true;
+    }
+    e.preventDefault();
+  }, { passive: false });
+  row.addEventListener('touchend', e => {
+    if (!active || !locked) { active = false; return; }
+    active = false;
+    const dx = e.changedTouches[0].clientX - sx;
+    if (Math.abs(dx) > 30) shiftWithAnim(dx > 0 ? -1 : 1);
+  }, { passive: true });
 }
 let filterTemp = null;
 function filterNames() { return accountsList.length ? accountsList.map(a => a.name) : [...accountsAll]; }

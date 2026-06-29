@@ -61,13 +61,19 @@ html, body {
   background: var(--pill); border: none; border-radius: 22px;
   padding: 7px 14px; cursor: pointer; color: var(--text);
   font-size: 14px; font-weight: 600; letter-spacing: 0.3px;
+  overflow: hidden;
 }
+.month-inner { display: flex; align-items: center; gap: 8px; }
 .month-pill .daycount {
   width: 24px; height: 24px; border-radius: 50%;
   border: 1.5px solid #555; display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700;
 }
-.month-pill .caret { color: #8a8a90; font-size: 11px; }
+.month-pill .caret { color: #8a8a90; font-size: 11px; flex-shrink: 0; }
+@keyframes monthOutLeft  { from { transform:translateX(0);    opacity:1; } to { transform:translateX(-28px); opacity:0; } }
+@keyframes monthOutRight { from { transform:translateX(0);    opacity:1; } to { transform:translateX(28px);  opacity:0; } }
+@keyframes monthInLeft   { from { transform:translateX(28px); opacity:0; } to { transform:translateX(0);    opacity:1; } }
+@keyframes monthInRight  { from { transform:translateX(-28px);opacity:0; } to { transform:translateX(0);    opacity:1; } }
 
 /* ── SCREENS ── */
 #screen-wrap { flex: 1; overflow: hidden; position: relative; min-height: 0; }
