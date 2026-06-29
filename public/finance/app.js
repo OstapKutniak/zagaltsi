@@ -1174,7 +1174,7 @@ function faCard(name, balText) {
   const st = catStyle(name);
   const on = filterTemp.has(name);
   return `<div class="fa-card ${on ? 'on' : 'off'}" data-name="${escAttr(name)}">
-    <div class="fa-ic" style="--c:${st.color}">${st.icon}</div>
+    <button class="fa-ic" style="--c:${st.color}" data-acc="${escAttr(name)}">${st.icon}</button>
     <div class="fa-tx"><div class="fa-name">${esc(name)}</div>${balText ? `<div class="fa-bal" style="color:${st.color}">${balText}</div>` : ''}</div>
   </div>`;
 }
@@ -1191,14 +1191,14 @@ function drawFilter() {
   }
   el.querySelectorAll('.fa-card').forEach(c => {
     const n = c.dataset.name;
-    c.onclick = e => {
-      if (e.target.closest('.fa-ic')) {
-        document.getElementById('filter-overlay').classList.remove('open');
-        setTimeout(() => openAccAction(n), 60);
-      } else {
-        if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
-        drawFilter();
-      }
+    c.onclick = () => {
+      if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
+      drawFilter();
+    };
+    c.querySelector('.fa-ic').onclick = e => {
+      e.stopPropagation();
+      document.getElementById('filter-overlay').classList.remove('open');
+      setTimeout(() => openAccAction(n), 300);
     };
   });
 }
