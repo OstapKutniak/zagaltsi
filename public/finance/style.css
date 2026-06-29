@@ -377,8 +377,8 @@ html, body {
 .filter-x { background: none; border: none; font-size: 20px; color: var(--text2); cursor: pointer; }
 .filter-list { overflow-y: auto; flex: 1; padding: 0 16px; }
 .filter-sub { font-size: 16px; font-weight: 700; color: var(--active-ink); margin: 10px 2px 8px; }
-.filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
-.fa-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: #fff; }
+.filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 8px; }
+.fa-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: #fff; overflow: hidden; min-width: 0; }
 .fa-card.on { border-color: var(--active-ink); }
 .fa-card .fa-ic { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--c); flex-shrink: 0; cursor: pointer; transition: transform 0.12s; border: none; padding: 0; }
 .fa-card .fa-ic:active { transform: scale(0.88); }
