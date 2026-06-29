@@ -72,6 +72,9 @@ export class GameScene extends Phaser.Scene {
   // Vignette: screen-space зображення, текстура band-aware
   private vignetteImg: Phaser.GameObjects.Image | null = null;
   private vignetteKey = '';
+  // Маска вінь'єтки по map-площині (як у редакторі — НЕ темнити фон).
+  private vigMaskTex: Phaser.Textures.DynamicTexture | null = null;
+  private vigMaskImg: Phaser.GameObjects.Image | null = null; // НЕ в display list (add:false)
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -259,6 +262,8 @@ export class GameScene extends Phaser.Scene {
     this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
     this.vignetteImg = null; this.vignetteKey = '';
+    if (this.vigMaskImg) { this.vigMaskImg.destroy(); this.vigMaskImg = null; }
+    if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
 
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
@@ -520,6 +525,30 @@ export class GameScene extends Phaser.Scene {
         this.lvlBakedAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, anim, idx });
       }
     }
+    this.buildVignetteMask();
+  }
+
+  // Маска map-площини для вінь'єтки (як у редакторі): вінь'єтка проявляється ТІЛЬКИ
+  // де є пікселі карти/decor/colliders — фон (ліс/хата) не темніє.
+  // World-space DynamicTexture з map-спрайтами; Image-обгортка з add:false (НЕ в display
+  // list → рендериться лише як маска). scrollFactor 1 → їде з камерою синхронно з картою.
+  private buildVignetteMask(): void {
+    if (this.vigMaskImg) { this.vigMaskImg.destroy(); this.vigMaskImg = null; }
+    if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
+    const cats = ['map', 'decor', 'collider', 'interactive', 'trap'];
+    const sprites: Phaser.GameObjects.GameObject[] = [];
+    for (const c of cats) for (const sp of (this.levelCatGOs.get(c) ?? [])) sprites.push(sp);
+    if (!sprites.length) return;
+    const x0 = this.levelMode ? this.levelStart : 0;
+    const w = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
+    if (this.textures.exists('_vigMask')) this.textures.remove('_vigMask');
+    const tex = this.textures.addDynamicTexture('_vigMask', w, this.worldH);
+    if (!tex) return;
+    tex.camera.setScroll(x0, 0); // спрайт у світі x → у текстуру в (x - x0)
+    tex.draw(sprites);
+    this.vigMaskTex = tex;
+    // Обгортка-Image у світі (x0,0), origin (0,0), НЕ в display list — лише для маски.
+    this.vigMaskImg = this.make.image({ x: x0, y: 0, key: '_vigMask', add: false }).setOrigin(0, 0);
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -1210,6 +1239,12 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode(this.toBlendMode(blend))
       .setPosition(this.logicalW / 2 + this.uiOffX, this.uiOffY)
       .setDisplaySize(this.logicalW, this.logicalH);
+    // Маска по map-площині (як редактор): темнити лише карту+ассети+персонажа, не фон.
+    if (this.vigMaskImg && !this.vignetteImg.mask) {
+      this.vignetteImg.setMask(this.vigMaskImg.createBitmapMask());
+    } else if (!this.vigMaskImg && this.vignetteImg.mask) {
+      this.vignetteImg.clearMask(true);
+    }
   }
 
   private updateColorBalance(): void {
