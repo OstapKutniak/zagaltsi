@@ -525,24 +525,20 @@ export class GameScene extends Phaser.Scene {
     this.buildVignetteMask();
   }
 
-  // Маска map-площини для вінь'єтки (як у редакторі): вінь'єтка проявляється ТІЛЬКИ
-  // де є пікселі карти/decor/colliders — фон (ліс/хата) не темніє.
-  // World-space DynamicTexture з map-спрайтами; Image-обгортка з add:false (НЕ в display
-  // list → рендериться лише як маска). scrollFactor 1 → їде з камерою синхронно з картою.
+  // Маска вінь'єтки = силует УСЬОГО, що «на карті»: карта+ассети+передплан + ЖИВІ
+  // персонажі (гравець/вороги/remote). НЕ темнимо лише далекий фон (sky/clouds/bg/frontbg).
+  // Раніше маскували тільки площину-карти позаду — тоді її силует «просвічувався» крізь
+  // персонажа/передплан (видно під блискавкою). Тепер маска у розмір КАДРУ, вирівняна по
+  // екрану (camera scroll = worldView) і ПЕРЕМАЛЬОВУЄТЬСЯ ЩОКАДРУ (персонажі рухомі).
+  private static readonly VIG_MASK_CATS = ['map', 'decor', 'collider', 'interactive', 'trap', 'foreground'];
+
   private buildVignetteMask(): void {
     if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
     if (this.colorGradePipe) { this.colorGradePipe.maskTex = null; this.colorGradePipe.vigHasMask = false; }
-    const cats = ['map', 'decor', 'collider', 'interactive', 'trap'];
-    const sprites: Phaser.GameObjects.GameObject[] = [];
-    for (const c of cats) for (const sp of (this.levelCatGOs.get(c) ?? [])) sprites.push(sp);
-    if (!sprites.length) return;
-    const x0 = this.levelMode ? this.levelStart : 0;
-    const w = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
     if (this.textures.exists('_vigMask')) this.textures.remove('_vigMask');
-    const tex = this.textures.addDynamicTexture('_vigMask', w, this.worldH);
+    const w = Math.max(1, this.logicalW), h = Math.max(1, this.worldH);
+    const tex = this.textures.addDynamicTexture('_vigMask', w, h);
     if (!tex) return;
-    tex.camera.setScroll(x0, 0); // спрайт у світі x → у текстуру в (x - x0)
-    tex.draw(sprites);
     this.vigMaskTex = tex;
     // Віддаємо WebGL-текстуру маски пайплайну (шейдер семплить її в юніті 1).
     if (this.colorGradePipe) {
@@ -550,6 +546,20 @@ export class GameScene extends Phaser.Scene {
       this.colorGradePipe.maskTex = (src.glTexture as { webGLTexture: WebGLTexture } | null) ?? null;
       this.colorGradePipe.vigHasMask = !!this.colorGradePipe.maskTex;
     }
+    this.redrawVigMask();
+  }
+
+  // Перемальовує екранну маску: усі не-фонові спрайти + усі CutoutCharacter у кадрі.
+  private redrawVigMask(): void {
+    const tex = this.vigMaskTex;
+    if (!tex) return;
+    const wv = this.cameras.main.worldView;
+    tex.camera.setScroll(wv.x, wv.y); // об'єкт у світі (x,y) → у текстуру в (x-wv.x, y-wv.y) = екран
+    tex.clear();
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    for (const c of GameScene.VIG_MASK_CATS) for (const sp of (this.levelCatGOs.get(c) ?? [])) objs.push(sp);
+    for (const o of this.children.list) if (o instanceof CutoutCharacter) objs.push(o);
+    if (objs.length) tex.draw(objs);
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -1179,19 +1189,10 @@ export class GameScene extends Phaser.Scene {
     p.vigCol = ColorGradePipeline.parse(vig.color ?? '#000000');
     // floorFrac: ручний повзунок vig.top (0..1 частка висоти екрана). Збігається з редактором.
     p.vigTop = Math.max(0.02, Math.min(0.98, vig.top ?? 0.5));
-    // Екранний UV → UV маски (world-space текстура площини-карти). Беремо worldView
-    // (РЕАЛЬНИЙ видимий світовий прямокутник), бо камера суперсемплиться (zoom=RENDER_SCALE):
-    // cam.width/height — це пікселі бекбуфера, а не світові одиниці. sy у шейдері 0=верх.
-    const wv = this.cameras.main.worldView;
-    const x0 = this.levelMode ? this.levelStart : 0;
-    const maskW = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
-    const maskH = this.worldH;
-    p.maskXf = [
-      wv.width / maskW,            // scaleX (screenU → maskU)
-      (wv.x - x0) / maskW,         // offX
-      wv.height / maskH,           // scaleY (sy → maskV)
-      wv.y / maskH,                // offY
-    ];
+    // Маска тепер екранна (у розмір кадру, вирівняна по екрану) → пряме відображення
+    // екранний UV ↔ UV маски: mu = outTexCoord.x, mv = sy. Перемальовуємо щокадру.
+    this.redrawVigMask();
+    p.maskXf = [1, 0, 1, 0];
   }
 
   private updateColorBalance(): void {
