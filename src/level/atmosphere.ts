@@ -62,6 +62,7 @@ export interface AtmVignette {
   strength?: number;   // 0-1, скільки темніє до країв; default 0.6
   blend?: BlendMode;   // режим накладання; default 'multiply'
   color?: string;      // колір краю (hex); default '#000000'
+  top?: number;        // 0-1, частка висоти екрана де ПОЧИНАЄТЬСЯ овал (верх); default 0.5
 }
 
 // ── Кольоровий баланс ────────────────────────────────────────────────────────

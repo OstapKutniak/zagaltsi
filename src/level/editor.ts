@@ -8,7 +8,6 @@ import { loadCharLibrary, type LibItem } from '../charlib';
 import { gatherBehaviors } from '../behaviors';
 import { footprintWorldCells } from './footprint';
 import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP, type DeformKf, type PlacedAnim, type PlacedDeform } from './LevelView';
-import { BAND_DEPTH } from '../config';
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type WeatherType, type LayerKey, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE, evalTod } from './atmosphere';
 import { generateGameAsset, hasFalKey, hasAiBgRemoval, removeBackgroundAI } from '../ai';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
@@ -635,40 +634,35 @@ export function initLevelEditor(prefix: string): void {
     }
 
     // ── Вінь'єтка (атмосферний прев'ю) ───────────────────────────────────────
+    // Рендериться ВСЕРЕДИНІ ігрового кадру 1280×576 (підлога на origin.y),
+    // тож прев'ю точно збігається з грою. Верх — ручний повзунок vig.top.
     if (state.showAtm && atm?.vignette?.enabled) {
       const vig = atm.vignette;
-      const W = canvas.width, H = canvas.height;
       const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
       const col = vig.color ?? '#000000';
-      // Верхній край шару карта = найвищий спрайт категорії 'map' на екрані.
-      // BAND_DEPTH — лише запасний варіант якщо map-спрайтів немає.
-      let mapTopY = toScreen(0, -BAND_DEPTH).y;
-      for (const p of (level().placed ?? [])) {
-        if (p.cat !== 'map') continue;
-        const img = renderImg(p) ?? imgOf(p);
-        if (!img) continue;
-        const sy = toScreen(p.x, p.y).y;
-        const ky = (p.scale ?? 1) * (p.scaleH ?? 1) * sc();
-        const spriteTop = sy - (img.height / 2 + (p.pivotY ?? 0)) * ky;
-        if (spriteTop < mapTopY) mapTopY = spriteTop;
-      }
-      const by0 = Math.max(0, mapTopY);
-      const groundH = H - by0;
+      const topF = Math.max(0, Math.min(0.98, vig.top ?? 0.5));
+      // Геометрія ігрового кадру (як у блоці state.camView)
+      const GAME_H = 576, FLOOR_M = 26;
+      const gw = 1280 * sc(), gh = GAME_H * sc();
+      const gx = (canvas.width - gw) / 2;
+      const gy = state.origin.y - (GAME_H - FLOOR_M) * sc();
+      const by0 = gy + topF * gh;        // верх вінь'єтки
+      const groundH = (gy + gh) - by0;   // висота зони підлоги в кадрі
       if (groundH > 4) {
-        const cx = W / 2, cy = by0 + groundH / 2;
-        const rx = W / 2, ry = groundH / 2;
+        const cx = gx + gw / 2, cy = by0 + groundH / 2;
+        const rx = gw / 2, ry = groundH / 2;
         const [er, eg, eb] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
         ctx.save();
         ctx.scale(1, ry / rx);
         const by0_sc = by0 * rx / ry, cy_sc = cy * rx / ry, gh_sc = groundH * rx / ry;
-        ctx.beginPath(); ctx.rect(0, by0_sc, W, gh_sc); ctx.clip();
+        ctx.beginPath(); ctx.rect(gx, by0_sc, gw, gh_sc); ctx.clip();
         const grd = ctx.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
         grd.addColorStop(0, 'rgba(0,0,0,0)');
         grd.addColorStop(0.45, 'rgba(0,0,0,0)');
         grd.addColorStop(1, `rgba(${er},${eg},${eb},${str})`);
         ctx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
         ctx.fillStyle = grd;
-        ctx.fillRect(0, 0, W, H * (rx / ry));
+        ctx.fillRect(gx, by0_sc, gw, gh_sc);
         ctx.restore();
         ctx.globalCompositeOperation = 'source-over';
       }
@@ -1970,6 +1964,7 @@ export function initLevelEditor(prefix: string): void {
       vigOpen(true);
       const vig = atm.vignette;
       vigBody.appendChild(mkRangeAbs('Сила', (vig.strength ?? 0.6) * 100, 0, 100, '%', (v) => { vig.strength = v / 100; }));
+      vigBody.appendChild(mkRangeAbs('Верх', Math.round((vig.top ?? 0.5) * 100), 0, 98, '%', (v) => { vig.top = v / 100; }));
       vigBody.appendChild(mkBlendSelect(vig.blend ?? 'multiply', (v) => { vig.blend = v; }));
       vigBody.appendChild(mkColorPicker('Колір', vig.color ?? '#000000', (v) => { vig.color = v; }));
     }

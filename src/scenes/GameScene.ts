@@ -71,7 +71,6 @@ export class GameScene extends Phaser.Scene {
   // Vignette: screen-space зображення, текстура band-aware
   private vignetteImg: Phaser.GameObjects.Image | null = null;
   private vignetteKey = '';
-  private mapLayerTopY = -1; // кешований верхній край map-спрайтів у world-space
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -514,13 +513,6 @@ export class GameScene extends Phaser.Scene {
         this.lvlBakedAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, anim, idx });
       }
     }
-    // Кешуємо фактичний верхній край шару 'map' для вінь'єтки
-    let mapTop = this.bandTop;
-    for (const go of (this.levelCatGOs.get('map') ?? [])) {
-      const b = (go as Phaser.GameObjects.Image).getBounds();
-      if (b.y < mapTop) mapTop = b.y;
-    }
-    this.mapLayerTopY = mapTop;
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -1144,10 +1136,8 @@ export class GameScene extends Phaser.Scene {
     const strength = Math.max(0, Math.min(1, vig.strength ?? 0.6));
     const color = vig.color ?? '#000000';
     const blend = vig.blend ?? 'multiply';
-    // floorFrac: реальний верхній край map-спрайтів (кеш після buildLevelView).
-    // Fallback: bandTop (межа колайдера) якщо map-спрайтів немає.
-    const topY = this.mapLayerTopY >= 0 ? this.mapLayerTopY : this.bandTop;
-    const floorFrac = this.logicalH > 0 ? Math.max(0.05, Math.min(0.95, topY / this.logicalH)) : 0.55;
+    // floorFrac: ручний повзунок vig.top (0..1 частка висоти екрана). Збігається з редактором.
+    const floorFrac = Math.max(0.02, Math.min(0.98, vig.top ?? 0.5));
     const key = `v2_${strength.toFixed(2)}_${color}_${blend}_${floorFrac.toFixed(3)}`;
     if (key !== this.vignetteKey) {
       this.vignetteKey = key;
