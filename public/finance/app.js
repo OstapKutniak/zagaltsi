@@ -779,12 +779,19 @@ function setFormType(t) {
   } else if ((old === 'expense' && t === 'income') || (old === 'income' && t === 'expense')) {
     formState.parent = ''; formState.sub = '';
   }
-  // Animate the orb: shrink + spin then restore
+  // Update tab buttons immediately
+  document.querySelectorAll('.ct').forEach(b => b.classList.toggle('active', b.dataset.type === t));
+  // Orb: phase 1 — spin inward to center
   const orb = document.getElementById('calc-orb');
-  orb.style.animation = 'none';
-  orb.offsetWidth; // force reflow
-  orb.style.animation = 'orbSwitch 0.28s cubic-bezier(0.4,0,0.2,1)';
-  renderForm();
+  orb.style.animation = 'orbOut 0.15s cubic-bezier(0.4,0,1,1) forwards';
+  orb.addEventListener('animationend', () => {
+    renderForm(); // update colors + icon at zero scale (invisible)
+    orb.style.animation = 'none';
+    orb.offsetWidth; // reflow
+    // Phase 2 — unwind and expand
+    orb.style.animation = 'orbIn 0.25s cubic-bezier(0,0,0.2,1) forwards';
+    orb.addEventListener('animationend', () => { orb.style.animation = ''; }, { once: true });
+  }, { once: true });
 }
 
 function renderForm() {
@@ -914,6 +921,23 @@ function drawPicker(items, nv = '') {
   list.querySelectorAll('.sheet-item').forEach(el => el.onclick = () => closePicker(el.dataset.v));
 }
 function closePicker(v) { document.getElementById('sheet-overlay').classList.remove('open'); if (pickerResolve) { pickerResolve(v); pickerResolve = null; } }
+
+// ── EXPORT ─────────────────────────────────────────────────
+function exportCSV() {
+  const rows = Object.values(txMap).sort((a, b) => new Date(a.date) - new Date(b.date));
+  if (!rows.length) return toast('Немає даних для експорту');
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = ['date,type,account,category,amount,note'];
+  rows.forEach(t => {
+    lines.push([esc(t.date), esc(t.type), esc(t.account || ''), esc(t.category || ''), t.amount, esc(t.note || '')].join(','));
+  });
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `finance-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  toast('Експорт завершено ✓');
+}
 
 // ── IMPORT ─────────────────────────────────────────────────
 const TYPE_MAP = { 'витрата':'expense','expense':'expense','дохід':'income','income':'income','переказ':'transfer','transfer':'transfer','повернення':'return','return':'return' };
@@ -1089,6 +1113,7 @@ function bindEvents() {
   document.getElementById('settings-overlay').onclick = e => { if (e.target.id === 'settings-overlay') e.currentTarget.classList.remove('open'); };
   document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
   document.getElementById('import-file').onchange = e => { const f = e.target.files[0]; if (f) importCSV(f); };
+  document.getElementById('btn-export').onclick = exportCSV;
 
   // Account action sheet
   document.getElementById('acc-action-overlay').onclick = e => { if (e.target.id === 'acc-action-overlay') closeAccAction(); };
@@ -1151,10 +1176,19 @@ function drawFilter() {
   } else {
     el.innerHTML = `<div class="filter-grid">${[...accountsAll].map(n => faCard(n, '')).join('')}</div>`;
   }
-  el.querySelectorAll('.fa-card').forEach(c => c.onclick = () => {
+  el.querySelectorAll('.fa-card').forEach(c => {
     const n = c.dataset.name;
-    if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
-    drawFilter();
+    // tap icon → close filter + open account action sheet
+    c.querySelector('.fa-ic').onclick = e => {
+      e.stopPropagation();
+      document.getElementById('filter-overlay').classList.remove('open');
+      openAccAction(n);
+    };
+    // tap card body → toggle filter
+    c.onclick = () => {
+      if (filterTemp.has(n)) filterTemp.delete(n); else filterTemp.add(n);
+      drawFilter();
+    };
   });
 }
 function openPeriod() {
