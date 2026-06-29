@@ -1183,7 +1183,7 @@ function drawFilter() {
   if (accountsList.length) {
     const reg = accountsList.filter(a => a.group !== 'savings' && !isSavings(a.name));
     const sav = accountsList.filter(a => a.group === 'savings' || isSavings(a.name));
-    const cards = a => `<div class="filter-grid">${a.map(x => { const cur = CUR_SUFFIX[x.currency] || x.currency; const v = x.currency === 'UAH' ? fmt(x.balance) : fmtDec(x.balance); return faCard(x.name, `${v} ${cur}`); }).join('')}</div>`;
+    const cards = a => `<div class="filter-grid">${a.map(x => { const cur = CUR_SUFFIX[x.currency] || x.currency; const lb = computeLiveBalance(x.name) ?? x.balance; const v = x.currency === 'UAH' ? fmt(lb) : fmtDec(lb); return faCard(x.name, `${v} ${cur}`); }).join('')}</div>`;
     el.innerHTML = (reg.length ? `<div class="filter-sub">Рахунки</div>${cards(reg)}` : '')
                  + (sav.length ? `<div class="filter-sub">Накопичувальні рахунки</div>${cards(sav)}` : '');
   } else {
