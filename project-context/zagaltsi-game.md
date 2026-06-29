@@ -534,8 +534,31 @@ const hw = Math.max(0, (luma - 0.35) / 0.65) * hStr;
 - Кожен канал: `d[i] = (d[i] + (targetR - d[i]) * weight) | 0`
 - Прозорі пікселі (`d[i+3] === 0`) пропускаються.
 
+### ОНОВЛЕННЯ (2026-06-29, сесія Opus) — гра нарешті виглядає як прев'ю студії
+
+Проблема: у грі картинка була пласка/світла проти редактора — частина атмосферних ефектів НЕ доходила до гри.
+
+**1. Кольоровий баланс у грі — повний, через WebGL-пайплайн (`src/scenes/ColorGradePipeline.ts`).**
+- Раніше гра застосовувала ЛИШЕ brightness/contrast/saturation/hue через `camera.postFX.addColorMatrix()`. Тіні/середні/світлини (luma-маска) і cavity — **повністю відсутні** → вся «настроєвість» губилась.
+- Тепер кастомний `PostFXPipeline` (GLSL) повторює математику редактора 1:1: `brightness → contrast(+cavity*0.5) → saturate → hue`, далі тіні/середні/світлини (ті самі ваги: `max(0,1-luma*2)` / `max(0,1-|luma-0.5|*4)` / `max(0,(luma-0.35)/0.65)`), наприкінці ч/б (тривожність=100, `uGray`).
+- Реєстрація: `main.ts` game config `pipeline:{ ColorGrade: ColorGradePipeline }` (Phaser перевіряє `isPostFX` → `postPipelineClasses`). Прикріплення: `GameScene.create()` → `cam.resetPostPipeline(true); cam.setPostPipeline(ColorGradePipeline)`, інстанс у `this.colorGradePipe`. Uniforms пушаться в `applyPostFX()` (замість старого ланцюга ColorMatrix). `onPreRender()` шле їх у шейдер. Інстанс має `.name='ColorGradePipeline'` (клас), зареєстрований під ключем `'ColorGrade'`.
+- **Не повертати ColorMatrix-підхід** — він не вмів тіні/середні/світлини.
+
+**2. Вінь'єтка в грі — bitmap-маску ПРИБРАНО.**
+- `vigMaskRT` (world-space RenderTexture) + `createBitmapMask()` на screen-space зображенні **ховали вінь'єтку в грі** (мисалайн/порожня маска). Прибрано `buildVignetteMask()` і поле `vigMaskRT`.
+- Гра тепер як ДО маскування: овал у смузі (білий вище `vig.top`), depth **4999** (під foreground=5000, над персонажем). `floorFrac = vig.top` (ручний повзунок «Верх»).
+- **Розбіжність (follow-up):** редактор ВСЕ ЩЕ маскує вінь'єтку по map-площині (`drawVignette`/`vigCv`/`maskCv`), а гра — ні. Якщо в грі темнітиме низ фонових дерев — зробити робочу world-space масковану RT (depth 4999), а не bitmap-mask на screen-space.
+
+**3. Плановість (per-layer tint) у грі — обмеження blend-режиму.**
+- Гра застосовує тінт через `setTint()` = ТІЛЬКИ multiply. Редактор підтримує `multiply/overlay/screen`. Шари з `overlay`/`screen` (напр. `bg` overlay 41%) у грі виглядають інакше; `multiply` (напр. foreground) збігається.
+- **Follow-up:** щоб overlay/screen збігались — потрібен per-layer кольоровий оверлей із blend-режимом, замаскований формою шару (а не setTint).
+
+Верифіковано в браузері (preview): шейдер компілюється, пайплайн прикріплюється, `updateAtmosphere()` пушить значення (brightness 1.04 / shadow #000070 / mid #ffe8c7 / highlight 0.2), вінь'єтка будується (depth 4999, multiply), 0 помилок консолі.
+
 ### TODO / відкладено
 
+- **Плановість overlay/screen у грі** (див. вище п.3) — поки лише multiply.
+- **Вінь'єтка: маскування в грі по map-площині** (див. вище п.2) — зараз unmasked, редактор masked.
+- **Авто-прив'язка «Верх» вінь'єтки** — зараз ручний повзунок `vig.top`; повернутись до авто-визначення лінії карти.
 - **Рандомізатор дощу:** при малій кількості крапель — помітні рядки/колонки (рандом поганий). Потребує кращого per-drop хешу.
-- **Вінь'єтка (game):** перевірити, що `floorFrac` відповідає видимій лінії карти в конкретному рівні (може залежати від вмісту рівня).
 - **Селектор якості рендера (GAME):** кнопка 1.5× повинна бути в лобі/налаштуваннях гри (`index.html`), а НЕ в редакторі. Поки не зроблено.
