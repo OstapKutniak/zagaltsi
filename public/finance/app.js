@@ -389,7 +389,7 @@ function openCatSheet(catName, dir, catList) {
   subsEl.innerHTML = subs.map(([name, v]) => {
     const sp = total ? Math.round(v / total * 100) : 0;
     const sst = catStyle(name);
-    return `<div class="cas-sub-row">
+    return `<div class="cas-sub-row" data-sub="${escAttr(name)}" style="cursor:pointer">
       <div class="cas-sub-ic" style="--c:${sst.color}">${sst.icon}</div>
       <div class="cas-sub-body">
         <div class="cas-sub-top"><span>${esc(name)}</span><span>${fmt(v)} <span class="cas-cur">UAH</span></span></div>
@@ -397,6 +397,14 @@ function openCatSheet(catName, dir, catList) {
       </div>
     </div>`;
   }).join('');
+  subsEl.querySelectorAll('.cas-sub-row').forEach(row => {
+    row.onclick = () => {
+      closeCatSheet();
+      catFilter = { parent: catName, sub: row.dataset.sub };
+      state.tab = 'records';
+      syncTabs(); renderAll();
+    };
+  });
 
   el.querySelector('.cas-ops-btn').onclick = () => {
     closeCatSheet();
@@ -413,7 +421,10 @@ const CARD_MINI = '<svg viewBox="0 0 24 24" style="width:15px;height:15px;vertic
 
 function renderRecords() {
   const filtered = catFilter
-    ? periodTxs().filter(t => parentCat(t.category) === catFilter)
+    ? periodTxs().filter(t => {
+        if (typeof catFilter === 'string') return parentCat(t.category) === catFilter;
+        return parentCat(t.category) === catFilter.parent && subCat(t.category) === catFilter.sub;
+      })
     : periodTxs();
   const txs = filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
   const el = document.getElementById('rec-list');
@@ -422,8 +433,10 @@ function renderRecords() {
   const chip = document.getElementById('rec-cat-chip');
   if (chip) {
     if (catFilter) {
-      const st = catStyle(catFilter);
-      chip.innerHTML = `<span class="rcc-ic" style="--c:${st.color}">${st.icon}</span><span>${esc(catFilter)}</span><button class="rcc-x" id="rcc-x">✕</button>`;
+      const chipName = typeof catFilter === 'string' ? catFilter : catFilter.parent;
+      const chipSub  = typeof catFilter === 'object' ? catFilter.sub : null;
+      const st = catStyle(chipName);
+      chip.innerHTML = `<span class="rcc-ic" style="--c:${st.color}">${st.icon}</span><span>${esc(chipName)}${chipSub ? ` · ${esc(chipSub)}` : ''}</span><button class="rcc-x" id="rcc-x">✕</button>`;
       chip.style.display = 'flex';
       document.getElementById('rcc-x').onclick = () => { catFilter = null; renderAll(); };
     } else {
