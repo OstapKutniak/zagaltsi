@@ -17,6 +17,7 @@ import {
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import type { NodeGraph } from '../node-editor';
 import { type Atmosphere, type WeatherType, type BlendMode, parseHex, hexToInt, evalSky, evalTod, evalWeather } from '../level/atmosphere';
+import { ColorGradePipeline } from './ColorGradePipeline';
 
 interface Remote {
   container: CutoutCharacter | null;
@@ -71,8 +72,6 @@ export class GameScene extends Phaser.Scene {
   // Vignette: screen-space зображення, текстура band-aware
   private vignetteImg: Phaser.GameObjects.Image | null = null;
   private vignetteKey = '';
-  // Маска map-площини: вінь'єтка лягає ТІЛЬКИ на карту+ассети+персонажа, не на фон.
-  private vigMaskRT: Phaser.GameObjects.RenderTexture | null = null;
 
   private banner!: Phaser.GameObjects.Text;
 
@@ -83,6 +82,7 @@ export class GameScene extends Phaser.Scene {
   private hudLayout: Array<{ iconKey: string; iconCx: number; barX: number; barW: number }> = [];
   private hudSig = ''; // підпис стану барів — перемальовуємо заливку лише при зміні
   private bwActive = false; // чи увімкнено ч/б екран (тривожність = 100)
+  private colorGradePipe: ColorGradePipeline | null = null; // кольоровий баланс у WebGL
 
   private finished = false;
   private waveSpawned = false;
@@ -223,6 +223,11 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#2a2233');
     this.cameras.main.setZoom(RENDER_SCALE); // backing×RENDER_SCALE + zoom = те саме поле огляду, але різкіше
     this.cameras.main.postFX.clear(); // скинути ч/б з минулого життя сцени (камера переживає restart)
+    // Кольоровий баланс через власний WebGL-пайплайн (камера переживає restart → reset перед add)
+    this.cameras.main.resetPostPipeline(true);
+    this.cameras.main.setPostPipeline(ColorGradePipeline);
+    const cgp = this.cameras.main.getPostPipeline(ColorGradePipeline);
+    this.colorGradePipe = (Array.isArray(cgp) ? cgp[0] : cgp) as ColorGradePipeline ?? null;
     this.bwActive = false;
     this.computeLayout();
 
@@ -254,7 +259,6 @@ export class GameScene extends Phaser.Scene {
     this.splashes = []; this.splashNextAt = 0;
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
     this.vignetteImg = null; this.vignetteKey = '';
-    if (this.vigMaskRT) { this.vigMaskRT.destroy(); this.vigMaskRT = null; }
 
     // Магазин — ціль рівня
     this.goal = this.add.rectangle(WORLD_WIDTH - 120, 0, 70, 120, 0xffd000).setOrigin(0.5, 1);
@@ -516,25 +520,6 @@ export class GameScene extends Phaser.Scene {
         this.lvlBakedAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, anim, idx });
       }
     }
-    this.buildVignetteMask();
-  }
-
-  // Статична маска map-площини (карта+decor/collider/...) у world-space.
-  // Вінь'єтка (BitmapMask) проявляється тільки де є map-пікселі → фон не темніє.
-  // Персонаж стоїть у межах підлоги, тож площа карти під ним теж маскує його.
-  private buildVignetteMask(): void {
-    if (this.vigMaskRT) { this.vigMaskRT.destroy(); this.vigMaskRT = null; }
-    const cats = ['map', 'decor', 'collider', 'interactive', 'trap'];
-    const sprites: Phaser.GameObjects.GameObject[] = [];
-    for (const c of cats) for (const sp of (this.levelCatGOs.get(c) ?? [])) sprites.push(sp);
-    if (!sprites.length) return;
-    const x0 = this.levelMode ? this.levelStart : 0;
-    const w = Math.max(1, (this.levelMode ? this.levelEnd : WORLD_WIDTH) - x0);
-    const rt = this.add.renderTexture(x0, 0, w, this.worldH).setOrigin(0, 0).setVisible(false);
-    rt.camera.setScroll(x0, 0);
-    rt.draw(sprites);
-    this.vigMaskRT = rt;
-    if (this.vignetteImg) this.vignetteImg.clearMask(true);
   }
 
   // Кейфрейм-анімація деформованих мешів: перебудовуємо вершини щокадру.
@@ -1084,21 +1069,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyPostFX(): void {
-    const cam = this.cameras.main;
-    cam.postFX.clear();
+    const p = this.colorGradePipe;
+    if (!p) return;
     const cb = this.atmosphere?.colorBalance;
     if (cb?.enabled) {
-      const mat = cam.postFX.addColorMatrix();
-      const br = cb.brightness ?? 1, co = cb.contrast ?? 1, sa = cb.saturation ?? 1, hu = cb.hue ?? 0;
-      if (br !== 1) mat.brightness(br, false);
-      if (co !== 1) mat.contrast(co - 1);
-      if (sa !== 1) mat.saturate(sa - 1);
-      if (hu !== 0) mat.hue(hu, false);
-      // Cavity: підсилення порожнин — додатковий контраст
-      const cav = cb.cavity ?? 0;
-      if (cav > 0.005) mat.contrast(cav * 1.5);
+      p.brightness = cb.brightness ?? 1;
+      // cavity → додатковий контраст (як co = (contrast + cavity*0.5) у редакторі)
+      p.contrast = (cb.contrast ?? 1) + (cb.cavity ?? 0) * 0.5;
+      p.saturation = cb.saturation ?? 1;
+      p.hue = (cb.hue ?? 0) * Math.PI / 180;
+      p.shadowCol = ColorGradePipeline.parse(cb.shadowColor ?? '#000033');
+      p.midCol = ColorGradePipeline.parse(cb.midColor ?? '#003300');
+      p.highCol = ColorGradePipeline.parse(cb.highlightColor ?? '#ffffee');
+      p.shadowStr = Math.min(1, cb.shadowStrength ?? 0);
+      p.midStr = Math.min(1, cb.midStrength ?? 0);
+      p.highStr = Math.min(1, cb.highlightStrength ?? 0);
+    } else {
+      p.brightness = 1; p.contrast = 1; p.saturation = 1; p.hue = 0;
+      p.shadowStr = 0; p.midStr = 0; p.highStr = 0;
     }
-    if (this.bwActive) cam.postFX.addColorMatrix().grayscale(1);
+    p.gray = this.bwActive ? 1 : 0;
   }
 
   private updateAtmosphere(): void {
@@ -1220,12 +1210,6 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode(this.toBlendMode(blend))
       .setPosition(this.logicalW / 2 + this.uiOffX, this.uiOffY)
       .setDisplaySize(this.logicalW, this.logicalH);
-    // Маска map-площини: проявляти вінь'єтку лише на карті+ассетах+персонажі
-    if (this.vigMaskRT && !this.vignetteImg.mask) {
-      this.vignetteImg.setMask(this.vigMaskRT.createBitmapMask());
-    } else if (!this.vigMaskRT && this.vignetteImg.mask) {
-      this.vignetteImg.clearMask(true);
-    }
   }
 
   private updateColorBalance(): void {
