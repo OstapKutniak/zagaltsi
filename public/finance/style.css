@@ -298,7 +298,7 @@ html, body {
 .calc-side.right { text-align: right; }
 .cs-label { display: block; font-size: 12px; opacity: 0.85; margin-bottom: 3px; }
 .cs-val { display: block; font-size: 19px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.calc-orb { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 60px; height: 60px; border-radius: 50%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; z-index: 2; }
+.calc-orb { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 60px; height: 60px; border-radius: 50%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; z-index: 2; cursor: pointer; }
 .calc-orb svg { width: 30px; height: 30px; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .calc-orb svg .fill { fill: #fff; stroke: none; }
 @keyframes orbOut {
@@ -370,8 +370,9 @@ html, body {
 .filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
 .fa-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: #fff; }
 .fa-card.on { border-color: var(--active-ink); }
-.fa-card .fa-ic { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--c); flex-shrink: 0; }
-.fa-card .fa-ic svg { width: 17px; height: 17px; fill: none; stroke: #fff; stroke-width: 1.9; }
+.fa-card .fa-ic { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--c); flex-shrink: 0; cursor: pointer; transition: transform 0.12s; }
+.fa-card .fa-ic:active { transform: scale(0.88); }
+.fa-card .fa-ic svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.9; }
 .fa-card .fa-tx { min-width: 0; }
 .fa-card .fa-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fa-card .fa-bal { font-size: 13px; font-weight: 700; }

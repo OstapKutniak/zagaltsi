@@ -781,17 +781,18 @@ function setFormType(t) {
   }
   // Update tab buttons immediately
   document.querySelectorAll('.ct').forEach(b => b.classList.toggle('active', b.dataset.type === t));
-  // Orb: phase 1 — spin inward to center
+  // Orb two-phase animation via setTimeout (reliable on iOS)
   const orb = document.getElementById('calc-orb');
-  orb.style.animation = 'orbOut 0.15s cubic-bezier(0.4,0,1,1) forwards';
-  orb.addEventListener('animationend', () => {
-    renderForm(); // update colors + icon at zero scale (invisible)
+  orb.style.animation = 'none';
+  orb.offsetWidth;
+  orb.style.animation = 'orbOut 0.14s ease-in both';
+  setTimeout(() => {
+    renderForm();
     orb.style.animation = 'none';
-    orb.offsetWidth; // reflow
-    // Phase 2 — unwind and expand
-    orb.style.animation = 'orbIn 0.25s cubic-bezier(0,0,0.2,1) forwards';
-    orb.addEventListener('animationend', () => { orb.style.animation = ''; }, { once: true });
-  }, { once: true });
+    orb.offsetWidth;
+    orb.style.animation = 'orbIn 0.24s ease-out both';
+    setTimeout(() => { orb.style.animation = ''; }, 260);
+  }, 140);
 }
 
 function renderForm() {
@@ -1080,6 +1081,10 @@ function bindEvents() {
   document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : openForm();
   document.getElementById('add-close').onclick = closeForm;
   document.querySelectorAll('.ct').forEach(b => b.onclick = () => setFormType(b.dataset.type));
+  document.getElementById('calc-orb').onclick = () => {
+    const types = ['expense', 'income', 'transfer'];
+    setFormType(types[(types.indexOf(formState.type) + 1) % types.length]);
+  };
   document.getElementById('keypad').querySelectorAll('button').forEach(b => b.onclick = () => keyPress(b.dataset.k));
   document.getElementById('side-left').onclick = pickSideLeft;
   document.getElementById('side-right').onclick = pickSideRight;
