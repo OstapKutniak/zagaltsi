@@ -469,14 +469,7 @@ function renderRecords() {
   }).join('');
 
   el.querySelectorAll('.rec-item').forEach(it => {
-    it.onclick = e => {
-      if (e.target.closest('.rec-act-btn')) return;
-      const id = it.dataset.id;
-      if (openRecId === id) { it.classList.remove('open'); openRecId = null; }
-      else { el.querySelectorAll('.rec-item.open').forEach(x => x.classList.remove('open')); it.classList.add('open'); openRecId = id; }
-    };
-    it.querySelector('.rec-edit').onclick = () => openForm(txMap[it.dataset.id]);
-    it.querySelector('.rec-del').onclick = async () => { if (confirm('Видалити операцію?')) { await deleteTx(it.dataset.id); toast('Видалено'); } };
+    it.onclick = () => openForm(txMap[it.dataset.id]);
   });
 }
 
@@ -493,10 +486,6 @@ function recItem(t) {
       ${t.note ? `<div class="rec-note">${esc(t.note)}</div>` : ''}
     </div>
     <span class="rec-amt" style="color:${col}">${sign}${fmt(t.amount)} <span style="font-size:11px;color:var(--text3)">UAH</span></span>
-    <div class="rec-actions">
-      <button class="rec-act-btn rec-edit">✎</button>
-      <button class="rec-act-btn rec-del">✕</button>
-    </div>
   </div>`;
 }
 
@@ -787,6 +776,7 @@ function openForm(tx = null, presetParent = null, presetDir = null, presetAccoun
   calcExpr = tx ? String(tx.amount) : '';
   document.getElementById('note-input').value = tx ? (tx.note || '') : '';
   document.getElementById('date-input').value = formState.date;
+  document.getElementById('form-del').style.display = tx ? '' : 'none';
   renderForm();
   document.getElementById('add-view').classList.add('active');
 }
@@ -868,7 +858,7 @@ function renderDisplay() {
 
 function keyPress(k) {
   if (k === 'back') calcExpr = calcExpr.slice(0, -1);
-  else if (k === 'cal') { const el = document.getElementById('date-input'); el.showPicker ? el.showPicker() : el.click(); return; }
+  else if (k === 'cal') { document.getElementById('date-input').click(); return; }
   else if (k === 'cur') return;
   else if (k === 'ok') return saveCalc();
   else if ('÷×−+'.includes(k)) { if (calcExpr && !/[÷×−+]$/.test(calcExpr)) calcExpr += k; }
@@ -1102,6 +1092,10 @@ function bindEvents() {
 
   document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : openForm();
   document.getElementById('add-close').onclick = closeForm;
+  document.getElementById('form-del').onclick = async () => {
+    if (!editingTx) return;
+    if (confirm('Видалити операцію?')) { await deleteTx(editingTx.id); closeForm(); toast('Видалено'); }
+  };
   document.querySelectorAll('.ct').forEach(b => b.onclick = () => setFormType(b.dataset.type));
   document.getElementById('calc-orb').onclick = () => {
     const types = ['expense', 'income', 'transfer'];

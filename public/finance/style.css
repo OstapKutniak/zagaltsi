@@ -304,6 +304,9 @@ html, body {
 .sheet-full.active { transform: translateY(0); }
 .calc-bar { display: flex; align-items: center; gap: 10px; padding: calc(var(--top) + 10px) 14px 8px; flex-shrink: 0; }
 .calc-x { background: none; border: none; font-size: 20px; color: var(--text2); cursor: pointer; width: 32px; }
+.form-del-btn { background: none; border: none; cursor: pointer; width: 32px; color: var(--exp); display: flex; align-items: center; justify-content: center; }
+.form-del-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.keypad .kcal svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .calc-types { display: flex; background: #f1f1f4; border-radius: 11px; padding: 3px; flex: 1; }
 .ct { flex: 1; background: none; border: none; color: var(--text2); padding: 7px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .ct.active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
