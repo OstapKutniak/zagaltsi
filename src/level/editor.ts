@@ -556,6 +556,40 @@ export function initLevelEditor(prefix: string): void {
       return (LAYER_ORDER.includes(cat as LK) ? cat : 'map') as LK;
     };
 
+    // Вінь'єтка малюється МІЖ шаром «карта» (+ ассети карти) і переднім планом —
+    // тобто площина вінь'єтки = площина карти/персонажа, а foreground лишається поверх.
+    const drawVignette = (): void => {
+      if (!(state.showAtm && atm?.vignette?.enabled)) return;
+      const vig = atm.vignette;
+      const vc = mainCtx;
+      const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
+      const col = vig.color ?? '#000000';
+      const topF = Math.max(0, Math.min(0.98, vig.top ?? 0.5));
+      const GAME_H = 576, FLOOR_M = 26;
+      const gw = 1280 * sc(), gh = GAME_H * sc();
+      const gx = (canvas.width - gw) / 2;
+      const gy = state.origin.y - (GAME_H - FLOOR_M) * sc();
+      const by0 = gy + topF * gh;
+      const groundH = (gy + gh) - by0;
+      if (groundH <= 4) return;
+      const cx = gx + gw / 2, cy = by0 + groundH / 2;
+      const rx = gw / 2, ry = groundH / 2;
+      const [er, eg, eb] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
+      vc.save();
+      vc.scale(1, ry / rx);
+      const by0_sc = by0 * rx / ry, gh_sc = groundH * rx / ry, cy_sc = cy * rx / ry;
+      vc.beginPath(); vc.rect(gx, by0_sc, gw, gh_sc); vc.clip();
+      const grd = vc.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
+      grd.addColorStop(0, 'rgba(0,0,0,0)');
+      grd.addColorStop(0.45, 'rgba(0,0,0,0)');
+      grd.addColorStop(1, `rgba(${er},${eg},${eb},${str})`);
+      vc.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
+      vc.fillStyle = grd;
+      vc.fillRect(gx, by0_sc, gw, gh_sc);
+      vc.restore();
+      vc.globalCompositeOperation = 'source-over';
+    };
+
     if (todEnabled) {
       // Per-layer offscreen: кожен шар малюється на окремому canvas → тінт → composite
       const W = canvas.width, H = canvas.height;
@@ -566,6 +600,8 @@ export function initLevelEditor(prefix: string): void {
         grouped.get(lk)!.push(p);
       }
       for (const lk of LAYER_ORDER) {
+        // Вінь'єтка перед переднім планом (площина карти/персонажа)
+        if (lk === 'foreground') { ctx = mainCtx; drawVignette(); }
         const items = grouped.get(lk) ?? [];
         if (!items.length) continue;
         const lt = todLayers[lk];
@@ -597,8 +633,11 @@ export function initLevelEditor(prefix: string): void {
         }
       }
     } else {
-      // Без атмосфери — єдиний прохід як раніше
-      for (const p of placedSorted()) drawOneItem(p);
+      // Без per-layer тінту: карта+ассети → вінь'єтка → передній план
+      const sorted = placedSorted();
+      for (const p of sorted) if (catToLk(p.cat) !== 'foreground') drawOneItem(p);
+      ctx = mainCtx; drawVignette();
+      for (const p of sorted) if (catToLk(p.cat) === 'foreground') drawOneItem(p);
     }
 
     // ── UI-оверлеї поверх (selection, transparent, group) ────────────────────
@@ -633,40 +672,7 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
-    // ── Вінь'єтка (атмосферний прев'ю) ───────────────────────────────────────
-    // Рендериться ВСЕРЕДИНІ ігрового кадру 1280×576 (підлога на origin.y),
-    // тож прев'ю точно збігається з грою. Верх — ручний повзунок vig.top.
-    if (state.showAtm && atm?.vignette?.enabled) {
-      const vig = atm.vignette;
-      const str = Math.max(0, Math.min(1, vig.strength ?? 0.6));
-      const col = vig.color ?? '#000000';
-      const topF = Math.max(0, Math.min(0.98, vig.top ?? 0.5));
-      // Геометрія ігрового кадру (як у блоці state.camView)
-      const GAME_H = 576, FLOOR_M = 26;
-      const gw = 1280 * sc(), gh = GAME_H * sc();
-      const gx = (canvas.width - gw) / 2;
-      const gy = state.origin.y - (GAME_H - FLOOR_M) * sc();
-      const by0 = gy + topF * gh;        // верх вінь'єтки
-      const groundH = (gy + gh) - by0;   // висота зони підлоги в кадрі
-      if (groundH > 4) {
-        const cx = gx + gw / 2, cy = by0 + groundH / 2;
-        const rx = gw / 2, ry = groundH / 2;
-        const [er, eg, eb] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
-        ctx.save();
-        ctx.scale(1, ry / rx);
-        const by0_sc = by0 * rx / ry, cy_sc = cy * rx / ry, gh_sc = groundH * rx / ry;
-        ctx.beginPath(); ctx.rect(gx, by0_sc, gw, gh_sc); ctx.clip();
-        const grd = ctx.createRadialGradient(cx, cy_sc, 0, cx, cy_sc, rx);
-        grd.addColorStop(0, 'rgba(0,0,0,0)');
-        grd.addColorStop(0.45, 'rgba(0,0,0,0)');
-        grd.addColorStop(1, `rgba(${er},${eg},${eb},${str})`);
-        ctx.globalCompositeOperation = (vig.blend as GlobalCompositeOperation) || 'multiply';
-        ctx.fillStyle = grd;
-        ctx.fillRect(gx, by0_sc, gw, gh_sc);
-        ctx.restore();
-        ctx.globalCompositeOperation = 'source-over';
-      }
-    }
+    // (вінь'єтка вже намальована між картою і переднім планом — drawVignette())
 
     // ── Кольоровий баланс (CSS filter + shadow/mid/highlight оверлеї) ────────
     if (state.showAtm && atm?.colorBalance?.enabled) {

@@ -1109,10 +1109,22 @@ export class GameScene extends Phaser.Scene {
           for (const sp of sprites) (sp as Phaser.GameObjects.Image).clearTint();
         }
       }
+      // Тінт площини «карта» накидається й на персонажа (Плановість шару карта)
+      if (this.character) {
+        const mapLt = s.layers['map'];
+        if (mapLt && mapLt.alpha > 0.005) {
+          const [cr, cg, cb] = parseHex(mapLt.color);
+          const r = Math.round(255 + (cr - 255) * mapLt.alpha);
+          const g = Math.round(255 + (cg - 255) * mapLt.alpha);
+          const b = Math.round(255 + (cb - 255) * mapLt.alpha);
+          this.character.ambientTint = (r << 16) | (g << 8) | b;
+        } else this.character.ambientTint = null;
+      }
     } else {
       this.ambientRect.setFillStyle(0x000000, 0);
       for (const sprites of this.levelCatGOs.values())
         for (const sp of sprites) (sp as Phaser.GameObjects.Image).clearTint();
+      if (this.character) this.character.ambientTint = null;
     }
     // Погода
     if (atm.weather?.enabled) {
@@ -1175,8 +1187,11 @@ export class GameScene extends Phaser.Scene {
       if (this.vignetteImg) { this.vignetteImg.destroy(); this.vignetteImg = null; }
     }
     if (!this.vignetteImg) {
+      // depth 4999 = одразу ПІД переднім планом (foreground=5000), але НАД персонажем
+      // (depth=fy≈340..520) та картою → вінь'єтка лягає на площину карти+ассети+персонажа,
+      // а передній план лишається поверх. Фон вище горизонту нейтральний (текстура біла).
       this.vignetteImg = this.add.image(0, 0, '_vignette')
-        .setScrollFactor(0).setDepth(5.95).setOrigin(0.5, 0);
+        .setScrollFactor(0).setDepth(4999).setOrigin(0.5, 0);
     }
     this.vignetteImg
       .setVisible(true)

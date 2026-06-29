@@ -272,6 +272,14 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
   private animDir = 1; // напрям кроку кісток (з тулзи «Хода в бік»); не чіпає арт
   private clips: Record<string, Clip> = {};
+  // Тінт площини карти (Плановість шару «карта») — накидається на персонажа разом з картою.
+  // null = немає; інакше 0xRRGGBB. Перебивається червоним при hurt.
+  ambientTint: number | null = null;
+  private applyTint(im: Phaser.GameObjects.Image, hurt: boolean): void {
+    if (hurt) im.setTint(0xff5555);
+    else if (this.ambientTint != null) im.setTint(this.ambientTint);
+    else im.clearTint();
+  }
 
   private constructor(scene: Phaser.Scene, doc: CharDoc) {
     super(scene, 0, 0);
@@ -423,10 +431,10 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         const jx = wt.x + jfx * co - jfy * si, jy = wt.y + jfx * si + jfy * co;
         lo.setOrigin(0.5, sl.cut); lo.setPosition(jx, jy); lo.setRotation(wt.rot + rad(bendVal)); lo.setScale(flip * scX, scY);
         lo.setCrop(0, cutPx, W, H - cutPx);
-        if (hurt) { im.setTint(0xff5555); lo.setTint(0xff5555); } else { im.clearTint(); lo.clearTint(); }
+        this.applyTint(im, hurt); this.applyTint(lo, hurt);
       } else {
         im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
-        if (hurt) im.setTint(0xff5555); else im.clearTint();
+        this.applyTint(im, hurt);
       }
       const lo2 = this.lower2[d.key];
       if (sl.cut2 != null && lo2) {
@@ -449,7 +457,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         lo2.setOrigin(0.5, sl.cut2); lo2.setPosition(j2x, j2y);
         lo2.setRotation(wt.rot + rad(bend1Val) + rad(bend2Val)); lo2.setScale(flip * scX, scY);
         lo2.setCrop(0, cut2Px, W, H - cut2Px);
-        if (hurt) lo2.setTint(0xff5555); else lo2.clearTint();
+        this.applyTint(lo2, hurt);
       }
       const lo3 = this.lower3[d.key];
       if (sl.cut3 != null && lo3 && sl.cut2 != null) {
@@ -473,7 +481,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         lo3.setOrigin(0.5, sl.cut3); lo3.setPosition(j3x, j3y);
         lo3.setRotation(r2 + rad(bend3Val)); lo3.setScale(flip * scX, scY);
         lo3.setCrop(0, cut3Px, W, H - cut3Px);
-        if (hurt) lo3.setTint(0xff5555); else lo3.clearTint();
+        this.applyTint(lo3, hurt);
       }
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту
