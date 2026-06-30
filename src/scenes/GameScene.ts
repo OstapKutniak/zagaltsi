@@ -107,7 +107,7 @@ export class GameScene extends Phaser.Scene {
   // для паралакс-шарів після анкера, інакше зразу.
   private levelAnims: { im: Phaser.GameObjects.Image; anim: PlacedAnim; isPlx: boolean; based: boolean; bx: number; by: number; br: number }[] = [];
   private lvlAnimTime = 0;
-  private lvlKfAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; idx: number[] }[] = [];
+  private lvlKfAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; scaleW: number; scaleH: number; idx: number[] }[] = [];
   private lvlBakedAnims: { mesh: Phaser.GameObjects.Mesh; deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; anim: PlacedAnim; idx: number[] }[] = [];
   // Кулінг: ассети ігрового шару (scrollFactor=1, не паралакс-фон). Поза кадром setVisible(false) —
   // суто ЛОКАЛЬНА оптимізація рендера, не чіпає стан/мережу (у коопі кожен клієнт кулить під свою камеру).
@@ -512,15 +512,15 @@ export class GameScene extends Phaser.Scene {
       if (im.getData('lvl') && !isPlx && !im.getData('lvlKfDeform') && !im.getData('lvlBakedAnim') && typeof im.displayWidth === 'number') {
         this.cullables.push({ im, halfW: Math.abs(im.displayWidth) / 2 });
       }
-      const kfData = im.getData('lvlKfDeform') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number } | undefined;
+      const kfData = im.getData('lvlKfDeform') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; scaleW: number; scaleH: number } | undefined;
       if (kfData) {
-        const { deform, W, H, N, scale, flip } = kfData;
+        const { deform, W, H, N, scale, flip, scaleW, scaleH } = kfData;
         const idx: number[] = [];
         for (let row = 0; row < N; row++) for (let col = 0; col < N; col++) {
           const i = row * (N + 1) + col;
           idx.push(i, i + 1, i + N + 1, i + 1, i + N + 2, i + N + 1);
         }
-        this.lvlKfAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, idx });
+        this.lvlKfAnims.push({ mesh: o as Phaser.GameObjects.Mesh, deform, W, H, N, scale, flip, scaleW: scaleW ?? 1, scaleH: scaleH ?? 1, idx });
       }
       const bakedData = im.getData('lvlBakedAnim') as { deform: PlacedDeform; W: number; H: number; N: number; scale: number; flip: number; anim: PlacedAnim } | undefined;
       if (bakedData) {
@@ -585,7 +585,7 @@ export class GameScene extends Phaser.Scene {
       for (let row = 0; row <= N; row++) for (let col = 0; col <= N; col++) {
         const t = col / N, s = row / N;
         const pos = deformImgPt(interpDeform, a.W, a.H, t, s);
-        verts.push(pos.x * a.scale * a.flip, -pos.y * a.scale);
+        verts.push(pos.x * a.scale * a.scaleW * a.flip, -pos.y * a.scale * a.scaleH);
         uvs.push(t, s);
       }
       a.mesh.clear();

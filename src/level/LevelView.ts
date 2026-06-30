@@ -139,7 +139,7 @@ export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: numb
   return { rot: 0, dx: dx * d, dy: dy * d };
 }
 
-export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; outline?: OutlineMod }
+export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; pivotX?: number; pivotY?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; outline?: OutlineMod }
 export interface LevelDoc {
   name?: string;
   placed: LevelPlaced[];
@@ -221,8 +221,8 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
         for (let col = 0; col <= N; col++) {
           const t = col / N, s = row / N;
           const pos = deformImgPt(p.deform, W, H, t, s);
-          // Негуємо y: image-space (y↓) → OpenGL/Phaser Mesh (y↑)
-          verts.push(pos.x * p.scale * p.flip, -pos.y * p.scale);
+          // Негуємо y: image-space (y↓) → OpenGL/Phaser Mesh (y↑). scaleW/scaleH — масштаб по осях (як редактор).
+          verts.push(pos.x * p.scale * (p.scaleW ?? 1) * p.flip, -pos.y * p.scale * (p.scaleH ?? 1));
           uvs.push(t, s);
         }
       }
@@ -239,11 +239,11 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       mesh.addVertices(verts, uvs, idx, false);
       // Якщо є кейфрейм-анімація деформації — зберігаємо дані для оновлення вершин у GameScene.
       if (p.deform.keyframes && p.deform.keyframes.length >= 2 && !p.deform.baked) {
-        mesh.setData('lvlKfDeform', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip });
+        mesh.setData('lvlKfDeform', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip, scaleW: p.scaleW ?? 1, scaleH: p.scaleH ?? 1 });
       }
       // Запечений деформ + анімація: UV крутиться через фіксовану форму.
       if (p.deform.baked && p.anim) {
-        mesh.setData('lvlBakedAnim', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip, anim: p.anim });
+        mesh.setData('lvlBakedAnim', { deform: p.deform, W, H, N, scale: p.scale, flip: p.flip, scaleW: p.scaleW ?? 1, scaleH: p.scaleH ?? 1, anim: p.anim });
       }
       go = mesh as unknown as Phaser.GameObjects.Image;
     } else {
@@ -255,7 +255,8 @@ export async function buildLevelView(scene: Phaser.Scene, doc: LevelDoc, floorY:
       }
       const im = scene.add.image(p.x, floorY + p.y, imgKey).setOrigin(0.5, 0.5);
       im.setRotation((p.rot * Math.PI) / 180);
-      im.setScale(p.scale * p.flip, p.scale);
+      // scaleW/scaleH — масштаб по ОКРЕМИХ осях (як редактор: kx=scale·scaleW, ky=scale·scaleH).
+      im.setScale(p.scale * (p.scaleW ?? 1) * p.flip, p.scale * (p.scaleH ?? 1));
       go = im;
     }
     const isBackdrop = p.cat === 'sky' || p.cat === 'clouds' || p.cat === 'bg' || p.cat === 'frontbg' || p.cat === 'map';
