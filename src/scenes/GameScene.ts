@@ -193,13 +193,24 @@ export class GameScene extends Phaser.Scene {
     const fcx = (gameX - editorY) / gs, fcy = editorY / k;
     const cx = Math.floor(fcx), cy = Math.floor(fcy);
     const lvl = (ix: number, iy: number): number => this.cellLevel.get(ix + ',' + iy) ?? 0;
-    if (this.floorSet.has(cx + ',' + cy) && !this.blockedCells.has(cx + ',' + cy)) return lvl(cx, cy) * gs;
+    const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy) && !this.blockedCells.has(ix + ',' + iy);
+    const fx = fcx - cx, fy = fcy - cy;
+    if (has(cx, cy)) {
+      const cl = lvl(cx, cy);
+      // Рампа: якщо суміжна клітинка рівно на +1 вище — поверхня плавно піднімається до неї
+      // (45° по горизонталі), щоб персонаж заходив угору без стрибка. Беремо макс. підйом.
+      const hi = (ix: number, iy: number): boolean => has(ix, iy) && lvl(ix, iy) === cl + 1;
+      let frac = 0;
+      if (hi(cx + 1, cy)) frac = Math.max(frac, fx);
+      if (hi(cx - 1, cy)) frac = Math.max(frac, 1 - fx);
+      if (hi(cx, cy + 1)) frac = Math.max(frac, fy);
+      if (hi(cx, cy - 1)) frac = Math.max(frac, 1 - fy);
+      return (cl + Math.min(1, frac)) * gs;
+    }
     // Авто-фаска: порожня клітинка з двома замальованими СУМІЖНИМИ сторонами =
     // внутрішній кут; половинка-трикутник до того кута прохідна (зрізаємо кут по
     // діагоналі). fx,fy — локальні 0..1 у клітинці; "/"=fx+fy, "\"=fx−fy.
     // Фаска успадковує висоту сусідньої клітинки-платформи, яку згладжує.
-    const has = (ix: number, iy: number): boolean => this.floorSet.has(ix + ',' + iy) && !this.blockedCells.has(ix + ',' + iy);
-    const fx = fcx - cx, fy = fcy - cy;
     const L = has(cx - 1, cy), R = has(cx + 1, cy), U = has(cx, cy - 1), D = has(cx, cy + 1);
     if (L && U && fx + fy < 1) return lvl(cx - 1, cy) * gs; // верх-ліво (діагональ /)
     if (R && D && fx + fy > 1) return lvl(cx + 1, cy) * gs; // низ-право  (діагональ /)

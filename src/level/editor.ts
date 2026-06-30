@@ -219,14 +219,34 @@ export function initLevelEditor(prefix: string): void {
     const d = L * state.grid * sc();
     return floorPts(cx, cy).map((pt) => ({ x: pt.x, y: pt.y - d }));
   };
-  // Малює підняту клітинку: сині бічні грані (стіни) до КОЖНОГО нижчого сусіда + помаранчевий верх.
+  // ── РАМПИ (трампліни) ──
+  // Якщо клітинка межує з present-сусідом РІВНО на +1 вище, її верх плавно піднімається
+  // до того сусіда на спільному ребрі (ухил 45° по горизонталі) → персонаж заходить угору
+  // без стрибка. Різниця ≥2 лишається стіною (лізти). Повертає підйом (0..1 рівня) у 4
+  // кутах клітинки в порядку floorPts: (0,0),(1,0),(1,1),(0,1).
+  const rampFracs = (cx: number, cy: number, L: number, present: Set<string>, lvlOf: (x: number, y: number) => number): [number, number, number, number] => {
+    const hi = (nx: number, ny: number): boolean => present.has(nx + ',' + ny) && lvlOf(nx, ny) === L + 1;
+    const R = hi(cx + 1, cy), Lf = hi(cx - 1, cy), F = hi(cx, cy + 1), B = hi(cx, cy - 1);
+    if (!(R || Lf || F || B)) return [0, 0, 0, 0];
+    const fr = (fx: number, fy: number): number => Math.min(1, Math.max(R ? fx : 0, Lf ? 1 - fx : 0, F ? fy : 0, B ? 1 - fy : 0));
+    return [fr(0, 0), fr(1, 0), fr(1, 1), fr(0, 1)];
+  };
+  // Малює клітинку: сині бічні грані (стіни) до нижчих сусідів (diff≥2) + верх. Якщо клітинка
+  // — рампа (межує з +1), верх нахилений і РОЖЕВИЙ, а стіна між diff-1 клітинками НЕ малюється
+  // (рампа їх з'єднує).
   const drawFloorCell = (cx: number, cy: number, L: number, present: Set<string>, lvlOf: (cx: number, cy: number) => number, preview = false): void => {
-    const top = liftedFloorPts(cx, cy, L);
+    const fracs = rampFracs(cx, cy, L, present, lvlOf);
+    const isRamp = fracs[0] > 0 || fracs[1] > 0 || fracs[2] > 0 || fracs[3] > 0;
+    const base = floorPts(cx, cy);
+    // Верх: кожен кут піднятий на (L + frac)·grid (рампа → кути на різній висоті).
+    const top: Pt[] = base.map((pt, i) => ({ x: pt.x, y: pt.y - (L + fracs[i]) * state.grid * sc() }));
     // ребра клітинки [iA,iB] та сусід за ним: back(cy-1), right(cx+1), front(cy+1), left(cx-1)
     const edges: Array<[number, number, number, number]> = [[0, 1, cx, cy - 1], [1, 2, cx + 1, cy], [2, 3, cx, cy + 1], [3, 0, cx - 1, cy]];
     for (const [a, b, nx, ny] of edges) {
-      const NL = present.has(nx + ',' + ny) ? lvlOf(nx, ny) : 0;
+      const nPresent = present.has(nx + ',' + ny);
+      const NL = nPresent ? lvlOf(nx, ny) : 0;
       if (L > NL) {
+        if (nPresent && L - NL === 1) continue; // рампа з'єднує сусіда — стіну не малюємо
         const dd = (L - NL) * state.grid * sc();
         const tA = top[a], tB = top[b];
         const bA = { x: tA.x, y: tA.y + dd }, bB = { x: tB.x, y: tB.y + dd };
@@ -236,11 +256,11 @@ export function initLevelEditor(prefix: string): void {
         fillStroke([tA, tB, bB, bA], wallFill, wallStroke, preview ? 2 : 1);
       }
     }
-    // Верх: піднята платформа — насичений помаранчевий, яма — приглушений, земля — середній.
-    const topFill = L > 0 ? 'rgba(255,154,31,0.32)' : 'rgba(255,154,31,0.20)';
-    const topStroke = 'rgba(255,154,31,' + (preview ? 0.95 : 0.85) + ')';
+    // Верх: рампа — РОЖЕВИЙ; піднята платформа — насичений помаранчевий; яма — приглушений; земля — середній.
+    const topFill = isRamp ? (preview ? 'rgba(255,90,200,0.42)' : 'rgba(255,90,200,0.30)') : (L > 0 ? 'rgba(255,154,31,0.32)' : 'rgba(255,154,31,0.20)');
+    const topStroke = isRamp ? 'rgba(255,90,200,0.95)' : 'rgba(255,154,31,' + (preview ? 0.95 : 0.85) + ')';
     fillStroke(top, topFill, topStroke, preview ? 2 : 1);
-    if (L !== 0) {
+    if (L !== 0 && !isRamp) {
       const ctr = { x: (top[0].x + top[2].x) / 2, y: (top[0].y + top[2].y) / 2 };
       ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText((L > 0 ? '↑' : '↓') + Math.abs(L), ctr.x, ctr.y); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
