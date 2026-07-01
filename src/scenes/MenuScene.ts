@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen } from './uiButton';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
+import { loadCharLibrary } from '../charlib';
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
 // Заголовок ХОРУГВА зверху по центру; кнопки-розділи зліва, серифом у small-caps,
@@ -64,7 +65,7 @@ export class MenuScene extends Phaser.Scene {
   // і саджає перед вогнищем у позі 'sit'. Немає арту → просто не показуємо (без падінь).
   private async seatCharacter(offX: number, offY: number): Promise<void> {
     const doc = await MenuScene.loadCharDoc();
-    if (!doc?.slots || !doc.images || Object.keys(doc.images).length === 0) return;
+    if (!doc) return; // нема персонажа з артом → просто без нього
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
     if (!char) return;
     char.setAnim('sit');
@@ -74,9 +75,22 @@ export class MenuScene extends Phaser.Scene {
     this.lobbyChar = char;
   }
 
+  private static hasImages(doc: CharDoc | null | undefined): boolean {
+    return !!(doc?.slots && doc.images && Object.keys(doc.images).length > 0);
+  }
+
   private static async loadCharDoc(): Promise<CharDoc | null> {
-    try { const s = localStorage.getItem('zag_game_char'); if (s) return JSON.parse(s) as CharDoc; } catch { /* ignore */ }
-    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) return await r.json() as CharDoc; } catch { /* ignore */ }
+    // 1) персонаж гравця на цьому пристрої
+    try { const s = localStorage.getItem('zag_game_char'); if (s) { const d = JSON.parse(s) as CharDoc; if (this.hasImages(d)) return d; } } catch { /* ignore */ }
+    // 2) синхронізована бібліотека (char-library.json з деплою) — герой із артом.
+    //    Працює крос-пристроєво, тож персонаж видно і з телефона без локального zag_game_char.
+    try {
+      const lib = await loadCharLibrary();
+      const hero = lib.find((x) => x.cat === 'char' && this.hasImages(x.doc)) ?? lib.find((x) => this.hasImages(x.doc));
+      if (hero) return hero.doc;
+    } catch { /* ignore */ }
+    // 3) запасний вшитий у репо (наразі без картинок → не покажеться)
+    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) { const d = await r.json() as CharDoc; if (this.hasImages(d)) return d; } } catch { /* ignore */ }
     return null;
   }
 
