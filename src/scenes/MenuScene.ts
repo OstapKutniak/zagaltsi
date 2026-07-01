@@ -21,7 +21,7 @@ const COL_HOVER = '#ffcf8f'; // теплий відсвіт багаття
 
 // Позиція/масштаб персонажа на лавці біля вогнища (логічні координати кадру 1280×576).
 // ЧЕРНЕТКА — точно виставимо в редакторі меню; поки тюнь тут. facing=-1 → обличчям до вогнища.
-const LOBBY_CHAR = { x: 1030, y: 372, scale: 0.62, facing: -1 };
+const LOBBY_CHAR = { x: 800, y: 205, scale: 1.55, facing: -1 };
 
 export class MenuScene extends Phaser.Scene {
   private lobbyChar: CutoutCharacter | null = null;

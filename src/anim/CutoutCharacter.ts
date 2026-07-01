@@ -91,7 +91,7 @@ function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; dd
 // Сидячий айдл (процедурна чернетка): стегна вперед, коліна зігнуті (розріз на нозі),
 // руки на колінах, легке дихання. Знаки/кути тюняться в рігу (вибери «sit»); пізніше
 // авторський кліп «sit» перебиває цю процедурку.
-const SIT = { rootDown: 4, thighFront: 78, thighBack: 70, knee: -86, armFront: 22, armBack: 18, elbow: -34, torso: 5 };
+const SIT = { rootDown: 2, thighFront: 82, thighBack: 76, knee: -90, armFront: 16, armBack: 12, elbow: -120, torso: -30 };
 function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { drot: number; ddx: number; ddy: number } {
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
