@@ -16,7 +16,8 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import type { NodeGraph } from '../node-editor';
-import { type Atmosphere, type WeatherType, parseHex, hexToInt, evalSky, evalTod, evalWeather } from '../level/atmosphere';
+import { type Atmosphere, parseHex, hexToInt, evalSky, evalTod, evalWeather, type LayerKey, type FogLayer, type WeatherState } from '../level/atmosphere';
+import { ensureFogTexture } from '../level/fogTexture';
 import { ColorGradePipeline } from './ColorGradePipeline';
 
 interface Remote {
@@ -31,6 +32,12 @@ interface Remote {
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
 const GATE_X = 1150; // поки арена не зачищена, далі не пройти
 const WAVE_TRIGGER_X = 760; // де набігає хвиля
+
+// Глибина туману кожного шару. sky/clouds/bg — позаду персонажа (як фон); frontbg/map —
+// ПЕРЕД персонажем (гравець «в тумані»); foreground — над усім. (Актори мають depth ~ fy.)
+const FOG_DEPTH: Record<LayerKey, number> = {
+  sky: -1350, clouds: -1250, bg: -1150, frontbg: 4000, map: 4010, foreground: 5500,
+};
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
@@ -57,7 +64,8 @@ export class GameScene extends Phaser.Scene {
   private splashes: { x: number; y: number; age: number }[] = [];
   private splashNextAt = 0;
   private ambientRect!: Phaser.GameObjects.Rectangle;
-  private fogRect!: Phaser.GameObjects.Rectangle;
+  // Процедурний туман: по одному TileSprite на шар (створюються ліниво).
+  private fogSprites: Map<LayerKey, Phaser.GameObjects.TileSprite> = new Map();
   private weatherFar!: Phaser.GameObjects.Graphics;   // дальній шар — розмитий, блідий, повільний
   private weatherMid!: Phaser.GameObjects.Graphics;   // середній — чіткий
   private weatherNear!: Phaser.GameObjects.Graphics;  // ближній — розмитий, швидкі довгі смуги
@@ -250,10 +258,10 @@ export class GameScene extends Phaser.Scene {
     this.horizon    = this.add.rectangle(0, 0, 10, 3, 0x000000, 0.25).setDepth(-1998);
     this.gateLine   = this.add.rectangle(0, 0, 6, 10, 0x000000, 0.25).setDepth(-1997);
 
-    // Ambient/fog overlay: world-space (scrollFactor=1), поверх ассетів (depth 8000).
+    // Ambient overlay: world-space (scrollFactor=1), поверх ассетів (depth 8000).
     // Переміщується з камерою → рівномірно тонує весь видимий рівень (час доби).
     this.ambientRect = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x000000, 0).setDepth(8000);
-    this.fogRect     = this.add.rectangle(WORLD_WIDTH / 2, 0, WORLD_WIDTH * 3, 10, 0x8899bb, 0).setDepth(8001);
+    ensureFogTexture(this); // процедурна текстура туману (один раз)
     // Дощ/сніг: 3 world-space шари (як спрайти), малюємо по camera.worldView → завжди
     // покриває видимий екран. Дальній і ближній — з блюром (кінематографічний дощ).
     this.weatherFar  = this.add.graphics().setDepth(8002);
@@ -269,6 +277,7 @@ export class GameScene extends Phaser.Scene {
     this.splashGfx = this.add.graphics().setDepth(5.9);
     this.atmosphere = null; this.atmTime = 0; this.weatherTime = 0;
     this.splashes = []; this.splashNextAt = 0;
+    this.fogSprites.clear(); // сцена перезапустилась → старі тайли знищено, мапу скидаємо
     this.lightningNext = 4 + Math.random() * 8; this.lightningOn = 0;
     if (this.vigMaskTex) { this.vigMaskTex.destroy(); this.vigMaskTex = null; }
     if (this.colorGradePipe) { this.colorGradePipe.vigStr = 0; this.colorGradePipe.maskTex = null; this.colorGradePipe.vigHasMask = false; }
@@ -386,7 +395,7 @@ export class GameScene extends Phaser.Scene {
     this.splashes = []; this.splashNextAt = 0;
     // Скидаємо overlays одразу, щоб не лишилось від минулого рівня
     this.ambientRect.setFillStyle(0x000000, 0);
-    this.fogRect.setFillStyle(0x8899bb, 0);
+    for (const s of this.fogSprites.values()) s.setVisible(false);
     this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
     this.lightningRect.setFillStyle(0xffffff, 0).setVisible(false); this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
     for (const e of this.enemies) e.destroy();
@@ -781,8 +790,9 @@ export class GameScene extends Phaser.Scene {
     // world-space overlays (scrollFactor=1): розміром на весь рівень по ширині та висоту кадру
     const H = this.worldH;
     this.ambientRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
-    this.fogRect?.setSize(WORLD_WIDTH * 3, H).setPosition(WORLD_WIDTH / 2, H / 2);
     this.lightningRect?.setSize(WORLD_WIDTH * 3, H * 3).setPosition(WORLD_WIDTH / 2, H / 2);
+    // Туман-тайли перепозиціонуються самі в updateFog (екранні), тут лише оновимо розмір.
+    for (const s of this.fogSprites.values()) s.setSize(this.logicalW + 6, this.logicalH + 6);
   }
 
   private onResize(): void {
@@ -1006,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
   private updateRainSplash(dt: number): void {
     if (!this.atmosphere?.weather?.enabled) { this.splashes = []; return; }
     const ws = evalWeather(this.atmosphere.weather, this.atmTime);
-    if (ws.type !== 'rain' || !ws.rainSplash) { this.splashes = []; return; }
+    if (!ws.rain || !ws.rainSplash) { this.splashes = []; return; }
     const LIFE = 0.45;
     for (const sp of this.splashes) sp.age += dt;
     this.splashes = this.splashes.filter(sp => sp.age < LIFE);
@@ -1175,15 +1185,15 @@ export class GameScene extends Phaser.Scene {
         for (const sp of sprites) (sp as Phaser.GameObjects.Image).clearTint();
       if (this.character) this.character.ambientTint = null;
     }
-    // Погода
+    // Погода — стак: дощ/сніг/туман/блискавка вмикаються незалежно.
     if (atm.weather?.enabled) {
       const s = evalWeather(atm.weather, this.atmTime);
-      this.fogRect.setFillStyle(0x8899bb, s.fogAlpha * 0.5);
-      this.drawWeatherFx(s.type, s);
+      this.drawWeatherFx(s);
+      this.updateFog(s);
     } else {
-      this.fogRect.setFillStyle(0x8899bb, 0);
       this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
       this.splashGfx.clear();
+      for (const sp of this.fogSprites.values()) sp.setVisible(false);
     }
     // Вінь'єтка
     this.updateVignette();
@@ -1224,9 +1234,9 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
-  private drawWeatherFx(type: WeatherType, ws: import('../level/atmosphere').WeatherState): void {
+  private drawWeatherFx(ws: WeatherState): void {
     this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
-    if (type === 'clear' || type === 'fog') return;
+    if (!ws.rain && !ws.snow) { this.splashGfx.clear(); return; }
 
     // Малюємо у світових координатах рівно по тому, що бачить камера зараз.
     const view = this.cameras.main.worldView;
@@ -1235,7 +1245,7 @@ export class GameScene extends Phaser.Scene {
     const GR  = 0.6180339887;
     const GR2 = 0.7548776662;
 
-    if (type === 'rain') {
+    if (ws.rain) {
       const angle   = Math.tan((ws.rainDir ?? 15) * Math.PI / 180);
       const spd     = ws.rainSpeed ?? 600;
       const baseLen = ws.rainDropLen ?? 16;
@@ -1297,7 +1307,8 @@ export class GameScene extends Phaser.Scene {
           }
         }
       }
-    } else if (type === 'snow') {
+    }
+    if (ws.snow) {
       const SPEED = 70;
       this.weatherMid.fillStyle(0xffffff, 0.7);
       for (let i = 0; i < 70; i++) {
@@ -1309,6 +1320,37 @@ export class GameScene extends Phaser.Scene {
         const sx = X0 + ((hf * OW + drift) % OW + OW) % OW - 50;
         this.weatherMid.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
+    }
+  }
+
+  // ── Процедурний туман: по TileSprite на активний шар ──────────────────────────
+  // Кожен шар — тайлована текстура (смуги+нойз+блюр), тонована в колір шару, з власною
+  // прозорістю/швидкістю/напрямком/рандомом. Екранна прив'язка (scrollFactor 0) — патерн
+  // не паралаксить зі світом, а дрейфує сам. Глибина з FOG_DEPTH: frontbg/map — перед гравцем.
+  private updateFog(ws: WeatherState): void {
+    const active = ws.fog ? ws.fogLayers : {};
+    const t = this.weatherTime;
+    for (const key of Object.keys(FOG_DEPTH) as LayerKey[]) {
+      const fl = active[key] as FogLayer | undefined;
+      let sp = this.fogSprites.get(key);
+      if (!fl || fl.alpha <= 0.004) { if (sp) sp.setVisible(false); continue; }
+      if (!sp) {
+        sp = this.add.tileSprite(0, 0, this.logicalW + 6, this.logicalH + 6, 'fog_noise')
+          .setOrigin(0.5).setScrollFactor(0).setDepth(FOG_DEPTH[key]);
+        this.fogSprites.set(key, sp);
+      }
+      sp.setVisible(true);
+      sp.setPosition(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 + this.uiOffY);
+      sp.setDepth(FOG_DEPTH[key]);
+      sp.setTint(hexToInt(fl.color ?? '#c2ccd6'));
+      sp.setAlpha(Math.max(0, Math.min(1, fl.alpha)));
+      const scale = Math.max(0.3, fl.scale ?? 1);
+      sp.setTileScale(scale, scale);
+      // Дрейф патерна за напрямком/швидкістю + сталий зсув від seed (рандом патерна).
+      const rad = (fl.dir ?? 0) * Math.PI / 180;
+      const off = (fl.seed ?? 0) * 37.13;
+      sp.tilePositionX = off + Math.cos(rad) * (fl.speed ?? 12) * t / scale;
+      sp.tilePositionY = off * 0.7 + Math.sin(rad) * (fl.speed ?? 12) * t / scale;
     }
   }
 

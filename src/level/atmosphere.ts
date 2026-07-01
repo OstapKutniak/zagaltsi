@@ -29,9 +29,13 @@ export interface TodPhase {
   layers?: TodLayers;     // нові per-layer тонти
 }
 export interface WeatherPhase {
-  durationSec: number;
-  type: WeatherType;
-  fogAlpha: number;
+  durationSec: number;      // legacy (більше не в UI — секції статичні per-level)
+  type?: WeatherType;       // legacy exclusive-тип; лишається для міграції у стак-тумблери
+  // ── СТАК: незалежні модифікатори погоди (можна вмикати кілька разом) ──
+  rain?:  boolean;
+  snow?:  boolean;
+  fog?:   boolean;
+  fogAlpha?: number;        // legacy повноекранний туман — більше НЕ рендериться
   // rain-specific
   rainColor?:   string;   // hex, default '#aaddff'
   rainDir?:     number;   // degrees tilt right, default 15
@@ -49,7 +53,22 @@ export interface WeatherPhase {
   splashSize?:      number;
   splashCount?:     number;
   splashIntensity?: number;
+  // ── ТУМАН: процедурний, per-layer (замість купи PNG) ──
+  fogLayers?: Partial<Record<LayerKey, FogLayer>>;
 }
+
+// Один шар процедурного туману. Малюється тайлованою текстурою (смуги+нойз+блюр),
+// прив'язаною до екрана; напрямок/швидкість ганяють патерн. Рандом = варіація патерна.
+export interface FogLayer {
+  color: string;   // hex, default '#c2ccd6'
+  alpha: number;   // 0..1 непрозорість, default 0.4
+  speed: number;   // px/sec руху патерна, default 12
+  dir:   number;   // degrees напрямок руху (0 = праворуч, 90 = вниз), default 0
+  seed:  number;   // рандомізація патерна (зсув/масштаб), default random
+  scale?: number;  // масштаб патерна (розмір «клубів»), 0.5..3, default 1
+}
+
+export const DEFAULT_FOG_LAYER = (): FogLayer => ({ color: '#c2ccd6', alpha: 0.4, speed: 12, dir: 0, seed: Math.floor(Math.random() * 1000), scale: 1 });
 
 export interface AtmSky     { enabled: boolean; static?: boolean; phases: SkyPhase[] }
 export interface AtmTod     { enabled: boolean; static?: boolean; phases: TodPhase[] }
@@ -137,11 +156,20 @@ function staticOrFind<T extends { durationSec: number }>(arr: T[], wallSec: numb
 export interface SkyState     { skyColor: number; groundColor: number }
 export interface TodState     { ambientColor: number; ambientAlpha: number; layers: TodLayers }
 export interface WeatherState {
-  type: WeatherType; fogAlpha: number;
+  rain: boolean; snow: boolean; fog: boolean; lightning: boolean;
   rainColor: string; rainDir: number; rainSpeed: number; rainDropLen: number; rainDrops: number;
-  rainNear: number; rainMid: number; rainFar: number; lightning: boolean; rainSplash: boolean;
+  rainNear: number; rainMid: number; rainFar: number; rainSplash: boolean;
   lightningEvery: number; lightningVary: number;
   splashSize: number; splashCount: number; splashIntensity: number;
+  fogLayers: Partial<Record<LayerKey, FogLayer>>;
+}
+
+// Стак-тумблери фази: беремо явні rain/snow/fog, або (legacy) виводимо з exclusive type.
+// Викликається і в редакторі (щоб чекбокси показали правильний стан), і в грі.
+export function weatherToggles(ph: WeatherPhase): { rain: boolean; snow: boolean; fog: boolean } {
+  const hasToggles = ph.rain !== undefined || ph.snow !== undefined || ph.fog !== undefined;
+  if (hasToggles) return { rain: !!ph.rain, snow: !!ph.snow, fog: !!ph.fog };
+  return { rain: ph.type === 'rain', snow: ph.type === 'snow', fog: ph.type === 'fog' };
 }
 
 export function evalSky(sky: AtmSky, wallSec: number): SkyState {
@@ -163,14 +191,15 @@ export function evalTod(tod: AtmTod, wallSec: number): TodState {
 }
 
 export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
-  const { pA, pB, f } = staticOrFind(wx.phases, wallSec, wx.static);
-  const a = pA as WeatherPhase, b = pB as WeatherPhase;
+  // Секції статичні per-level → беремо фазу 0 (durationSec/фази-цикл поки не в UI).
+  const a = (wx.phases[0] ?? {}) as WeatherPhase;
+  const tog = weatherToggles(a);
   // Частота блискавки: нова freq (1-10) або legacy lightningEvery
   const freq = a.lightningFreq;
   const every = freq != null ? (30 / Math.max(1, freq)) : (a.lightningEvery ?? 10);
   return {
-    type:        f < 0.5 ? (a.type ?? 'clear') : (b.type ?? 'clear'),
-    fogAlpha:    (a.fogAlpha    ?? 0) + ((b.fogAlpha    ?? 0) - (a.fogAlpha    ?? 0)) * f,
+    rain: tog.rain, snow: tog.snow, fog: tog.fog,
+    lightning:   !!a.lightning,
     rainColor:   a.rainColor   ?? '#aaddff',
     rainDir:     a.rainDir     ?? 15,
     rainSpeed:   a.rainSpeed   ?? 600,
@@ -179,13 +208,13 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
     rainNear:    a.rainNear    ?? 1,
     rainMid:     a.rainMid     ?? 0.7,
     rainFar:     a.rainFar     ?? 0.35,
-    lightning:   !!a.lightning,
     rainSplash:  !!a.rainSplash,
     lightningEvery: every,
     lightningVary:  a.lightningVary  ?? 0.5,
     splashSize:      a.splashSize      ?? 1,
     splashCount:     a.splashCount     ?? 1,
     splashIntensity: a.splashIntensity ?? 1,
+    fogLayers:   a.fogLayers ?? {},
   };
 }
 
@@ -193,4 +222,4 @@ export function evalWeather(wx: AtmWeather, wallSec: number): WeatherState {
 
 export const DEFAULT_SKY_PHASE:     SkyPhase     = { durationSec: 30, skyHex: '#3a3148', groundHex: '#4a3f2e' };
 export const DEFAULT_TOD_PHASE:     TodPhase     = { durationSec: 30, ambientHex: '#000000', ambientAlpha: 0, layers: {} };
-export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, type: 'clear', fogAlpha: 0, rainColor: '#aaddff', rainDir: 15, rainSpeed: 600, rainDropLen: 16, rainDrops: 100, rainNear: 1, rainMid: 0.7, rainFar: 0.35 };
+export const DEFAULT_WEATHER_PHASE: WeatherPhase = { durationSec: 30, rain: false, snow: false, fog: false, rainColor: '#aaddff', rainDir: 15, rainSpeed: 600, rainDropLen: 16, rainDrops: 100, rainNear: 1, rainMid: 0.7, rainFar: 0.35, fogLayers: {} };
