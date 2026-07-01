@@ -103,7 +103,9 @@ export function hideLobby(lobbyCode?: string): void {
 }
 
 export function initLobbyUI(): void {
-  showLobby();
+  // Лобі більше НЕ показуємо одразу на старті — вхідні двері тепер ігрове меню
+  // (MenuScene). Лобі відкривається з розділу «Подорожі» (збір Хоругви перед
+  // вилазкою). Тут лише готуємо пікер і вішаємо обробники.
   void renderCharPicker();
 
   // Solo — skip lobby

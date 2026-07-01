@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { MenuScene } from './scenes/MenuScene';
+import { SectionScene } from './scenes/SectionScene';
 import { GameScene } from './scenes/GameScene';
 import { ColorGradePipeline } from './scenes/ColorGradePipeline';
 import { initTelegram } from './telegram';
@@ -30,7 +32,7 @@ const game = new Phaser.Game({
     height: LOGICAL_H * RENDER_SCALE,
   },
   pipeline: { ColorGrade: ColorGradePipeline } as unknown as Phaser.Types.Core.PipelineConfig,
-  scene: [BootScene, GameScene],
+  scene: [BootScene, MenuScene, SectionScene, GameScene],
 });
 
 setupViewport(game);
