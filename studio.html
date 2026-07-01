@@ -542,10 +542,16 @@
           <!-- NODE EDITOR PANEL — стикується в нижню половину вьюпорта -->
           <div id="nodeEditorPanel">
             <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--rail);border-bottom:1px solid var(--line);flex-shrink:0">
-              <span id="nodeEditorTitle" style="font-weight:600;font-size:13px;flex:1">Нодове дерево</span>
+              <span id="nodeEditorTitle" style="font-weight:600;font-size:13px">Нодове дерево</span>
+              <div id="neTabs" style="display:none;gap:4px;margin-left:6px">
+                <button id="neTabBehavior" class="ne-tab" style="padding:4px 10px;font-size:12px">Активна поведінка</button>
+                <button id="neTabDialogs" class="ne-tab" style="padding:4px 10px;font-size:12px">Діалоги</button>
+              </div>
+              <span style="flex:1"></span>
               <button id="nodeEditorClose" style="padding:4px 12px;font-size:12px">Закрити ✕</button>
             </div>
             <canvas id="nodeEditorCanvas" style="flex:1;width:100%;display:block"></canvas>
+            <div id="dialogEditorPane" style="display:none;flex:1;width:100%;overflow:auto"></div>
           </div>
         </div>
         <div id="timelineBar" class="pane tl-collapsed">

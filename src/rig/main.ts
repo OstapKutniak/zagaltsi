@@ -7,6 +7,8 @@ import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { pullCharLib } from '../sync';
 import { gatherBehaviors, loadPublishedBehaviors } from '../behaviors';
+import { gatherDialogs, loadPublishedDialogs } from '../dialogs';
+import { mountDialogEditor, unmountDialogEditor } from './dialogEditor';
 import { toggleConstructor } from '../ui-constructor';
 import { generateGameAsset, hasFalKey } from '../ai';
 
@@ -1159,14 +1161,38 @@ function openNodePanel(graph: NodeGraph, cats: string[], onChange: (g: NodeGraph
   _sharedNE = new NodeEditor(canvas, cats, onChange);
   _sharedNE.loadGraph(graph);
   document.getElementById('nodeEditorTitle')!.textContent = title;
+  // За замовчуванням (напр. логіка локації) — без вкладок, лише граф.
+  document.getElementById('neTabs')!.style.display = 'none';
+  canvas.style.display = 'block';
+  document.getElementById('dialogEditorPane')!.style.display = 'none';
   // Стикуємо дерево в нижню половину вьюпорта (центру) — не overlay поверх усього.
   document.getElementById('centerMid')?.classList.add('nodes-open');
   panel.style.display = 'flex';
   requestAnimationFrame(() => { _sharedNE?.resize(); _sharedNE?.start(); });
 }
 
+// Вкладки «Активна поведінка / Діалоги» — лише для поведінки персонажа.
+function enableBehaviorTabs(cid: string, cname: string): void {
+  const tabs = document.getElementById('neTabs')!; tabs.style.display = 'flex';
+  const canvas = document.getElementById('nodeEditorCanvas') as HTMLCanvasElement;
+  const pane = document.getElementById('dialogEditorPane')!;
+  const tb = document.getElementById('neTabBehavior') as HTMLButtonElement;
+  const td = document.getElementById('neTabDialogs') as HTMLButtonElement;
+  const setActive = (which: 'b' | 'd'): void => {
+    tb.style.background = which === 'b' ? 'var(--accent)' : 'var(--rail)';
+    tb.style.color = which === 'b' ? '#1b1b1b' : 'var(--ink)';
+    td.style.background = which === 'd' ? 'var(--accent)' : 'var(--rail)';
+    td.style.color = which === 'd' ? '#1b1b1b' : 'var(--ink)';
+  };
+  tb.onclick = (): void => { canvas.style.display = 'block'; pane.style.display = 'none'; setActive('b'); requestAnimationFrame(() => _sharedNE?.resize()); };
+  td.onclick = (): void => { canvas.style.display = 'none'; setActive('d'); void mountDialogEditor(pane, cid, cname); };
+  setActive('b');
+}
+
 function closeNodePanel(): void {
   if (_sharedNE) { _sharedNE.stop(); _sharedNE = null; }
+  unmountDialogEditor();
+  document.getElementById('neTabs')!.style.display = 'none';
   document.getElementById('nodeEditorPanel')!.style.display = 'none';
   document.getElementById('centerMid')?.classList.remove('nodes-open');
 }
@@ -1557,7 +1583,8 @@ function openCharBehavior(charId: string, name: string): void {
     if (local && remote && (remote.updatedAt ?? 0) > (local.updatedAt ?? 0)) g = remote;
     if (g === remote && remote) idbSet(key, remote).catch(() => {}); // підтягнули з репо → осідаємо локально
     open(g);
-  }).catch(() => open({ nodes: [], edges: [] }));
+    enableBehaviorTabs(charId, name); // вкладки Активна поведінка / Діалоги
+  }).catch(() => { open({ nodes: [], edges: [] }); enableBehaviorTabs(charId, name); });
 }
 document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
   const item = loadLib().find((x) => x.id === currentCharId && (x.cat ?? 'char') === libCat);
@@ -1581,10 +1608,23 @@ registerPublisher(async () => {
     const rem = published[id];
     if (!rem || (g.updatedAt ?? 0) >= (rem.updatedAt ?? 0)) behaviors[id] = g;
   }
+  // Діалоги — так само: збираємо локальні, зливаємо з опублікованими (LWW пер-діалог за id).
+  const [localDlg, pubDlg] = await Promise.all([
+    gatherDialogs(),
+    loadPublishedDialogs().catch(() => ({} as import('../dialogs').DialogMap)),
+  ]);
+  const dialogs: import('../dialogs').DialogMap = { ...pubDlg };
+  for (const [cid, arr] of Object.entries(localDlg)) {
+    const remArr = pubDlg[cid] ?? [];
+    const byId = new Map(remArr.map((d) => [d.id, d]));
+    for (const d of arr) { const r = byId.get(d.id); if (!r || (d.updatedAt ?? 0) >= (r.updatedAt ?? 0)) byId.set(d.id, d); }
+    dialogs[cid] = [...byId.values()];
+  }
   return {
     'public/character.json': JSON.stringify(character),
     'public/studio-data/char-library.json': JSON.stringify(loadLib()),
     'public/studio-data/behaviors.json': JSON.stringify(behaviors),
+    'public/studio-data/dialogs.json': JSON.stringify(dialogs),
   };
 });
 wirePublishButton($<HTMLButtonElement>('toGameBtn'), status, reloadPreview);
