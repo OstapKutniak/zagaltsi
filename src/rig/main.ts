@@ -234,7 +234,7 @@ function animRoot(name: string, t: number): { ddx: number; ddy: number } {
 // Сидячий айдл (процедурна чернетка): стегна вперед, коліна зігнуті (розріз на нозі),
 // руки на колінах, легке дихання. Тюнь кути/знаки тут; пізніше авторський кліп «sit»
 // (ключі в таймлайні) перебиває процедурку. ДЗЕРКАЛО у src/anim/CutoutCharacter.ts.
-const SIT = { rootDown: 2, thighFront: 82, thighBack: 76, knee: -90, armFront: 52, armBack: 52, elbow: -125, torso: -33 };
+const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 52, armBack: 52, elbow: -125, torso: -33 };
 
 // Локальний догин кістки (лише ОБЕРТАННЯ) — поверх руху кореня. Пропорційно-незалежно.
 function animOff(name: string, t: number, key: string): { drot: number; ddx: number; ddy: number } {
