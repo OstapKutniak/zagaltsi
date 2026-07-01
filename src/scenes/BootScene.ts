@@ -14,7 +14,7 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     this.makeRect('player', 34, 56, 0x57c25a);
     this.makeRect('enemy',  34, 56, 0xc2504f);
-    this.scene.start('Game');
+    this.scene.start('Menu');
   }
 
   private makeRect(key: string, w: number, h: number, color: number): void {
