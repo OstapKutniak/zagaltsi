@@ -627,8 +627,11 @@ export function initLevelEditor(prefix: string): void {
       mainCtx.restore();
     };
 
-    if (todEnabled) {
-      // Per-layer offscreen: кожен шар малюється на окремому canvas → тінт → composite
+    {
+      // Єдиний прохід по шарах: [фоновий туман] → [вміст шару (+тод-тінт)] → [передній туман].
+      // Туман кожного шару лягає на своїй глибині (як FOG_DEPTH у грі): sky/clouds/bg —
+      // ЗА своїм шаром, frontbg/map/foreground — ПЕРЕД. Малюється у сцену (до кольор-балансу),
+      // тож грейдиться разом зі сценою — як у грі.
       const W = canvas.width, H = canvas.height;
       const grouped = new Map<LK, Placed[]>();
       for (const p of placedSorted()) {
@@ -636,45 +639,46 @@ export function initLevelEditor(prefix: string): void {
         if (!grouped.has(lk)) grouped.set(lk, []);
         grouped.get(lk)!.push(p);
       }
+      const fogPh = fogActivePhase();
+      const FOG_BEHIND: LK[] = ['sky', 'clouds', 'bg'];         // фоновий туман — за шаром
+      const FOG_FRONT:  LK[] = ['frontbg', 'map', 'foreground']; // передній туман — перед шаром
       for (const lk of LAYER_ORDER) {
+        // Туман фонового шару — ПЕРЕД його вмістом (позаду сцени)
+        if (fogPh && FOG_BEHIND.includes(lk)) { ctx = mainCtx; drawFogLayer(fogPh, lk); }
         // Вінь'єтка перед переднім планом (площина карти/персонажа)
         if (lk === 'foreground') { ctx = mainCtx; drawVignette(); }
         const items = grouped.get(lk) ?? [];
-        if (!items.length) continue;
-        const lt = todLayers[lk];
-        const needTint = lt && lt.alpha > 0.005;
-        if (!needTint) {
-          for (const p of items) drawOneItem(p);
-        } else {
-          // Малюємо шар на offscreen, щоб тінт не торкнувся попередніх шарів
-          const off = document.createElement('canvas');
-          off.width = W; off.height = H;
-          ctx = off.getContext('2d')!;
-          ctx.imageSmoothingEnabled = !_panning;
-          for (const p of items) drawOneItem(p);
-          // Тінт-канвас: колір шару, замаскований формою спрайтів (destination-in)
-          // → множиться ТІЛЬКИ на пікселі ассетів, не на прозорий фон
-          const tintCv = document.createElement('canvas'); tintCv.width = W; tintCv.height = H;
-          const tc = tintCv.getContext('2d')!;
-          tc.fillStyle = lt.color; tc.fillRect(0, 0, W, H);
-          tc.globalCompositeOperation = 'destination-in';
-          tc.drawImage(off, 0, 0); // маска: залишити колір тільки де є спрайти
-          // Накладаємо замаскований тінт на спрайти з вибраним режимом
-          const offCtx = off.getContext('2d')!;
-          offCtx.globalCompositeOperation = (lt.blend as GlobalCompositeOperation) || 'multiply';
-          offCtx.globalAlpha = Math.min(1, lt.alpha);
-          offCtx.drawImage(tintCv, 0, 0);
-          offCtx.globalCompositeOperation = 'source-over'; offCtx.globalAlpha = 1;
-          ctx = mainCtx;
-          ctx.drawImage(off, 0, 0);
+        const lt = todEnabled ? todLayers[lk] : undefined;
+        const needTint = !!(lt && lt.alpha > 0.005);
+        if (items.length) {
+          if (!needTint) {
+            ctx = mainCtx;
+            for (const p of items) drawOneItem(p);
+          } else {
+            // Малюємо шар на offscreen, щоб тінт не торкнувся попередніх шарів
+            const off = document.createElement('canvas');
+            off.width = W; off.height = H;
+            ctx = off.getContext('2d')!;
+            ctx.imageSmoothingEnabled = !_panning;
+            for (const p of items) drawOneItem(p);
+            // Тінт-канвас: колір шару, замаскований формою спрайтів (destination-in)
+            const tintCv = document.createElement('canvas'); tintCv.width = W; tintCv.height = H;
+            const tc = tintCv.getContext('2d')!;
+            tc.fillStyle = lt!.color; tc.fillRect(0, 0, W, H);
+            tc.globalCompositeOperation = 'destination-in';
+            tc.drawImage(off, 0, 0);
+            const offCtx = off.getContext('2d')!;
+            offCtx.globalCompositeOperation = (lt!.blend as GlobalCompositeOperation) || 'multiply';
+            offCtx.globalAlpha = Math.min(1, lt!.alpha);
+            offCtx.drawImage(tintCv, 0, 0);
+            offCtx.globalCompositeOperation = 'source-over'; offCtx.globalAlpha = 1;
+            ctx = mainCtx;
+            ctx.drawImage(off, 0, 0);
+          }
         }
+        // Туман переднього шару — ПІСЛЯ його вмісту (перед сценою)
+        if (fogPh && FOG_FRONT.includes(lk)) { ctx = mainCtx; drawFogLayer(fogPh, lk); }
       }
-    } else {
-      // Без per-layer тінту: карта+ассети → вінь'єтка → передній план
-      const sorted = placedSorted();
-      for (const p of sorted) if (catToLk(p.cat) !== 'foreground') drawOneItem(p);
-      ctx = mainCtx; drawVignette();
-      for (const p of sorted) if (catToLk(p.cat) === 'foreground') drawOneItem(p);
     }
 
     // ── UI-оверлеї поверх (selection, transparent, group) ────────────────────
@@ -1114,8 +1118,8 @@ export function initLevelEditor(prefix: string): void {
       ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
       ctx.closePath(); ctx.fill();
     }
-    // Атмосфера у вьюпорті редактора (туман під дощем, як у грі)
-    if (state.showAtm) { drawEditorFog(); drawEditorRain(); }
+    // Дощ малюється поверх (туман тепер інтерлівиться між шарами в основному циклі)
+    if (state.showAtm) drawEditorRain();
   }
 
   function rainPaletteEd(hex: string): string[] {
@@ -1143,35 +1147,38 @@ export function initLevelEditor(prefix: string): void {
     _fogTinted.set(color, c);
     return c;
   }
-  function drawEditorFog(): void {
-    const lv = level();
-    const wx = lv.atmosphere?.weather;
-    if (!wx?.enabled) return;
-    const ph = wx.phases[0] as import('./atmosphere').WeatherPhase;
-    if (!ph) return;
+  // Активна фаза туману (або null): showAtm + weather.enabled + fog-тумблер + шари.
+  function fogActivePhase(): WeatherPhase | null {
+    if (!state.showAtm) return null;
+    const wx = level().atmosphere?.weather;
+    if (!wx?.enabled) return null;
+    const ph = wx.phases[0] as WeatherPhase;
+    if (!ph) return null;
     const fogOn = ph.fog !== undefined ? ph.fog : ph.type === 'fog';
-    if (!fogOn || !ph.fogLayers) return;
-    const W = canvas.width, H = canvas.height;
+    if (!fogOn || !ph.fogLayers) return null;
+    return ph;
+  }
+  // Малює туман ОДНОГО шару на поточний ctx (має бути mainCtx). Викликається у циклі
+  // шарів на своїй глибині → фоновий за шаром, передній перед шаром (як FOG_DEPTH у грі).
+  function drawFogLayer(ph: WeatherPhase, key: LayerKey): void {
+    const fl = ph.fogLayers?.[key] as FogLayer | undefined;
+    if (!fl || (fl.alpha ?? 0) <= 0.004) return;
+    const pat = ctx.createPattern(fogTintedCanvas(fl.color ?? '#c2ccd6'), 'repeat');
+    if (!pat || !_fogBase) return;
     const t = performance.now() / 1000;
-    for (const key of LAYER_KEYS) {
-      const fl = ph.fogLayers[key] as FogLayer | undefined;
-      if (!fl || (fl.alpha ?? 0) <= 0.004) continue;
-      const pat = ctx.createPattern(fogTintedCanvas(fl.color ?? '#c2ccd6'), 'repeat');
-      if (!pat || !_fogBase) continue;
-      const scale = Math.max(0.3, fl.scale ?? 1) * sc();
-      const rad = (fl.dir ?? 0) * Math.PI / 180;
-      const off = (fl.seed ?? 0) * 37.13;
-      // дрейф патерна (аналог tilePosition у грі): base-зсув від seed + рух за напрямком
-      const tx = -(off + Math.cos(rad) * (fl.speed ?? 12) * t) * scale;
-      const ty = -(off * 0.7 + Math.sin(rad) * (fl.speed ?? 12) * t) * scale;
-      const m = new DOMMatrix([scale, 0, 0, scale, tx % (_fogBase.width * scale), ty % (_fogBase.height * scale)]);
-      (pat as CanvasPattern).setTransform(m);
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, fl.alpha ?? 0.4));
-      ctx.fillStyle = pat;
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
-    }
+    const scale = Math.max(0.3, fl.scale ?? 1) * sc();
+    const rad = (fl.dir ?? 0) * Math.PI / 180;
+    const off = (fl.seed ?? 0) * 37.13;
+    // дрейф патерна (аналог tilePosition у грі): base-зсув від seed + рух за напрямком
+    const tx = -(off + Math.cos(rad) * (fl.speed ?? 12) * t) * scale;
+    const ty = -(off * 0.7 + Math.sin(rad) * (fl.speed ?? 12) * t) * scale;
+    const m = new DOMMatrix([scale, 0, 0, scale, tx % (_fogBase.width * scale), ty % (_fogBase.height * scale)]);
+    (pat as CanvasPattern).setTransform(m);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, fl.alpha ?? 0.4));
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
   }
   function drawEditorRain(): void {
     const lv = level();
