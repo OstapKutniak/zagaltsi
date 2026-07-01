@@ -37,9 +37,10 @@ function sampleNoise(u: number, v: number, nx: number, ny: number, grid: number[
   return a + (b - a) * fy;
 }
 
-// Реєструє текстуру туману в Phaser (один раз). w×h — степені 2 для чистого тайлу.
-export function ensureFogTexture(scene: Phaser.Scene, key = 'fog_noise', w = 512, h = 256): void {
-  if (scene.textures.exists(key)) return;
+// Будує безшовну тайловану нойз-канву туману (біле із alpha-формою «клубів»).
+// Спільна для гри (Phaser-текстура) і редактора (Canvas2D-патерн у вьюпорті),
+// щоб туман виглядав однаково в прев'ю і в грі. w×h — степені 2 для чистого тайлу.
+export function buildFogNoiseCanvas(w = 512, h = 256): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d')!;
@@ -70,5 +71,11 @@ export function ensureFogTexture(scene: Phaser.Scene, key = 'fog_noise', w = 512
     }
   }
   ctx.putImageData(img, 0, 0);
-  scene.textures.addCanvas(key, canvas);
+  return canvas;
+}
+
+// Реєструє текстуру туману в Phaser (один раз).
+export function ensureFogTexture(scene: Phaser.Scene, key = 'fog_noise', w = 512, h = 256): void {
+  if (scene.textures.exists(key)) return;
+  scene.textures.addCanvas(key, buildFogNoiseCanvas(w, h));
 }

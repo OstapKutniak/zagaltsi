@@ -11,6 +11,7 @@ import { animOffset, deformImgPt, deformKfAt, deformKfTransform, PLAN_DIST_STEP,
 import { type Atmosphere, type AtmSky, type AtmTod, type AtmWeather, type SkyPhase, type TodPhase, type WeatherPhase, type LayerKey, type FogLayer, type BlendMode, LAYER_KEYS, LAYER_LABELS, BLEND_MODES, BLEND_LABELS, DEFAULT_SKY_PHASE, DEFAULT_TOD_PHASE, DEFAULT_WEATHER_PHASE, DEFAULT_FOG_LAYER, evalTod } from './atmosphere';
 import { generateGameAsset, hasFalKey, hasAiBgRemoval, removeBackgroundAI } from '../ai';
 import { bakeOutline, outlineKey, type OutlineMod } from './outline';
+import { buildFogNoiseCanvas } from './fogTexture';
 
 const rad = (d: number): number => (d * Math.PI) / 180;
 
@@ -1113,8 +1114,8 @@ export function initLevelEditor(prefix: string): void {
       ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
       ctx.closePath(); ctx.fill();
     }
-    // Атмосфера у вьюпорті редактора
-    if (state.showAtm) drawEditorRain();
+    // Атмосфера у вьюпорті редактора (туман під дощем, як у грі)
+    if (state.showAtm) { drawEditorFog(); drawEditorRain(); }
   }
 
   function rainPaletteEd(hex: string): string[] {
@@ -1123,6 +1124,54 @@ export function initLevelEditor(prefix: string): void {
     const cl = (v: number): number => Math.max(0, Math.min(255, Math.round(v)));
     const mk = (mr: number, mg: number, mb: number): string => `rgb(${cl(r * mr)},${cl(g * mg)},${cl(b * mb)})`;
     return [mk(0.72, 0.78, 0.92), mk(0.9, 0.95, 1), mk(1, 1, 1), mk(1.12, 1.12, 1.18)];
+  }
+  // Процедурний per-layer туман у вьюпорті — та сама нойз-текстура, що в грі
+  // (fogTexture), тонована в колір шару, з дрейфом за напрямком/швидкістю. Малюємо
+  // всі активні шари поверх сцени (спрощення: без точного depth-перекладання між
+  // шарами — для прев'ю достатньо показати наявність/колір/густину/рух туману).
+  let _fogBase: HTMLCanvasElement | null = null;
+  const _fogTinted = new Map<string, HTMLCanvasElement>();
+  function fogTintedCanvas(color: string): HTMLCanvasElement {
+    let c = _fogTinted.get(color);
+    if (c) return c;
+    if (!_fogBase) _fogBase = buildFogNoiseCanvas();
+    c = document.createElement('canvas'); c.width = _fogBase.width; c.height = _fogBase.height;
+    const cx = c.getContext('2d')!;
+    cx.drawImage(_fogBase, 0, 0);
+    cx.globalCompositeOperation = 'source-in'; // лишити alpha нойзу, залити кольором
+    cx.fillStyle = color; cx.fillRect(0, 0, c.width, c.height);
+    _fogTinted.set(color, c);
+    return c;
+  }
+  function drawEditorFog(): void {
+    const lv = level();
+    const wx = lv.atmosphere?.weather;
+    if (!wx?.enabled) return;
+    const ph = wx.phases[0] as import('./atmosphere').WeatherPhase;
+    if (!ph) return;
+    const fogOn = ph.fog !== undefined ? ph.fog : ph.type === 'fog';
+    if (!fogOn || !ph.fogLayers) return;
+    const W = canvas.width, H = canvas.height;
+    const t = performance.now() / 1000;
+    for (const key of LAYER_KEYS) {
+      const fl = ph.fogLayers[key] as FogLayer | undefined;
+      if (!fl || (fl.alpha ?? 0) <= 0.004) continue;
+      const pat = ctx.createPattern(fogTintedCanvas(fl.color ?? '#c2ccd6'), 'repeat');
+      if (!pat || !_fogBase) continue;
+      const scale = Math.max(0.3, fl.scale ?? 1) * sc();
+      const rad = (fl.dir ?? 0) * Math.PI / 180;
+      const off = (fl.seed ?? 0) * 37.13;
+      // дрейф патерна (аналог tilePosition у грі): base-зсув від seed + рух за напрямком
+      const tx = -(off + Math.cos(rad) * (fl.speed ?? 12) * t) * scale;
+      const ty = -(off * 0.7 + Math.sin(rad) * (fl.speed ?? 12) * t) * scale;
+      const m = new DOMMatrix([scale, 0, 0, scale, tx % (_fogBase.width * scale), ty % (_fogBase.height * scale)]);
+      (pat as CanvasPattern).setTransform(m);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, fl.alpha ?? 0.4));
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
   }
   function drawEditorRain(): void {
     const lv = level();
@@ -1931,9 +1980,6 @@ export function initLevelEditor(prefix: string): void {
         }
         wxBody.appendChild(rb);
       }
-
-      // ── СНІГ (поки без параметрів) ──
-      wxBody.appendChild(modToggle('Сніг', !!ph.snow, (v) => { ph.snow = v; }));
 
       // ── ТУМАН (процедурний, per-layer) ──
       wxBody.appendChild(modToggle('Туман', !!ph.fog, (v) => { ph.fog = v; }));

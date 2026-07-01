@@ -1236,7 +1236,7 @@ export class GameScene extends Phaser.Scene {
 
   private drawWeatherFx(ws: WeatherState): void {
     this.weatherFar.clear(); this.weatherMid.clear(); this.weatherNear.clear();
-    if (!ws.rain && !ws.snow) { this.splashGfx.clear(); return; }
+    if (!ws.rain) { this.splashGfx.clear(); return; }
 
     // Малюємо у світових координатах рівно по тому, що бачить камера зараз.
     const view = this.cameras.main.worldView;
@@ -1306,19 +1306,6 @@ export class GameScene extends Phaser.Scene {
             this.splashGfx.fillCircle(sp.x + ddx, sp.y + ddy, Math.max(0.4, 1.3 * (1 - p)) * sz);
           }
         }
-      }
-    }
-    if (ws.snow) {
-      const SPEED = 70;
-      this.weatherMid.fillStyle(0xffffff, 0.7);
-      for (let i = 0; i < 70; i++) {
-        const hf = (i * GR)  % 1;
-        const vf = (i * GR2) % 1;
-        const drift = Math.sin(t * 0.45 + i * 1.1) * 25;
-        const OH = H + 50, OW = W + 100;
-        const sy = Y0 + ((vf * OH + t * SPEED) % OH) - 25;
-        const sx = X0 + ((hf * OW + drift) % OW + OW) % OW - 50;
-        this.weatherMid.fillCircle(sx, sy, 1.5 + (i % 4) * 0.6);
       }
     }
   }
