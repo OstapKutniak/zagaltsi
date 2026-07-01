@@ -66,6 +66,9 @@ export class MenuScene extends Phaser.Scene {
   private async seatCharacter(offX: number, offY: number): Promise<void> {
     const doc = await MenuScene.loadCharDoc();
     if (!doc) return; // нема персонажа з артом → просто без нього
+    // Тимчасовий дефолт: розріз хребта на талії, щоб sit гарно згинався вже зараз.
+    // Прибрати, коли Остап виставить власний розріз торса в рігу й перевидасть персонажа.
+    if (doc.slots?.torso) doc.slots.torso.cut = 0.5;
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
     if (!char) return;
     char.setAnim('sit');

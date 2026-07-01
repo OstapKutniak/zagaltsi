@@ -91,7 +91,7 @@ function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; dd
 // Сидячий айдл (процедурна чернетка): стегна вперед, коліна зігнуті (розріз на нозі),
 // руки на колінах, легке дихання. Знаки/кути тюняться в рігу (вибери «sit»); пізніше
 // авторський кліп «sit» перебиває цю процедурку.
-const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 52, armBack: 52, elbow: -125, torso: -33 };
+const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 52, armBack: 52, elbow: -125, torso: -12, spine: 40 };
 function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { drot: number; ddx: number; ddy: number } {
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
@@ -236,6 +236,7 @@ function animBend(name: string, t: number, key: string, ctx: AnimCtx = {}): numb
   if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); if (key.startsWith('arm')) return -r * 25; return 0; }
   if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
   if (name === 'sit') {
+    if (key === 'torso') return SIT.spine; // згин хребта (грудина над розрізом торса)
     if (key.startsWith('leg')) return SIT.knee;
     if (key.startsWith('arm')) return SIT.elbow - Math.abs(Math.sin(t * 1.5)) * 2;
     return 0;
@@ -409,6 +410,9 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     };
     // світовий трансформ слота в локалі контейнера (ієрархія); gs — накопичений масштаб (gscale батька -> дітям)
     const cache: Record<string, { x: number; y: number; rot: number; gs: number }> = {};
+    // Хребет: якщо в торса є розріз, грудина (над суглобом) гнеться, а шия/руки/голова їдуть за нею.
+    let spine: { jx: number; jy: number; bendRad: number } | null = null;
+    const SPINE_CHILDREN = new Set(['neck', 'arm_front', 'arm_back']);
     const wof = (sel: string): { x: number; y: number; rot: number; gs: number } => {
       if (cache[sel]) return cache[sel];
       const lp = localOf(sel); const ownG = this.slots[sel]?.gscale ?? 1;
@@ -423,8 +427,30 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         const co = Math.cos(pw.rot), si = Math.sin(pw.rot);
         res = { x: pw.x + (lx * co - ly * si) * pw.gs * us, y: pw.y + (lx * si + ly * co) * pw.gs * us, rot: pw.rot + rad(lp.rot), gs: pw.gs * ownG };
       }
+      // діти, що кріпляться до грудини — обертаються навколо суглоба хребта разом із нею
+      if (spine && spine.bendRad !== 0 && SPINE_CHILDREN.has(sel)) {
+        const dx = res.x - spine.jx, dy = res.y - spine.jy;
+        const c = Math.cos(spine.bendRad), s = Math.sin(spine.bendRad);
+        res = { x: spine.jx + dx * c - dy * s, y: spine.jy + dx * s + dy * c, rot: res.rot + spine.bendRad, gs: res.gs };
+      }
       cache[sel] = res; return res;
     };
+    // Обчислюємо суглоб хребта (світова точка + кут згину) до рендеру дітей.
+    const torsoSl = this.slots['torso'];
+    if (torsoSl && torsoSl.cut != null && this.parts['torso']) {
+      const wtT = wof('torso');
+      const imT = this.parts['torso'];
+      const lpT = localOf('torso');
+      const flipT = torsoSl.flip ?? 1;
+      const scXT = lpT.scale * us * (torsoSl.sx ?? 1) * wtT.gs;
+      const scYT = lpT.scale * us * (torsoSl.sy ?? 1) * wtT.gs;
+      const procSpine = authored ? 0 : animBend(this.anim, this.t, 'torso', ctx) * this.animDir;
+      const bendDeg = ((torsoSl.bend ?? 0) + procSpine) * (torsoSl.bendFlip ? -1 : 1);
+      const W = imT.width, H = imT.height;
+      const jfx = (0.5 - torsoSl.pivotX) * W * flipT * scXT, jfy = (torsoSl.cut - torsoSl.pivotY) * H * scYT;
+      const coT = Math.cos(wtT.rot), siT = Math.sin(wtT.rot);
+      spine = { jx: wtT.x + jfx * coT - jfy * siT, jy: wtT.y + jfx * siT + jfy * coT, bendRad: rad(bendDeg) };
+    }
     for (const d of SLOT_DEFS) {
       const im = this.parts[d.key];
       if (!im) continue;
@@ -435,7 +461,17 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       const scX = lp.scale * us * (sl.sx ?? 1) * wt.gs;
       const scY = lp.scale * us * (sl.sy ?? 1) * wt.gs;
       const lo = this.lower[d.key];
-      if (sl.cut != null && lo) {
+      if (d.key === 'torso' && sl.cut != null && lo) {
+        // ХРЕБЕТ (інверсно до кінцівок): таз (ПІД розрізом) лишається на корені,
+        // грудина (НАД розрізом) гнеться навколо суглоба; шия/руки/голова їдуть за нею (у wof).
+        const W = im.width, H = im.height, cutPx = sl.cut * H;
+        im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
+        im.setCrop(0, cutPx, W, H - cutPx); // таз — нижня частина зображення
+        const jx = spine ? spine.jx : wt.x, jy = spine ? spine.jy : wt.y, br = spine ? spine.bendRad : 0;
+        lo.setOrigin(sl.pivotX, sl.cut); lo.setPosition(jx, jy); lo.setRotation(wt.rot + br); lo.setScale(flip * scX, scY);
+        lo.setCrop(0, 0, W, cutPx); // грудина — верхня частина
+        this.applyTint(im, hurt); this.applyTint(lo, hurt);
+      } else if (sl.cut != null && lo) {
         const W = im.width, H = im.height, cutPx = sl.cut * H;
         // верхня частина — від півота до лінії розрізу
         im.setOrigin(sl.pivotX, sl.pivotY); im.setPosition(wt.x, wt.y); im.setRotation(wt.rot); im.setScale(flip * scX, scY);
