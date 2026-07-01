@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen } from './uiButton';
+import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
 // Заголовок ХОРУГВА зверху по центру; кнопки-розділи зліва, серифом у small-caps,
@@ -17,7 +18,13 @@ const MENU_FONT = 'Georgia, "Times New Roman", serif';
 const COL_IDLE = '#e5d8bc';  // пергамент (як на референсі)
 const COL_HOVER = '#ffcf8f'; // теплий відсвіт багаття
 
+// Позиція/масштаб персонажа на лавці біля вогнища (логічні координати кадру 1280×576).
+// ЧЕРНЕТКА — точно виставимо в редакторі меню; поки тюнь тут. facing=-1 → обличчям до вогнища.
+const LOBBY_CHAR = { x: 1030, y: 372, scale: 0.62, facing: -1 };
+
 export class MenuScene extends Phaser.Scene {
+  private lobbyChar: CutoutCharacter | null = null;
+
   constructor() { super('Menu'); }
 
   create(): void {
@@ -49,6 +56,32 @@ export class MenuScene extends Phaser.Scene {
         else this.scene.start('Section', { title: it.label, from: 'Menu' });
       });
     });
+
+    void this.seatCharacter(offX, offY);
+  }
+
+  // Тягне персонажа гравця (localStorage zag_game_char → fallback public/character.json)
+  // і саджає перед вогнищем у позі 'sit'. Немає арту → просто не показуємо (без падінь).
+  private async seatCharacter(offX: number, offY: number): Promise<void> {
+    const doc = await MenuScene.loadCharDoc();
+    if (!doc?.slots || !doc.images || Object.keys(doc.images).length === 0) return;
+    const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
+    if (!char) return;
+    char.setAnim('sit');
+    // Обгортка задає позицію/масштаб: tick() щокадру перезаписує scaleX/Y самого персонажа.
+    const holder = this.add.container(LOBBY_CHAR.x + offX, LOBBY_CHAR.y + offY, [char]);
+    holder.setScrollFactor(0).setScale(LOBBY_CHAR.scale).setDepth(5);
+    this.lobbyChar = char;
+  }
+
+  private static async loadCharDoc(): Promise<CharDoc | null> {
+    try { const s = localStorage.getItem('zag_game_char'); if (s) return JSON.parse(s) as CharDoc; } catch { /* ignore */ }
+    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) return await r.json() as CharDoc; } catch { /* ignore */ }
+    return null;
+  }
+
+  update(_time: number, deltaMs: number): void {
+    this.lobbyChar?.tick(deltaMs / 1000, LOBBY_CHAR.facing);
   }
 
   // Кнопка меню: лише текст (без підкладки/обводки), small-caps, підсвітка + зсув при наведенні.

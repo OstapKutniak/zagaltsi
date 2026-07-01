@@ -227,8 +227,14 @@ function animRoot(name: string, t: number): { ddx: number; ddy: number } {
   if (name === 'attack') { const ap = (t % 0.7) / 0.7; return { ddx: 0, ddy: ap < 0.45 ? (ap / 0.45) * 6 : 6 * (1 - (ap - 0.45) / 0.55) }; }
   if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); return { ddx: -r * 12, ddy: -r * 3 }; }
   if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
+  if (name === 'sit')  return { ddx: 0, ddy: SIT.rootDown + Math.sin(t * 1.5) * 0.8 };
   return { ddx: 0, ddy: 0 };
 }
+
+// Сидячий айдл (процедурна чернетка): стегна вперед, коліна зігнуті (розріз на нозі),
+// руки на колінах, легке дихання. Тюнь кути/знаки тут; пізніше авторський кліп «sit»
+// (ключі в таймлайні) перебиває процедурку. ДЗЕРКАЛО у src/anim/CutoutCharacter.ts.
+const SIT = { rootDown: 4, thighFront: 78, thighBack: 70, knee: -86, armFront: 22, armBack: 18, elbow: -34, torso: 5 };
 
 // Локальний догин кістки (лише ОБЕРТАННЯ) — поверх руху кореня. Пропорційно-незалежно.
 function animOff(name: string, t: number, key: string): { drot: number; ddx: number; ddy: number } {
@@ -276,6 +282,16 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
     if (key.startsWith('arm')) return { drot: -r * 8, ddx: 0, ddy: 0 };
     return z;
   }
+  if (name === 'sit') {
+    const br = Math.sin(t * 1.5);
+    if (key === 'leg_front') return { drot: SIT.thighFront, ddx: 0, ddy: 0 };
+    if (key === 'leg_back')  return { drot: SIT.thighBack, ddx: 0, ddy: 0 };
+    if (key === 'arm_front') return { drot: SIT.armFront + br * 1.2, ddx: 0, ddy: 0 };
+    if (key === 'arm_back')  return { drot: SIT.armBack + br * 1.2, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: SIT.torso + br * 0.5, ddx: 0, ddy: 0 };
+    if (key === 'head')  return { drot: br * 1.5, ddx: 0, ddy: 0 };
+    return z;
+  }
   return z;
 }
 
@@ -308,6 +324,11 @@ function animBend(name: string, t: number, key: string): number {
   }
   if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); if (key.startsWith('arm')) return -r * 25; return 0; }
   if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
+  if (name === 'sit') {
+    if (key.startsWith('leg')) return SIT.knee;
+    if (key.startsWith('arm')) return SIT.elbow - Math.abs(Math.sin(t * 1.5)) * 2;
+    return 0;
+  }
   return 0;
 }
 
@@ -321,6 +342,7 @@ const PROC_PERIOD: Record<string, number> = {
   jump: 1.6,
   attack: 0.7,
   hurt: 0.6,
+  sit: TWO_PI / 1.5,
 };
 
 // Перекат стопи (cut2 = гомілковостоп, cut3 = плюснофаланговий/пальці) у ходьбі/бігу.
@@ -2134,7 +2156,7 @@ function play(on: boolean): void {
   refreshTimeline();
 }
 // ---- іменовані анімації (службові процедурні + власні з ключами) ----
-const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt'];
+const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt', 'sit'];
 function refreshAnimOptions(): void {
   const sel = $<HTMLSelectElement>('anim'); const cur = state.anim ?? '';
   sel.innerHTML = '<option value="">base pose</option>';
