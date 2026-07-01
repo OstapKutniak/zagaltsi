@@ -9,6 +9,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image('hud_heart', 'ui/HP.png');
     this.load.image('hud_sun',   'ui/Pain.png');
     this.load.image('hud_skull', 'ui/Tryvoga.png');
+    this.load.image('menu_home', 'menu/home.png'); // фон головного меню (хатина з багаттям)
   }
 
   create(): void {
