@@ -21,7 +21,9 @@ const BASE = { torso: 105, head: 86, arms: 116, legs: 140, neck: 26 };
 interface Slot { image: string | null; pivotX: number; pivotY: number; rot: number; scale: number; dx: number; dy: number; flip: number; bend?: number; cut?: number | null; bendFlip?: boolean; sx?: number; sy?: number; gscale?: number; cut2?: number | null; bend2?: number; bendFlip2?: boolean; cut3?: number | null; bend3?: number; bendFlip3?: boolean }
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number; bend2?: number; bend3?: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
-interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
+// base — поза-основа ПРОЦЕДУРНОГО кліпу з тулзи: правки конкретної анімації
+// (перекривають анімовні поля bind-пози лише в цьому кліпі).
+interface Clip { duration: number; keys: Keyframe[]; hotkey?: string; base?: Record<string, KeyPose> }
 export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip>; updatedAt?: number }
 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
@@ -348,7 +350,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
 
   // вибірка авторського кліпу в момент t для слота (локальний трансформ)
   private sampleClip(clip: Clip, t: number, sel: string): KeyPose {
-    const su = this.slots[sel];
+    const su = clip.base?.[sel] ?? this.slots[sel]; // база кліпу (якщо є) перекриває bind
     const base: KeyPose = su ? { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend ?? 0, bend2: su.bend2 ?? 0, bend3: su.bend3 ?? 0 } : { rot: 0, dx: 0, dy: 0, scale: 1, flip: 1, bend: 0, bend2: 0, bend3: 0 };
     const ks = clip.keys;
     if (!ks.length) return base;
@@ -438,10 +440,12 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     const localOf = (sel: string): { rot: number; dx: number; dy: number; scale: number; bend: number; bend2: number; bend3: number } => {
       const sl = this.slots[sel];
       if (authored) { const sp = this.sampleClip(clip!, ct, sel); return { rot: sp.rot, dx: sp.dx, dy: sp.dy, scale: sp.scale, bend: sp.bend, bend2: sp.bend2 ?? 0, bend3: sp.bend3 ?? 0 }; }
+      // Анімовні поля: база ЦЬОГО кліпу (правки конкретної анімації з тулзи), інакше bind.
+      const bp = clip?.base?.[sel];
       const o = animOff(this.anim, this.t, sel, ctx);
-      let dx = (sl?.dx ?? 0) + o.ddx, dy = (sl?.dy ?? 0) + o.ddy;
+      let dx = (bp?.dx ?? sl?.dx ?? 0) + o.ddx, dy = (bp?.dy ?? sl?.dy ?? 0) + o.ddy;
       if (!PARENT[sel]) { const ar = animRoot(this.anim, this.t, ctx); dx += ar.ddx; dy += ar.ddy; }
-      return { rot: (sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: sl?.scale ?? 1, bend: sl?.bend ?? 0, bend2: sl?.bend2 ?? 0, bend3: sl?.bend3 ?? 0 };
+      return { rot: (bp?.rot ?? sl?.rot ?? 0) + o.drot * this.animDir, dx, dy, scale: bp?.scale ?? sl?.scale ?? 1, bend: sl?.bend ?? 0, bend2: sl?.bend2 ?? 0, bend3: sl?.bend3 ?? 0 };
     };
     // світовий трансформ слота в локалі контейнера (ієрархія); gs — накопичений масштаб (gscale батька -> дітям)
     const cache: Record<string, { x: number; y: number; rot: number; gs: number }> = {};

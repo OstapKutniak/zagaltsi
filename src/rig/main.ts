@@ -27,8 +27,10 @@ interface Slot extends Tf { image: string | null; pivotX: number; pivotY: number
 interface Ref extends Tf { canvas: HTMLCanvasElement | null }
 // ---- анімації (таймлайн) ----
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number; bend2: number; bend3: number }
+// base — поза-основа ПРОЦЕДУРНОГО кліпу: правки, зроблені на цій анімації, живуть
+// тут (пер-кліпно), а НЕ в спільній bind-позі — інакше твік руки в sit ламав idle/walk.
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
-interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
+interface Clip { duration: number; keys: Keyframe[]; hotkey?: string; base?: Record<string, KeyPose> }
 
 // Порядок = шари ззаду наперед. Передня нога ПІД торсом (сорочка її перекриває).
 // Порядок = шари ззаду наперед. Обличчя (очі/брови/рот) — діти голови, поверх неї.
@@ -164,10 +166,25 @@ const toPx = (ux: number, uy: number): { x: number; y: number } => ({ x: state.o
 
 // ---- цільові аксесори (слот або 'ref') ----
 const tf = (sel: string): Tf => (sel === 'ref' ? state.ref : state.slots[sel]);
-// АНІМОВНІ правки (rot/dx/dy жестами G/R/drag): коли кліп відкритий, прев'ю читає
-// bind-позу (setup) — тож і писати треба туди, інакше правку не видно і вона
-// губиться. Статичні поля (gscale/sx/sy/flip) завжди в живих слотах (state.slots).
-const poseTf = (sel: string): Tf => (sel === 'ref' ? state.ref : (rigSlots()[sel] ?? state.slots[sel]));
+// АНІМОВНІ правки (rot/dx/dy жестами G/R/drag): коли відкритий ПРОЦЕДУРНИЙ кліп
+// (без ключів) — пишемо в БАЗУ ЦЬОГО кліпу (clip.base), щоб правка діяла лише на цю
+// анімацію (твік руки в sit не має ламати idle/walk). Авторський кліп/без кліпу —
+// bind-поза (setup/slots). Статичні поля (gscale/sx/sy/flip) завжди в state.slots.
+const poseTf = (sel: string): Tf => {
+  if (sel === 'ref') return state.ref;
+  const clip = state.anim ? state.clips[state.anim] : null;
+  if (clip && !clip.keys.length) return clipBasePose(clip, sel) as unknown as Tf; // жести пишуть лише rot/dx/dy/scale
+  return rigSlots()[sel] ?? state.slots[sel];
+};
+// База кліпу: лінива копія анімовних полів bind-пози (створюється при першій правці).
+function clipBasePose(clip: Clip, sel: string): KeyPose {
+  clip.base ??= {};
+  if (!clip.base[sel]) {
+    const b = rigSlots()[sel] ?? state.slots[sel];
+    clip.base[sel] = { rot: b.rot, dx: b.dx, dy: b.dy, scale: b.scale, flip: b.flip, bend: b.bend ?? 0, bend2: b.bend2 ?? 0, bend3: b.bend3 ?? 0 };
+  }
+  return clip.base[sel];
+}
 const imgOf = (sel: string): HTMLCanvasElement | null => {
   if (sel === 'ref') return state.ref.canvas;
   const sl = state.slots[sel];
@@ -267,7 +284,11 @@ function eff(sel: string): Tf {
     }
     return t;
   }
-  const su = rigSlots()[sel]; // процедурна поза — семплимо за animT (і на ПАУЗІ теж, для скрабу)
+  // Процедурна поза — семплимо за animT (і на ПАУЗІ теж, для скрабу).
+  // Анімовні поля: база ЦЬОГО кліпу (правки цієї анімації), інакше bind-поза.
+  const bind = rigSlots()[sel];
+  const bp = clip?.base?.[sel];
+  const su = bp ? { ...bind, rot: bp.rot, dx: bp.dx, dy: bp.dy, scale: bp.scale } : bind;
   const live = state.slots[sel]; // статичні рігові поля (gscale/sx/sy/flip) — завжди з живих слотів
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
@@ -533,7 +554,7 @@ function undo(): void {
 
 // автозбереження збірки (без картинок — їх перетягнеш знову, релінк збереже позиції)
 function saveLocal(): void {
-  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigForExport(), facing: state.facing, animDir: state.animDir, clips: state.clips, customBones: state.customBones, gravBones: state.gravBones })); } catch { /* ignore */ }
+  try { localStorage.setItem('ostap_char', JSON.stringify({ prop: state.prop, slots: rigForExport(), facing: state.facing, animDir: state.animDir, clips: state.clips, customBones: state.customBones, gravBones: state.gravBones, updatedAt: Date.now() })); } catch { /* ignore */ }
 }
 // Правки НЕ губляться при рефреші: автосейв кожні 5с + на закритті сторінки
 // (раніше saveLocal звався лише в кількох місцях — правки жестами могли пропасти).
@@ -557,6 +578,18 @@ function restoreLocal(): void {
     if (o.gravBones) state.gravBones = o.gravBones;
     if (o.slots) for (const k of Object.keys(state.slots)) if (o.slots[k]) Object.assign(state.slots[k], o.slots[k]);
   } catch { /* ignore */ }
+}
+// LWW із опублікованим character.json: якщо опублікована копія свіжіша за локальну —
+// підтягнути її (інакше стара локальна правка «воскрешала» вже виправлені пози).
+async function pullPublishedChar(): Promise<void> {
+  let localAt = 0;
+  try { localAt = JSON.parse(localStorage.getItem('ostap_char') || '{}').updatedAt ?? 0; } catch { /* ignore */ }
+  try {
+    const r = await fetch(`${import.meta.env.BASE_URL}character.json?t=${Date.now()}`);
+    if (!r.ok) return;
+    const pub = await r.json() as Parameters<typeof loadCharFromDoc>[0] & { updatedAt?: number };
+    if ((pub.updatedAt ?? 0) > localAt) { loadCharFromDoc(pub); saveLocal(); refreshUI(); draw(); status('Підтягнуто свіжішого персонажа з публікації'); }
+  } catch { /* offline — лишаємось на локальному */ }
 }
 
 // ---- рендер ----
@@ -822,7 +855,7 @@ function _drawNow(): void {
   // mode hint text (after ctx.restore so it's not mirrored)
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
-    const txt = state.cutMode ? `РОЗРІЗ ${state.activeCut}: клікни, де різати (лікоть/коліно)` : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : state.liveEdit ? `ЖИВА ПРАВКА ${state.mode}: ляже на ВСІ ключі · клік — ок, Esc — скасувати` : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    const txt = state.cutMode ? `РОЗРІЗ ${state.activeCut}: клікни, де різати (лікоть/коліно)` : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : state.liveEdit ? `ЖИВА ПРАВКА ${state.mode}: на всю ЦЮ анімацію · клік — ок, Esc — скасувати` :`${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
@@ -1080,15 +1113,21 @@ function endMode(commit: boolean): void {
           touched++;
         }
         status(`Живу правку «${sel}» застосовано до ${touched} ключів`);
+      } else if (clip && !(state.modeCenter && state.mode === 'S')) {
+        // Процедурний кліп: дельта в БАЗУ ЦЬОГО кліпу — правка діє на весь цикл
+        // ЛИШЕ ЦІЄЇ анімації (раніше писалось у спільну bind-позу, і твік руки
+        // в sit ламав idle/walk/усе інше).
+        const bp = clipBasePose(clip, sel);
+        bp.rot += ld.drot; bp.dx += ld.ddx; bp.dy += ld.ddy; bp.scale = Math.max(0.02, bp.scale * ld.ds);
+        status(`Живу правку «${sel}» застосовано до «${state.anim}» (лише ця анімація)`);
       } else {
-        // Процедурний кліп: дельта в bind-позу (setup, якщо кліп відкритий) —
-        // процедурка адитивна, тож зміщення діє на весь цикл. gscale — статичне
-        // рігове поле, живе в state.slots.
+        // Центральний півот + S = масштаб УСЬОГО персонажа: це рігове калібрування,
+        // тож пишемо глобально (bind + gscale), як раніше.
         const bind = rigSlots()[sel];
         if (bind) { bind.rot += ld.drot; bind.dx += ld.ddx; bind.dy += ld.ddy; }
         const live = state.slots[sel];
         if (live) live.gscale = Math.max(0.02, (live.gscale ?? 1) * ld.ds);
-        status(`Живу правку «${sel}» застосовано до базової пози (весь цикл)`);
+        status(`Живу правку «${sel}» застосовано до базової пози (всі анімації)`);
       }
       saveLocal();
     }
@@ -1995,7 +2034,7 @@ function rigForExport(): Record<string, Slot> {
 }
 
 function sampleClip(clip: Clip, t: number, sel: string): KeyPose {
-  const su = rigSlots()[sel];
+  const su = clip.base?.[sel] ?? rigSlots()[sel]; // база кліпу (якщо є) перекриває bind
   const base: KeyPose = { rot: su.rot, dx: su.dx, dy: su.dy, scale: su.scale, flip: su.flip, bend: su.bend, bend2: su.bend2 ?? 0, bend3: su.bend3 ?? 0 };
   const ks = clip.keys;
   if (!ks.length) return base;
@@ -2084,7 +2123,7 @@ function bakeProcedural(): void {
   for (let i = 0; i <= N; i++) {
     const t = (i / N) * dur; const pose: Record<string, KeyPose> = {};
     for (const d of SLOT_DEFS) {
-      const sl = rigSlots()[d.key];
+      const sl = clip.base?.[d.key] ?? rigSlots()[d.key]; // база кліпу перекриває bind
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
@@ -2105,7 +2144,7 @@ function convertToKeys(): void {
     const t = f / FPS;
     const pose: Record<string, KeyPose> = {};
     for (const d of SLOT_DEFS) {
-      const sl = rigSlots()[d.key];
+      const sl = clip.base?.[d.key] ?? rigSlots()[d.key]; // база кліпу перекриває bind
       const o = animOff(state.anim, t, d.key);
       let dx = sl.dx + o.ddx, dy = sl.dy + o.ddy;
       if (d.key === 'torso') { const r = animRoot(state.anim, t); dx += r.ddx; dy += r.ddy; }
@@ -2655,6 +2694,7 @@ if (typeof ResizeObserver !== 'undefined') {
   new ResizeObserver(() => { resize(); draw(); }).observe(canvas);
 }
 restoreLocal();
+void pullPublishedChar(); // LWW: свіжіша опублікована копія перекриває стару локальну
 resize(); refreshUI();
 renderLibrary(); // спочатку порожня — заповниться після async load
 // Завантаження бібліотеки: IDB → міграція з localStorage → pull з GitHub
