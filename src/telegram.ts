@@ -10,7 +10,7 @@ interface TelegramWebApp {
   isVersionAtLeast?(version: string): boolean;
   requestFullscreen?(): void; // Bot API 8.0+
   disableVerticalSwipes?(): void; // Bot API 7.7+
-  initDataUnsafe?: { user?: TgUser };
+  initDataUnsafe?: { user?: TgUser; start_param?: string };
   CloudStorage?: {
     setItem(key: string, value: string, cb?: (err: unknown, ok: boolean) => void): void;
     getItem(key: string, cb: (err: unknown, value: string | null) => void): void;
@@ -36,6 +36,14 @@ export function initTelegram(): void {
 
 export function getUser(): TgUser | null {
   return tg()?.initDataUnsafe?.user ?? null;
+}
+
+// Deep-link параметр Mini App (t.me/<bot>/<app>?startapp=XXX). Поза Telegram —
+// підтримуємо і ?startapp=XXX у URL (для тестів у браузері).
+export function getStartParam(): string | null {
+  const p = tg()?.initDataUnsafe?.start_param;
+  if (p) return p;
+  try { return new URLSearchParams(location.search).get('startapp'); } catch { return null; }
 }
 
 const LS_PREFIX = 'zagaltsi:';

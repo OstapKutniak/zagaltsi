@@ -2,15 +2,22 @@ import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
 import { SectionScene } from './scenes/SectionScene';
+import { QuestsScene } from './scenes/QuestsScene';
+import { AchievementsScene } from './scenes/AchievementsScene';
+import { KhorugvaScene } from './scenes/KhorugvaScene';
+import { MapScene } from './scenes/MapScene';
 import { GameScene } from './scenes/GameScene';
 import { ColorGradePipeline } from './scenes/ColorGradePipeline';
-import { initTelegram } from './telegram';
+import { initTelegram, getStartParam } from './telegram';
 import { setupViewport } from './viewport';
 import { initLobbyUI } from './multiplayer/lobbyUI';
+import { registerPlayer } from './players';
+import { joinKhorugva } from './khorugva';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from './config';
 
 initTelegram();
 initLobbyUI();
+registerPlayer(); // реєстр гравців (Firebase) — для «Досягнень»
 
 // Камера ФІКСОВАНА 20:9: логічний кадр завжди 1280×576 (Scale.NONE — без
 // авто-масштабування Phaser, бо його FIT нестабільно перефітує при resize).
@@ -32,10 +39,39 @@ const game = new Phaser.Game({
     height: LOGICAL_H * RENDER_SCALE,
   },
   pipeline: { ColorGrade: ColorGradePipeline } as unknown as Phaser.Types.Core.PipelineConfig,
-  scene: [BootScene, MenuScene, SectionScene, GameScene],
+  scene: [BootScene, MenuScene, SectionScene, QuestsScene, AchievementsScene, KhorugvaScene, MapScene, GameScene],
 });
 
 setupViewport(game);
+
+// Deep-link роутинг (кнопки бота / сповіщення збору): ?startapp=<param>.
+// zhytlo→Меню(Житло), mandry→Карта, khorugva→Хоругва, zavdannya→Завдання,
+// dosyagnennya→Досягнення, inventar→Інвентар, kh_<id>→приєднатись до хоругви.
+const START_ROUTES: Record<string, { scene: string; data?: object }> = {
+  zhytlo: { scene: 'Menu' },
+  mandry: { scene: 'Map' },
+  khorugva: { scene: 'Khorugva' },
+  zavdannya: { scene: 'Quests' },
+  dosyagnennya: { scene: 'Achievements' },
+  inventar: { scene: 'Section', data: { title: 'Інвентар', from: 'Menu' } },
+};
+const startParam = getStartParam();
+if (startParam) {
+  // Меню стартує з Boot; перемикаємось, щойно воно піднялось.
+  game.events.once(Phaser.Core.Events.READY, () => {
+    const menu = game.scene.getScene('Menu');
+    menu?.events.once(Phaser.Scenes.Events.CREATE, () => {
+      if (startParam.startsWith('kh_')) {
+        void joinKhorugva(startParam.slice(3))
+          .catch(() => null)
+          .then(() => menu.scene.start('Khorugva'));
+      } else {
+        const r = START_ROUTES[startParam];
+        if (r && r.scene !== 'Menu') menu.scene.start(r.scene, r.data);
+      }
+    });
+  });
+}
 
 // Dev-only: доступ до інстансу гри з консолі для дебагу (у проді не активний).
 if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;

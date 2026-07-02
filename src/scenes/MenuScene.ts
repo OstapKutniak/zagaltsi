@@ -1,23 +1,20 @@
 import Phaser from 'phaser';
-import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
+import { LOGICAL_W, LOGICAL_H } from '../config';
 import { hideLoadScreen } from './uiButton';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { loadCharLibrary } from '../charlib';
+import { setupMenuCamera, addTitle, addMenuItem } from './menuTheme';
 
-// Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
-// Заголовок ХОРУГВА зверху по центру; кнопки-розділи зліва, серифом у small-caps,
-// без обводок, з підсвіткою. «Мандри» = подорожі (згодом глобальна карта; поки просто
-// запускає гру); Завдання/Прогрес/Інвентар — поки сцена-заглушка 'Section'.
+// «Житло» — головна сторінка (хатина з багаттям, персонаж сидить біля вогню).
+// Кнопки-розділи зліва: Мандри (глобальна карта) / Хоругва (збір загону) /
+// Завдання / Досягнення / Інвентар (заглушка).
 const ITEMS: { label: string; target: string }[] = [
-  { label: 'Мандри',   target: 'Game' },
-  { label: 'Завдання', target: 'Quests' },
-  { label: 'Прогрес',  target: 'Progress' },
-  { label: 'Інвентар', target: 'Inventory' },
+  { label: 'Мандри',     target: 'Map' },
+  { label: 'Хоругва',    target: 'Khorugva' },
+  { label: 'Завдання',   target: 'Quests' },
+  { label: 'Досягнення', target: 'Achievements' },
+  { label: 'Інвентар',   target: 'Inventory' },
 ];
-
-const MENU_FONT = 'Georgia, "Times New Roman", serif';
-const COL_IDLE = '#e5d8bc';  // пергамент (як на референсі)
-const COL_HOVER = '#ffcf8f'; // теплий відсвіт багаття
 
 // Позиція/масштаб персонажа на лавці біля вогнища (логічні координати кадру 1280×576).
 // ЧЕРНЕТКА — точно виставимо в редакторі меню; поки тюнь тут. facing=-1 → обличчям до вогнища.
@@ -30,38 +27,30 @@ export class MenuScene extends Phaser.Scene {
 
   create(): void {
     hideLoadScreen(); // меню — перша видима сцена, знімаємо HTML-оверлей завантаження
-    const cam = this.cameras.main;
-    cam.setZoom(RENDER_SCALE);
-    cam.setBackgroundColor('#0b0a0d');
-    const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
-    const offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    this.lobbyChar = null; // сцена могла перезапускатись — старий інстанс знищено
+    const f = setupMenuCamera(this);
 
     // Фон-хатина: масштаб «cover» (арт 20:9 = кадр, тож фактично точно вписується).
-    const bg = this.add.image(LOGICAL_W / 2 + offX, LOGICAL_H / 2 + offY, 'menu_home')
+    const bg = this.add.image(LOGICAL_W / 2 + f.offX, LOGICAL_H / 2 + f.offY, 'menu_home')
       .setScrollFactor(0);
     bg.setScale(Math.max(LOGICAL_W / bg.width, LOGICAL_H / bg.height));
 
-    // Заголовок — зверху по центру.
-    this.add.text(LOGICAL_W / 2 + offX, 58 + offY, 'ХОРУГВА', {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
-    }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
+    addTitle(this, f, 'ЖИТЛО');
 
     // Кнопки — ліворуч, стовпчиком.
-    const x = 92 + offX;
-    const startY = 210, gap = 74;
+    const x = 92 + f.offX;
+    const startY = 186, gap = 66;
     ITEMS.forEach((it, i) => {
-      this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
-        // «Мандри» поки просто запускає гру (глобальна карта — пізніше). Лобі-збір
-        // Хоругви прибрано зі старту: GameScene бачить прихований лобі → грає соло.
-        if (it.target === 'Game') this.scene.start('Game');
-        else this.scene.start('Section', { title: it.label, from: 'Menu' });
+      addMenuItem(this, x, startY + i * gap + f.offY, it.label, () => {
+        if (it.target === 'Inventory') this.scene.start('Section', { title: it.label, from: 'Menu' });
+        else this.scene.start(it.target);
       });
     });
 
-    void this.seatCharacter(offX, offY);
+    void this.seatCharacter(f.offX, f.offY);
   }
 
-  // Тягне персонажа гравця (localStorage zag_game_char → fallback public/character.json)
+  // Тягне персонажа гравця (localStorage zag_game_char → бібліотека → public/character.json)
   // і саджає перед вогнищем у позі 'sit'. Немає арту → просто не показуємо (без падінь).
   private async seatCharacter(offX: number, offY: number): Promise<void> {
     const doc = await MenuScene.loadCharDoc();
@@ -70,7 +59,7 @@ export class MenuScene extends Phaser.Scene {
     // Прибрати, коли Остап виставить власний розріз торса в рігу й перевидасть персонажа.
     if (doc.slots?.torso) doc.slots.torso.cut = 0.5;
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
-    if (!char) return;
+    if (!char || !this.scene.isActive()) return;
     char.setAnim('sit');
     // Обгортка задає позицію/масштаб: tick() щокадру перезаписує scaleX/Y самого персонажа.
     const holder = this.add.container(LOBBY_CHAR.x + offX, LOBBY_CHAR.y + offY, [char]);
@@ -99,18 +88,5 @@ export class MenuScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     this.lobbyChar?.tick(deltaMs / 1000, LOBBY_CHAR.facing);
-  }
-
-  // Кнопка меню: лише текст (без підкладки/обводки), small-caps, підсвітка + зсув при наведенні.
-  private makeMenuItem(x: number, y: number, label: string, onClick: () => void): void {
-    const t = this.add.text(x, y, label, {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '34px', color: COL_IDLE,
-    }).setOrigin(0, 0.5).setScrollFactor(0)
-      .setShadow(2, 2, '#000000', 6, false, true)
-      .setInteractive({ useHandCursor: true });
-
-    t.on('pointerover', () => { t.setColor(COL_HOVER); t.setX(x + 10); });
-    t.on('pointerout',  () => { t.setColor(COL_IDLE);  t.setX(x); });
-    t.on('pointerup', onClick);
   }
 }
