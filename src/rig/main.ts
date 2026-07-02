@@ -225,7 +225,14 @@ function eff(sel: string): Tf {
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
   if (sel === 'torso') { const r = animRoot(state.anim, state.animT); dx += r.ddx; dy += r.ddy; }
-  return { rot: su.rot + o.drot * state.animDir + gOff, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy, gscale: su.gscale };
+  let rot = su.rot + o.drot * state.animDir + gOff;
+  let gscale = su.gscale;
+  // Жива правка: дельта видима поверх процедурного програвання, поки жест не підтверджено.
+  if (state.liveEdit?.sel === sel) {
+    const ld = state.liveDelta;
+    rot += ld.drot; dx += ld.ddx; dy += ld.ddy; gscale *= ld.ds;
+  }
+  return { rot, scale: su.scale, dx, dy, flip: su.flip, sx: su.sx, sy: su.sy, gscale };
 }
 
 // «Живе» дихання і згасаючий дрож — ДЗЕРКАЛО хелперів у src/anim/CutoutCharacter.ts.
@@ -867,11 +874,12 @@ function addImageFile(file: File, fallbackToSelected: boolean): void {
 function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
   if (m === 'B' && state.selected === 'ref') return; // ref не має bend
   pushUndo();
-  // ЖИВА ПРАВКА: під час ▶ авторського кліпу G/R/S не б'ються з loadFrame
-  // (він щокадру перезаписує слоти), а пишуть дельту на ВСІ ключі кліпу.
-  const liveClip = state.anim ? state.clips[state.anim] : null;
+  // ЖИВА ПРАВКА: під час ▶ будь-якого кліпу G/R/S пишуть ДЕЛЬТУ поверх програвання.
+  // Авторський кліп: loadFrame щокадру перезаписує слоти — тому дельта, а на
+  // підтвердженні розкладається на ВСІ ключі. Процедурний: прев'ю читає bind-позу
+  // (setup), а не живі слоти — тому теж дельта, а на підтвердженні пишеться в bind.
   state.liveEdit = null;
-  if (state.playing && state.liveEditOn && liveClip && liveClip.keys.length
+  if (state.playing && state.liveEditOn && state.anim
       && state.selected !== 'ref' && (m === 'G' || m === 'R' || m === 'S')) {
     state.liveEdit = { sel: state.selected };
     state.liveDelta = { drot: 0, ddx: 0, ddy: 0, ds: 1 };
@@ -937,13 +945,14 @@ function applyMode(): void {
 }
 function endMode(commit: boolean): void {
   if (!state.mode) return;
-  // Жива правка: підтвердження розкладає дельту на ВСІ ключі кліпу (одразу вся анімація).
+  // Жива правка: підтвердження розкладає дельту на ВСЮ анімацію одразу.
   if (state.liveEdit) {
     if (commit) {
       const clip = curClip();
       const sel = state.liveEdit.sel;
       const ld = state.liveDelta;
-      if (clip) {
+      if (clip && clip.keys.length) {
+        // Авторський кліп: дельта на кожен ключ.
         let touched = 0;
         for (const k of clip.keys) {
           const p = k.pose[sel];
@@ -952,8 +961,17 @@ function endMode(commit: boolean): void {
           touched++;
         }
         status(`Живу правку «${sel}» застосовано до ${touched} ключів`);
-        saveLocal();
+      } else {
+        // Процедурний кліп: дельта в bind-позу (setup, якщо кліп відкритий) —
+        // процедурка адитивна, тож зміщення діє на весь цикл. gscale — статичне
+        // рігове поле, живе в state.slots.
+        const bind = rigSlots()[sel];
+        if (bind) { bind.rot += ld.drot; bind.dx += ld.ddx; bind.dy += ld.ddy; }
+        const live = state.slots[sel];
+        if (live) live.gscale = Math.max(0.02, (live.gscale ?? 1) * ld.ds);
+        status(`Живу правку «${sel}» застосовано до базової пози (весь цикл)`);
       }
+      saveLocal();
     }
     state.liveEdit = null;
     state.liveDelta = { drot: 0, ddx: 0, ddy: 0, ds: 1 };
@@ -1492,6 +1510,7 @@ $('imgGrid').addEventListener('drop', (e) => {
 
 // ---- canvas ----
 let drag: { key: string; sx: number; sy: number; dx: number; dy: number } | null = null;
+let liveDragging = false; // жива правка почата затиском миші (mouseup = застосувати)
 let panning = false;
 let panStart = { mx: 0, my: 0, px: 0, py: 0 };
 canvas.addEventListener('mousedown', (ev) => {
@@ -1516,7 +1535,18 @@ canvas.addEventListener('mousedown', (ev) => {
   }
   const hit = hitTest(c.x, c.y);
   const key = hit ?? (state.selected === 'ref' && state.ref.canvas ? 'ref' : null);
-  if (key) { state.selected = key; pushUndo(); const t = tf(key); drag = { key, sx: c.x, sy: c.y, dx: t.dx, dy: t.dy }; refreshUI(); }
+  if (key) {
+    state.selected = key;
+    // Під час програвання клік-тягнути по кістці = ЖИВА ПРАВКА G (відпустив — застосовано).
+    if (state.playing && state.liveEditOn && state.anim && key !== 'ref') {
+      state.mouse = { x: raw.x, y: raw.y };
+      startMode('G');
+      liveDragging = !!state.liveEdit;
+      refreshUI();
+      return;
+    }
+    pushUndo(); const t = tf(key); drag = { key, sx: c.x, sy: c.y, dx: t.dx, dy: t.dy }; refreshUI();
+  }
 });
 window.addEventListener('mousemove', (ev) => {
   const r = canvas.getBoundingClientRect();
@@ -1533,7 +1563,11 @@ window.addEventListener('mousemove', (ev) => {
     draw();
   }
 });
-window.addEventListener('mouseup', () => { drag = null; panning = false; });
+window.addEventListener('mouseup', () => {
+  drag = null; panning = false;
+  // Живу правку, почату затиском миші, застосовуємо на відпусканні.
+  if (liveDragging) { liveDragging = false; if (state.mode) endMode(true); }
+});
 canvas.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (state.mode) endMode(false); });
 canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); state.zoom = Math.min(3, Math.max(0.3, state.zoom * (ev.deltaY < 0 ? 1.1 : 0.9))); resize(); draw(); }, { passive: false });
 
