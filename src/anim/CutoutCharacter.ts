@@ -49,6 +49,15 @@ function conn(sel: string, p: CharDoc['proportions']): { x: number; y: number } 
 }
 type AnimCtx = { speed?: number; jumpVel?: number; landingT?: number };
 
+// «Живе» дихання: два неспівмірні синуси → вдих/видих нерівні, ритм не механічний.
+function breath(t: number, w = 1.8): number {
+  return Math.sin(t * w) + 0.35 * Math.sin(t * w * 2.13 + 0.7);
+}
+// Згасаючий дрож (для hurt): високочастотне тремтіння, що вщухає до кінця дуги.
+function jitter(t: number, p: number): number {
+  return Math.sin(t * 42) * (1 - p) * (1 - p);
+}
+
 function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; ddy: number } {
   const wk = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * wk)) * 3 };
@@ -83,9 +92,13 @@ function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; dd
     const ddy = ap < 0.42 ? (ap / 0.42) * 4 : 4 * (1 - (ap - 0.42) / 0.58);
     return { ddx, ddy };
   }
-  if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); return { ddx: -r * 12, ddy: -r * 3 }; }
-  if (name === 'idle') return { ddx: 0, ddy: Math.sin(t * 1.8) * 1.2 };
-  if (name === 'sit')  return { ddx: 0, ddy: SIT.rootDown + Math.sin(t * 1.5) * 0.8 };
+  if (name === 'hurt') {
+    const p = Math.min(1, (t % 0.6) / 0.6);
+    const r = Math.sin(p * Math.PI);
+    return { ddx: -r * 12 + jitter(t, p) * 2.2, ddy: -r * 3 };
+  }
+  if (name === 'idle') return { ddx: 0, ddy: breath(t) * 1.3 };
+  if (name === 'sit')  return { ddx: Math.sin(t * 0.9 + 1) * 1.1, ddy: SIT.rootDown + breath(t, 1.5) * 0.9 };
   return { ddx: 0, ddy: 0 };
 }
 // Сидячий айдл (процедурна чернетка): стегна вперед, коліна зігнуті (розріз на нозі),
@@ -95,21 +108,29 @@ const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 
 function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { drot: number; ddx: number; ddy: number } {
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
-    if (key === 'head') return { drot: Math.sin(t * 1.8) * 2, ddx: 0, ddy: 0 };
-    if (key.startsWith('arm')) return { drot: Math.sin(t * 1.8) * 3, ddx: 0, ddy: 0 };
+    // Голова живе повільніше за груди + зрідка «роззирається» (довгий синус).
+    if (key === 'head') return { drot: breath(t, 1.3) * 1.8 + Math.sin(t * 0.34) * 2.4, ddx: 0, ddy: 0 };
+    // Руки з фазовим лагом за диханням, кожна трохи своя.
+    if (key === 'arm_front') return { drot: breath(t - 0.18) * 2.8, ddx: 0, ddy: 0 };
+    if (key === 'arm_back')  return { drot: breath(t - 0.3) * 2.4, ddx: 0, ddy: 0 };
+    // Ледь помітний перенос ваги — ноги протифазно, дуже мало.
+    if (key === 'leg_front') return { drot: Math.sin(t * 0.55) * 0.9, ddx: 0, ddy: 0 };
+    if (key === 'leg_back')  return { drot: -Math.sin(t * 0.55) * 0.9, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'walk' || name === 'run') {
     const spd = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
     const amp = name === 'run' ? 48 : 24, aArm = name === 'run' ? 46 : 20;
     const ph = t * spd, back = Math.sin(ph), front = Math.sin(ph + Math.PI);
-    const lean = name === 'run' ? 12 : 0;
+    const lean = name === 'run' ? 12 : 3;
+    const LAG = 0.5; // руки трохи запізнюються за ногами — «м'ясо» тягнеться за кістками
     if (key === 'leg_front') return { drot: front * amp, ddx: 0, ddy: 0 };
     if (key === 'leg_back')  return { drot: back * amp, ddx: 0, ddy: 0 };
-    if (key === 'arm_front') return { drot: back * aArm, ddx: 0, ddy: 0 };
-    if (key === 'arm_back')  return { drot: front * aArm, ddx: 0, ddy: 0 };
+    if (key === 'arm_front') return { drot: Math.sin(ph - LAG) * aArm, ddx: 0, ddy: 0 };
+    if (key === 'arm_back')  return { drot: Math.sin(ph + Math.PI - LAG) * aArm, ddx: 0, ddy: 0 };
     if (key === 'torso') return { drot: lean + Math.sin(ph) * 2, ddx: 0, ddy: 0 };
-    if (key === 'head' && name === 'run') return { drot: -lean * 0.6, ddx: 0, ddy: 0 };
+    // Голова амортизує кроки: контр-нахил у такт подвійному бобу + компенсація ліну.
+    if (key === 'head') return { drot: -lean * 0.5 - Math.abs(Math.sin(ph)) * (name === 'run' ? 3 : 1.6) + (name === 'run' ? 1.5 : 0.8), ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'jump') {
@@ -140,49 +161,59 @@ function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { dro
   }
   if (name === 'attack') {
     const ap = (t % 0.7) / 0.7;
-    // Замах (0-0.30): рука йде назад; удар (0.30-0.42): різкий ривок вперед; відкат (0.42-0.70)
+    // Замах (0-0.30) → удар (0.30-0.42) → ПРУЖНИЙ відкат (0.42-0.70): рука пролітає
+    // трохи далі цілі й повертається згасаючим коливанням (overshoot = вага удару).
+    const settle = (peak: number): number => {
+      const p = (ap - 0.42) / 0.58;
+      return peak * Math.cos(p * Math.PI * 1.35) * (1 - p * 0.85);
+    };
     if (key === 'arm_front') {
       let af: number;
       if (ap < 0.30)      af = -(ap / 0.30) * 58;                    // 0 → -58 (замах)
       else if (ap < 0.42) af = -58 + ((ap - 0.30) / 0.12) * 108;     // -58 → +50 (різкий удар)
-      else                af = 50 - ((ap - 0.42) / 0.58) * 50;        // +50 → 0 (відкат)
+      else                af = settle(50);
       return { drot: af, ddx: 0, ddy: 0 };
     }
     if (key === 'arm_back') {
       let ab: number;
       if (ap < 0.30)      ab = (ap / 0.30) * 22;                     // 0 → +22 (контр-замах)
       else if (ap < 0.42) ab = 22 - ((ap - 0.30) / 0.12) * 38;      // +22 → -16
-      else                ab = -16 + ((ap - 0.42) / 0.58) * 16;
+      else                ab = settle(-16);
       return { drot: ab, ddx: 0, ddy: 0 };
     }
     if (key === 'torso') {
       let at: number;
       if (ap < 0.30)      at = -(ap / 0.30) * 8;
       else if (ap < 0.42) at = -8 + ((ap - 0.30) / 0.12) * 20;      // -8 → +12
-      else                at = 12 - ((ap - 0.42) / 0.58) * 12;
+      else                at = settle(12);
       return { drot: at, ddx: 0, ddy: 0 };
     }
     if (key === 'head') {
-      const at = ap < 0.30 ? -(ap / 0.30) * 3 : ap < 0.42 ? -3 + ((ap - 0.30) / 0.12) * 5 : 2 - ((ap - 0.42) / 0.58) * 2;
+      // Голова «клацає» в момент удару і швидко осідає.
+      const at = ap < 0.30 ? -(ap / 0.30) * 3 : ap < 0.42 ? -3 + ((ap - 0.30) / 0.12) * 6 : settle(3);
       return { drot: at, ddx: 0, ddy: 0 };
     }
     return z;
   }
   if (name === 'hurt') {
-    const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI);
-    if (key === 'torso') return { drot: r * 6, ddx: 0, ddy: 0 };
-    if (key === 'head')  return { drot: r * 7, ddx: 0, ddy: 0 };
-    if (key.startsWith('arm')) return { drot: -r * 8, ddx: 0, ddy: 0 };
+    const p = Math.min(1, (t % 0.6) / 0.6);
+    const r = Math.sin(p * Math.PI);
+    const sh = jitter(t, p); // згасаючий дрож від удару
+    if (key === 'torso') return { drot: r * 6 + sh * 1.6, ddx: 0, ddy: 0 };
+    if (key === 'head')  return { drot: r * 8 + sh * 3, ddx: 0, ddy: 0 };
+    if (key.startsWith('arm')) return { drot: -r * 8 + sh * 2, ddx: 0, ddy: 0 };
     return z;
   }
   if (name === 'sit') {
-    const br = Math.sin(t * 1.5);
+    const br = breath(t, 1.5);
+    const rock = Math.sin(t * 0.9 + 1); // повільне погойдування корпуса (сумний ритм)
     if (key === 'leg_front') return { drot: SIT.thighFront, ddx: 0, ddy: 0 };
     if (key === 'leg_back')  return { drot: SIT.thighBack, ddx: 0, ddy: 0 };
-    if (key === 'arm_front') return { drot: SIT.armFront + br * 1.2, ddx: 0, ddy: 0 };
-    if (key === 'arm_back')  return { drot: SIT.armBack + br * 1.2, ddx: 0, ddy: 0 };
-    if (key === 'torso') return { drot: SIT.torso + br * 0.5, ddx: 0, ddy: 0 };
-    if (key === 'head')  return { drot: br * 1.5, ddx: 0, ddy: 0 };
+    if (key === 'arm_front') return { drot: SIT.armFront + br * 1.4 + rock * 0.8, ddx: 0, ddy: 0 };
+    if (key === 'arm_back')  return { drot: SIT.armBack + br * 1.1 + rock * 0.8, ddx: 0, ddy: 0 };
+    if (key === 'torso') return { drot: SIT.torso + br * 0.7 + rock * 1.6, ddx: 0, ddy: 0 };
+    // Голова: дивиться у вогонь, повільні мікро-нахили + зрідка глибший «задумався».
+    if (key === 'head')  return { drot: br * 1.5 - rock * 1.2 + Math.sin(t * 0.23) * 2, ddx: 0, ddy: 0 };
     return z;
   }
   return z;
@@ -234,7 +265,11 @@ function animBend(name: string, t: number, key: string, ctx: AnimCtx = {}): numb
     return 0;
   }
   if (name === 'hurt') { const r = Math.sin(Math.min(1, (t % 0.6) / 0.6) * Math.PI); if (key.startsWith('arm')) return -r * 25; return 0; }
-  if (name === 'idle') { if (key.startsWith('arm')) return -(0.3 + 0.3 * Math.sin(t * 1.8)) * 10; return 0; }
+  if (name === 'idle') {
+    if (key === 'arm_front') return -(0.3 + 0.3 * breath(t - 0.18)) * 10;
+    if (key === 'arm_back')  return -(0.3 + 0.3 * breath(t - 0.3)) * 9;
+    return 0;
+  }
   if (name === 'sit') {
     if (key === 'torso') return SIT.spine; // згин хребта (грудина над розрізом торса)
     if (key.startsWith('leg')) return SIT.knee;
