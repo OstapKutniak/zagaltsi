@@ -2,57 +2,59 @@
   "version": 1,
   "worlds": [
     {
-      "id": "mqpg77xu",
-      "name": "Карта 1",
+      "id": "w_karpaty",
+      "name": "Карпатський край",
       "bg": "",
+      "updatedAt": 1782950400000,
       "nodes": [
-        {
-          "id": "mqpgehx1",
-          "label": "Поділля",
-          "x": -94.62208865514648,
-          "y": -23.21938392186324,
-          "type": "region",
-          "regionId": "Поділля"
-        },
-        {
-          "id": "mqpgehx2",
-          "label": "Хмельницький",
-          "x": 5.381542436303391,
-          "y": 59.82301636805052,
-          "type": "location"
-        },
-        {
-          "id": "mqpgehx5",
-          "label": "Тернопіль",
-          "x": -204.56057789879952,
-          "y": 71.12622750489165,
-          "type": "location"
-        },
-        {
-          "id": "mqpgehx8",
-          "label": "Локація",
-          "x": -104.20065822486481,
-          "y": 166.07372283518558,
-          "type": "location"
-        }
+        { "id": "r_tykhoplav", "label": "Тихоплав", "x": -300, "y": 60, "type": "region", "regionId": "w_tykhoplav" },
+        { "id": "r_verkhovyna", "label": "Верховина", "x": -40, "y": -120, "type": "region" },
+        { "id": "r_polonyny", "label": "Чорні Полонини", "x": 230, "y": -30, "type": "region" },
+        { "id": "r_solekamin", "label": "Солекамінь", "x": 40, "y": 150, "type": "region" }
       ],
       "edges": [
-        {
-          "id": "mqqblqtr",
-          "from": "mqpgehx5",
-          "to": "mqpgehx2",
-          "levelId": "",
-          "twoWay": false
-        }
+        { "id": "ge1", "from": "r_tykhoplav", "to": "r_verkhovyna", "levelId": "", "twoWay": true },
+        { "id": "ge2", "from": "r_verkhovyna", "to": "r_polonyny", "levelId": "", "twoWay": true },
+        { "id": "ge3", "from": "r_tykhoplav", "to": "r_solekamin", "levelId": "", "twoWay": true },
+        { "id": "ge4", "from": "r_solekamin", "to": "r_polonyny", "levelId": "", "twoWay": true }
       ]
     },
     {
-      "id": "mqt8i51d",
-      "name": "Карта 1",
+      "id": "w_tykhoplav",
+      "name": "Тихоплав",
       "bg": "",
-      "nodes": [],
-      "edges": [],
-      "updatedAt": 1782403193455
+      "updatedAt": 1782950400000,
+      "nodes": [
+        { "id": "n_peresolykha", "label": "Пересолиха", "x": -420, "y": 40, "type": "location" },
+        { "id": "n_duplyany", "label": "Дупляни", "x": 120, "y": -40, "type": "location" },
+        { "id": "n_hreblya", "label": "Гребля Мельника", "x": -260, "y": -60, "type": "location" },
+        { "id": "n_dub", "label": "Дуб-Боржник", "x": -120, "y": -160, "type": "location" },
+        { "id": "n_krynytsia", "label": "Криниця-Повторюшка", "x": -180, "y": 130, "type": "location" },
+        { "id": "n_korchma", "label": "Корчма при Броді", "x": -40, "y": 40, "type": "location" },
+        { "id": "n_pasika", "label": "Пасіка-Борть", "x": 250, "y": -160, "type": "location" },
+        { "id": "n_zavod", "label": "Полуднева Заводь", "x": 60, "y": 185, "type": "location" },
+        { "id": "n_brody", "label": "Гнилі Броди", "x": 290, "y": 120, "type": "location" },
+        { "id": "n_kaplytsia", "label": "Капличка-на-палях", "x": 460, "y": 30, "type": "location" },
+        { "id": "n_bahno", "label": "Солоне Багно", "x": 470, "y": -130, "type": "location" },
+        { "id": "n_balka", "label": "Дідова Балка", "x": -330, "y": -190, "type": "location" }
+      ],
+      "edges": [
+        { "id": "te1", "from": "n_peresolykha", "to": "n_hreblya", "levelId": "", "twoWay": true },
+        { "id": "te2", "from": "n_hreblya", "to": "n_dub", "levelId": "", "twoWay": true },
+        { "id": "te3", "from": "n_dub", "to": "n_balka", "levelId": "", "twoWay": true },
+        { "id": "te4", "from": "n_peresolykha", "to": "n_krynytsia", "levelId": "", "twoWay": true },
+        { "id": "te5", "from": "n_krynytsia", "to": "n_korchma", "levelId": "", "twoWay": true },
+        { "id": "te6", "from": "n_hreblya", "to": "n_korchma", "levelId": "", "twoWay": true },
+        { "id": "te7", "from": "n_korchma", "to": "n_duplyany", "levelId": "", "twoWay": true },
+        { "id": "te8", "from": "n_duplyany", "to": "n_pasika", "levelId": "", "twoWay": true },
+        { "id": "te9", "from": "n_korchma", "to": "n_zavod", "levelId": "", "twoWay": true },
+        { "id": "te10", "from": "n_zavod", "to": "n_brody", "levelId": "", "twoWay": true },
+        { "id": "te11", "from": "n_duplyany", "to": "n_brody", "levelId": "", "twoWay": true },
+        { "id": "te12", "from": "n_brody", "to": "n_kaplytsia", "levelId": "", "twoWay": true },
+        { "id": "te13", "from": "n_pasika", "to": "n_bahno", "levelId": "", "twoWay": true },
+        { "id": "te14", "from": "n_kaplytsia", "to": "n_bahno", "levelId": "", "twoWay": true },
+        { "id": "te15", "from": "n_dub", "to": "n_duplyany", "levelId": "", "twoWay": true }
+      ]
     }
   ]
 }

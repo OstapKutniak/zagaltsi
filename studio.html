@@ -794,13 +794,18 @@
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeStop" name="wld-nodeType" value="stop"> Зупинка</label>
               </div>
               <div id="wld-nodeRegionRow" style="display:none;flex-direction:column;gap:4px">
-                <label style="font-size:12px;color:var(--muted)">id вкладеної карти</label>
-                <input id="wld-nodeRegionId" type="text" placeholder="map_id" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
+                <label style="font-size:12px;color:var(--muted)">Вкладена карта (регіон)</label>
+                <select id="wld-nodeRegionId" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
+              </div>
+              <div id="wld-nodeLocRow" style="display:none;flex-direction:column;gap:4px">
+                <label style="font-size:12px;color:var(--muted)">Локація (з Редактора Локацій)</label>
+                <select id="wld-nodeLocId" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
               </div>
             </div>
             <div id="wld-edgeProps" style="display:none;flex-direction:column;gap:6px">
-              <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр (id)</label>
-              <input id="wld-edgeLevelId" type="text" placeholder="village1, forest1 …" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:monospace;outline:none;width:100%;box-sizing:border-box">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр</label>
+              <input id="wld-edgeLevelId" type="text" list="wld-levelList" placeholder="почни вводити назву рівня…" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:monospace;outline:none;width:100%;box-sizing:border-box">
+              <datalist id="wld-levelList"></datalist>
               <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wld-edgeTwoWay"> Двосторонній шлях</label>
             </div>
           </div>

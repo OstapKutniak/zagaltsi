@@ -9,7 +9,7 @@ import { loadCharLibrary } from '../charlib';
 // без обводок, з підсвіткою. «Мандри» = подорожі (згодом глобальна карта; поки просто
 // запускає гру); Завдання/Прогрес/Інвентар — поки сцена-заглушка 'Section'.
 const ITEMS: { label: string; target: string }[] = [
-  { label: 'Мандри',   target: 'Game' },
+  { label: 'Мандри',   target: 'World' },
   { label: 'Завдання', target: 'Quests' },
   { label: 'Прогрес',  target: 'Progress' },
   { label: 'Інвентар', target: 'Inventory' },
@@ -51,9 +51,9 @@ export class MenuScene extends Phaser.Scene {
     const startY = 210, gap = 74;
     ITEMS.forEach((it, i) => {
       this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
-        // «Мандри» поки просто запускає гру (глобальна карта — пізніше). Лобі-збір
-        // Хоругви прибрано зі старту: GameScene бачить прихований лобі → грає соло.
-        if (it.target === 'Game') this.scene.start('Game');
+        // «Мандри» → глобальна карта (WorldScene). Бітемап (GameScene) тепер
+        // запускається з переходів карти (поки скіпаються — приїзд одразу).
+        if (it.target === 'World') this.scene.start('World', {});
         else this.scene.start('Section', { title: it.label, from: 'Menu' });
       });
     });
