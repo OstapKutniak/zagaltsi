@@ -648,6 +648,34 @@ const hw = Math.max(0, (luma - 0.35) / 0.65) * hStr;
   (таз лишається, грудина гнеться); (3) `SIT` синхронізувати (`torso:-12, spine:40`) + `animBend`
   торс-кейс для `sit`. Тестувати, завантаживши бібліотечного Остапа в риг (не наосліп на манекені).
 
+### Розділи гри + Хоругва-паті + подія мандрівки (2026-07, мобільна сесія)
+
+**Меню «Житло»:** заголовок ЖИТЛО; кнопки Мандри/Хоругва/Завдання/Досягнення/Інвентар
+(menu.json оновлено + fallback ITEMS + followTarget: `khorugva|quests|achievements`).
+**Сторінки:** `QuestsScene` (дошка з пустими нотатками, процедурна) і `AchievementsScene`
+(список гравців із Firebase-реєстру `players/{id}` — пишеться в `registerPlayer()` при
+старті (src/players.ts); наповнюється З ЦЬОГО релізу, старі заходи відновити нема звідки).
+**Хоругва-паті (`src/khorugva.ts` + `KhorugvaScene`):** «Створити» → Firebase `khorugvas/{id}`
+(до 5), 5 слотів-портретів (мініатюри з char-library, `khPortraits.ts`); «Оголосити збір»
+(нік через prompt) → запис `calls/{nick}` + POST на бот-воркер (`VITE_BOT_PROXY`), гравцю
+в бот приходить тематичне сповіщення з кнопкою «Приєднатись» (deep-link `kh_<id>`).
+⚠️ Це ПАТІ-система; окремо існує PRESENCE у `LocationScene` (хто в цій локації).
+Усі Firebase-виклики сторінок — через `withTimeout` (офлайн-проміси Firebase не падають).
+**Подія мандрівки (WorldScene.travelAlong):** якщо в ребра є `levelId` АБО це тестова пара
+`n_peresolykha↔n_hreblya` (Тихоплав) — цятка їде до СЕРЕДИНИ хопа → прапорець «Ви дещо
+побачили» + смуга завантаження → `stageLevelById(levelId)` (src/level/launch.ts: збирає
+LevelDoc як «Зберегти рівень у гру»; нема id → грає поточний zag_level/public/level.json)
+→ GameScene. Прибуття фіксується в ціль хопа. ⚠️ Тест-пару ПРИБРАТИ, коли Остап проставить
+levelId ребер у Редакторі Карти. **Портрети паті** — 5 квадратиків ліворуч на WorldScene.
+**Deep-links (main.ts):** `?startapp=` `zhytlo|mandry|khorugva|zavdannya|dosyagnennya|inventar|kh_<id>`
+(telegram.ts `getStartParam`; у браузері — `?startapp=` у query для тестів).
+**Бот-воркер (`serverless/telegram-bot.worker.js`, НЕ задеплоєний — треба РУКАМИ Остапа):**
+/webhook: на будь-яке повідомлення шле клавіатуру-розділи (url deep-links) і пише
+`tg_users/{username}={chatId}` у Firebase REST; /notify: {nick,khorugvaId,from} → сповіщення
+про збір. Деплой: dash.cloudflare.com → новий воркер → вставити код → Variables:
+BOT_TOKEN (Secret), BOT_USERNAME, APP_SHORT (short name Mini App з BotFather), FIREBASE_URL;
+далі `setWebhook?url=https://<воркер>/webhook`; у репо variable `VITE_BOT_PROXY`=URL воркера.
+
 ### Редактор Меню — 5-та вкладка studio (ЗАПРОПОНОВАНА архітектура, чекає підтвердження)
 Мета Остапа: сам налаштовувати всі сторінки меню (лоббі/завдання/прогрес/інвентар…) —
 розкладку, **шрифти, гіперпосилання (навігацію), зовнішній вигляд**, і зручно ставити персонажа.
