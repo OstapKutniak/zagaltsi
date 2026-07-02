@@ -679,6 +679,18 @@
               <button id="bendFlipBtn">Напрям (B)</button>
               <button id="flipAllBtn">Фліп</button>
             </div>
+            <div id="animTools" style="display:flex;flex-direction:column;gap:6px;padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+              <div style="font-size:12px;font-weight:600;color:var(--muted)">Анімація</div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px">
+                <span style="flex:0 0 72px;color:var(--muted)">Швидкість</span>
+                <input type="range" id="playRate" min="25" max="200" step="5" value="100" style="flex:1">
+                <span id="playRateV" style="flex:0 0 40px;text-align:right;color:var(--muted)">100%</span>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="Під час програвання кліпу G/R/S на кістці зсуває/крутить/масштабує її ОДРАЗУ в усіх ключах — анімація грає далі, а правка лягає на весь кліп">
+                <input type="checkbox" id="liveEditChk" checked style="width:14px;height:14px">
+                Жива правка при програванні (G/R/S на всі ключі)
+              </label>
+            </div>
             <input type="file" id="fileInput" accept="image/png,image/*" multiple style="display:none" />
             <div id="imgGrid" title="Клік — завантажити картинку · Перетягни PNG"></div>
             <div class="btns"><button id="saveChar" style="flex:1">Зберегти персонажа</button></div>

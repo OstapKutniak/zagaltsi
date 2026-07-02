@@ -107,6 +107,12 @@ const state = {
   animT: 0, // час на таймлайні
   clips: {} as Record<string, Clip>, // авторські анімації
   playing: false,
+  playRate: 1, // швидкість прев'ю (0.25–2), слайдер у панелі «Анімація»
+  // ЖИВА ПРАВКА під час ▶ авторського кліпу: G/R/S на кістці пишуть ДЕЛЬТУ, що
+  // видима поверх програвання і при підтвердженні лягає на ВСІ ключі кліпу.
+  liveEditOn: true,
+  liveEdit: null as null | { sel: string },
+  liveDelta: { drot: 0, ddx: 0, ddy: 0, ds: 1 },
   selKeys: [] as number[], // вибрані ключі (для звʼязування)
   selKeyBone: null as string | null, // кістка одинарного виділення (null = мульти/рамка)
   setup: null as Record<string, Slot> | null, // bind-поза, поки редагуємо кліп
@@ -203,7 +209,16 @@ function eff(sel: string): Tf {
   const gOff = gravOffsets.get(sel) ?? 0;
   if (sel === 'ref' || !state.anim) { const t = tf(sel); return gOff ? { ...t, rot: t.rot + gOff } : t; }
   const clip = state.clips[state.anim];
-  if (clip && clip.keys.length) { const t = tf(sel); return gOff ? { ...t, rot: t.rot + gOff } : t; }
+  if (clip && clip.keys.length) {
+    const t0 = tf(sel);
+    let t: Tf = gOff ? { ...t0, rot: t0.rot + gOff } : t0;
+    // Жива правка: дельта видима поверх семпла кліпу, поки жест не підтверджено.
+    if (state.liveEdit?.sel === sel) {
+      const ld = state.liveDelta;
+      t = { ...t, rot: t.rot + ld.drot, dx: t.dx + ld.ddx, dy: t.dy + ld.ddy, scale: t.scale * ld.ds };
+    }
+    return t;
+  }
   const su = rigSlots()[sel]; // процедурна поза — семплимо за animT (і на ПАУЗІ теж, для скрабу)
   const o = animOff(state.anim, state.animT, sel);
   let dx = su.dx + o.ddx, dy = su.dy + o.ddy;
@@ -717,7 +732,7 @@ function _drawNow(): void {
   // mode hint text (after ctx.restore so it's not mirrored)
   if (state.mode || state.pivotMode || state.cutMode) {
     ctx.fillStyle = '#e8e8e8'; ctx.font = '14px monospace';
-    const txt = state.cutMode ? `РОЗРІЗ ${state.activeCut}: клікни, де різати (лікоть/коліно)` : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
+    const txt = state.cutMode ? `РОЗРІЗ ${state.activeCut}: клікни, де різати (лікоть/коліно)` : state.pivotMode ? 'PIVOT: клікни на частині' : state.mode === 'B' ? 'ЗГИН (B): рухай мишею ліво/право · клік — ок, Esc — скасувати' : state.liveEdit ? `ЖИВА ПРАВКА ${state.mode}: ляже на ВСІ ключі · клік — ок, Esc — скасувати` : `${state.mode}: рухай мишею · клік — ок, Esc — скасувати`;
     ctx.fillText(txt, 12, canvas.height - 16);
   }
 }
@@ -850,6 +865,15 @@ function addImageFile(file: File, fallbackToSelected: boolean): void {
 function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
   if (m === 'B' && state.selected === 'ref') return; // ref не має bend
   pushUndo();
+  // ЖИВА ПРАВКА: під час ▶ авторського кліпу G/R/S не б'ються з loadFrame
+  // (він щокадру перезаписує слоти), а пишуть дельту на ВСІ ключі кліпу.
+  const liveClip = state.anim ? state.clips[state.anim] : null;
+  state.liveEdit = null;
+  if (state.playing && state.liveEditOn && liveClip && liveClip.keys.length
+      && state.selected !== 'ref' && (m === 'G' || m === 'R' || m === 'S')) {
+    state.liveEdit = { sel: state.selected };
+    state.liveDelta = { drot: 0, ddx: 0, ddy: 0, ds: 1 };
+  }
   const t = tf(state.selected);
   state.mode = m; state.pivotMode = false; state.axis = null;
   state.orig = { rot: t.rot, scale: t.scale, dx: t.dx, dy: t.dy, flip: t.flip, sx: t.sx, sy: t.sy, gscale: t.gscale };
@@ -865,8 +889,28 @@ function startMode(m: 'R' | 'S' | 'G' | 'B'): void {
 }
 function applyMode(): void {
   if (!state.mode || !state.orig) return;
-  const t = tf(state.selected); const a = anchorPx(state.selected);
+  const a = anchorPx(state.selected);
   const mx = mirrorX(state.mouse.x); const my = state.mouse.y;
+  // Жива правка: жест пише дельту (бачимо поверх програвання), слоти не чіпаємо.
+  if (state.liveEdit) {
+    const ld = state.liveDelta;
+    if (state.mode === 'G') {
+      const pr = dynParent(state.selected) ? worldOf(dynParent(state.selected)!).rot : 0;
+      let wdx = mx - state.startMx, wdy = my - state.startMy;
+      if (state.axis === 'x') wdy = 0; else if (state.axis === 'z') wdx = 0;
+      const c = Math.cos(-pr), s2 = Math.sin(-pr);
+      ld.ddx = (wdx * c - wdy * s2) / s();
+      ld.ddy = (wdx * s2 + wdy * c) / s();
+    } else if (state.mode === 'R') {
+      const ang = Math.atan2(my - a.y, mx - a.x);
+      ld.drot = ((ang - state.startAng) * 180) / Math.PI;
+    } else if (state.mode === 'S') {
+      ld.ds = Math.max(0.02, Math.hypot(mx - a.x, my - a.y) / state.startDist);
+    }
+    draw();
+    return;
+  }
+  const t = tf(state.selected);
   if (state.mode === 'G') {
     const sl = state.selected !== 'ref' ? state.slots[state.selected] : null;
     if (state.ikMode && sl?.cut != null) { solveIK(state.selected, mx, my); }
@@ -891,6 +935,29 @@ function applyMode(): void {
 }
 function endMode(commit: boolean): void {
   if (!state.mode) return;
+  // Жива правка: підтвердження розкладає дельту на ВСІ ключі кліпу (одразу вся анімація).
+  if (state.liveEdit) {
+    if (commit) {
+      const clip = curClip();
+      const sel = state.liveEdit.sel;
+      const ld = state.liveDelta;
+      if (clip) {
+        let touched = 0;
+        for (const k of clip.keys) {
+          const p = k.pose[sel];
+          if (!p) continue;
+          p.rot += ld.drot; p.dx += ld.ddx; p.dy += ld.ddy; p.scale *= ld.ds;
+          touched++;
+        }
+        status(`Живу правку «${sel}» застосовано до ${touched} ключів`);
+        saveLocal();
+      }
+    }
+    state.liveEdit = null;
+    state.liveDelta = { drot: 0, ddx: 0, ddy: 0, ds: 1 };
+    state.mode = null; state.orig = null; state.axis = null; refreshUI();
+    return;
+  }
   if (!commit) {
     if (state.orig) Object.assign(tf(state.selected), state.orig);
     if (state.mode === 'B') { const sl = state.slots[state.selected]; if (sl) { const bn = bendField(state.activeCut); (sl as any)[bn] = state.origBend; } }
@@ -1175,6 +1242,14 @@ let showGrid = true;
 const gridBtn = $<HTMLButtonElement>('gridBtn');
 gridBtn?.classList.add('on');
 gridBtn?.addEventListener('click', () => { showGrid = !showGrid; gridBtn.classList.toggle('on', showGrid); draw(); });
+// Панель «Анімація»: швидкість прев'ю + тумблер живої правки під час програвання.
+$<HTMLInputElement>('playRate')?.addEventListener('input', function () {
+  state.playRate = Number(this.value) / 100;
+  const v = document.getElementById('playRateV'); if (v) v.textContent = this.value + '%';
+});
+$<HTMLInputElement>('liveEditChk')?.addEventListener('change', function () {
+  state.liveEditOn = this.checked;
+});
 $<HTMLButtonElement>('faceBtn').addEventListener('click', () => { state.facing *= -1; refreshUI(); });
 $<HTMLButtonElement>('animDirBtn').addEventListener('click', () => { state.animDir *= -1; refreshUI(); });
 $<HTMLButtonElement>('refBtn').addEventListener('click', () => $<HTMLInputElement>('refInput').click());
@@ -2207,7 +2282,7 @@ function tick(ts: number): void {
   if (!state.playing) return;
   const dt = Math.min((ts - lastTs) / 1000, 0.1) || 0; lastTs = ts;
   const clip = curClip();
-  if (clip) { state.animT += dt; if (state.animT > clip.duration) state.animT %= clip.duration; if (clip.keys.length) loadFrame(state.animT); }
+  if (clip) { state.animT += dt * state.playRate; if (state.animT > clip.duration) state.animT %= clip.duration; if (clip.keys.length) loadFrame(state.animT); }
   if (state.gravBones.length > 0) updateGravity(dt);
   draw();
   movePlayhead();

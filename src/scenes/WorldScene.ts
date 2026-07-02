@@ -300,7 +300,10 @@ export class WorldScene extends Phaser.Scene {
 
   private openNode(n: WorldNode): void {
     if (n.type === 'location') {
-      this.scene.start('Location', { nodeId: n.id, label: n.label, locationId: n.locationId, worldId: this.world!.id });
+      this.scene.start('Location', {
+        nodeId: n.id, label: n.label, locationId: n.locationId, worldId: this.world!.id,
+        icon: (n.icon as MapIconKind) || iconFromLabel(n.label),
+      });
     }
   }
 

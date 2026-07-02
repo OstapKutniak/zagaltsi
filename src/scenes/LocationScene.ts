@@ -7,6 +7,8 @@ import {
 import { enterLocation, leaveLocation, watchLocationPresence, type PresenceEntry } from '../multiplayer/presence';
 import { getPlayerId } from '../multiplayer/lobby';
 import { loadCharLibrary, type LibItem } from '../charlib';
+import { oakScene } from '../world/locationArt';
+import { ensureFogTexture } from '../level/fogTexture';
 
 // Сцена локації (хаб): арт із Редактора Локацій (фон + розставлені будівлі), а поки
 // його нема — білі куби-заглушки. Внизу — 5 слотів Хоругви (як герої в HoMM):
@@ -27,11 +29,14 @@ export class LocationScene extends Phaser.Scene {
 
   constructor() { super('Location'); }
 
-  init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string }): void {
+  private icon = '';
+
+  init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string; icon?: string }): void {
     this.nodeId = data?.nodeId ?? '';
     this.label = data?.label ?? 'Локація';
     this.locationId = data?.locationId;
     this.worldId = data?.worldId ?? '';
+    this.icon = data?.icon ?? '';
   }
 
   create(): void {
@@ -72,7 +77,30 @@ export class LocationScene extends Phaser.Scene {
     const doc = locationForNode(fakeNode, locs);
     if (!this.scene.isActive()) return;
     if (doc && (doc.bg || doc.placed.length)) await this.renderDoc(doc);
+    else if (this.icon === 'oak') this.renderOakScene(); // Дуб-Боржник — процедурна сцена-референс
     else this.renderPlaceholder();
+  }
+
+  // Силуетна сцена «Дуб-Боржник» у палітрі гри: небо/пагорб/земля → туман → дуб
+  // з дуплом і підвішеними монетами → передній туман. Плановість — туман МІЖ шарами.
+  private renderOakScene(): void {
+    const cx = LOGICAL_W / 2 + this.offX, cy = LOGICAL_H / 2 + this.offY;
+    if (!this.textures.exists('oak_back')) {
+      const s = oakScene(LOGICAL_W, LOGICAL_H);
+      this.textures.addCanvas('oak_back', s.back);
+      this.textures.addCanvas('oak_front', s.front);
+    }
+    this.add.image(cx, cy, 'oak_back').setScrollFactor(0).setDepth(1);
+    ensureFogTexture(this);
+    // Туман ЗА дубом — щільніший, повзе праворуч.
+    const fogBack = this.add.tileSprite(cx, cy + 40, LOGICAL_W + 6, 220, 'fog_noise')
+      .setScrollFactor(0).setDepth(2).setTint(0x9a92ad).setAlpha(0.34);
+    this.tweens.add({ targets: fogBack, tilePositionX: 512, duration: 46000, repeat: -1 });
+    this.add.image(cx, cy, 'oak_front').setScrollFactor(0).setDepth(3);
+    // Легкий передній туман біля землі — повзе ліворуч (протихід дає глибину).
+    const fogFront = this.add.tileSprite(cx, LOGICAL_H - 90 + this.offY, LOGICAL_W + 6, 150, 'fog_noise')
+      .setScrollFactor(0).setDepth(4).setTint(0xb3a9c4).setAlpha(0.22);
+    this.tweens.add({ targets: fogFront, tilePositionX: -512, duration: 34000, repeat: -1 });
   }
 
   // Рендер LocationDoc: та сама система координат, що в Редакторі Локацій
