@@ -6,6 +6,7 @@
 
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
+import { initBotEditor } from '../bot/editor';
 
 export interface MenuButton {
   id: string; label: string;
@@ -403,4 +404,8 @@ export function initMenuEditor(prefix: string): void {
 
   window.addEventListener('menuTabActivated', () => draw());
   draw();
+
+  // Секція «Бот (Telegram)» у цій же правій панелі: тексти/кнопки бота →
+  // bot-config.json (спільна публікація) → воркер читає живцем.
+  initBotEditor();
 }

@@ -39,12 +39,18 @@ function appLink(env, param) {
   return `https://t.me/${env.BOT_USERNAME}/${env.APP_SHORT}?startapp=${param}`;
 }
 
+// ПОСТІЙНА reply-клавіатура (під рядком вводу, не їде з повідомленнями).
+// Кнопки web_app відкривають Mini App напряму; розділ передаємо через
+// ?startapp=<param> у URL (гра читає його фолбеком у getStartParam).
 function sectionsKeyboard(env, cfg) {
+  const base = (env.GAME_URL || 'https://ostapkutniak.github.io/zagaltsi/').replace(/\/$/, '/');
   const rows = [];
-  for (let i = 0; i < cfg.sections.length; i += 2) {
-    rows.push(cfg.sections.slice(i, i + 2).map(([label, param]) => ({ text: label, url: appLink(env, param) })));
+  for (let i = 0; i < cfg.sections.length; i += 3) {
+    rows.push(cfg.sections.slice(i, i + 3).map(([label, param]) => ({
+      text: label, web_app: { url: `${base}?startapp=${param}` },
+    })));
   }
-  return { inline_keyboard: rows };
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 
 async function tg(env, method, body) {
