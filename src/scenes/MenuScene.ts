@@ -267,7 +267,7 @@ export class MenuScene extends Phaser.Scene {
         this.boltDur = 0.38 * (1 - vary * 0.5 + Math.random() * vary);
         this.boltOn = this.boltDur;
         this.boltNext = LIGHTNING.every * (1 - vary + Math.random() * vary * 2);
-        triggerThunder(300 + Math.random() * 900); // грім доганяє світло
+        triggerThunder(4000 + Math.random() * 2500); // далекий грім: ~4-6.5с після спалаху
       }
     }
   }
