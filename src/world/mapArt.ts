@@ -109,6 +109,21 @@ function hut(x: Ctx, cx: number, groundY: number, w: number, h: number): void {
 export type MapIconKind =
   | 'village' | 'mill' | 'oak' | 'well' | 'tavern' | 'hives'
   | 'reeds' | 'sunken' | 'chapel' | 'bog' | 'mound' | 'spot';
+// Список видів з людськими назвами — для селекта в Редакторі Карти.
+export const MAP_ICON_KINDS: Array<{ v: MapIconKind; l: string }> = [
+  { v: 'village', l: 'Село (хати)' },
+  { v: 'mill', l: 'Млин' },
+  { v: 'oak', l: 'Дуб / дерево' },
+  { v: 'well', l: 'Криниця' },
+  { v: 'tavern', l: 'Корчма' },
+  { v: 'hives', l: 'Пасіка' },
+  { v: 'reeds', l: 'Очерети' },
+  { v: 'sunken', l: 'Затонуле' },
+  { v: 'chapel', l: 'Каплиця' },
+  { v: 'bog', l: 'Багно' },
+  { v: 'mound', l: 'Курган' },
+  { v: 'spot', l: 'Просто місце' },
+];
 
 export function locationIcon(kind: MapIconKind, size = 108, seed = 3): HTMLCanvasElement {
   const c = document.createElement('canvas'); c.width = size; c.height = size;

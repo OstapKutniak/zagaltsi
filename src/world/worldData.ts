@@ -27,6 +27,8 @@ export interface WorldNode {
   locationId?: string;  // type=location → id LocationDoc (нема — шукаємо за назвою)
   desc?: string;        // короткий опис для прапорця на мапі
   icon?: string;        // MapIconKind для чорнильної іконки (нема — з назви)
+  img?: string;         // своя картинка-іконка (dataURL) — перекриває icon
+  iconScale?: number;   // множник розміру іконки/картинки на мапі
 }
 
 export interface WorldEdge {
@@ -53,10 +55,18 @@ export interface ActionZone {
   id: string; x: number; y: number; w: number; h: number;
   action: string; label: string;
 }
+// Шар туману локації (Редактор Локацій → LocationScene): смуга шуму, що повзе.
+// y/h — у світових координатах локації (як placed); speed px/с (знак = напрямок);
+// front=true — поверх будівель (передній план), інакше між фоном і будівлями.
+export interface FogLayer {
+  id: string; y: number; h: number;
+  alpha: number; tint: string; speed: number; front: boolean;
+}
 export interface LocationDoc {
   id: string; name: string; bg: string;
   placed: PlacedAsset[];
   zones: ActionZone[];
+  fogs?: FogLayer[];
   updatedAt?: number;
 }
 

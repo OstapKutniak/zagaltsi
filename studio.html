@@ -877,6 +877,18 @@
                 <label style="font-size:12px;color:var(--muted)">Локація (з Редактора Локацій)</label>
                 <select id="wld-nodeLocId" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
               </div>
+              <div id="wld-nodeIconRow" style="display:flex;flex-direction:column;gap:4px">
+                <label style="font-size:12px;color:var(--muted)">Іконка на мапі</label>
+                <select id="wld-nodeIcon" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
+                <div style="display:flex;gap:6px">
+                  <button id="wld-nodeImgBtn" style="flex:1;padding:5px;font-size:12px">Своя картинка…</button>
+                  <button id="wld-nodeImgClear" style="flex:0 0 auto;padding:5px 8px;font-size:12px" title="Прибрати свою картинку">✕</button>
+                </div>
+                <input type="file" id="wld-nodeImgInput" accept="image/*" style="display:none">
+                <label style="font-size:12px;display:flex;align-items:center;gap:6px">Розмір<input type="range" id="wld-nodeIconScale" min="0.4" max="2.4" step="0.05" style="flex:1"><span id="wld-nodeIconScaleV" style="flex:0 0 34px;text-align:right;color:var(--muted);font-size:11px"></span></label>
+              </div>
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Опис (прапорець на мапі)</label>
+              <textarea id="wld-nodeDesc" rows="2" placeholder="короткий опис локації…" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;resize:vertical"></textarea>
             </div>
             <div id="wld-edgeProps" style="display:none;flex-direction:column;gap:6px">
               <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр</label>
@@ -923,6 +935,12 @@
               <input id="loc-zoneLabel" type="text" placeholder="підпис зони" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
             </div>
           </div>
+          <button class="header secToggle open" style="margin-top:6px">Туман</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:11px;color:var(--muted)">Смуги туману, що повзуть. «Попереду» — поверх будівель, інакше — між фоном і будівлями.</div>
+            <div id="loc-fogList" style="display:flex;flex-direction:column;gap:8px"></div>
+            <button id="loc-addFog" style="width:100%;padding:6px;font-size:12px">＋ Шар туману</button>
+          </div>
           <button class="header secToggle open" style="margin-top:6px">Бібліотека споруд</button>
           <div class="secBody">
             <button id="loc-addBuilding" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Створити будівлю</button>
@@ -955,6 +973,32 @@
               <label style="font-size:12px;color:var(--muted);font-weight:600">Куди веде (гіперпосилання)</label>
               <select id="mn-btnTarget" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
               <button id="mn-btnDelete" style="width:100%;padding:6px;font-size:12px">Видалити кнопку</button>
+            </div>
+          </div>
+          <button class="header secToggle open" style="margin-top:6px">Ефекти сцени</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:10px;font-size:12px">
+            <div style="color:var(--muted);font-size:11px">Персонажа, вогнище й вікно дощу тягни прямо у вьюпорті. Налаштування діють на поточну сторінку.</div>
+            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxCharOn">Персонаж (сидить)</label>
+              <label style="display:flex;align-items:center;gap:6px">Масштаб<input type="range" id="mn-fxCharScale" min="0.4" max="3" step="0.05" style="flex:1"><span id="mn-fxCharScaleV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxFireOn">Вогнище</label>
+              <label style="display:flex;align-items:center;gap:6px">Розмір<input type="range" id="mn-fxFireScale" min="0.3" max="2.5" step="0.05" style="flex:1"><span id="mn-fxFireScaleV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+              <label style="display:flex;align-items:center;gap:6px">Світло<input type="range" id="mn-fxFireGlow" min="0" max="0.5" step="0.01" style="flex:1"><span id="mn-fxFireGlowV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxRainOn">Дощ за вікном</label>
+              <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="mn-fxRainPanes">Шибки 2×2 (хрестовина рами)</label>
+              <label style="display:flex;align-items:center;gap:6px">Нахил<input type="range" id="mn-fxRainDir" min="-60" max="60" step="1" style="flex:1"><span id="mn-fxRainDirV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+              <label style="display:flex;align-items:center;gap:6px">Видимість<input type="range" id="mn-fxRainAlpha" min="0" max="1" step="0.05" style="flex:1"><span id="mn-fxRainAlphaV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+              <label style="display:flex;align-items:center;gap:6px">Швидкість<input type="range" id="mn-fxRainSpeed" min="200" max="3200" step="50" style="flex:1"><span id="mn-fxRainSpeedV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxBoltOn">Блискавка (світло у вікні + кімнаті)</label>
+              <label style="display:flex;align-items:center;gap:6px">Кожні, с<input type="range" id="mn-fxBoltEvery" min="3" max="30" step="0.5" style="flex:1"><span id="mn-fxBoltEveryV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+              <label style="display:flex;align-items:center;gap:6px">Розкид<input type="range" id="mn-fxBoltVary" min="0" max="1" step="0.01" style="flex:1"><span id="mn-fxBoltVaryV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+              <label style="display:flex;align-items:center;gap:6px">Яскравість<input type="range" id="mn-fxBoltBright" min="0.2" max="2" step="0.05" style="flex:1"><span id="mn-fxBoltBrightV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
             </div>
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">

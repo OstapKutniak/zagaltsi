@@ -16,10 +16,17 @@ interface ActionZone {
   action: string; label: string;
 }
 
+// Шар туману (дзеркало FogLayer у worldData): смуга шуму, що повзе у грі.
+interface FogLayer {
+  id: string; y: number; h: number;
+  alpha: number; tint: string; speed: number; front: boolean;
+}
+
 interface LocationDoc {
   id: string; name: string; bg: string;
   placed: PlacedAsset[];
   zones: ActionZone[];
+  fogs?: FogLayer[];
   nodeGraph?: NodeGraph;
   updatedAt?: number; // мітка останньої правки — для синхронізації між компами (LWW)
 }
@@ -220,6 +227,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       ctx.setLineDash([4, 3]); ctx.strokeRect(tl2.x, tl2.y, zw * sc(), zh * sc()); ctx.setLineDash([]);
     }
 
+    // Задні шари туману — між фоном і будівлями (як у грі)
+    drawFogBands(false, w);
+
     // Placed assets (будівлі) — hover: білий контур + плавний масштаб (як у Гамлеті DD1)
     for (const p of loc().placed) {
       const img = state.images.get(p.id);
@@ -247,6 +257,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       ctx.restore();
     }
 
+    // Передні шари туману — поверх будівель (як у грі)
+    drawFogBands(true, w);
+
     if (state.showCamView) {
       const vw = 1280 * sc(); const vh = 576 * sc();
       const vx = (w - vw) / 2; const vy = (h - vh) / 2;
@@ -263,6 +276,37 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     }
 
     requestAnimationFrame(draw);
+  }
+
+  // Смуги туману у вьюпорті: м'яка вертикальна градієнтна стрічка на всю ширину.
+  function drawFogBands(front: boolean, w: number): void {
+    const fogs = loc().fogs;
+    if (!fogs?.length) return;
+    const t = performance.now() / 1000;
+    for (const fg of fogs) {
+      if (fg.front !== front) continue;
+      const yTop = toScreen(0, fg.y - fg.h / 2).y;
+      const hPx = Math.max(6, fg.h * sc());
+      const grad = ctx.createLinearGradient(0, yTop, 0, yTop + hPx);
+      const c = fg.tint || '#aaa1bd';
+      grad.addColorStop(0, c + '00');
+      grad.addColorStop(0.5, c + Math.round(Math.min(0.9, fg.alpha) * 255).toString(16).padStart(2, '0'));
+      grad.addColorStop(1, c + '00');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, yTop, w, hPx);
+      // хвилясті прозорі пасма, що повзуть — видно рух і напрямок
+      const drift = (t * fg.speed * sc()) % 220;
+      ctx.strokeStyle = c + '30'; ctx.lineWidth = Math.max(6, hPx * 0.16); ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let x = -220 + drift; x < w + 220; x += 6) {
+        const yy = yTop + hPx / 2 + Math.sin((x - drift) / 46) * hPx * 0.16;
+        if (x <= -220 + drift + 6) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+      const arrow = fg.speed === 0 ? '' : fg.speed > 0 ? ' →' : ' ←';
+      ctx.fillText('туман' + (fg.front ? ' (попереду)' : '') + arrow, 6, yTop + 11);
+    }
   }
 
   // ── Mouse ─────────────────────────────────────────────────────────────────
@@ -515,6 +559,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   });
 
   function renderList() {
+    renderFogs(); // панель туману завжди показує шари ПОТОЧНОЇ локації
     const el = $('locList'); if (!el) return;
     el.innerHTML = '';
     state.locs.forEach((l, i) => {
@@ -589,6 +634,57 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   $<HTMLInputElement>('zoneLabel')?.addEventListener('input', function () {
     const z = zoneById(state.sel!); if (z) { z.label = this.value; save(); }
+  });
+
+  // ── Туман: список шарів з повзунками ───────────────────────────────────────
+  function renderFogs(): void {
+    const box = $('fogList'); if (!box) return;
+    box.innerHTML = '';
+    const fogs = (loc().fogs ??= []);
+    fogs.forEach((fg, i) => {
+      const card = document.createElement('div');
+      card.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:5px;font-size:12px';
+      const row = (label: string, input: HTMLElement): HTMLElement => {
+        const l = document.createElement('label');
+        l.style.cssText = 'display:flex;align-items:center;gap:6px';
+        const sp = document.createElement('span'); sp.textContent = label; sp.style.cssText = 'flex:0 0 64px;color:var(--muted)';
+        l.append(sp, input); return l;
+      };
+      const rng = (min: number, max: number, step: number, val: number, on: (v: number) => void): HTMLInputElement => {
+        const r = document.createElement('input'); r.type = 'range';
+        r.min = String(min); r.max = String(max); r.step = String(step); r.value = String(val);
+        r.style.cssText = 'flex:1';
+        r.addEventListener('input', () => { on(Number(r.value)); save(); });
+        return r;
+      };
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;align-items:center;gap:8px';
+      const frontChk = document.createElement('input'); frontChk.type = 'checkbox'; frontChk.checked = fg.front;
+      frontChk.addEventListener('change', () => { fg.front = frontChk.checked; save(); });
+      const frontLbl = document.createElement('label');
+      frontLbl.style.cssText = 'display:flex;align-items:center;gap:5px;flex:1;cursor:pointer';
+      frontLbl.append(frontChk, document.createTextNode(`Шар ${i + 1} · попереду`));
+      const color = document.createElement('input'); color.type = 'color'; color.value = fg.tint || '#aaa1bd';
+      color.style.cssText = 'width:34px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:none';
+      color.addEventListener('input', () => { fg.tint = color.value; save(); });
+      const del = document.createElement('button'); del.textContent = '✕'; del.title = 'Видалити шар';
+      del.style.cssText = 'flex:0 0 auto;padding:2px 8px;font-size:12px';
+      del.addEventListener('click', () => { loc().fogs = fogs.filter((x) => x.id !== fg.id); save(); renderFogs(); });
+      head.append(frontLbl, color, del);
+      card.append(
+        head,
+        row('Щільність', rng(0, 0.85, 0.02, fg.alpha, (v) => { fg.alpha = v; })),
+        row('Висота, px', rng(30, 450, 5, fg.h, (v) => { fg.h = v; })),
+        row('Рівень (y)', rng(-300, 700, 5, fg.y, (v) => { fg.y = v; })),
+        row('Швидкість', rng(-60, 60, 1, fg.speed, (v) => { fg.speed = v; })),
+      );
+      box.appendChild(card);
+    });
+  }
+  $('addFog')?.addEventListener('click', () => {
+    const fogs = (loc().fogs ??= []);
+    fogs.push({ id: uid(), y: 160, h: 180, alpha: 0.3, tint: '#9a92ad', speed: 11, front: fogs.length % 2 === 1 });
+    save(); renderFogs();
   });
 
   // ── Preview expand/collapse ───────────────────────────────────────────────

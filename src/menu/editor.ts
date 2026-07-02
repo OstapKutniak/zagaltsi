@@ -13,10 +13,26 @@ export interface MenuButton {
   size: number;              // px шрифту
   target: string;            // 'world' | 'game' | 'section:Назва' | 'page:<id>' | ''
 }
+// Ефекти сцени меню — усе, що раніше було зашито в код MenuScene, тепер редаговане:
+// персонаж біля вогню, вогнище, вікно дощу (прямокутник + шибки), блискавка.
+export interface MenuFx {
+  char: { on: boolean; x: number; y: number; scale: number };
+  fire: { on: boolean; x: number; y: number; scale: number; glow: number };
+  rain: { on: boolean; x0: number; y0: number; x1: number; y1: number; panes: boolean; dir: number; alpha: number; speed: number };
+  bolt: { on: boolean; every: number; vary: number; bright: number };
+}
+// Дефолти = значення, під які зведено лобі (та сама хатина).
+export const DEFAULT_FX: MenuFx = {
+  char: { on: true, x: 800, y: 205, scale: 1.55 },
+  fire: { on: true, x: 640, y: 492, scale: 1, glow: 0.16 },
+  rain: { on: true, x0: 595, y0: 140, x1: 682, y1: 285, panes: true, dir: -25, alpha: 0.5, speed: 1600 },
+  bolt: { on: true, every: 11, vary: 0.77, bright: 1 },
+};
 export interface MenuPage {
   id: string; name: string;
   bg: string;                // dataURL фону ('' = чорний)
   buttons: MenuButton[];
+  fx?: MenuFx;               // ефекти сцени (нема — гра бере DEFAULT_FX)
 }
 export interface MenuDoc { version: 1; pages: MenuPage[]; updatedAt?: number }
 
@@ -65,11 +81,15 @@ export function initMenuEditor(prefix: string): void {
     bgImgs: new Map<string, HTMLImageElement>(), // pageId → фон
     assets: [] as Array<{ id: string; name: string; url: string }>,
     drag: null as null | { id: string; ox: number; oy: number },
+    dragFx: null as null | { kind: 'char' | 'fire' | 'rain' | 'rainSize'; ox: number; oy: number },
+    charThumb: null as HTMLImageElement | null, // портрет персонажа для гізмо
     lastClick: 0,
     linkFrom: null as null | { pageId: string; btnId: string }, // мапа: тягнемо лінк
     mapRects: [] as Array<{ pageId: string; x: number; y: number; w: number; h: number; btns: Array<{ id: string; y: number; h: number }> }>,
   };
   const page = (): MenuPage => state.doc.pages[state.cur];
+  // fx поточної сторінки (створюється з дефолтів при першому доступі)
+  const fx = (): MenuFx => (page().fx ??= JSON.parse(JSON.stringify(DEFAULT_FX)) as MenuFx);
   const setStatus = (m: string): void => { const el = $('statusBar'); if (el) el.textContent = m; };
 
   let saveTimer = 0;
@@ -140,9 +160,91 @@ export function initMenuEditor(prefix: string): void {
       ctx.font = `${11 * f.s}px system-ui`; ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fillText(tgt, bx, by + b.size * f.s * 0.85);
     }
+    drawFxGizmos(f);
     // назва сторінки
     ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('Сторінка: ' + p.name + ' (' + p.id + ')', f.x + 4, f.y - 6);
+  }
+
+  // ── Гізмо ефектів: вікно дощу (рамка), вогнище (пляма), персонаж (портрет) ──
+  function drawFxGizmos(f: { x: number; y: number; s: number }): void {
+    const e = fx();
+    const X = (v: number): number => f.x + v * f.s;
+    const Y = (v: number): number => f.y + v * f.s;
+    ctx.save();
+    // Вікно дощу
+    if (e.rain.on) {
+      const x0 = X(e.rain.x0), y0 = Y(e.rain.y0), w = (e.rain.x1 - e.rain.x0) * f.s, h = (e.rain.y1 - e.rain.y0) * f.s;
+      ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x0, y0, w, h);
+      if (e.rain.panes) { // хрестовина 2×2
+        ctx.beginPath();
+        ctx.moveTo(x0 + w / 2, y0); ctx.lineTo(x0 + w / 2, y0 + h);
+        ctx.moveTo(x0, y0 + h / 2); ctx.lineTo(x0 + w, y0 + h / 2);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      // штрихи дощу-прев'ю
+      ctx.strokeStyle = 'rgba(120,200,255,0.35)';
+      const ang = Math.tan(e.rain.dir * Math.PI / 180);
+      for (let i = 0; i < 6; i++) {
+        const rx = x0 + w * (i + 0.5) / 6, ry = y0 + h * ((i * 0.37) % 1);
+        ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx + 10 * ang, ry + 10); ctx.stroke();
+      }
+      // куточок-ресайз
+      ctx.fillStyle = 'rgba(120,200,255,0.95)';
+      ctx.fillRect(x0 + w - 5, y0 + h - 5, 10, 10);
+      ctx.fillStyle = 'rgba(120,200,255,0.8)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('дощ (вікно)', x0, y0 - 4);
+    }
+    // Вогнище
+    if (e.fire.on) {
+      const cx0 = X(e.fire.x), cy0 = Y(e.fire.y), r = 26 * e.fire.scale * f.s;
+      const g = ctx.createRadialGradient(cx0, cy0 - r * 0.4, 2, cx0, cy0 - r * 0.4, r * 1.6);
+      g.addColorStop(0, 'rgba(255,190,90,0.75)'); g.addColorStop(1, 'rgba(255,120,30,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx0, cy0 - r * 0.4, r * 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,170,70,0.9)'; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.arc(cx0, cy0, 8 * f.s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,170,70,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
+    }
+    // Персонаж
+    if (e.char.on) {
+      const cx0 = X(e.char.x), cy0 = Y(e.char.y);
+      const H = 150 * e.char.scale * f.s;
+      const th = state.charThumb;
+      if (th?.complete && th.naturalWidth) {
+        const W2 = H * th.naturalWidth / th.naturalHeight;
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(th, cx0 - W2 / 2, cy0 - H / 2, W2, H);
+        ctx.globalAlpha = 1;
+      } else {
+        // силует: голова + тулуб
+        ctx.fillStyle = 'rgba(220,205,170,0.35)';
+        ctx.beginPath(); ctx.arc(cx0, cy0 - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(cx0 - H * 0.14, cy0 - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(255,207,143,0.8)'; ctx.setLineDash([4, 3]);
+      ctx.strokeRect(cx0 - H * 0.3, cy0 - H / 2, H * 0.6, H);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('персонаж', cx0, cy0 + H / 2 + 12);
+    }
+    ctx.restore();
+  }
+
+  // Гізмо під курсором (координати кадру). Порядок: кут дощу → вогонь → персонаж → вікно.
+  function fxAt(px: number, py: number): 'char' | 'fire' | 'rain' | 'rainSize' | null {
+    const e = fx();
+    if (e.rain.on && Math.abs(px - e.rain.x1) < 9 && Math.abs(py - e.rain.y1) < 9) return 'rainSize';
+    if (e.fire.on && Math.hypot(px - e.fire.x, py - e.fire.y) < 26) return 'fire';
+    if (e.char.on) {
+      const H = 150 * e.char.scale;
+      if (Math.abs(px - e.char.x) < H * 0.3 && Math.abs(py - e.char.y) < H / 2) return 'char';
+    }
+    if (e.rain.on && px >= e.rain.x0 && px <= e.rain.x1 && py >= e.rain.y0 && py <= e.rain.y1) return 'rain';
+    return null;
   }
 
   function btnAt(sx: number, sy: number): MenuButton | null {
@@ -256,17 +358,46 @@ export function initMenuEditor(prefix: string): void {
       state.sel = b.id;
       const fp = toFrame(sx, sy);
       state.drag = { id: b.id, ox: fp.x - b.x, oy: fp.y - b.y };
-    } else state.sel = null;
+    } else {
+      // гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
+      const fp = toFrame(sx, sy);
+      const kind = fxAt(fp.x, fp.y);
+      if (kind) {
+        const e = fx();
+        const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
+          : kind === 'rainSize' ? { x: e.rain.x1, y: e.rain.y1 } : { x: e.rain.x0, y: e.rain.y0 };
+        state.dragFx = { kind, ox: fp.x - ref.x, oy: fp.y - ref.y };
+        setStatus(kind === 'rainSize' ? 'Розмір вікна дощу' : kind === 'rain' ? 'Вікно дощу' : kind === 'fire' ? 'Вогнище' : 'Персонаж');
+      }
+      state.sel = null;
+    }
     renderProps(); draw();
   });
   canvas.addEventListener('mousemove', (e) => {
-    if (!state.drag || state.view === 'map') return;
+    if (state.view === 'map') return;
     const r = canvas!.getBoundingClientRect();
     const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    if (state.dragFx) {
+      const ef = fx();
+      const nx = Math.round(fp.x - state.dragFx.ox), ny = Math.round(fp.y - state.dragFx.oy);
+      if (state.dragFx.kind === 'char') { ef.char.x = nx; ef.char.y = ny; }
+      else if (state.dragFx.kind === 'fire') { ef.fire.x = nx; ef.fire.y = ny; }
+      else if (state.dragFx.kind === 'rain') {
+        const w = ef.rain.x1 - ef.rain.x0, h = ef.rain.y1 - ef.rain.y0;
+        ef.rain.x0 = nx; ef.rain.y0 = ny; ef.rain.x1 = nx + w; ef.rain.y1 = ny + h;
+      } else { // rainSize — тягнемо нижній правий кут
+        ef.rain.x1 = Math.max(ef.rain.x0 + 16, nx); ef.rain.y1 = Math.max(ef.rain.y0 + 16, ny);
+      }
+      draw(); return;
+    }
+    if (!state.drag) return;
     const b = page().buttons.find((x) => x.id === state.drag!.id);
     if (b) { b.x = Math.round(fp.x - state.drag.ox); b.y = Math.round(fp.y - state.drag.oy); draw(); }
   });
-  window.addEventListener('mouseup', () => { if (state.drag) { state.drag = null; save(); } });
+  window.addEventListener('mouseup', () => {
+    if (state.drag) { state.drag = null; save(); }
+    if (state.dragFx) { state.dragFx = null; save(); setStatus(''); }
+  });
   window.addEventListener('keydown', (e) => {
     if (!document.getElementById('app')?.className.includes('mode-menu')) return;
     const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
@@ -287,7 +418,7 @@ export function initMenuEditor(prefix: string): void {
       const chip = document.createElement('button');
       chip.textContent = p.name;
       chip.style.cssText = `font-size:12px;padding:4px 10px;border-radius:5px;border:1px solid var(--line);cursor:pointer;background:${i === state.cur ? 'var(--accent)' : 'var(--rail)'};color:${i === state.cur ? '#1b1b1b' : 'var(--ink)'}`;
-      chip.onclick = () => { state.cur = i; state.sel = null; state.view = 'page'; renderPages(); renderProps(); draw(); };
+      chip.onclick = () => { state.cur = i; state.sel = null; state.view = 'page'; renderPages(); renderProps(); renderFx(); draw(); };
       chip.ondblclick = () => { const n = prompt('Назва сторінки:', p.name); if (n) { p.name = n; save(); renderPages(); } };
       list.appendChild(chip);
     });
@@ -323,6 +454,48 @@ export function initMenuEditor(prefix: string): void {
     const p = page(); p.buttons = p.buttons.filter((b) => b.id !== state.sel);
     state.sel = null; save(); renderProps(); draw();
   });
+
+  // ── Ефекти сцени: повзунки ↔ fx поточної сторінки ───────────────────────────
+  function renderFx(): void {
+    const e = fx();
+    const set = (id: string, v: number | boolean): void => {
+      const el = $(id) as HTMLInputElement | null; if (!el) return;
+      if (typeof v === 'boolean') el.checked = v;
+      else { el.value = String(v); const vs = $(id + 'V'); if (vs) vs.textContent = String(Math.round(v * 100) / 100); }
+    };
+    set('fxCharOn', e.char.on); set('fxCharScale', e.char.scale);
+    set('fxFireOn', e.fire.on); set('fxFireScale', e.fire.scale); set('fxFireGlow', e.fire.glow);
+    set('fxRainOn', e.rain.on); set('fxRainPanes', e.rain.panes); set('fxRainDir', e.rain.dir);
+    set('fxRainAlpha', e.rain.alpha); set('fxRainSpeed', e.rain.speed);
+    set('fxBoltOn', e.bolt.on); set('fxBoltEvery', e.bolt.every); set('fxBoltVary', e.bolt.vary); set('fxBoltBright', e.bolt.bright);
+  }
+  function wireFxNum(id: string, apply: (v: number) => void): void {
+    const el = $(id) as HTMLInputElement | null; if (!el) return;
+    el.addEventListener('input', () => { apply(Number(el.value)); const vs = $(id + 'V'); if (vs) vs.textContent = el.value; save(); draw(); });
+  }
+  function wireFxChk(id: string, apply: (v: boolean) => void): void {
+    const el = $(id) as HTMLInputElement | null; if (!el) return;
+    el.addEventListener('change', () => { apply(el.checked); save(); draw(); });
+  }
+  wireFxChk('fxCharOn', (v) => { fx().char.on = v; });
+  wireFxNum('fxCharScale', (v) => { fx().char.scale = v; });
+  wireFxChk('fxFireOn', (v) => { fx().fire.on = v; });
+  wireFxNum('fxFireScale', (v) => { fx().fire.scale = v; });
+  wireFxNum('fxFireGlow', (v) => { fx().fire.glow = v; });
+  wireFxChk('fxRainOn', (v) => { fx().rain.on = v; });
+  wireFxChk('fxRainPanes', (v) => { fx().rain.panes = v; });
+  wireFxNum('fxRainDir', (v) => { fx().rain.dir = v; });
+  wireFxNum('fxRainAlpha', (v) => { fx().rain.alpha = v; });
+  wireFxNum('fxRainSpeed', (v) => { fx().rain.speed = v; });
+  wireFxChk('fxBoltOn', (v) => { fx().bolt.on = v; });
+  wireFxNum('fxBoltEvery', (v) => { fx().bolt.every = v; });
+  wireFxNum('fxBoltVary', (v) => { fx().bolt.vary = v; });
+  wireFxNum('fxBoltBright', (v) => { fx().bolt.bright = v; });
+  // Портрет персонажа для гізмо — thumb героя з бібліотеки персонажів.
+  void idbGet<Array<{ cat?: string; thumb?: string }>>('zag_char_lib').then((lib) => {
+    const hero = lib?.find((x) => (x.cat ?? 'char') === 'char' && x.thumb);
+    if (hero?.thumb) { const im = new Image(); im.onload = () => draw(); im.src = hero.thumb; state.charThumb = im; }
+  }).catch(() => { /* без портрета — силует */ });
 
   // ── Тулбар ──────────────────────────────────────────────────────────────────
   $('addBtn')?.addEventListener('click', () => {
@@ -395,8 +568,8 @@ export function initMenuEditor(prefix: string): void {
   // ── Завантаження ────────────────────────────────────────────────────────────
   void idbGet<MenuDoc>('zag_menu').then((d) => {
     if (d?.pages?.length) state.doc = d;
-    renderPages(); renderProps(); draw();
-  }).catch(() => { renderPages(); draw(); });
+    renderPages(); renderProps(); renderFx(); draw();
+  }).catch(() => { renderPages(); renderFx(); draw(); });
   void idbGet<typeof state.assets>('zag_menu_assets').then((a) => {
     if (Array.isArray(a)) { state.assets = a; renderAssets(); }
   }).catch(() => {});
