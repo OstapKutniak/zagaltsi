@@ -39,8 +39,27 @@ const RAIN = { color: 0xdbf0ea, dir: -25, speed: 1600, dropLen: 24, drops: 76, a
 // Блискавка: середній інтервал/рандомізація як у рівні (vary 0.77).
 const LIGHTNING = { every: 11, vary: 0.77 };
 
+// Сторінки меню з Редактора Меню (menu.json / IDB zag_menu). Нема — хардкод ITEMS.
+interface MenuBtnDoc { id: string; label: string; x: number; y: number; size: number; target: string }
+interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[] }
+interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
+
+async function loadMenuDoc(): Promise<MenuDocData | null> {
+  try {
+    const { idbGet } = await import('../store');
+    const d = await idbGet<MenuDocData>('zag_menu');
+    if (d?.pages?.length) return d;
+  } catch { /* ignore */ }
+  try {
+    const r = await fetch(`${import.meta.env.BASE_URL}studio-data/menu.json?t=${Date.now()}`);
+    if (r.ok) { const d = await r.json() as MenuDocData; if (d?.pages?.length) return d; }
+  } catch { /* ignore */ }
+  return null;
+}
+
 export class MenuScene extends Phaser.Scene {
   private lobbyChar: CutoutCharacter | null = null;
+  private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
   private fireTime = 0;
@@ -53,6 +72,8 @@ export class MenuScene extends Phaser.Scene {
   private boltDur = 0.4;
 
   constructor() { super('Menu'); }
+
+  init(data: { pageId?: string }): void { this.pageId = data?.pageId ?? null; }
 
   create(): void {
     hideLoadScreen(); // меню — перша видима сцена, знімаємо HTML-оверлей завантаження
@@ -80,17 +101,8 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
 
-    // Кнопки — ліворуч, стовпчиком.
-    const x = 92 + offX;
-    const startY = 210, gap = 74;
-    ITEMS.forEach((it, i) => {
-      this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
-        // «Мандри» → глобальна карта (WorldScene). Бітемап (GameScene) тепер
-        // запускається з переходів карти (поки скіпаються — приїзд одразу).
-        if (it.target === 'World') this.scene.start('World', {});
-        else this.scene.start('Section', { title: it.label, from: 'Menu' });
-      });
-    });
+    // Кнопки: зі сторінки Редактора Меню (menu.json), фолбек — хардкод ITEMS.
+    void this.buildButtons(offX, offY);
 
     void this.seatCharacter(offX, offY);
   }
@@ -138,6 +150,40 @@ export class MenuScene extends Phaser.Scene {
     this.fireGlow = this.add.image(fx, fy - 30, 'fire_soft')
       .setScrollFactor(0).setDepth(5).setScale(11, 7.5)
       .setTint(0xff9a3d).setAlpha(0.16).setBlendMode(Phaser.BlendModes.ADD);
+  }
+
+  // Кнопки меню: сторінка з Редактора Меню або дефолтний хардкод.
+  private async buildButtons(offX: number, offY: number): Promise<void> {
+    const doc = await loadMenuDoc();
+    if (!this.scene.isActive()) return;
+    const pg = doc?.pages.find((p) => p.id === (this.pageId ?? 'main')) ?? doc?.pages[0];
+    if (pg?.buttons.length) {
+      for (const b of pg.buttons) {
+        this.makeMenuItem(b.x + offX, b.y + offY, b.label, () => this.followTarget(b.target), b.size);
+      }
+      // не-головна сторінка → кнопка назад на головну
+      if (doc && pg.id !== (doc.pages[0]?.id ?? 'main') && !pg.buttons.some((b) => b.target.startsWith('page:') && doc.pages[0] && b.target.slice(5) === doc.pages[0].id)) {
+        this.makeMenuItem(36 + offX, 40 + offY, '‹ Назад', () => this.scene.start('Menu', { pageId: doc.pages[0].id }), 24);
+      }
+      return;
+    }
+    const x = 92 + offX;
+    const startY = 210, gap = 74;
+    ITEMS.forEach((it, i) => {
+      this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
+        if (it.target === 'World') this.scene.start('World', {});
+        else this.scene.start('Section', { title: it.label, from: 'Menu' });
+      });
+    });
+  }
+
+  // Гіперпосилання кнопки меню: сцени гри або інша сторінка меню.
+  private followTarget(target: string): void {
+    if (!target) return;
+    if (target === 'world') { this.scene.start('World', {}); return; }
+    if (target === 'game') { this.scene.start('Game'); return; }
+    if (target.startsWith('section:')) { this.scene.start('Section', { title: target.slice(8), from: 'Menu' }); return; }
+    if (target.startsWith('page:')) { this.scene.start('Menu', { pageId: target.slice(5) }); return; }
   }
 
   // ── Шторм за вікном: дощ (маскою по шибках) + блискавка зі світлом у кімнату ─
@@ -284,9 +330,9 @@ export class MenuScene extends Phaser.Scene {
   }
 
   // Кнопка меню: лише текст (без підкладки/обводки), small-caps, підсвітка + зсув при наведенні.
-  private makeMenuItem(x: number, y: number, label: string, onClick: () => void): void {
+  private makeMenuItem(x: number, y: number, label: string, onClick: () => void, size = 34): void {
     const t = this.add.text(x, y, label, {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '34px', color: COL_IDLE,
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: size + 'px', color: COL_IDLE,
     }).setOrigin(0, 0.5).setScrollFactor(0)
       .setShadow(2, 2, '#000000', 6, false, true)
       .setInteractive({ useHandCursor: true });

@@ -2,6 +2,8 @@ import { keyImage, hasSolidBackground, imageToCanvas } from './keyer';
 import { initLevelEditor } from '../level/editor';
 import { initWorldEditor } from '../world/editor';
 import { initLocationEditor } from '../location/editor';
+import { initMenuEditor } from '../menu/editor';
+import { initSoundEditor } from '../sound/editor';
 import { NodeEditor, NodeGraph } from '../node-editor';
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
@@ -1297,6 +1299,7 @@ function setMode(mode: string): void {
   if (mode === 'level') window.dispatchEvent(new CustomEvent('levelTabActivated'));
   else if (mode === 'world') window.dispatchEvent(new CustomEvent('worldTabActivated'));
   else if (mode === 'location') window.dispatchEvent(new CustomEvent('locationTabActivated'));
+  else if (mode === 'menu') window.dispatchEvent(new CustomEvent('menuTabActivated'));
   else { window.dispatchEvent(new CustomEvent('levelTabDeactivated')); if (mode === 'char') requestAnimationFrame(() => { resize(); draw(); }); }
 }
 for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#topTabs button'))) {
@@ -1367,6 +1370,8 @@ const _isMobileInit = window.matchMedia('(max-width: 900px)').matches;
 if (!_isMobileInit) {
   initWorldEditor('wld-');
   initLocationEditor('loc-', openNodePanel);
+  initMenuEditor('mn-');
+  initSoundEditor('snd-');
 }
 
 // On mobile — auto-switch to level editor as default starting mode

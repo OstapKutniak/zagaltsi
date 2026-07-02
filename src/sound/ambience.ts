@@ -154,12 +154,18 @@ function startCrowLoop(): void {
 }
 
 // ── Публічне API ──────────────────────────────────────────────────────────────
+let analyser: AnalyserNode | null = null;
+// Аналізатор живого міксу (осцилограма в Редакторі Звуку). null, поки не грає.
+export function getAnalyser(): AnalyserNode | null { return analyser; }
+
 export function startAmbience(mix: AmbienceMix): void {
   if (running) { setMix(mix); return; }
   const a = ac();
   void a.resume();
   running = true;
   masterGain = a.createGain(); masterGain.gain.value = mix.master;
+  analyser = a.createAnalyser(); analyser.fftSize = 2048;
+  masterGain.connect(analyser);
   masterGain.connect(a.destination);
   for (const k of ['rain', 'fire', 'crickets', 'thunder', 'crow'] as const) {
     const g = a.createGain(); g.gain.value = mix[k]; g.connect(masterGain);
@@ -184,7 +190,7 @@ export function stopAmbience(): void {
   for (const t of timers) clearTimeout(t);
   timers = [];
   if (ctx) { void ctx.close(); ctx = null; }
-  masterGain = null;
+  masterGain = null; analyser = null;
   for (const k of Object.keys(gains)) delete gains[k as keyof AmbienceMix];
   noiseBuf = null;
 }
