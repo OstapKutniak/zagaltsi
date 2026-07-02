@@ -44,64 +44,108 @@ function loopNoise(dest: AudioNode): AudioBufferSourceNode {
   return src;
 }
 
-// ── ДОЩ: шум → bandpass ~1.4кГц + повільна модуляція гучності (пориви) ────────
+// ── ДОЩ: тихе верхнє шипіння + ГОЛОВНЕ — окремі краплі-«тік» по поверхні ──────
+// Характер дощу дають транзієнти-краплі, а не рівний шум (рівний шум = «шшш»).
 function startRain(out: GainNode): void {
   const a = ac();
-  const bp = a.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 0.4;
-  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 400;
-  const g = a.createGain(); g.gain.value = 0.5;
-  loopNoise(bp); bp.connect(hp); hp.connect(g); g.connect(out);
-  // пориви: LFO на гучність
-  const lfo = a.createOscillator(); lfo.frequency.value = 0.07;
-  const lfoG = a.createGain(); lfoG.gain.value = 0.15;
+  // тонка підкладка-мряка (ледь чутна)
+  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3200;
+  const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 9000;
+  const g = a.createGain(); g.gain.value = 0.10;
+  loopNoise(hp); hp.connect(lp); lp.connect(g); g.connect(out);
+  const lfo = a.createOscillator(); lfo.frequency.value = 0.07; // пориви
+  const lfoG = a.createGain(); lfoG.gain.value = 0.04;
   lfo.connect(lfoG); lfoG.connect(g.gain); lfo.start();
-}
-
-// ── ВОГНИЩЕ: низький «шелест» + випадкові тріски-клацання ─────────────────────
-function startFire(out: GainNode): void {
-  const a = ac();
-  const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380; lp.Q.value = 0.5;
-  const g = a.createGain(); g.gain.value = 0.35;
-  loopNoise(lp); lp.connect(g); g.connect(out);
-  const crackle = (): void => {
+  // краплі: часті короткі резонансні «тік» різної висоти
+  const drop = (): void => {
     if (!running) return;
-    // тріск: короткий шумовий пшик через bandpass, випадкова висота
+    const t = a.currentTime;
     const src = a.createBufferSource(); src.buffer = noise();
     const bp = a.createBiquadFilter(); bp.type = 'bandpass';
-    bp.frequency.value = 900 + Math.random() * 2600; bp.Q.value = 9;
+    bp.frequency.value = 2200 + Math.random() * 4800; bp.Q.value = 14;
+    const dg = a.createGain();
+    const peak = 0.25 + Math.random() * 0.5;
+    dg.gain.setValueAtTime(0.0001, t);
+    dg.gain.exponentialRampToValueAtTime(peak, t + 0.003);
+    dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.02 + Math.random() * 0.04);
+    src.connect(bp); bp.connect(dg); dg.connect(out);
+    src.start(t); src.stop(t + 0.08);
+    timers.push(window.setTimeout(drop, 15 + Math.random() * 60)); // ~20-30 крапель/сек
+  };
+  drop();
+}
+
+// ── ВОГНИЩЕ: ледь чутне «дихання» жару + ГОЛОВНЕ — сухі тріски-«попкорн» ──────
+function startFire(out: GainNode): void {
+  const a = ac();
+  // низький жар — тихий, з повільним диханням
+  const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; lp.Q.value = 0.4;
+  const g = a.createGain(); g.gain.value = 0.09;
+  loopNoise(lp); lp.connect(g); g.connect(out);
+  const breathe = a.createOscillator(); breathe.frequency.value = 0.23;
+  const bg = a.createGain(); bg.gain.value = 0.04;
+  breathe.connect(bg); bg.connect(g.gain); breathe.start();
+  // один тріск (клік із коротким дзвоном); кластеризуються як попкорн
+  const snap = (delay: number, loud: number): void => {
+    const t = a.currentTime + delay;
+    const src = a.createBufferSource(); src.buffer = noise();
+    const bp = a.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = 1400 + Math.random() * 3800; bp.Q.value = 16;
     const cg = a.createGain();
-    const t = a.currentTime;
     cg.gain.setValueAtTime(0.0001, t);
-    cg.gain.exponentialRampToValueAtTime(0.5 + Math.random() * 0.5, t + 0.004);
-    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.03 + Math.random() * 0.05);
+    cg.gain.exponentialRampToValueAtTime(loud, t + 0.002);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.015 + Math.random() * 0.03);
     src.connect(bp); bp.connect(cg); cg.connect(out);
-    src.start(t); src.stop(t + 0.12);
-    timers.push(window.setTimeout(crackle, 60 + Math.random() * 420));
+    src.start(t); src.stop(t + 0.06);
+  };
+  const crackle = (): void => {
+    if (!running) return;
+    snap(0, 0.6 + Math.random() * 0.6);
+    // кластер: 40% шанс ще 1-2 тріски одразу слідом (попкорн)
+    if (Math.random() < 0.4) snap(0.03 + Math.random() * 0.05, 0.4 + Math.random() * 0.4);
+    if (Math.random() < 0.15) snap(0.08 + Math.random() * 0.06, 0.3 + Math.random() * 0.3);
+    // зрідка — глухий «пух» осілого поліна
+    if (Math.random() < 0.08) {
+      const t = a.currentTime + 0.02;
+      const src = a.createBufferSource(); src.buffer = noise();
+      const blp = a.createBiquadFilter(); blp.type = 'lowpass'; blp.frequency.value = 300;
+      const pg = a.createGain();
+      pg.gain.setValueAtTime(0.0001, t);
+      pg.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+      pg.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      src.connect(blp); blp.connect(pg); pg.connect(out);
+      src.start(t); src.stop(t + 0.3);
+    }
+    timers.push(window.setTimeout(crackle, 90 + Math.random() * 500));
   };
   crackle();
 }
 
-// ── ЦВІРКУНИ: синус ~4.3кГц, тремоло ~28Гц, «пачки» цвірінькання ──────────────
+// ── ЦВІРКУНИ: 2 «особини», регулярні серії коротких пульсів (дуже впізнавано) ─
 function startCrickets(out: GainNode): void {
   const a = ac();
-  const chirp = (): void => {
-    if (!running) return;
-    const osc = a.createOscillator(); osc.type = 'sine';
-    osc.frequency.value = 4100 + Math.random() * 500;
-    const trem = a.createOscillator(); trem.frequency.value = 24 + Math.random() * 10;
-    const tremG = a.createGain(); tremG.gain.value = 0.5;
-    const g = a.createGain(); g.gain.value = 0;
-    trem.connect(tremG); tremG.connect(g.gain);
-    osc.connect(g); g.connect(out);
-    const t = a.currentTime, dur = 0.5 + Math.random() * 1.1;
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.16, t + 0.05);
-    g.gain.setValueAtTime(0.16, t + dur - 0.06);
-    g.gain.linearRampToValueAtTime(0, t + dur);
-    osc.start(t); trem.start(t); osc.stop(t + dur); trem.stop(t + dur);
-    timers.push(window.setTimeout(chirp, 400 + Math.random() * 2200));
+  const individual = (baseFreq: number, startDelay: number): void => {
+    const cycle = (): void => {
+      if (!running) return;
+      const pulses = 3 + Math.floor(Math.random() * 3); // серія цвірінь
+      const t0 = a.currentTime;
+      for (let i = 0; i < pulses; i++) {
+        const t = t0 + i * 0.075;
+        const osc = a.createOscillator(); osc.type = 'sine';
+        osc.frequency.value = baseFreq + Math.random() * 120;
+        const g = a.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.30, t + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+        osc.connect(g); g.connect(out);
+        osc.start(t); osc.stop(t + 0.06);
+      }
+      timers.push(window.setTimeout(cycle, pulses * 75 + 350 + Math.random() * 1100));
+    };
+    timers.push(window.setTimeout(cycle, startDelay));
   };
-  chirp();
+  individual(4300, 100);
+  individual(4750, 800); // друга — вища і в протифазі
 }
 
 // ── ГРІМ: низький шум-розкат із повільним загасанням (тригер під спалах) ─────
@@ -109,18 +153,28 @@ export function triggerThunder(delayMs = 500): void {
   if (!running || !ctx || !gains.thunder) return;
   const a = ctx;
   const t = a.currentTime + delayMs / 1000;
+  // 1) різкий CRACK — тріск розряду (щоб читалось «грім», а не «шум наріс»)
+  const ck = a.createBufferSource(); ck.buffer = noise();
+  const chp = a.createBiquadFilter(); chp.type = 'highpass'; chp.frequency.value = 900;
+  const cg = a.createGain();
+  cg.gain.setValueAtTime(0.0001, t);
+  cg.gain.exponentialRampToValueAtTime(0.9, t + 0.006);
+  cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+  ck.connect(chp); chp.connect(cg); cg.connect(gains.thunder);
+  ck.start(t); ck.stop(t + 0.2);
+  // 2) низький розкат, що котиться і глухне
   const src = a.createBufferSource(); src.buffer = noise(); src.loop = true;
   const lp = a.createBiquadFilter(); lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(120, t);
-  lp.frequency.exponentialRampToValueAtTime(45, t + 2.6);
+  lp.frequency.setValueAtTime(140, t);
+  lp.frequency.exponentialRampToValueAtTime(40, t + 2.8);
   const g = a.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.9, t + 0.10);       // удар
-  g.gain.exponentialRampToValueAtTime(0.25, t + 0.8);       // відкат
-  g.gain.exponentialRampToValueAtTime(0.5, t + 1.3);        // другий розкат
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+  g.gain.setValueAtTime(0.0001, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.9, t + 0.16);       // удар
+  g.gain.exponentialRampToValueAtTime(0.25, t + 0.9);       // відкат
+  g.gain.exponentialRampToValueAtTime(0.5, t + 1.4);        // другий розкат
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 3.4);
   src.connect(lp); lp.connect(g); g.connect(gains.thunder);
-  src.start(t); src.stop(t + 3.4);
+  src.start(t); src.stop(t + 3.6);
 }
 
 // ── ВОРОНА: «кар» = пилкоподібний тон 620→380Гц із хрипом, серія 1-3 ──────────
