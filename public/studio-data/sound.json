@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "lobby": {
+    "master": 0.8,
+    "rain": 0.55,
+    "fire": 0.5,
+    "crickets": 0.25,
+    "thunder": 0.8,
+    "crow": 0.35
+  }
+}
