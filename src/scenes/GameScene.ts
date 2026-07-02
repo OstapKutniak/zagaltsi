@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { WORLD_WIDTH, BAND_DEPTH, FLOOR_MARGIN, PLAYER, STATS, RENDER_SCALE } from '../config';
 import { InputController } from '../core/input';
+import { setTouchUI } from './uiButton';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
@@ -226,6 +227,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Тач-керування (джойстик/удар/стрибок) живе лише тут, у бітемапі.
+    setTouchUI(true);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => setTouchUI(false));
     this.finished = false;
     this.enemies = [];
     this.waveSpawned = false;

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
+import { setTouchUI } from './uiButton';
 import {
   type WorldDoc, type WorldNode, loadWorldsForGame, findGlobalWorld,
   loadTravel, saveTravel,
@@ -38,6 +39,7 @@ export class WorldScene extends Phaser.Scene {
   private _wantedWorldId: string | null = null;
 
   create(): void {
+    setTouchUI(false); // джойстик/кнопки — лише в бітемапі
     const cam = this.cameras.main;
     cam.setZoom(RENDER_SCALE);
     cam.setBackgroundColor('#141118');

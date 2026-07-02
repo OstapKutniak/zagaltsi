@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
-import { hideLoadScreen } from './uiButton';
+import { hideLoadScreen, setTouchUI } from './uiButton';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { loadCharLibrary } from '../charlib';
 
@@ -30,6 +30,7 @@ export class MenuScene extends Phaser.Scene {
 
   create(): void {
     hideLoadScreen(); // меню — перша видима сцена, знімаємо HTML-оверлей завантаження
+    setTouchUI(false); // джойстик/кнопки — лише в бітемапі
     const cam = this.cameras.main;
     cam.setZoom(RENDER_SCALE);
     cam.setBackgroundColor('#0b0a0d');
