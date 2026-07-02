@@ -1,0 +1,15 @@
+# Конфіг автодеплою бот-воркера (GitHub Actions → cloudflare/wrangler-action).
+# Пуш у main зі зміною serverless/* → воркер horugva-bot оновлюється сам.
+# УВАГА: plaintext-змінні воркера мусять бути оголошені ТУТ (wrangler deploy
+# замінює їх на ці значення). Секрети (BOT_TOKEN) wrangler НЕ чіпає — живуть у дашборді.
+
+name = "horugva-bot"
+main = "telegram-bot.worker.js"
+account_id = "063b0830021bdfad979d2bef54f2edc5"
+compatibility_date = "2026-07-01"
+
+[vars]
+BOT_USERNAME = "Zagaltsi_Bot"
+APP_SHORT = "Horugva"
+FIREBASE_URL = "https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app"
+GAME_URL = "https://ostapkutniak.github.io/zagaltsi/"

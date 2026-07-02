@@ -1,0 +1,25 @@
+# Автодеплой Telegram-бот-воркера на Cloudflare.
+# Тригер: push у main, що чіпає serverless/* (або запуск руками з вкладки Actions).
+# Потрібен секрет репо CLOUDFLARE_API_TOKEN (Cloudflare → My Profile → API Tokens →
+# Create Token → шаблон «Edit Cloudflare Workers»).
+name: Deploy bot worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'serverless/telegram-bot.worker.js'
+      - 'serverless/wrangler.toml'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: serverless

@@ -1,28 +1,56 @@
 // Telegram-бот «Хоругви» — Cloudflare Worker.
 // Ролі:
-//  1) /webhook  ← Telegram: на /start (і будь-яке повідомлення) шле клавіатуру-розділи
-//     (Житло/Мандри/Хоругва/Завдання/Досягнення/Інвентар — deep-link у Mini App)
-//     і запам'ятовує username → chat_id у Firebase (щоб уміти сповіщати на нік).
-//  2) POST /notify ← гра: {nick, khorugvaId, from} → шле гравцю сповіщення про збір
-//     хоругви з кнопкою «Приєднатись» (deep-link kh_<id>).
+//  1) /webhook ← Telegram:
+//     - /start → вступ: КАРТИНКА (хатина) + тематичний текст + клавіатура-розділи;
+//     - будь-яке інше повідомлення → клавіатура-розділи;
+//     - завжди запам'ятовує username → chat_id у Firebase (для сповіщень на нік).
+//  2) POST /notify ← гра: {nick, khorugvaId, from} → сповіщення про збір хоругви
+//     з кнопкою «Приєднатись» (deep-link kh_<id>).
 //
-// ДЕПЛОЙ (вручну, як openai-proxy): dash.cloudflare.com → Workers & Pages → Create →
-// вставити цей код → Deploy. Далі Settings → Variables and Secrets:
-//   BOT_TOKEN     (Secret)  — токен бота з BotFather
-//   BOT_USERNAME  (Var)     — нік бота без @ (напр. horugva_bot)
-//   APP_SHORT     (Var)     — short name Mini App із BotFather (/newapp), напр. game
-//   FIREBASE_URL  (Var)     — https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app
-// І прив'язати вебхук (раз, із термінала/браузера):
-//   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>.workers.dev/webhook
-// У гру (repo variable, як VITE_FAL_PROXY): VITE_BOT_PROXY = https://<worker>.workers.dev
+// ТЕКСТИ/КНОПКИ/КАРТИНКА — НЕ тут, а в репо: public/bot-config.json (деплоїться на
+// Pages). Редагування бота = звичайний git push, воркер перевставляти НЕ треба.
+// Перевставляти код воркера потрібно лише при зміні ЛОГІКИ.
+//
+// ДЕПЛОЙ (вручну): dash.cloudflare.com → Workers → horugva-bot → Edit code → Deploy.
+// Variables: BOT_TOKEN (Secret), BOT_USERNAME, APP_SHORT, FIREBASE_URL,
+//            CONFIG_URL (необов'язково; дефолт — bot-config.json з Pages).
+// Вебхук:   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>/webhook
 
-const SECTIONS = [
-  ['Житло', 'zhytlo'], ['Мандри', 'mandry'], ['Хоругва', 'khorugva'],
-  ['Завдання', 'zavdannya'], ['Досягнення', 'dosyagnennya'], ['Інвентар', 'inventar'],
-];
+const DEFAULT_CONFIG_URL = 'https://ostapkutniak.github.io/zagaltsi/bot-config.json';
+const FALLBACK = {
+  intro: { photo: '', text: 'Хоругва кличе. Обирай, куди рушити:' },
+  menuText: 'Хоругва кличе. Обирай, куди рушити:',
+  sections: [
+    ['Житло', 'zhytlo'], ['Мандри', 'mandry'], ['Хоругва', 'khorugva'],
+    ['Завдання', 'zavdannya'], ['Досягнення', 'dosyagnennya'], ['Інвентар', 'inventar'],
+  ],
+  gatherText: '{from} розгортає хоругву — загін збирається у мандри. Стань під хоругву!',
+};
+
+async function loadConfig(env) {
+  try {
+    const r = await fetch((env.CONFIG_URL || DEFAULT_CONFIG_URL) + '?t=' + Date.now());
+    if (r.ok) { const c = await r.json(); return { ...FALLBACK, ...c }; }
+  } catch { /* Pages недоступний → вбудований запас */ }
+  return FALLBACK;
+}
 
 function appLink(env, param) {
   return `https://t.me/${env.BOT_USERNAME}/${env.APP_SHORT}?startapp=${param}`;
+}
+
+// ПОСТІЙНА reply-клавіатура (під рядком вводу, не їде з повідомленнями).
+// Кнопки web_app відкривають Mini App напряму; розділ передаємо через
+// ?startapp=<param> у URL (гра читає його фолбеком у getStartParam).
+function sectionsKeyboard(env, cfg) {
+  const base = (env.GAME_URL || 'https://ostapkutniak.github.io/zagaltsi/').replace(/\/$/, '/');
+  const rows = [];
+  for (let i = 0; i < cfg.sections.length; i += 3) {
+    rows.push(cfg.sections.slice(i, i + 3).map(([label, param]) => ({
+      text: label, web_app: { url: `${base}?startapp=${param}` },
+    })));
+  }
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 
 async function tg(env, method, body) {
@@ -57,19 +85,24 @@ export default {
       const update = await request.json().catch(() => null);
       const msg = update?.message;
       if (msg?.chat?.id) {
+        const cfg = await loadConfig(env);
         // Запам'ятати нік → chat_id (для сповіщень збору на нік)
         const uname = (msg.from?.username || '').toLowerCase();
         if (uname) await fbPut(env, `tg_users/${uname}`, { chatId: msg.chat.id, at: Date.now() });
-        // Клавіатура-розділи
-        const rows = [];
-        for (let i = 0; i < SECTIONS.length; i += 2) {
-          rows.push(SECTIONS.slice(i, i + 2).map(([label, param]) => ({ text: label, url: appLink(env, param) })));
+
+        const kb = sectionsKeyboard(env, cfg);
+        const isStart = typeof msg.text === 'string' && msg.text.startsWith('/start');
+        if (isStart && cfg.intro?.photo) {
+          // Вступ: картинка + текст + меню однією карткою
+          await tg(env, 'sendPhoto', {
+            chat_id: msg.chat.id,
+            photo: cfg.intro.photo,
+            caption: cfg.intro.text,
+            reply_markup: kb,
+          });
+        } else {
+          await tg(env, 'sendMessage', { chat_id: msg.chat.id, text: cfg.menuText, reply_markup: kb });
         }
-        await tg(env, 'sendMessage', {
-          chat_id: msg.chat.id,
-          text: 'Хоругва кличе. Обирай, куди рушити:',
-          reply_markup: { inline_keyboard: rows },
-        });
       }
       return new Response('ok');
     }
@@ -80,10 +113,10 @@ export default {
       if (!nick || !khorugvaId) return new Response(JSON.stringify({ ok: false, err: 'bad request' }), { status: 400, headers: CORS });
       const rec = await fbGet(env, `tg_users/${String(nick).toLowerCase()}`);
       if (!rec?.chatId) return new Response(JSON.stringify({ ok: false, err: 'user unknown to bot' }), { status: 404, headers: CORS });
+      const cfg = await loadConfig(env);
       await tg(env, 'sendMessage', {
         chat_id: rec.chatId,
-        text: `${from || 'Побратим'} розгортає хоругву — загін збирається у мандри крізь неспокійні землі. ` +
-          `Мандрівка буде темна, дорога непевна, але гуртом і чорт не страшний. Стань під хоругву!`,
+        text: String(cfg.gatherText).replace('{from}', from || 'Побратим'),
         reply_markup: { inline_keyboard: [[{ text: 'Приєднатись', url: appLink(env, 'kh_' + khorugvaId) }]] },
       });
       return new Response(JSON.stringify({ ok: true }), { headers: CORS });
