@@ -1780,12 +1780,13 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (ev) => {
 
 // ---- експорт / імпорт ----
 // самодостатній doc: пропорції + слоти + вшиті картинки (base64)
-function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip>; customBones?: typeof state.customBones } {
+function buildDoc(): { version: number; proportions: typeof state.prop; slots: Record<string, Slot>; images: Record<string, string>; facing: number; animDir: number; clips: Record<string, Clip>; customBones?: typeof state.customBones; updatedAt?: number } {
   const rig = rigForExport();
   const used = new Set(Object.values(rig).map((sl) => sl.image).filter(Boolean) as string[]);
   const images: Record<string, string> = {};
   for (const n of used) { const cv = state.images.get(n); if (cv) images[n] = cv.toDataURL('image/png'); }
-  const doc: ReturnType<typeof buildDoc> = { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)) };
+  // updatedAt — для LWW у грі: серед копій (zag_game_char / бібліотека / character.json) виграє найсвіжіша.
+  const doc: ReturnType<typeof buildDoc> = { version: 4, proportions: { ...state.prop }, slots: JSON.parse(JSON.stringify(rig)), images, facing: state.facing, animDir: state.animDir, clips: JSON.parse(JSON.stringify(state.clips)), updatedAt: Date.now() };
   if (state.customBones.length) doc.customBones = JSON.parse(JSON.stringify(state.customBones));
   return doc;
 }
@@ -1925,6 +1926,14 @@ document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
 registerPublisher(async () => {
   const character = buildDoc();
   try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
+  // Освіжити бібліотечну копію ПОТОЧНОГО персонажа: лобі/портрети/мультиплеєр читають
+  // бібліотеку, і стара копія там давала «розʼїхану» позу на інших пристроях,
+  // хоч character.json публікувався свіжим.
+  {
+    const lib = loadLib();
+    const i = lib.findIndex((x) => x.id === currentCharId);
+    if (i >= 0) { lib[i] = { ...lib[i], doc: character, thumb: composeThumb(150, 190), updatedAt: Date.now() }; storeLib(lib); renderLibrary(); }
+  }
   // Злити локальні поведінки з опублікованими (LWW) — щоб публікація з «порожньої» машини
   // не затирала графи, збережені на іншому компі.
   const [local, published] = await Promise.all([

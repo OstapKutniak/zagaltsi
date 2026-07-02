@@ -22,7 +22,7 @@ interface Slot { image: string | null; pivotX: number; pivotY: number; rot: numb
 interface KeyPose { rot: number; dx: number; dy: number; scale: number; flip: number; bend: number; bend2?: number; bend3?: number }
 interface Keyframe { t: number; interp: 'linear' | 'smooth'; pose: Record<string, KeyPose> }
 interface Clip { duration: number; keys: Keyframe[]; hotkey?: string }
-export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip> }
+export interface CharDoc { proportions: { overall: number; head: number; torso: number; arms: number; legs: number }; slots: Record<string, Slot>; images: Record<string, string>; facing?: number; animDir?: number; clips?: Record<string, Clip>; updatedAt?: number }
 
 // Ієрархія (як у тулзі): торс — корінь; шия/руки/ноги — діти торса; голова — дитя шиї.
 const PARENT: Record<string, string | null> = {

@@ -299,18 +299,22 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private static async loadCharDoc(): Promise<CharDoc | null> {
-    // 1) персонаж гравця на цьому пристрої
-    try { const s = localStorage.getItem('zag_game_char'); if (s) { const d = JSON.parse(s) as CharDoc; if (this.hasImages(d)) return d; } } catch { /* ignore */ }
-    // 2) синхронізована бібліотека (char-library.json з деплою) — герой із артом.
-    //    Працює крос-пристроєво, тож персонаж видно і з телефона без локального zag_game_char.
+    // Джерела: локальний zag_game_char, герой із синхронізованої бібліотеки,
+    // запасний public/character.json. Виграє НАЙСВІЖІШИЙ (LWW по updatedAt) —
+    // стара бібліотечна копія при свіжому character.json давала «розʼїханого»
+    // персонажа на телефоні, хоч у студії все було відкалібровано.
+    const cand: CharDoc[] = [];
+    try { const s = localStorage.getItem('zag_game_char'); if (s) { const d = JSON.parse(s) as CharDoc; if (this.hasImages(d)) cand.push(d); } } catch { /* ignore */ }
     try {
       const lib = await loadCharLibrary();
       const hero = lib.find((x) => x.cat === 'char' && this.hasImages(x.doc)) ?? lib.find((x) => this.hasImages(x.doc));
-      if (hero) return hero.doc;
+      if (hero) cand.push(hero.doc);
     } catch { /* ignore */ }
-    // 3) запасний вшитий у репо (наразі без картинок → не покажеться)
-    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) { const d = await r.json() as CharDoc; if (this.hasImages(d)) return d; } } catch { /* ignore */ }
-    return null;
+    try { const r = await fetch(`${import.meta.env.BASE_URL}character.json`); if (r.ok) { const d = await r.json() as CharDoc; if (this.hasImages(d)) cand.push(d); } } catch { /* ignore */ }
+    if (!cand.length) return null;
+    let best = cand[0];
+    for (const d of cand) if ((d.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = d;
+    return best;
   }
 
   update(_time: number, deltaMs: number): void {
