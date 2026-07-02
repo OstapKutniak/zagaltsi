@@ -14,6 +14,13 @@ export function hideLoadScreen(): void {
   }, 150);
 }
 
+// Тач-керування (#touch: джойстик + удар/стрибок) — ЛИШЕ в бітемап-рівні.
+// GameScene вмикає на створенні й вимикає на shutdown; меню/карти/локації ховають захисно.
+export function setTouchUI(on: boolean): void {
+  const el = document.getElementById('touch');
+  if (el) el.style.display = on ? '' : 'none';
+}
+
 // Проста текстова кнопка (без іконок/оформлення — за конвенцією проєкту).
 // Прямокутник-підкладка + напис, hover підсвічує. Повертає підкладку (для позиціювання).
 export function makeTextButton(

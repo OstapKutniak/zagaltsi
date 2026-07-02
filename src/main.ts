@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
 import { SectionScene } from './scenes/SectionScene';
+import { WorldScene } from './scenes/WorldScene';
+import { LocationScene } from './scenes/LocationScene';
 import { QuestsScene } from './scenes/QuestsScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { KhorugvaScene } from './scenes/KhorugvaScene';
-import { MapScene } from './scenes/MapScene';
 import { GameScene } from './scenes/GameScene';
 import { ColorGradePipeline } from './scenes/ColorGradePipeline';
 import { initTelegram, getStartParam } from './telegram';
@@ -39,17 +40,17 @@ const game = new Phaser.Game({
     height: LOGICAL_H * RENDER_SCALE,
   },
   pipeline: { ColorGrade: ColorGradePipeline } as unknown as Phaser.Types.Core.PipelineConfig,
-  scene: [BootScene, MenuScene, SectionScene, QuestsScene, AchievementsScene, KhorugvaScene, MapScene, GameScene],
+  scene: [BootScene, MenuScene, SectionScene, WorldScene, LocationScene, QuestsScene, AchievementsScene, KhorugvaScene, GameScene],
 });
 
 setupViewport(game);
 
 // Deep-link роутинг (кнопки бота / сповіщення збору): ?startapp=<param>.
-// zhytlo→Меню(Житло), mandry→Карта, khorugva→Хоругва, zavdannya→Завдання,
+// zhytlo→Житло, mandry→Карта, khorugva→Хоругва, zavdannya→Завдання,
 // dosyagnennya→Досягнення, inventar→Інвентар, kh_<id>→приєднатись до хоругви.
 const START_ROUTES: Record<string, { scene: string; data?: object }> = {
   zhytlo: { scene: 'Menu' },
-  mandry: { scene: 'Map' },
+  mandry: { scene: 'World', data: {} },
   khorugva: { scene: 'Khorugva' },
   zavdannya: { scene: 'Quests' },
   dosyagnennya: { scene: 'Achievements' },

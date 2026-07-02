@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
-import { makeTextButton } from './uiButton';
+import { makeTextButton, setTouchUI } from './uiButton';
 
 // Універсальна сцена-заглушка для розділів меню (Житло / Досягнення / Персонаж).
 // Показує назву розділу + кнопку «Назад». Оформлення й вміст додамо пізніше —
@@ -17,6 +17,7 @@ export class SectionScene extends Phaser.Scene {
   }
 
   create(): void {
+    setTouchUI(false); // джойстик/кнопки — лише в бітемапі
     const cam = this.cameras.main;
     cam.setZoom(RENDER_SCALE);
     cam.setBackgroundColor('#1a1622');

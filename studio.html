@@ -18,7 +18,8 @@
       /* Level editor panels: hidden by default (char mode) */
       #lv-library, #lv-right { display: none; }
       #lv-stageWrap { display: none; }
-      #wld-library, #loc-library { display: none; }
+      #wld-library, #loc-library, #mn-library, #snd-library { display: none; }
+      #mn-toolbar, #snd-toolbar { flex: 0 0 auto; height: 56px; min-height: 56px; padding: 6px 8px; gap: 6px; align-items: center; display: none; }
       /* When level mode: show level panels, hide char panels */
       .mode-level #lv-library { display: flex; }
       .mode-level #lv-right { display: flex; }
@@ -69,6 +70,28 @@
       .mode-location #partsList { display: none !important; }
       .mode-location #faceList { display: none !important; }
       .mode-location #mob-char-parts-row { display: none !important; }
+      /* ── mode-menu (Редактор Меню) ── */
+      .mode-menu #stageWrap, .mode-menu #lv-stageWrap, .mode-menu #wld-stageWrap, .mode-menu #loc-stageWrap { display: none; }
+      .mode-menu #mn-stageWrap { display: block !important; }
+      .mode-menu #right, .mode-menu #lv-right, .mode-menu #wld-right, .mode-menu #loc-right { display: none; }
+      .mode-menu #mn-right { display: flex !important; }
+      .mode-menu #timelineBar, .mode-menu #lv-levelToolbar, .mode-menu #wld-toolbar, .mode-menu #loc-toolbar { display: none; }
+      .mode-menu #mn-toolbar { display: flex !important; }
+      .mode-menu #library, .mode-menu #lv-library, .mode-menu #wld-library, .mode-menu #loc-library { display: none; }
+      .mode-menu #mn-library { display: flex !important; }
+      .mode-menu #lv-levelBar { display: none; }
+      .mode-menu #partsList, .mode-menu #faceList, .mode-menu #mob-char-parts-row { display: none !important; }
+      /* ── mode-sound (Редактор Звуку) ── */
+      .mode-sound #stageWrap, .mode-sound #lv-stageWrap, .mode-sound #wld-stageWrap, .mode-sound #loc-stageWrap, .mode-sound #mn-stageWrap { display: none; }
+      .mode-sound #snd-stageWrap { display: block !important; }
+      .mode-sound #right, .mode-sound #lv-right, .mode-sound #wld-right, .mode-sound #loc-right, .mode-sound #mn-right { display: none; }
+      .mode-sound #snd-right { display: flex !important; }
+      .mode-sound #timelineBar, .mode-sound #lv-levelToolbar, .mode-sound #wld-toolbar, .mode-sound #loc-toolbar, .mode-sound #mn-toolbar { display: none; }
+      .mode-sound #snd-toolbar { display: flex !important; }
+      .mode-sound #library, .mode-sound #lv-library, .mode-sound #wld-library, .mode-sound #loc-library, .mode-sound #mn-library { display: none; }
+      .mode-sound #snd-library { display: flex !important; }
+      .mode-sound #lv-levelBar { display: none; }
+      .mode-sound #partsList, .mode-sound #faceList, .mode-sound #mob-char-parts-row { display: none !important; }
       /* AI-панелі (опис персонажа / декорації) тієї ж висоти, що й таймлайн — спільне --panel-h */
       #aiPanel, #lv-aiPanel { height: var(--panel-h, 220px); }
       .mode-level #partsList { display: none !important; }
@@ -513,6 +536,20 @@
         <div id="loc-locList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:8px"></div>
       </aside>
 
+      <!-- ЛІВА ПАНЕЛЬ режиму Меню: бібліотека ассетів (PNG) зі скролом -->
+      <aside id="mn-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px;flex-direction:column">
+        <button id="mn-addAsset" class="btn-accent" style="width:100%;padding:10px;flex:0 0 auto">＋ PNG-ассет</button>
+        <input type="file" id="mn-assetInput" accept="image/*" multiple style="display:none">
+        <div style="font-size:11px;color:var(--muted);margin:6px 0;flex:0 0 auto">Клік по картці — зробити фоном сторінки</div>
+        <div id="mn-assetList" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start"></div>
+      </aside>
+
+      <!-- ЛІВА ПАНЕЛЬ режиму Звуку: бібліотека звуків -->
+      <aside id="snd-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px;flex-direction:column">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);padding:4px 2px;flex:0 0 auto">Бібліотека звуків (процедурні)</div>
+        <div id="snd-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
+      </aside>
+
       <!-- ЦЕНТР -->
       <section id="center" class="col">
         <div id="topTabs">
@@ -520,6 +557,8 @@
           <button data-tab="level">Редактор Мандр</button>
           <button data-tab="world">Редактор Карти</button>
           <button data-tab="location">Редактор Локацій</button>
+          <button data-tab="menu">Редактор Меню</button>
+          <button data-tab="sound">Редактор Звуку</button>
           <button id="playTab" class="btn-accent" title="Запустити гру">▶ Грати</button>
         </div>
         <!-- Мобільна смуга вибору рівня (між вкладками і бібліотекою тайлів) -->
@@ -536,6 +575,8 @@
           <div id="lv-stageWrap" style="position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="lv-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни ассет · <b>G/R/S/M</b> · <b>Shift+D</b> дублювати · <b>H/V</b> шлях · <b>Y</b> стерти шлях · <b>J</b> снеп · <b>Del</b> · <b>Ctrl+Z</b> · колесо — зум</div></div>
           <div id="wld-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="wld-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap"><b>V</b> вибір · <b>N</b> вузол · <b>E</b> зʼєднання · <b>Del</b> видалити · <b>Alt+тягни</b> пан · колесо — зум</div></div>
           <div id="loc-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="loc-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">тягни PNG будівлі/фону · <b>V</b> вибір · <b>Z</b> зона · <b>G/R/S/M</b> · <b>Del</b> · <b>Alt+тягни</b> пан · колесо — зум</div></div>
+          <div id="mn-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="mn-stage" style="display:block;width:100%;height:100%"></canvas><div id="mn-stageHint" style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · <b>Del</b> — видалити</div></div>
+          <div id="snd-stageWrap" style="display:none;position:absolute;inset:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden"><canvas id="snd-stage" style="display:block;width:100%;height:100%"></canvas><div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.35);pointer-events:none;white-space:nowrap">осцилограма живого міксу · ▶ у бібліотеці — прослухати звук</div></div>
           <div id="partsList" style="display:none"><div id="slotChips"></div></div>
           <div id="faceList"><div id="faceChips"></div></div>
           <div id="lv-fillMenu" style="display:none"></div>
@@ -650,6 +691,25 @@
           <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
           <button id="loc-keyBgBtn" class="on" title="Вирізати рівний фон у завантажених PNG (будівлі/декор)">✂ Фон</button>
         </div>
+
+        <!-- НИЖНІЙ ТУЛБАР режиму Меню -->
+        <div id="mn-toolbar" class="pane">
+          <button id="mn-addBtn" title="Додати кнопку на поточну сторінку">＋ Кнопка</button>
+          <button id="mn-bgBtn" title="Завантажити фон сторінки (PNG)">Фон…</button>
+          <input type="file" id="mn-bgInput" accept="image/*" style="display:none">
+          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
+          <button id="mn-mapBtn" title="Сторінки та гіперпосилання: яка кнопка куди веде">Мапа переходів</button>
+          <button id="mn-addPage" title="Створити нову сторінку меню">＋ Сторінка</button>
+        </div>
+
+        <!-- НИЖНІЙ ТУЛБАР режиму Звуку -->
+        <div id="snd-toolbar" class="pane">
+          <button id="snd-playAll" class="btn-accent" title="Слухати весь мікс лобі">▶ Мікс лобі</button>
+          <button id="snd-stop" title="Зупинити все">■ Стоп</button>
+          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
+          <button id="snd-thunder" title="Тригернути гуркіт грому">Грім</button>
+          <button id="snd-crow" title="Тригернути крякання ворони">Ворона</button>
+        </div>
       </section>
 
       <!-- ПРАВА ПАНЕЛЬ -->
@@ -678,6 +738,22 @@
               <button id="cutBtn">Розріз (D)</button>
               <button id="bendFlipBtn">Напрям (B)</button>
               <button id="flipAllBtn">Фліп</button>
+            </div>
+            <div id="animTools" style="display:flex;flex-direction:column;gap:6px;padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+              <div style="font-size:12px;font-weight:600;color:var(--muted)">Анімація</div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px">
+                <span style="flex:0 0 72px;color:var(--muted)">Швидкість</span>
+                <input type="range" id="playRate" min="25" max="200" step="5" value="100" style="flex:1">
+                <span id="playRateV" style="flex:0 0 40px;text-align:right;color:var(--muted)">100%</span>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="Під час програвання кліпу G/R/S на кістці зсуває/крутить/масштабує її ОДРАЗУ в усіх ключах — анімація грає далі, а правка лягає на весь кліп">
+                <input type="checkbox" id="liveEditChk" checked style="width:14px;height:14px">
+                Жива правка при програванні (G/R/S на всі ключі)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="R/S крутять і масштабують УСЕ ТІЛО навколо точки на землі під персонажем (хрестик), а не навколо півота тулуба — тіло не «влітає вбік»">
+                <input type="checkbox" id="centerPivotChk" style="width:14px;height:14px">
+                Центральний півот (R/S всього тіла від землі)
+              </label>
             </div>
             <input type="file" id="fileInput" accept="image/png,image/*" multiple style="display:none" />
             <div id="imgGrid" title="Клік — завантажити картинку · Перетягни PNG"></div>
@@ -794,13 +870,18 @@
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" id="wld-nodeTypeStop" name="wld-nodeType" value="stop"> Зупинка</label>
               </div>
               <div id="wld-nodeRegionRow" style="display:none;flex-direction:column;gap:4px">
-                <label style="font-size:12px;color:var(--muted)">id вкладеної карти</label>
-                <input id="wld-nodeRegionId" type="text" placeholder="map_id" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
+                <label style="font-size:12px;color:var(--muted)">Вкладена карта (регіон)</label>
+                <select id="wld-nodeRegionId" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
+              </div>
+              <div id="wld-nodeLocRow" style="display:none;flex-direction:column;gap:4px">
+                <label style="font-size:12px;color:var(--muted)">Локація (з Редактора Локацій)</label>
+                <select id="wld-nodeLocId" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
               </div>
             </div>
             <div id="wld-edgeProps" style="display:none;flex-direction:column;gap:6px">
-              <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр (id)</label>
-              <input id="wld-edgeLevelId" type="text" placeholder="village1, forest1 …" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:monospace;outline:none;width:100%;box-sizing:border-box">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Рівень Мандр</label>
+              <input id="wld-edgeLevelId" type="text" list="wld-levelList" placeholder="почни вводити назву рівня…" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:monospace;outline:none;width:100%;box-sizing:border-box">
+              <datalist id="wld-levelList"></datalist>
               <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wld-edgeTwoWay"> Двосторонній шлях</label>
             </div>
           </div>
@@ -852,6 +933,48 @@
             <hr style="border:0;border-top:1px solid var(--line)">
             <button id="loc-exportBtn" class="btn-accent" style="width:100%">Оновити гру</button>
             <div id="loc-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ПРАВА ПАНЕЛЬ режиму Меню -->
+      <aside id="mn-right" class="col" style="display:none;width:480px;flex:0 0 auto">
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
+          <button class="header secToggle open">Сторінки</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:6px">
+            <div id="mn-pageList" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+          <button class="header secToggle open" style="margin-top:6px">Кнопка</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:6px">
+            <div id="mn-noBtn" style="color:var(--muted);font-size:12px;text-align:center;padding:10px 0">Вибери кнопку у вьюпорті</div>
+            <div id="mn-btnProps" style="display:none;flex-direction:column;gap:6px">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Текст</label>
+              <input id="mn-btnLabel" type="text" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Розмір</label>
+              <input id="mn-btnSize" type="range" min="18" max="64" step="1" style="width:100%">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Куди веде (гіперпосилання)</label>
+              <select id="mn-btnTarget" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box"></select>
+              <button id="mn-btnDelete" style="width:100%;padding:6px;font-size:12px">Видалити кнопку</button>
+            </div>
+          </div>
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
+            <hr style="border:0;border-top:1px solid var(--line)">
+            <button id="mn-exportBtn" class="btn-accent" style="width:100%">Оновити гру</button>
+            <div id="mn-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ПРАВА ПАНЕЛЬ режиму Звуку: мікс лобі -->
+      <aside id="snd-right" class="col" style="display:none;width:480px;flex:0 0 auto">
+        <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
+          <button class="header secToggle open">Мікс лобі (стартовий екран)</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px" id="snd-mixBody"></div>
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
+            <hr style="border:0;border-top:1px solid var(--line)">
+            <button id="snd-saveMix" style="width:100%;padding:8px">Зберегти мікс (локально)</button>
+            <button id="snd-exportBtn" class="btn-accent" style="width:100%">Оновити гру</button>
+            <div id="snd-statusBar" style="font-size:12px;color:var(--muted);min-height:14px"></div>
           </div>
         </div>
       </aside>

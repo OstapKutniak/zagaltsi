@@ -1,1 +1,1 @@
-{}
+{"c1781902554014":[{"id":"d1","name":"Розмова","root":{"id":"lmr2lade1","who":"npc","text":"Гей, чужинцю!","children":[{"id":"lmr2lade2","who":"player","text":"Відповідь","children":[{"id":"lmr2lade3","who":"npc","text":"…","children":[{"id":"lmr2lade7","who":"player","text":"Відповідь","children":[]}]}]},{"id":"lmr2lade4","who":"player","text":"Відповідь","children":[{"id":"lmr2lade5","who":"npc","text":"…","children":[{"id":"lmr2lade6","who":"player","text":"Відповідь","children":[]}]}]}]},"updatedAt":1782941464296}]}

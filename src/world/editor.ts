@@ -9,7 +9,10 @@ interface WorldNode {
   label: string;
   x: number; y: number;
   type: 'location' | 'region' | 'stop';
-  regionId?: string;
+  regionId?: string;   // type=region → id вкладеної карти
+  locationId?: string; // type=location → id LocationDoc (нема — гра шукає за назвою)
+  desc?: string;       // короткий опис для прапорця на ігровій мапі
+  icon?: string;       // вид чорнильної іконки на мапі (нема — гра вгадує з назви)
 }
 
 interface WorldEdge {
@@ -527,6 +530,29 @@ export function initWorldEditor(prefix: string): void {
     }
   });
 
+  // Подвійний клік: по вузлу — перейменувати на місці; по порожньому (в режимі
+  // «Вибір») — одразу створити вузол тут і спитати назву. Швидше, ніж перемикати
+  // інструменти й лізти в панель властивостей.
+  canvas.addEventListener('dblclick', e => {
+    const mx = e.clientX - rect().left;
+    const my = e.clientY - rect().top;
+    const n = nodeAt(mx, my);
+    if (n) {
+      const name = prompt('Назва вузла:', n.label);
+      if (name) { pushUndo(); n.label = name; select(n.id, 'node'); save(); }
+      return;
+    }
+    if (state.tool !== 'select') return;
+    pushUndo();
+    const wp = toWorld(mx, my);
+    const nn: WorldNode = { id: uid(), label: 'Локація', x: wp.x, y: wp.y, type: 'location' };
+    world().nodes.push(nn);
+    select(nn.id, 'node');
+    const name = prompt('Назва нової локації:', '');
+    if (name) nn.label = name;
+    save();
+  });
+
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const f = e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -732,7 +758,9 @@ export function initWorldEditor(prefix: string): void {
       ($<HTMLInputElement>('nodeTypeRegion')).checked = n.type === 'region';
       ($<HTMLInputElement>('nodeTypeStop')).checked = n.type === 'stop';
       $('nodeRegionRow').style.display = n.type === 'region' ? 'flex' : 'none';
-      if (n.regionId) ($<HTMLInputElement>('nodeRegionId')).value = n.regionId;
+      $('nodeLocRow').style.display = n.type === 'location' ? 'flex' : 'none';
+      fillRegionSelect(n);
+      void fillLocSelect(n);
     }
 
     if (state.selType === 'edge') {
@@ -742,6 +770,54 @@ export function initWorldEditor(prefix: string): void {
       if (!e) return;
       ($<HTMLInputElement>('edgeLevelId')).value = e.levelId;
       ($<HTMLInputElement>('edgeTwoWay')).checked = e.twoWay;
+      void fillLevelList();
+    }
+  }
+
+  // Селект вкладеної карти для region-вузла: усі карти, крім поточної (без самопосилань).
+  function fillRegionSelect(n: WorldNode): void {
+    const sel = $<HTMLSelectElement>('nodeRegionId'); if (!sel) return;
+    sel.innerHTML = '';
+    const none = document.createElement('option'); none.value = ''; none.textContent = '— (зачинено)';
+    sel.appendChild(none);
+    for (const w of state.worlds) {
+      if (w.id === world().id) continue;
+      const o = document.createElement('option'); o.value = w.id; o.textContent = w.name;
+      sel.appendChild(o);
+    }
+    sel.value = n.regionId ?? '';
+  }
+
+  // Селект локації для location-вузла — з zag_locations (Редактор Локацій).
+  // «— (за назвою)» = гра шукає LocationDoc, чиє name збігається з label вузла.
+  async function fillLocSelect(n: WorldNode): Promise<void> {
+    const sel = $<HTMLSelectElement>('nodeLocId'); if (!sel) return;
+    let locs: { id: string; name: string }[] = [];
+    try { const l = await idbGet<{ id: string; name: string }[]>('zag_locations'); if (Array.isArray(l)) locs = l; } catch { /* ignore */ }
+    sel.innerHTML = '';
+    const none = document.createElement('option'); none.value = ''; none.textContent = '— (за назвою вузла)';
+    sel.appendChild(none);
+    for (const l of locs) {
+      const o = document.createElement('option'); o.value = l.id; o.textContent = l.name;
+      sel.appendChild(o);
+    }
+    sel.value = n.locationId ?? '';
+  }
+
+  // Datalist рівнів для ребра — назви з Редактора Мандр (zag_levels), пишемо id.
+  async function fillLevelList(): Promise<void> {
+    const dl = $<HTMLElement>('levelList'); if (!dl) return;
+    let levels: { id?: string; name: string }[] = [];
+    try {
+      const l = await idbGet<{ levels: { id?: string; name: string }[] }>('zag_levels');
+      if (l?.levels) levels = l.levels;
+    } catch { /* ignore */ }
+    dl.innerHTML = '';
+    for (const lv of levels) {
+      const o = document.createElement('option');
+      o.value = lv.id ?? lv.name;
+      o.label = lv.name;
+      dl.appendChild(o);
     }
   }
 
@@ -758,9 +834,14 @@ export function initWorldEditor(prefix: string): void {
     });
   }
 
-  $<HTMLInputElement>('nodeRegionId')?.addEventListener('input', function () {
+  $<HTMLSelectElement>('nodeRegionId')?.addEventListener('change', function () {
     const n = nodeById(state.sel!);
-    if (n) { n.regionId = this.value; save(); }
+    if (n) { n.regionId = this.value || undefined; save(); }
+  });
+
+  $<HTMLSelectElement>('nodeLocId')?.addEventListener('change', function () {
+    const n = nodeById(state.sel!);
+    if (n) { n.locationId = this.value || undefined; save(); }
   });
 
   $<HTMLInputElement>('edgeLevelId')?.addEventListener('input', function () {
