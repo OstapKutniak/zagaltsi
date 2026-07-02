@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen, setTouchUI } from './uiButton';
+import { startAmbience, stopAmbience, triggerThunder, loadLobbyMix } from '../sound/ambience';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { loadCharLibrary } from '../charlib';
 
@@ -24,12 +25,32 @@ const COL_HOVER = '#ffcf8f'; // теплий відсвіт багаття
 const LOBBY_CHAR = { x: 800, y: 205, scale: 1.55, facing: -1 };
 // Центр багаття на арті хатини (логічні координати) — сюди садимо полум'я і світло.
 const FIRE = { x: 640, y: 492 };
+// ШИБКИ вікна на арті хатини (логічні координати кадру 1280×576, арт 2000×900 ×0.64):
+// 4 стулки, розділені хрестовиною — світло блискавки й дощ сідають ТІЛЬКИ на скло.
+const PANES: Array<{ x0: number; y0: number; x1: number; y1: number }> = [
+  { x0: 595, y0: 140, x1: 634, y1: 205 }, // верх-ліва
+  { x0: 643, y0: 140, x1: 682, y1: 205 }, // верх-права
+  { x0: 595, y0: 214, x1: 634, y1: 285 }, // низ-ліва
+  { x0: 643, y0: 214, x1: 682, y1: 285 }, // низ-права
+];
+const WIN_BOUNDS = { x0: 595, y0: 140, x1: 682, y1: 285 }; // габарит скла (для дощу)
+// Дощ за вікном — ті самі налаштування, що накручені в атмосфері 1-го бітемап-рівня.
+const RAIN = { color: 0xdbf0ea, dir: -25, speed: 1600, dropLen: 24, drops: 76, alpha: 0.5 };
+// Блискавка: середній інтервал/рандомізація як у рівні (vary 0.77).
+const LIGHTNING = { every: 11, vary: 0.77 };
 
 export class MenuScene extends Phaser.Scene {
   private lobbyChar: CutoutCharacter | null = null;
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
   private fireTime = 0;
+  // Шторм за вікном
+  private rainGfx: Phaser.GameObjects.Graphics | null = null;
+  private windowFlash: Phaser.GameObjects.Image | null = null;   // світло по шибках (блюр)
+  private roomFlash: Phaser.GameObjects.Rectangle | null = null; // біле світло в кімнаті
+  private boltNext = 4;   // сек до наступної блискавки
+  private boltOn = 0;     // залишок поточного спалаху
+  private boltDur = 0.4;
 
   constructor() { super('Menu'); }
 
@@ -49,6 +70,10 @@ export class MenuScene extends Phaser.Scene {
     this.bgImg = bg;
 
     this.buildFire(offX, offY);
+    this.buildStorm(offX, offY);
+    // Звук стартує лише після взаємодії (політика браузера) — перший клік/тап.
+    this.input.once('pointerdown', () => { void loadLobbyMix().then((m) => startAmbience(m)); });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopAmbience());
 
     // Заголовок — зверху по центру.
     this.add.text(LOGICAL_W / 2 + offX, 58 + offY, 'ХОРУГВА', {
@@ -115,6 +140,92 @@ export class MenuScene extends Phaser.Scene {
       .setTint(0xff9a3d).setAlpha(0.16).setBlendMode(Phaser.BlendModes.ADD);
   }
 
+  // ── Шторм за вікном: дощ (маскою по шибках) + блискавка зі світлом у кімнату ─
+  private buildStorm(offX: number, offY: number): void {
+    // Дощ малюємо Graphics-ом щокадру, обрізаний маскою по ЧОТИРЬОХ шибках
+    // (хрестовина рами лишається темною — краплі тільки на склі).
+    this.rainGfx = this.add.graphics().setScrollFactor(0).setDepth(2);
+    const maskShape = this.make.graphics({}, false);
+    for (const p of PANES) maskShape.fillRect(p.x0 + offX, p.y0 + offY, p.x1 - p.x0, p.y1 - p.y0);
+    this.rainGfx.setMask(maskShape.createGeometryMask());
+
+    // Світло блискавки у вікні: канва зі шибками + гаусів блюр у два проходи
+    // (вузьке яскраве ядро по склу + широкий м'який ореол на стіну навколо рами).
+    if (!this.textures.exists('window_glow')) {
+      const PAD = 34;
+      const w = (WIN_BOUNDS.x1 - WIN_BOUNDS.x0) + PAD * 2;
+      const h = (WIN_BOUNDS.y1 - WIN_BOUNDS.y0) + PAD * 2;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const x = c.getContext('2d')!;
+      const panes = (): void => {
+        for (const p of PANES) x.fillRect(p.x0 - WIN_BOUNDS.x0 + PAD, p.y0 - WIN_BOUNDS.y0 + PAD, p.x1 - p.x0, p.y1 - p.y0);
+      };
+      x.fillStyle = 'rgba(238,242,255,0.5)';
+      x.filter = 'blur(13px)'; panes();       // широкий ореол (світло «виливається» на раму/стіну)
+      x.fillStyle = 'rgba(244,247,255,0.95)';
+      x.filter = 'blur(4px)'; panes();        // яскраве ядро по склу з м'яким краєм
+      x.filter = 'none';
+      this.textures.addCanvas('window_glow', c);
+    }
+    this.windowFlash = this.add.image(
+      (WIN_BOUNDS.x0 + WIN_BOUNDS.x1) / 2 + offX,
+      (WIN_BOUNDS.y0 + WIN_BOUNDS.y1) / 2 + offY,
+      'window_glow',
+    ).setScrollFactor(0).setDepth(3).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
+
+    this.roomFlash = this.add.rectangle(LOGICAL_W / 2 + offX, LOGICAL_H / 2 + offY, LOGICAL_W, LOGICAL_H, 0xeef1ff, 0)
+      .setScrollFactor(0).setDepth(40);
+    this.boltNext = 3 + Math.random() * 6;
+  }
+
+  // Краплі за вікном — та сама математика, що в грі (jittered колонки, нахил, фаза).
+  private drawWindowRain(t: number, offX: number, offY: number): void {
+    const g = this.rainGfx; if (!g) return;
+    g.clear();
+    const angle = Math.tan(RAIN.dir * Math.PI / 180);
+    const X0 = WIN_BOUNDS.x0 + offX, Y0 = WIN_BOUNDS.y0 + offY;
+    const W = WIN_BOUNDS.x1 - WIN_BOUNDS.x0, H = WIN_BOUNDS.y1 - WIN_BOUNDS.y0;
+    const hash = (n: number): number => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
+    const n = Math.round(16 * RAIN.drops / 100 * 2); // ~30 крапель у маленькому вікні
+    const len = RAIN.dropLen * 0.55; // менша «глибина» за вікном
+    const speed = RAIN.speed * 0.55;
+    for (let i = 0; i < n; i++) {
+      const rx = (i + 0.5 + (hash(i + 7) - 0.5) * 0.5) / n;
+      const rlen = 0.6 + hash(i + 17) * 0.9;
+      const ra = 0.5 + hash(i + 29) * 0.5;
+      const drift = Math.abs(angle) * (H + len);
+      const OW = W + drift + 20, OH = H + len + 20;
+      const baseX = X0 - 10 - (angle > 0 ? drift : 0) + rx * OW;
+      const phase = ((hash(i + 41) * OH) + t * speed) % OH;
+      const sy = Y0 - 10 + phase;
+      const sx = baseX + phase * angle;
+      g.lineStyle(1.4, RAIN.color, RAIN.alpha * ra);
+      g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + len * rlen * angle, sy + len * rlen); g.strokePath();
+    }
+  }
+
+  // Блискавка: подвійний блим (як справжня) — вікно яскраво, кімната білим відсвітом.
+  private stepLightning(dt: number): void {
+    if (this.boltOn > 0) {
+      this.boltOn -= dt;
+      const k = Math.max(0, this.boltOn / this.boltDur);
+      // подвійний імпульс: пік → провал → менший пік
+      const pulse = Math.max(0, Math.sin(k * Math.PI)) * (k > 0.45 ? 1 : 0.55);
+      this.windowFlash?.setAlpha(Math.min(1, pulse));
+      this.roomFlash?.setFillStyle(0xeef1ff, Math.min(0.35, pulse * 0.30));
+      if (this.boltOn <= 0) { this.windowFlash?.setAlpha(0); this.roomFlash?.setFillStyle(0xeef1ff, 0); }
+    } else {
+      this.boltNext -= dt;
+      if (this.boltNext <= 0) {
+        const vary = LIGHTNING.vary;
+        this.boltDur = 0.38 * (1 - vary * 0.5 + Math.random() * vary);
+        this.boltOn = this.boltDur;
+        this.boltNext = LIGHTNING.every * (1 - vary + Math.random() * vary * 2);
+        triggerThunder(300 + Math.random() * 900); // грім доганяє світло
+      }
+    }
+  }
+
   // Тягне персонажа гравця (localStorage zag_game_char → fallback public/character.json)
   // і саджає перед вогнищем у позі 'sit'. Немає арту → просто не показуємо (без падінь).
   private async seatCharacter(offX: number, offY: number): Promise<void> {
@@ -156,6 +267,10 @@ export class MenuScene extends Phaser.Scene {
     // Мерехтіння вогню: сума неспівмірних синусів = живий нерівний ритм.
     this.fireTime += deltaMs / 1000;
     const t = this.fireTime;
+    const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
+    const offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    this.drawWindowRain(t, offX, offY);
+    this.stepLightning(deltaMs / 1000);
     const f = 0.5 + 0.5 * (Math.sin(t * 7.3) * 0.5 + Math.sin(t * 12.7 + 1.3) * 0.3 + Math.sin(t * 3.1 + 2.1) * 0.2);
     if (this.fireGlow) {
       this.fireGlow.setAlpha(0.11 + 0.10 * f);
