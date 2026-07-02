@@ -11,6 +11,8 @@ interface WorldNode {
   type: 'location' | 'region' | 'stop';
   regionId?: string;   // type=region → id вкладеної карти
   locationId?: string; // type=location → id LocationDoc (нема — гра шукає за назвою)
+  desc?: string;       // короткий опис для прапорця на ігровій мапі
+  icon?: string;       // вид чорнильної іконки на мапі (нема — гра вгадує з назви)
 }
 
 interface WorldEdge {

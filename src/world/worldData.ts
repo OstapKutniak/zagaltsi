@@ -25,6 +25,8 @@ export interface WorldNode {
   type: 'location' | 'region' | 'stop';
   regionId?: string;    // type=region → id дочірньої карти (WorldDoc)
   locationId?: string;  // type=location → id LocationDoc (нема — шукаємо за назвою)
+  desc?: string;        // короткий опис для прапорця на мапі
+  icon?: string;        // MapIconKind для чорнильної іконки (нема — з назви)
 }
 
 export interface WorldEdge {

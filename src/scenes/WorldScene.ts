@@ -5,19 +5,25 @@ import {
   type WorldDoc, type WorldNode, loadWorldsForGame, findGlobalWorld,
   loadTravel, saveTravel,
 } from '../world/worldData';
+import { parchmentCanvas, drawInkDecor, locationIcon, regionSeal, compassRose, iconFromLabel, type MapIconKind } from '../world/mapArt';
 
-// Сцена мандрів — карта світу з Редактора Карти. Глобальна (Карпати) → клік по
-// відкритому регіону → карта регіону (села/лихі місця). По регіону їздить БІЛА
-// ТОЧКА героя: клік по вузлу → шлях по ребрах (BFS) → анімований переїзд.
-// Прибув у location-вузол → відкривається LocationScene. Переходи-бітемап поки
-// скіпаються (levelId є в ребрах — підключимо пізніше).
+// Сцена мандрів — «стара мапа»: процедурний пергамент + чорнильні іконки локацій
+// (стиль DD1: товсті контури, штриховка). Глобальна (Карпатський край) → регіон.
+// Наведення (ПК) або перший тап (телефон) — іконка підсвічується й росте, за нею
+// прапорець з описом; клік/другий тап — біла точка героя їде по ребрах (BFS).
 
-const MENU_FONT = 'Georgia, "Times New Roman", serif';
-const COL_TEXT = '#e5d8bc';
-const COL_NODE = '#d8cdb4';
-const COL_EDGE = 'rgba(229,216,188,0.5)';
+const MAP_FONT = 'Georgia, "Times New Roman", serif';
+const INK = '#231a12';
+const INK_SOFT = '#5a4832';
 
-interface Fit { s: number; ox: number; oy: number } // world→screen: sx = ox + wx*s
+interface Fit { s: number; ox: number; oy: number }
+
+interface NodeView {
+  node: WorldNode;
+  img: Phaser.GameObjects.Image;    // іконка
+  glow: Phaser.GameObjects.Image;   // золота підсвітка (копія за іконкою)
+  baseScale: number;
+}
 
 export class WorldScene extends Phaser.Scene {
   private worlds: WorldDoc[] = [];
@@ -25,11 +31,13 @@ export class WorldScene extends Phaser.Scene {
   private isGlobal = true;
   private fit: Fit = { s: 1, ox: 0, oy: 0 };
   private gfx!: Phaser.GameObjects.Graphics;
-  private dot: Phaser.GameObjects.Arc | null = null; // біла точка героя
+  private dot: Phaser.GameObjects.Arc | null = null;
   private curNodeId: string | null = null;
   private travelling = false;
-  private labels: Phaser.GameObjects.Text[] = [];
   private offX = 0; private offY = 0;
+  private views: NodeView[] = [];
+  private hoveredId: string | null = null;
+  private banner: Phaser.GameObjects.Container | null = null;
 
   constructor() { super('World'); }
 
@@ -42,11 +50,11 @@ export class WorldScene extends Phaser.Scene {
     setTouchUI(false); // джойстик/кнопки — лише в бітемапі
     const cam = this.cameras.main;
     cam.setZoom(RENDER_SCALE);
-    cam.setBackgroundColor('#141118');
+    cam.setBackgroundColor('#171310');
     this.offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
     this.offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
     this.gfx = this.add.graphics().setScrollFactor(0).setDepth(5);
-    this.dot = null; this.labels = []; this.travelling = false;
+    this.dot = null; this.travelling = false; this.views = []; this.hoveredId = null; this.banner = null;
 
     void this.loadAndRender();
   }
@@ -57,23 +65,39 @@ export class WorldScene extends Phaser.Scene {
     const wanted = this._wantedWorldId ? this.worlds.find((w) => w.id === this._wantedWorldId) : null;
     this.world = wanted ?? global;
     this.isGlobal = !!this.world && this.world.id === global?.id;
+    this.drawParchment();
     if (!this.world) {
       this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H / 2 + this.offY,
         'Карт ще нема — намалюй у Редакторі Карти (studio)', {
-          fontFamily: MENU_FONT, fontSize: '22px', color: COL_TEXT,
-        }).setOrigin(0.5).setScrollFactor(0);
+          fontFamily: MAP_FONT, fontSize: '22px', color: INK,
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(6);
       this.addBackButton();
       return;
     }
     this.computeFit();
-    await this.drawBg();
+    await this.drawUserBg();
     this.drawMap();
     this.placeDot();
     this.addBackButton();
     this.addTitle();
   }
 
-  // Вписати карту (bbox вузлів + фон) в екран з полями.
+  // Пергамент на весь кадр + чорнильний декор (річка/ялинки) + компас.
+  private drawParchment(): void {
+    const key = 'map_parchment';
+    if (!this.textures.exists(key)) {
+      const c = parchmentCanvas(LOGICAL_W, LOGICAL_H, 7);
+      drawInkDecor(c, 11);
+      this.textures.addCanvas(key, c);
+    }
+    this.add.image(LOGICAL_W / 2 + this.offX, LOGICAL_H / 2 + this.offY, key)
+      .setScrollFactor(0).setDepth(0);
+    const ck = 'map_compass';
+    if (!this.textures.exists(ck)) this.textures.addCanvas(ck, compassRose(92));
+    this.add.image(LOGICAL_W - 74 + this.offX, LOGICAL_H - 72 + this.offY, ck)
+      .setScrollFactor(0).setDepth(4).setAlpha(0.75);
+  }
+
   private computeFit(): void {
     const w = this.world!;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -82,23 +106,23 @@ export class WorldScene extends Phaser.Scene {
       minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
     }
     if (minX === Infinity) { minX = -300; maxX = 300; minY = -150; maxY = 150; }
-    // трохи повітря навколо вузлів
-    const padW = (maxX - minX) * 0.12 + 60, padH = (maxY - minY) * 0.12 + 60;
+    const padW = (maxX - minX) * 0.12 + 70, padH = (maxY - minY) * 0.12 + 70;
     minX -= padW; maxX += padW; minY -= padH; maxY += padH;
-    const availW = LOGICAL_W - 120, availH = LOGICAL_H - 150;
+    const availW = LOGICAL_W - 140, availH = LOGICAL_H - 170;
     const s = Math.min(availW / (maxX - minX), availH / (maxY - minY));
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     this.fit = {
       s,
       ox: LOGICAL_W / 2 - cx * s + this.offX,
-      oy: (LOGICAL_H / 2 + 20) - cy * s + this.offY, // +20: лишаємо місце заголовку
+      oy: (LOGICAL_H / 2 + 24) - cy * s + this.offY,
     };
   }
 
   private sx(wx: number): number { return this.fit.ox + wx * this.fit.s; }
   private sy(wy: number): number { return this.fit.oy + wy * this.fit.s; }
 
-  private async drawBg(): Promise<void> {
+  // Намальований користувачем фон (Редактор Карти) — поверх пергаменту.
+  private async drawUserBg(): Promise<void> {
     const w = this.world!;
     if (!w.bg) return;
     const key = 'worldbg_' + w.id;
@@ -108,11 +132,21 @@ export class WorldScene extends Phaser.Scene {
         this.textures.addBase64(key, w.bg);
       });
     }
-    if (!this.scene.isActive()) return; // пішли зі сцени, поки вантажилось
-    // Фон у редакторі лежить верхнім лівим кутом у світовій (0,0), натуральний розмір.
+    if (!this.scene.isActive()) return;
     const img = this.add.image(this.sx(0), this.sy(0), key).setOrigin(0, 0).setScrollFactor(0).setDepth(1);
     img.setScale(this.fit.s);
-    img.setAlpha(0.92);
+  }
+
+  private iconTexture(kind: MapIconKind): string {
+    const key = 'mi_' + kind;
+    if (!this.textures.exists(key)) this.textures.addCanvas(key, locationIcon(kind, 108));
+    return key;
+  }
+
+  private sealTexture(locked: boolean): string {
+    const key = 'seal_' + (locked ? 'l' : 'o');
+    if (!this.textures.exists(key)) this.textures.addCanvas(key, regionSeal(124, locked));
+    return key;
   }
 
   private drawMap(): void {
@@ -121,52 +155,108 @@ export class WorldScene extends Phaser.Scene {
     g.clear();
     const byId = new Map(w.nodes.map((n) => [n.id, n]));
 
-    // Ребра
+    // Шляхи — чорнильний пунктир (з рівнем — щільніший і темніший)
     for (const e of w.edges) {
       const a = byId.get(e.from), b = byId.get(e.to);
       if (!a || !b) continue;
-      g.lineStyle(3, 0xe5d8bc, e.levelId ? 0.55 : 0.28);
-      // штрих для «ще без рівня» — сегментована лінія
-      if (e.levelId) {
-        g.lineBetween(this.sx(a.x), this.sy(a.y), this.sx(b.x), this.sy(b.y));
-      } else {
-        this.dashedLine(g, this.sx(a.x), this.sy(a.y), this.sx(b.x), this.sy(b.y), 9, 7);
-      }
+      g.lineStyle(2.4, 0x231a12, e.levelId ? 0.8 : 0.42);
+      this.dashedLine(g, this.sx(a.x), this.sy(a.y), this.sx(b.x), this.sy(b.y), e.levelId ? 12 : 7, 8);
     }
 
-    // Вузли
     for (const n of w.nodes) {
       const x = this.sx(n.x), y = this.sy(n.y);
       const locked = n.type === 'region' && !n.regionId;
-      if (n.type === 'region') {
-        // Регіон — ромб (зачинений — тьмяний з замком)
-        g.fillStyle(locked ? 0x4a4438 : 0xcbb98a, 1);
-        g.lineStyle(2.5, 0x141118, 1);
-        g.beginPath();
-        g.moveTo(x, y - 20); g.lineTo(x + 20, y); g.lineTo(x, y + 20); g.lineTo(x - 20, y);
-        g.closePath(); g.fillPath(); g.strokePath();
-      } else if (n.type === 'stop') {
-        g.fillStyle(0x9a8f78, 1);
-        g.fillCircle(x, y, 5);
-      } else {
-        g.fillStyle(0xd8cdb4, 1);
-        g.lineStyle(2.5, 0x141118, 1);
-        g.fillCircle(x, y, 12);
-        g.strokeCircle(x, y, 12);
+
+      if (n.type === 'stop') {
+        g.fillStyle(0x231a12, 0.9);
+        g.fillCircle(x, y, 4.5);
+        continue;
       }
-      // Підпис
-      if (n.type !== 'stop') {
-        const t = this.add.text(x, y + (n.type === 'region' ? 30 : 22), n.label + (locked ? ' 🔒' : ''), {
-          fontFamily: MENU_FONT, fontSize: '17px', color: locked ? '#8a8171' : COL_TEXT,
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(6)
-          .setShadow(1, 2, '#000000', 5, false, true);
-        this.labels.push(t);
-      }
-      // Хіт-зона кліку
-      const zone = this.add.zone(x, y, 56, 56).setOrigin(0.5).setScrollFactor(0)
-        .setInteractive({ useHandCursor: !locked });
-      zone.on('pointerup', () => this.onNodeClick(n));
+
+      const texKey = n.type === 'region'
+        ? this.sealTexture(locked)
+        : this.iconTexture((n.icon as MapIconKind) || iconFromLabel(n.label));
+      const baseScale = n.type === 'region' ? 0.86 : 0.8;
+
+      // Золота підсвітка — копія текстури за іконкою (видима лише в hover)
+      const glow = this.add.image(x, y, texKey).setScrollFactor(0).setDepth(6)
+        .setScale(baseScale * 1.12).setTint(0xd99a2b).setAlpha(0);
+      const img = this.add.image(x, y, texKey).setScrollFactor(0).setDepth(7).setScale(baseScale);
+      if (locked) img.setAlpha(0.55);
+
+      // Підпис чорнилом
+      this.add.text(x, y + 44, n.label, {
+        fontFamily: MAP_FONT, fontStyle: 'italic', fontSize: '17px', color: locked ? INK_SOFT : INK,
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(8);
+
+      img.setInteractive({ useHandCursor: !locked });
+      const view: NodeView = { node: n, img, glow, baseScale };
+      this.views.push(view);
+      img.on('pointerover', () => this.setHover(view));
+      img.on('pointerout', () => this.clearHover(view));
+      img.on('pointerup', () => {
+        // Телефон: перший тап = підсвітка+прапорець, другий — дія.
+        if (this.hoveredId !== n.id) { this.setHover(view); return; }
+        this.onNodeClick(n);
+      });
     }
+  }
+
+  // ── hover: збільшення + підсвітка + прапорець-опис ──────────────────────────
+  private setHover(v: NodeView): void {
+    if (this.hoveredId === v.node.id) return;
+    const prev = this.views.find((x) => x.node.id === this.hoveredId);
+    if (prev) this.clearHover(prev);
+    this.hoveredId = v.node.id;
+    this.tweens.add({ targets: v.img, scale: v.baseScale * 1.18, duration: 140, ease: 'sine.out' });
+    this.tweens.add({ targets: v.glow, alpha: 0.75, scale: v.baseScale * 1.3, duration: 140 });
+    this.showBanner(v);
+  }
+
+  private clearHover(v: NodeView): void {
+    if (this.hoveredId !== v.node.id) return;
+    this.hoveredId = null;
+    this.tweens.add({ targets: v.img, scale: v.baseScale, duration: 140, ease: 'sine.in' });
+    this.tweens.add({ targets: v.glow, alpha: 0, scale: v.baseScale * 1.12, duration: 140 });
+    this.hideBanner();
+  }
+
+  // Прапорець над іконкою: планка з хвостиком + назва + короткий опис.
+  private showBanner(v: NodeView): void {
+    this.hideBanner();
+    const n = v.node;
+    const x = this.sx(n.x), y = this.sy(n.y) - 52;
+    const cont = this.add.container(x, y).setScrollFactor(0).setDepth(30);
+    const title = this.add.text(0, 0, n.label, {
+      fontFamily: MAP_FONT, fontSize: '16px', fontStyle: 'bold', color: '#efe3c8',
+    }).setOrigin(0.5, 0.5);
+    const descTxt = n.desc ? this.add.text(0, 0, n.desc, {
+      fontFamily: MAP_FONT, fontSize: '13px', fontStyle: 'italic', color: '#cbb98a',
+      wordWrap: { width: 230 }, align: 'center',
+    }).setOrigin(0.5, 0) : null;
+    const wBox = Math.max(title.width, descTxt?.width ?? 0) + 26;
+    const hBox = 14 + title.height + (descTxt ? descTxt.height + 4 : 0);
+    title.setY(-hBox / 2 + 8 + title.height / 2 - 4);
+    if (descTxt) descTxt.setY(title.y + title.height / 2 + 2);
+    const g = this.add.graphics();
+    g.fillStyle(0x231a12, 0.94);
+    g.fillRoundedRect(-wBox / 2, -hBox / 2, wBox, hBox, 6);
+    g.lineStyle(2, 0xcbb98a, 0.8);
+    g.strokeRoundedRect(-wBox / 2, -hBox / 2, wBox, hBox, 6);
+    // хвостик до іконки
+    g.fillTriangle(-7, hBox / 2, 7, hBox / 2, 0, hBox / 2 + 10);
+    cont.add([g, title]);
+    if (descTxt) cont.add(descTxt);
+    cont.setY(y - hBox / 2);
+    cont.setAlpha(0);
+    this.tweens.add({ targets: cont, alpha: 1, y: cont.y - 4, duration: 150, ease: 'sine.out' });
+    this.banner = cont;
+  }
+
+  private hideBanner(): void {
+    if (!this.banner) return;
+    const b = this.banner; this.banner = null;
+    this.tweens.add({ targets: b, alpha: 0, duration: 120, onComplete: () => b.destroy() });
   }
 
   private dashedLine(g: Phaser.GameObjects.Graphics, x1: number, y1: number, x2: number, y2: number, dash: number, gap: number): void {
@@ -181,7 +271,6 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  // Точка героя: збережена позиція в ЦЬОМУ світі, або перше село (location-вузол).
   private placeDot(): void {
     const w = this.world!;
     const t = loadTravel();
@@ -191,10 +280,9 @@ export class WorldScene extends Phaser.Scene {
     if (!node) return;
     this.curNodeId = node.id;
     saveTravel({ worldId: w.id, nodeId: node.id });
-    this.dot = this.add.circle(this.sx(node.x), this.sy(node.y), 9, 0xffffff)
-      .setScrollFactor(0).setDepth(10).setStrokeStyle(2.5, 0x141118);
-    // легка пульсація — щоб героя було видно одразу
-    this.tweens.add({ targets: this.dot, scale: 1.25, duration: 700, yoyo: true, repeat: -1, ease: 'sine.inout' });
+    this.dot = this.add.circle(this.sx(node.x), this.sy(node.y) + 14, 8.5, 0xffffff)
+      .setScrollFactor(0).setDepth(12).setStrokeStyle(3, 0x231a12);
+    this.tweens.add({ targets: this.dot, scale: 1.22, duration: 700, yoyo: true, repeat: -1, ease: 'sine.inout' });
   }
 
   private onNodeClick(n: WorldNode): void {
@@ -204,9 +292,7 @@ export class WorldScene extends Phaser.Scene {
       this.scene.start('World', { worldId: n.regionId });
       return;
     }
-    // стоїмо тут → одразу відкриваємо локацію
     if (n.id === this.curNodeId) { this.openNode(n); return; }
-    // інакше — їдемо по ребрах (BFS-шлях); переходи-рівні поки скіпаються
     const path = this.findPath(this.curNodeId, n.id);
     if (!path || path.length < 2) { this.toast('Туди нема шляху'); return; }
     this.travelAlong(path, () => this.openNode(n));
@@ -218,7 +304,6 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  // BFS по ребрах (двобічно — twoWay поки не обмежує).
   private findPath(from: string | null, to: string): string[] | null {
     const w = this.world!;
     if (!from) return [to];
@@ -246,7 +331,6 @@ export class WorldScene extends Phaser.Scene {
     return null;
   }
 
-  // Анімований переїзд точки по сегментах шляху; час ~ довжині сегмента.
   private travelAlong(path: string[], done: () => void): void {
     const w = this.world!;
     const byId = new Map(w.nodes.map((n) => [n.id, n]));
@@ -262,7 +346,7 @@ export class WorldScene extends Phaser.Scene {
       }
       const n = byId.get(path[i]); i++;
       if (!n || !this.dot) { step(); return; }
-      const tx = this.sx(n.x), ty = this.sy(n.y);
+      const tx = this.sx(n.x), ty = this.sy(n.y) + 14;
       const dist = Math.hypot(tx - this.dot.x, ty - this.dot.y);
       this.tweens.add({
         targets: this.dot, x: tx, y: ty,
@@ -275,30 +359,35 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private addTitle(): void {
-    this.add.text(LOGICAL_W / 2 + this.offX, 40 + this.offY, this.world?.name ?? 'Мандри', {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '34px', color: '#efe3c8',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(20).setShadow(2, 3, '#000000', 7, false, true);
+    // Картуш-заголовок чорнилом на пергаменті
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, 42 + this.offY, this.world?.name ?? 'Мандри', {
+      fontFamily: MAP_FONT, fontStyle: 'small-caps', fontSize: '36px', color: INK,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(20);
+    // підкреслення-розчерк
+    const g = this.add.graphics().setScrollFactor(0).setDepth(20);
+    g.lineStyle(2, 0x231a12, 0.7);
+    const y = 42 + this.offY + t.height / 2 + 3;
+    g.lineBetween(t.x - t.width / 2 - 14, y, t.x + t.width / 2 + 14, y);
   }
 
   private addBackButton(): void {
     const label = this.isGlobal ? '‹ Меню' : '‹ Мапа країв';
     const t = this.add.text(36 + this.offX, 34 + this.offY, label, {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '24px', color: COL_TEXT,
+      fontFamily: MAP_FONT, fontStyle: 'small-caps', fontSize: '24px', color: INK,
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(20)
-      .setShadow(1, 2, '#000000', 6, false, true)
       .setInteractive({ useHandCursor: true });
-    t.on('pointerover', () => t.setColor('#ffcf8f'));
-    t.on('pointerout', () => t.setColor(COL_TEXT));
+    t.on('pointerover', () => t.setColor('#7a5b16'));
+    t.on('pointerout', () => t.setColor(INK));
     t.on('pointerup', () => {
       if (this.isGlobal) this.scene.start('Menu');
-      else this.scene.start('World', {}); // на глобальну
+      else this.scene.start('World', {});
     });
   }
 
   private toast(msg: string): void {
-    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 46 + this.offY, msg, {
-      fontFamily: MENU_FONT, fontSize: '20px', color: '#ffcf8f',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setShadow(1, 2, '#000', 5, false, true);
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 42 + this.offY, msg, {
+      fontFamily: MAP_FONT, fontSize: '19px', fontStyle: 'italic', color: INK,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30);
     this.tweens.add({ targets: t, alpha: 0, delay: 900, duration: 500, onComplete: () => t.destroy() });
   }
 }
