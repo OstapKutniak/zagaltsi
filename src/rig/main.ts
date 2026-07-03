@@ -311,8 +311,24 @@ function jitterP(t: number, p: number): number {
   return Math.sin(t * 42) * (1 - p) * (1 - p);
 }
 
+// Проміжні (перехідні) анімації — ДЗЕРКАЛО src/anim/CutoutCharacter.ts: блендінг
+// між двома процедурними позами (сидить↔стоїть). f=0 → from, f=1 → to.
+const TRANSITIONS: Record<string, { from: string; to: string; dur: number }> = {
+  sit_to_idle: { from: 'sit', to: 'idle', dur: 0.75 }, // встає з лавки
+  idle_to_sit: { from: 'idle', to: 'sit', dur: 0.75 }, // сідає на лавку
+};
+const smooth01 = (x: number): number => { const f = x < 0 ? 0 : x > 1 ? 1 : x; return f * f * (3 - 2 * f); };
+const transScalarP = (tr: { from: string; to: string; dur: number }, t: number, key: string, fn: (n: string, t: number, k: string) => number): number =>
+  fn(tr.from, t, key) + (fn(tr.to, t, key) - fn(tr.from, t, key)) * smooth01(t / tr.dur);
+
 // Рух усього тіла (корінь) — однаковий для всіх частин: підскок, погойдування.
 function animRoot(name: string, t: number): { ddx: number; ddy: number } {
+  const tr = TRANSITIONS[name];
+  if (tr) {
+    const f = smooth01(t / tr.dur);
+    const a = animRoot(tr.from, t), b = animRoot(tr.to, t);
+    return { ddx: a.ddx + (b.ddx - a.ddx) * f, ddy: a.ddy + (b.ddy - a.ddy) * f };
+  }
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 5.5)) * 3 };
   if (name === 'run') return { ddx: 0, ddy: -Math.abs(Math.sin(t * 9)) * 5 };
   if (name === 'jump') {
@@ -351,6 +367,12 @@ const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 
 
 // Локальний догин кістки (лише ОБЕРТАННЯ) — поверх руху кореня. Пропорційно-незалежно.
 function animOff(name: string, t: number, key: string): { drot: number; ddx: number; ddy: number } {
+  const tr = TRANSITIONS[name];
+  if (tr) {
+    const f = smooth01(t / tr.dur);
+    const a = animOff(tr.from, t, key), b = animOff(tr.to, t, key);
+    return { drot: a.drot + (b.drot - a.drot) * f, ddx: a.ddx + (b.ddx - a.ddx) * f, ddy: a.ddy + (b.ddy - a.ddy) * f };
+  }
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
     // Голова повільніша за груди + зрідка «роззирається»; руки з фазовим лагом;
@@ -446,6 +468,7 @@ function animOff(name: string, t: number, key: string): { drot: number; ddx: num
 // Згин у суглобі (коліно/лікоть) для розрізаних кінцівок — градуси, поверх slot.bend.
 // Знак від'ємний — коліно/лікоть гнуться "назад" (природно).
 function animBend(name: string, t: number, key: string): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalarP(tr, t, key, animBend);
   if (name === 'walk' || name === 'run') {
     const spd = name === 'run' ? 9 : 5.5; const ph = t * spd;
     const legAmp = name === 'run' ? 46 : 28, armAmp = name === 'run' ? 50 : 34;
@@ -501,6 +524,9 @@ const PROC_PERIOD: Record<string, number> = {
   attack: 0.7,
   hurt: 0.6,
   sit: TWO_PI / 1.5,
+  // Переходи: рух ~0.75с + пауза в кінцевій позі (щоб у прев'ю було видно результат).
+  sit_to_idle: 1.8,
+  idle_to_sit: 1.8,
 };
 
 // Перекат стопи (cut2 = гомілковостоп, cut3 = плюснофаланговий/пальці) у ходьбі/бігу.
@@ -518,6 +544,7 @@ function footPhaseU(name: string, t: number, key: string): number {
 // гомілковостоп: тил-флексія (носок угору) в махі та перед ударом п'яти,
 // підошовна (носок донизу) на відштовхуванні
 function animBend2(name: string, t: number, key: string): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalarP(tr, t, key, animBend2);
   if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
     const u = footPhaseU(name, t, key);
     const dorsiSwing = pbump(u, 0.18, 0.13); // носок угору — кліренс у махі
@@ -529,6 +556,7 @@ function animBend2(name: string, t: number, key: string): number {
 }
 // пальці: згинаються на відштовхуванні (перекат через носок)
 function animBend3(name: string, t: number, key: string): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalarP(tr, t, key, animBend3);
   if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
     const u = footPhaseU(name, t, key);
     return pbump(u, 0.90, 0.05) * 20 * (name === 'run' ? 1.3 : 1);
@@ -2520,7 +2548,7 @@ function play(on: boolean): void {
   refreshTimeline();
 }
 // ---- іменовані анімації (службові процедурні + власні з ключами) ----
-const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt', 'sit'];
+const BUILTIN = ['idle', 'walk', 'run', 'jump', 'attack', 'hurt', 'sit', 'sit_to_idle', 'idle_to_sit'];
 function refreshAnimOptions(): void {
   const sel = $<HTMLSelectElement>('anim'); const cur = state.anim ?? '';
   sel.innerHTML = '<option value="">base pose</option>';

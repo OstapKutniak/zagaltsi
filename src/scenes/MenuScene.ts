@@ -4,6 +4,7 @@ import { hideLoadScreen, setTouchUI } from './uiButton';
 import { startAmbience, stopAmbience, triggerThunder, loadLobbyMix } from '../sound/ambience';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import { loadCharLibrary } from '../charlib';
+import { InventoryPage } from './inventoryPage';
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
 // Заголовок ХОРУГВА зверху по центру; кнопки-розділи зліва, серифом у small-caps,
@@ -79,20 +80,41 @@ export class MenuScene extends Phaser.Scene {
   private boltDur = 0.4;
   protected fx: MenuFxData = normFx(null); // ефекти сцени (перекриваються pg.fx з menu.json)
 
-  // key параметризовано: сторінка «Інвентар» (InventoryScene) успадковує хатину.
+  // Реальночасні сторінки (та сама сцена-хатина): 'home' (Житло) ↔ 'inventory'.
+  // Перехід НЕ перезапускає сцену — персонаж встає/сідає проміжною анімацією,
+  // верхній напис плавно перетікає, кнопки лишаються на місці.
+  protected initialPage = 'home';
+  private curPage = 'home';
+  private offX = 0; private offY = 0;
+  private titleTxt: Phaser.GameObjects.Text | null = null;
+  private holder: Phaser.GameObjects.Container | null = null; // обгортка персонажа
+  private invPage: InventoryPage | null = null;
+  private switching = false;
+  // Керування переходом вручну в update() (надійніше за time.delayedCall у цій сцені).
+  private trT = 0; private trDur = 0; private trTo: string | null = null;
+  private trToAnim = 'idle'; private trBuilt = false;
+
+  // key параметризовано: сторінка «Інвентар» (InventoryScene) стартує на 'inventory'.
   constructor(key = 'Menu') { super(key); }
 
   init(data: { pageId?: string }): void { this.pageId = data?.pageId ?? null; }
 
-  // ── Хуки для сторінок-нащадків (Інвентар тощо) ──────────────────────────────
-  protected pageTitle(): string { return 'ЖИТЛО'; }
-  // Поза/позиція персонажа; feetY — поставити ступні на цю логічну висоту.
-  protected charSetup(): { anim: string; x: number; y: number; scale: number; feetY?: number } {
+  // ── Опис сторінок ───────────────────────────────────────────────────────────
+  private pageTitle(key: string): string { return key === 'inventory' ? 'ІНВЕНТАР' : 'ЖИТЛО'; }
+  // Поза/позиція персонажа для сторінки; feetY — поставити ступні на цю висоту.
+  private pagePose(key: string): { anim: string; x: number; y: number; scale: number; feetY?: number } {
     const C = this.fx.char;
-    return { anim: 'sit', x: C.x, y: C.y, scale: C.scale };
+    if (key === 'inventory') return { anim: 'idle', x: C.x + 55, y: C.y, scale: C.scale, feetY: 522 };
+    return { anim: 'sit', x: C.x, y: C.y, scale: C.scale }; // home — сидить на лавці
   }
-  protected onCharReady(_char: CutoutCharacter): void { /* нащадки вдягають/чіпляють своє */ }
-  protected afterBuild(_offX: number, _offY: number): void { /* додатковий UI нащадків */ }
+  // Холдер (екранні координати) для пози сторінки.
+  private holderPos(pose: { anim: string; x: number; y: number; scale: number; feetY?: number }): { x: number; y: number } {
+    const x = pose.x + this.offX;
+    if (pose.feetY != null && this.lobbyChar) {
+      return { x, y: pose.feetY + this.offY - this.lobbyChar.measureFeetOffset(pose.anim, CHAR_FACING) * pose.scale };
+    }
+    return { x, y: pose.y + this.offY };
+  }
 
   create(): void {
     hideLoadScreen(); // меню — перша видима сцена, знімаємо HTML-оверлей завантаження
@@ -100,8 +122,11 @@ export class MenuScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setZoom(RENDER_SCALE);
     cam.setBackgroundColor('#0b0a0d');
-    const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
-    const offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    this.offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
+    this.offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    const offX = this.offX, offY = this.offY;
+    this.curPage = this.initialPage;
+    this.holder = null; this.invPage = null; this.switching = false;
 
     // Фон-хатина: масштаб «cover» (арт 20:9 = кадр, тож фактично точно вписується).
     const bg = this.add.image(LOGICAL_W / 2 + offX, LOGICAL_H / 2 + offY, 'menu_home')
@@ -113,8 +138,8 @@ export class MenuScene extends Phaser.Scene {
     this.input.once('pointerdown', () => { void loadLobbyMix().then((m) => startAmbience(m)); });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopAmbience());
 
-    // Заголовок — зверху по центру.
-    this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
+    // Заголовок — зверху по центру (текст сторінки; при переході плавно перетікає).
+    this.titleTxt = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(this.curPage), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
 
@@ -131,8 +156,72 @@ export class MenuScene extends Phaser.Scene {
     try { if (this.fx.fire.on) this.buildFire(offX, offY); } catch { /* без вогню */ }
     try { this.buildStorm(offX, offY); } catch { /* без шторму */ }
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
-    try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
-    try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
+    try { if (this.fx.char.on) await this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
+    // Додатковий UI початкової сторінки (напр., інвентар) — після появи персонажа.
+    try { this.buildPageExtra(this.curPage); } catch { /* без додаткового UI */ }
+  }
+
+  // Будує/перебудовує UI сторінки поверх хатини (слоти інвентаря тощо).
+  private buildPageExtra(key: string): void {
+    if (key === 'inventory') {
+      this.invPage = new InventoryPage(this, this.offX, this.offY, () => this.lobbyChar);
+      this.invPage.build();
+    }
+  }
+
+  // ── Реальночасний перехід між сторінками (без перезапуску сцени) ─────────────
+  private gotoPage(key: string): void {
+    if (this.switching || key === this.curPage) return;
+    if (!this.lobbyChar || !this.holder) { // немає персонажа — нема що анімувати
+      this.scene.start(key === 'inventory' ? 'Inventory' : 'Menu');
+      return;
+    }
+    this.switching = true;
+    const from = this.curPage, to = key;
+    const DUR = 750;
+
+    // Знести UI старої сторінки (роздягає персонажа, якщо йшли з інвентаря).
+    if (from === 'inventory' && this.invPage) { this.invPage.teardown(); this.invPage = null; }
+
+    // Персонаж: проміжна анімація (встає/сідає) + переїзд холдера у нову позицію.
+    const char = this.lobbyChar, holder = this.holder;
+    const fromPose = this.pagePose(from), toPose = this.pagePose(to);
+    const trName = fromPose.anim === 'sit' && toPose.anim === 'idle' ? 'sit_to_idle'
+      : fromPose.anim === 'idle' && toPose.anim === 'sit' ? 'idle_to_sit' : null;
+    const dst = this.holderPos(toPose);
+    char.setAnim(trName ?? toPose.anim);
+    this.tweens.add({ targets: holder, x: dst.x, y: dst.y, duration: DUR, ease: 'sine.inout' });
+
+    // Заголовок плавно перетікає в новий.
+    this.morphTitle(this.pageTitle(to));
+
+    // Далі веде update(): на середині будуємо UI сторінки, у кінці — ставимо кінцеву позу.
+    this.curPage = to;
+    this.trTo = to; this.trToAnim = toPose.anim; this.trDur = DUR / 1000; this.trT = 0; this.trBuilt = false;
+  }
+
+  // Крок переходу сторінки (з update). Керуємо вручну — time.delayedCall у цій сцені
+  // ненадійний (не спрацьовував), а update тут гарантовано тікає.
+  private stepTransition(dt: number): void {
+    if (!this.trTo) return;
+    this.trT += dt;
+    if (!this.trBuilt && this.trT >= this.trDur * 0.55) { this.trBuilt = true; this.buildPageExtra(this.trTo); }
+    if (this.trT >= this.trDur) {
+      this.lobbyChar?.setAnim(this.trToAnim);
+      this.switching = false; this.trTo = null;
+    }
+  }
+
+  // Верхній напис: крос-фейд старого тексту в новий (лишається по центру).
+  private morphTitle(newText: string): void {
+    const old = this.titleTxt;
+    if (!old) return;
+    const neu = this.add.text(old.x, old.y, newText, {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true).setAlpha(0);
+    this.titleTxt = neu;
+    this.tweens.add({ targets: old, alpha: 0, duration: 260, ease: 'sine.in', onComplete: () => old.destroy() });
+    this.tweens.add({ targets: neu, alpha: 1, duration: 320, ease: 'sine.out' });
   }
 
   // Шибки вікна: прямокутник дощу з редактора; panes — ділимо хрестовиною 2×2.
@@ -224,7 +313,11 @@ export class MenuScene extends Phaser.Scene {
     if (target === 'khorugva') { this.scene.start('Khorugva'); return; }
     if (target === 'quests') { this.scene.start('Quests'); return; }
     if (target === 'achievements') { this.scene.start('Achievements'); return; }
-    if (target === 'inventory' || target === 'section:Інвентар') { this.scene.start('Inventory'); return; }
+    if (target === 'inventory' || target === 'section:Інвентар') {
+      // Реальночасний перехід у межах сцени (персонаж встає/сідає), toggle назад у Житло.
+      this.gotoPage(this.curPage === 'inventory' ? 'home' : 'inventory');
+      return;
+    }
     if (target.startsWith('section:')) { this.scene.start('Section', { title: target.slice(8), from: 'Menu' }); return; }
     if (target.startsWith('page:')) { this.scene.start('Menu', { pageId: target.slice(5) }); return; }
   }
@@ -335,15 +428,15 @@ export class MenuScene extends Phaser.Scene {
     if (doc.slots?.torso && doc.slots.torso.cut == null) doc.slots.torso.cut = 0.5;
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
     if (!char || !this.scene.isActive()) return;
-    const st = this.charSetup();
-    char.setAnim(st.anim);
+    const pose = this.pagePose(this.curPage);
+    char.setAnim(pose.anim);
     // Обгортка задає позицію/масштаб: tick() щокадру перезаписує scaleX/Y самого персонажа.
-    const holder = this.add.container(st.x + offX, st.y + offY, [char]);
-    holder.setScrollFactor(0).setScale(st.scale).setDepth(5);
-    // Поставити ступні на вказану висоту (для стоячих поз в Інвентарі).
-    if (st.feetY != null) { char.tick(0, CHAR_FACING); holder.y = st.feetY + offY - char.feetOffset() * st.scale; }
+    const holder = this.add.container(pose.x + offX, pose.y + offY, [char]);
+    holder.setScrollFactor(0).setScale(pose.scale).setDepth(5);
     this.lobbyChar = char;
-    this.onCharReady(char);
+    this.holder = holder;
+    // Поставити ступні на вказану висоту (для стоячих поз в Інвентарі).
+    if (pose.feetY != null) { char.tick(0, CHAR_FACING); holder.y = this.holderPos(pose).y; }
   }
 
   private static hasImages(doc: CharDoc | null | undefined): boolean {
@@ -370,6 +463,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   update(_time: number, deltaMs: number): void {
+    this.stepTransition(deltaMs / 1000);
     this.lobbyChar?.tick(deltaMs / 1000, CHAR_FACING);
     // Мерехтіння вогню: сума неспівмірних синусів = живий нерівний ритм.
     this.fireTime += deltaMs / 1000;

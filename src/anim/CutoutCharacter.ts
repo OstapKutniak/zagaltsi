@@ -60,7 +60,32 @@ function jitter(t: number, p: number): number {
   return Math.sin(t * 42) * (1 - p) * (1 - p);
 }
 
+// Проміжні (перехідні) анімації: плавний блендінг між ДВОМА процедурними позами.
+// f=0 → from, f=1 → to; обидві семплимо в той самий t (дихання неперервне), тож
+// блендінг гладкий. Після dur f тримається на 1 (поза лишається кінцевою).
+// ДЗЕРКАЛО у src/rig/main.ts (TRANSITIONS + transBlend).
+const TRANSITIONS: Record<string, { from: string; to: string; dur: number }> = {
+  sit_to_idle: { from: 'sit', to: 'idle', dur: 0.75 }, // встає з лавки
+  idle_to_sit: { from: 'idle', to: 'sit', dur: 0.75 }, // сідає на лавку
+};
+const smooth01 = (x: number): number => { const f = x < 0 ? 0 : x > 1 ? 1 : x; return f * f * (3 - 2 * f); };
+function transRoot(tr: { from: string; to: string; dur: number }, t: number, ctx: AnimCtx): { ddx: number; ddy: number } {
+  const f = smooth01(t / tr.dur);
+  const a = animRoot(tr.from, t, ctx), b = animRoot(tr.to, t, ctx);
+  return { ddx: a.ddx + (b.ddx - a.ddx) * f, ddy: a.ddy + (b.ddy - a.ddy) * f };
+}
+function transOff(tr: { from: string; to: string; dur: number }, t: number, key: string, ctx: AnimCtx): { drot: number; ddx: number; ddy: number } {
+  const f = smooth01(t / tr.dur);
+  const a = animOff(tr.from, t, key, ctx), b = animOff(tr.to, t, key, ctx);
+  return { drot: a.drot + (b.drot - a.drot) * f, ddx: a.ddx + (b.ddx - a.ddx) * f, ddy: a.ddy + (b.ddy - a.ddy) * f };
+}
+const transScalar = (tr: { from: string; to: string; dur: number }, t: number, key: string, ctx: AnimCtx, fn: (n: string, t: number, k: string, c: AnimCtx) => number): number => {
+  const f = smooth01(t / tr.dur);
+  return fn(tr.from, t, key, ctx) + (fn(tr.to, t, key, ctx) - fn(tr.from, t, key, ctx)) * f;
+};
+
 function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; ddy: number } {
+  const tr = TRANSITIONS[name]; if (tr) return transRoot(tr, t, ctx);
   const wk = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * wk)) * 3 };
   if (name === 'run')  return { ddx: 0, ddy: -Math.abs(Math.sin(t * wk)) * 5 };
@@ -108,6 +133,7 @@ function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; dd
 // авторський кліп «sit» перебиває цю процедурку.
 const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 52, armBack: 52, elbow: -125, torso: -12, spine: 40 };
 function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { drot: number; ddx: number; ddy: number } {
+  const tr = TRANSITIONS[name]; if (tr) return transOff(tr, t, key, ctx);
   const z = { drot: 0, ddx: 0, ddy: 0 };
   if (name === 'idle') {
     // Голова живе повільніше за груди + зрідка «роззирається» (довгий синус).
@@ -223,6 +249,7 @@ function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { dro
 
 // Згин у суглобі (лікоть/коліно) — як у тулзі (для розрізаних кінцівок).
 function animBend(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalar(tr, t, key, ctx, animBend);
   if (name === 'walk' || name === 'run') {
     const spd = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
     const ph = t * spd;
@@ -292,6 +319,7 @@ function footPhaseU(name: string, t: number, key: string, ctx: AnimCtx): number 
   return ((ph / (Math.PI * 2)) % 1 + 1) % 1;
 }
 function animBend2(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalar(tr, t, key, ctx, animBend2);
   if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
     const u = footPhaseU(name, t, key, ctx);
     const dorsiSwing = pbump(u, 0.18, 0.13), dorsiHeel = pbump(u, 0.46, 0.05), plantar = pbump(u, 0.93, 0.06);
@@ -300,6 +328,7 @@ function animBend2(name: string, t: number, key: string, ctx: AnimCtx = {}): num
   return 0;
 }
 function animBend3(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  const tr = TRANSITIONS[name]; if (tr) return transScalar(tr, t, key, ctx, animBend3);
   if ((name === 'walk' || name === 'run') && (key === 'leg_front' || key === 'leg_back')) {
     const u = footPhaseU(name, t, key, ctx);
     return pbump(u, 0.90, 0.05) * 20 * (name === 'run' ? 1.3 : 1);
@@ -542,6 +571,19 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     }
     if (feet <= 0) feet = BASE.legs * this.prop.legs * this.unitScale();
     return feet;
+  }
+
+  get currentAnim(): string { return this.anim; }
+
+  // feetOffset для ІНШОЇ пози (щоб порахувати цільову висоту холдера під час переходу
+  // сидить↔стоїть), без видимого зсуву: заміряли й відновили поточну позу.
+  measureFeetOffset(anim: string, facing: number): number {
+    const sa = this.anim, st = this.t;
+    this.anim = anim; this.t = sa === anim ? st : 1.0; // стабільна фаза дихання
+    this.tick(0, facing);
+    const fo = this.feetOffset();
+    this.anim = sa; this.t = st; this.tick(0, facing); // відновити видиму позу
+    return fo;
   }
 
   // Y голови в локальних координатах контейнера (від'ємне = вище кореня/стегон).
