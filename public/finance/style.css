@@ -266,9 +266,9 @@ html, body {
 .ov-cat-top { display: flex; justify-content: space-between; font-size: 15px; }
 .ov-cat-amt { color: var(--text2); }
 .ov-cat-amt span { font-size: 11px; color: var(--text3); }
-.ov-bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 6px; overflow: hidden; display: flex; align-items: center; }
+.ov-bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 6px; overflow: hidden; }
 .ov-bar { height: 100%; background: var(--c); border-radius: 3px; }
-.ov-pct { font-size: 12px; font-weight: 700; color: var(--text2); margin-left: 8px; flex-shrink: 0; }
+.ov-pct { font-size: 11px; font-weight: 700; color: var(--text2); text-align: right; margin-top: 3px; }
 
 /* ── TAB BAR ── */
 .tabbar {

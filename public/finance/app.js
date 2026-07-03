@@ -465,12 +465,13 @@ function openCatSheet(catName, dir, catList) {
   const subsEl = el.querySelector('.cas-subs');
   subsEl.innerHTML = subs.map(([name, v]) => {
     const sp = total ? Math.round(v / total * 100) : 0;
-    const sst = catStyle(name);
+    const sst = catStyle(`${catName} (${name})`);
     return `<div class="cas-sub-row" data-sub="${escAttr(name)}" style="cursor:pointer">
-      <div class="cas-sub-ic" style="--c:${sst.color}">${sst.icon}</div>
+      <div class="cas-sub-ic" style="--c:${st.color}">${sst.icon}</div>
       <div class="cas-sub-body">
         <div class="cas-sub-top"><span>${esc(name)}</span><span>${fmt(v)} <span class="cas-cur">UAH</span></span></div>
-        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div><span class="ov-pct">${sp}%</span></div>
+        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div></div>
+        <div class="ov-pct">${sp}%</div>
       </div>
     </div>`;
   }).join('');
@@ -896,7 +897,8 @@ function renderOverview() {
         <div class="ov-sub-dot" style="background:${st.color}"></div>
         <div class="ov-sub-body">
           <div class="ov-sub-top"><span>${esc(sub)}</span><span class="ov-cat-amt">${fmt(sv)} <span>UAH</span></span></div>
-          <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div><span class="ov-pct">${sp}%</span></div>
+          <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${sp}%"></div></div>
+          <div class="ov-pct">${sp}%</div>
         </div>
       </div>`;
     }).join('') : '';
@@ -904,14 +906,16 @@ function renderOverview() {
       <div class="ov-cat-ic" style="--c:${st.color}">${st.icon}</div>
       <div class="ov-cat-body">
         <div class="ov-cat-top"><span>${esc(x.name)}</span><span class="ov-cat-amt">${fmt(x.v)} <span>UAH</span></span></div>
-        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${pct}%"></div><span class="ov-pct">${pct}%</span></div>
+        <div class="ov-bar-bg"><div class="ov-bar" style="--c:${st.color};width:${pct}%"></div></div>
+        <div class="ov-pct">${pct}%</div>
       </div>
       ${subs.length ? `<span class="ov-chevron">${expanded ? '▲' : '▼'}</span>` : ''}
     </div>${subRows}`;
   }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
 
   const days = elapsedDays();
-  const avgD = total / days, avgW = avgD * 7, avgM = avgD * 30;
+  const monMul = state.period === 'month' ? new Date(state.cursor.getFullYear(), state.cursor.getMonth() + 1, 0).getDate() : 30.44;
+  const avgD = total / days, avgW = avgD * 7, avgM = avgD * monMul;
   const avgCol = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
 
   document.getElementById('ov-wrap').innerHTML = `
