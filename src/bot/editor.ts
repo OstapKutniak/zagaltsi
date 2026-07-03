@@ -28,9 +28,9 @@ const DEFAULT_CFG: BotCfg = {
 };
 
 let _init = false;
-export function initBotEditor(): void {
+export function initBotEditor(container?: HTMLElement): void {
   if (_init) return; _init = true;
-  const host = document.getElementById('mn-right')?.querySelector('.pane');
+  const host = container ?? document.getElementById('mn-right')?.querySelector('.pane');
   if (!host) return;
 
   let cfg: BotCfg = JSON.parse(JSON.stringify(DEFAULT_CFG)) as BotCfg;
@@ -70,6 +70,8 @@ export function initBotEditor(): void {
     head.classList.toggle('open', !open);
   });
   host.appendChild(head); host.appendChild(body);
+  // У перемикачі Редактора Історії секція вже вибрана табом — заголовок зайвий.
+  if (container) { head.style.display = 'none'; body.style.display = 'flex'; }
 
   const lbl = (t: string): HTMLElement => {
     const e = document.createElement('label');
