@@ -7,6 +7,7 @@ import { LocationScene } from './scenes/LocationScene';
 import { QuestsScene } from './scenes/QuestsScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { KhorugvaScene } from './scenes/KhorugvaScene';
+import { InventoryScene } from './scenes/InventoryScene';
 import { GameScene } from './scenes/GameScene';
 import { ColorGradePipeline } from './scenes/ColorGradePipeline';
 import { initTelegram, getStartParam } from './telegram';
@@ -40,7 +41,7 @@ const game = new Phaser.Game({
     height: LOGICAL_H * RENDER_SCALE,
   },
   pipeline: { ColorGrade: ColorGradePipeline } as unknown as Phaser.Types.Core.PipelineConfig,
-  scene: [BootScene, MenuScene, SectionScene, WorldScene, LocationScene, QuestsScene, AchievementsScene, KhorugvaScene, GameScene],
+  scene: [BootScene, MenuScene, SectionScene, WorldScene, LocationScene, QuestsScene, AchievementsScene, KhorugvaScene, InventoryScene, GameScene],
 });
 
 setupViewport(game);
@@ -54,7 +55,7 @@ const START_ROUTES: Record<string, { scene: string; data?: object }> = {
   khorugva: { scene: 'Khorugva' },
   zavdannya: { scene: 'Quests' },
   dosyagnennya: { scene: 'Achievements' },
-  inventar: { scene: 'Section', data: { title: 'Інвентар', from: 'Menu' } },
+  inventar: { scene: 'Inventory' },
 };
 const startParam = getStartParam();
 if (startParam) {

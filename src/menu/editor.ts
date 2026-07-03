@@ -48,6 +48,7 @@ const FIXED_TARGETS: Array<{ v: string; l: string }> = [
   { v: 'khorugva', l: 'Хоругва (паті)' },
   { v: 'quests', l: 'Завдання' },
   { v: 'achievements', l: 'Досягнення' },
+  { v: 'inventory', l: 'Інвентар (спорядження)' },
   { v: 'section:Завдання', l: 'Розділ: Завдання' },
   { v: 'section:Прогрес', l: 'Розділ: Прогрес' },
   { v: 'section:Інвентар', l: 'Розділ: Інвентар' },
@@ -75,7 +76,7 @@ export function initMenuEditor(prefix: string): void {
         { id: uid(), label: 'Хоругва', x: 92, y: 284, size: 34, target: 'khorugva' },
         { id: uid(), label: 'Завдання', x: 92, y: 358, size: 34, target: 'quests' },
         { id: uid(), label: 'Досягнення', x: 92, y: 432, size: 34, target: 'achievements' },
-        { id: uid(), label: 'Інвентар', x: 92, y: 506, size: 34, target: 'section:Інвентар' },
+        { id: uid(), label: 'Інвентар', x: 92, y: 506, size: 34, target: 'inventory' },
       ],
     }],
   });

@@ -65,7 +65,7 @@ async function loadMenuDoc(): Promise<MenuDocData | null> {
 }
 
 export class MenuScene extends Phaser.Scene {
-  private lobbyChar: CutoutCharacter | null = null;
+  protected lobbyChar: CutoutCharacter | null = null;
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
@@ -77,11 +77,22 @@ export class MenuScene extends Phaser.Scene {
   private boltNext = 4;   // сек до наступної блискавки
   private boltOn = 0;     // залишок поточного спалаху
   private boltDur = 0.4;
-  private fx: MenuFxData = normFx(null); // ефекти сцени (перекриваються pg.fx з menu.json)
+  protected fx: MenuFxData = normFx(null); // ефекти сцени (перекриваються pg.fx з menu.json)
 
-  constructor() { super('Menu'); }
+  // key параметризовано: сторінка «Інвентар» (InventoryScene) успадковує хатину.
+  constructor(key = 'Menu') { super(key); }
 
   init(data: { pageId?: string }): void { this.pageId = data?.pageId ?? null; }
+
+  // ── Хуки для сторінок-нащадків (Інвентар тощо) ──────────────────────────────
+  protected pageTitle(): string { return 'ЖИТЛО'; }
+  // Поза/позиція персонажа; feetY — поставити ступні на цю логічну висоту.
+  protected charSetup(): { anim: string; x: number; y: number; scale: number; feetY?: number } {
+    const C = this.fx.char;
+    return { anim: 'sit', x: C.x, y: C.y, scale: C.scale };
+  }
+  protected onCharReady(_char: CutoutCharacter): void { /* нащадки вдягають/чіпляють своє */ }
+  protected afterBuild(_offX: number, _offY: number): void { /* додатковий UI нащадків */ }
 
   create(): void {
     hideLoadScreen(); // меню — перша видима сцена, знімаємо HTML-оверлей завантаження
@@ -103,7 +114,7 @@ export class MenuScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopAmbience());
 
     // Заголовок — зверху по центру.
-    this.add.text(LOGICAL_W / 2 + offX, 58 + offY, 'ЖИТЛО', {
+    this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
 
@@ -121,6 +132,7 @@ export class MenuScene extends Phaser.Scene {
     try { this.buildStorm(offX, offY); } catch { /* без шторму */ }
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
     try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
+    try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
   }
 
   // Шибки вікна: прямокутник дощу з редактора; panes — ділимо хрестовиною 2×2.
@@ -199,7 +211,6 @@ export class MenuScene extends Phaser.Scene {
     ITEMS.forEach((it, i) => {
       this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
         if (it.target === 'World') this.scene.start('World', {});
-        else if (it.target === 'Inventory') this.scene.start('Section', { title: it.label, from: 'Menu' });
         else this.scene.start(it.target);
       });
     });
@@ -213,6 +224,7 @@ export class MenuScene extends Phaser.Scene {
     if (target === 'khorugva') { this.scene.start('Khorugva'); return; }
     if (target === 'quests') { this.scene.start('Quests'); return; }
     if (target === 'achievements') { this.scene.start('Achievements'); return; }
+    if (target === 'inventory' || target === 'section:Інвентар') { this.scene.start('Inventory'); return; }
     if (target.startsWith('section:')) { this.scene.start('Section', { title: target.slice(8), from: 'Menu' }); return; }
     if (target.startsWith('page:')) { this.scene.start('Menu', { pageId: target.slice(5) }); return; }
   }
@@ -322,13 +334,16 @@ export class MenuScene extends Phaser.Scene {
     // (перетирання ламало позу — персонаж у меню виходив нахилений/зіжмаканий).
     if (doc.slots?.torso && doc.slots.torso.cut == null) doc.slots.torso.cut = 0.5;
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
-    if (!char) return;
-    char.setAnim('sit');
+    if (!char || !this.scene.isActive()) return;
+    const st = this.charSetup();
+    char.setAnim(st.anim);
     // Обгортка задає позицію/масштаб: tick() щокадру перезаписує scaleX/Y самого персонажа.
-    const C = this.fx.char;
-    const holder = this.add.container(C.x + offX, C.y + offY, [char]);
-    holder.setScrollFactor(0).setScale(C.scale).setDepth(5);
+    const holder = this.add.container(st.x + offX, st.y + offY, [char]);
+    holder.setScrollFactor(0).setScale(st.scale).setDepth(5);
+    // Поставити ступні на вказану висоту (для стоячих поз в Інвентарі).
+    if (st.feetY != null) { char.tick(0, CHAR_FACING); holder.y = st.feetY + offY - char.feetOffset() * st.scale; }
     this.lobbyChar = char;
+    this.onCharReady(char);
   }
 
   private static hasImages(doc: CharDoc | null | undefined): boolean {
@@ -378,7 +393,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   // Кнопка меню: лише текст (без підкладки/обводки), small-caps, підсвітка + зсув при наведенні.
-  private makeMenuItem(x: number, y: number, label: string, onClick: () => void, size = 34): void {
+  protected makeMenuItem(x: number, y: number, label: string, onClick: () => void, size = 34): void {
     const t = this.add.text(x, y, label, {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: size + 'px', color: COL_IDLE,
     }).setOrigin(0, 0.5).setScrollFactor(0)
