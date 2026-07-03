@@ -47,6 +47,16 @@ export async function joinKhorugva(id: string): Promise<Khorugva | null> {
   return kh;
 }
 
+// Дані бота для прямих запрошень (мають збігатися з wrangler.toml воркера).
+export const BOT_USERNAME = 'Zagaltsi_Bot';
+export const APP_SHORT = 'Horugva';
+
+export async function leaveKhorugva(id: string): Promise<void> {
+  const myId = getPlayerId();
+  setMyKhorugva(null);
+  await withTimeout(set(ref(db, `khorugvas/${id}/members/${myId}`), null));
+}
+
 export function watchKhorugva(id: string, cb: (kh: Khorugva | null) => void): Unsubscribe {
   return onValue(ref(db, `khorugvas/${id}`), (snap) => cb(snap.val() as Khorugva | null));
 }

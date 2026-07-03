@@ -20,30 +20,33 @@ function addBase64Texture(scene: Phaser.Scene, key: string, dataURL: string): Pr
 }
 
 // Малює слот size×size у (x,y) (верхній лівий кут). member=null → порожній.
-export function drawKhSlot(scene: Phaser.Scene, x: number, y: number, size: number, member: KhMember | null): void {
-  const g = scene.add.graphics().setScrollFactor(0).setDepth(50);
+// into — контейнер-власник (щоб destroy(true) чисто прибирав слоти при оновленні).
+export function drawKhSlot(scene: Phaser.Scene, x: number, y: number, size: number, member: KhMember | null, into?: Phaser.GameObjects.Container): void {
+  const own = <T extends Phaser.GameObjects.GameObject>(o: T): T => { if (into) into.add(o); return o; };
+  const g = own(scene.add.graphics().setScrollFactor(0).setDepth(50));
   g.fillStyle(0x120d14, member ? 0.85 : 0.5);
   g.fillRect(x, y, size, size);
   g.lineStyle(2, member ? 0x8a7a5c : 0x3a3240, 1);
   g.strokeRect(x, y, size, size);
   if (!member) return;
 
+  const alive = (): boolean => scene.scene.isActive() && (!into || into.active);
   const letter = (): void => {
-    if (!scene.scene.isActive()) return;
-    scene.add.text(x + size / 2, y + size / 2, (member.name || '?').slice(0, 1).toUpperCase(), {
+    if (!alive()) return;
+    own(scene.add.text(x + size / 2, y + size / 2, (member.name || '?').slice(0, 1).toUpperCase(), {
       fontFamily: MENU_FONT, fontSize: Math.round(size * 0.5) + 'px', color: '#d8c9a3',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(51));
   };
 
   void lib().then(async (items) => {
-    if (!scene.scene.isActive()) return;
+    if (!alive()) return;
     const it = items.find((i) => i.id === member.charId && i.thumb)
       ?? items.find((i) => i.cat === 'char' && i.thumb);
     if (!it?.thumb) { letter(); return; }
     const key = 'khthumb_' + it.id;
     const ok = await addBase64Texture(scene, key, it.thumb);
-    if (!ok || !scene.scene.isActive()) { letter(); return; }
-    const im = scene.add.image(x + size / 2, y + size / 2, key).setScrollFactor(0).setDepth(51);
+    if (!ok || !alive()) { if (alive()) letter(); return; }
+    const im = own(scene.add.image(x + size / 2, y + size / 2, key).setScrollFactor(0).setDepth(51));
     const sc = Math.min((size - 6) / im.width, (size - 6) / im.height);
     im.setScale(sc);
   });

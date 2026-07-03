@@ -61,6 +61,11 @@ function jitter(t: number, p: number): number {
 }
 
 function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; ddy: number } {
+  const tk = transK(name, t);
+  if (tk != null) {
+    const a = animRoot('idle', t, ctx), b = animRoot('sit', t, ctx);
+    return { ddx: lerpN(a.ddx, b.ddx, tk), ddy: lerpN(a.ddy, b.ddy, tk) };
+  }
   const wk = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
   if (name === 'walk') return { ddx: 0, ddy: -Math.abs(Math.sin(t * wk)) * 3 };
   if (name === 'run')  return { ddx: 0, ddy: -Math.abs(Math.sin(t * wk)) * 5 };
@@ -107,8 +112,24 @@ function animRoot(name: string, t: number, ctx: AnimCtx = {}): { ddx: number; dd
 // руки на колінах, легке дихання. Знаки/кути тюняться в рігу (вибери «sit»); пізніше
 // авторський кліп «sit» перебиває цю процедурку.
 const SIT = { rootDown: 2, thighFront: 100, thighBack: 93, knee: -98, armFront: 52, armBack: 52, elbow: -125, torso: -12, spine: 40 };
+// Перехідні кліпи сісти/встати: бленд idle↔sit за TRANS_DUR (smoothstep).
+// 'sit_down' = idle→sit, 'stand_up' = sit→idle. Після завершення викликач сам
+// перемикає на кінцеву позу (setAnim('sit'|'idle')).
+export const TRANS_DUR = 0.7;
+function transK(name: string, t: number): number | null {
+  if (name !== 'sit_down' && name !== 'stand_up') return null;
+  const p = Math.max(0, Math.min(1, t / TRANS_DUR));
+  const k = p * p * (3 - 2 * p); // 0→1 у бік sit для sit_down
+  return name === 'sit_down' ? k : 1 - k;
+}
+const lerpN = (a: number, b: number, k: number): number => a + (b - a) * k;
 function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { drot: number; ddx: number; ddy: number } {
   const z = { drot: 0, ddx: 0, ddy: 0 };
+  const tk = transK(name, t);
+  if (tk != null) {
+    const a = animOff('idle', t, key, ctx), b = animOff('sit', t, key, ctx);
+    return { drot: lerpN(a.drot, b.drot, tk), ddx: lerpN(a.ddx, b.ddx, tk), ddy: lerpN(a.ddy, b.ddy, tk) };
+  }
   if (name === 'idle') {
     // Голова живе повільніше за груди + зрідка «роззирається» (довгий синус).
     if (key === 'head') return { drot: breath(t, 1.3) * 1.8 + Math.sin(t * 0.34) * 2.4, ddx: 0, ddy: 0 };
@@ -223,6 +244,8 @@ function animOff(name: string, t: number, key: string, ctx: AnimCtx = {}): { dro
 
 // Згин у суглобі (лікоть/коліно) — як у тулзі (для розрізаних кінцівок).
 function animBend(name: string, t: number, key: string, ctx: AnimCtx = {}): number {
+  const tk = transK(name, t);
+  if (tk != null) return lerpN(animBend('idle', t, key, ctx), animBend('sit', t, key, ctx), tk);
   if (name === 'walk' || name === 'run') {
     const spd = ctx.speed != null ? ctx.speed * (5.5 / 230) : (name === 'run' ? 9 : 5.5);
     const ph = t * spd;

@@ -2,7 +2,9 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen, setTouchUI } from './uiButton';
 import { startAmbience, stopAmbience, triggerThunder, loadLobbyMix } from '../sound/ambience';
-import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
+import { CutoutCharacter, TRANS_DUR, type CharDoc } from '../anim/CutoutCharacter';
+import { buildInvPanel, applyEquipTo, type InvPanel } from './invPanel';
+import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
@@ -66,6 +68,13 @@ async function loadMenuDoc(): Promise<MenuDocData | null> {
 
 export class MenuScene extends Phaser.Scene {
   protected lobbyChar: CutoutCharacter | null = null;
+  protected charHolder: Phaser.GameObjects.Container | null = null;
+  private titleObj: Phaser.GameObjects.Text | null = null;
+  // Ріалтайм-морф розділів БЕЗ зміни сцени: Житло↔Інвентар (персонаж встає/сідає,
+  // напис плавно перетворюється, фон/кнопки/шторм лишаються як були).
+  private curPage: 'home' | 'inventory' = 'home';
+  private invPanel: InvPanel | null = null;
+  private morphing = false;
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
@@ -114,7 +123,8 @@ export class MenuScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopAmbience());
 
     // Заголовок — зверху по центру.
-    this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
+    this.curPage = 'home'; this.invPanel = null; this.morphing = false;
+    this.titleObj = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
 
@@ -211,9 +221,59 @@ export class MenuScene extends Phaser.Scene {
     ITEMS.forEach((it, i) => {
       this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
         if (it.target === 'World') this.scene.start('World', {});
+        else if (it.target === 'Inventory') this.followTarget('inventory');
         else this.scene.start(it.target);
       });
     });
+  }
+
+  // Ріалтайм-перехід Житло↔Інвентар: сцена НЕ перезапускається — персонаж встає
+  // (stand_up) чи сідає (sit_down), заголовок плавно перетікає, панель інвентаря
+  // з'являється/зникає. Фон, вогонь, шторм і кнопки лишаються недоторкані.
+  private morphTo(page: 'home' | 'inventory'): void {
+    if (this.curPage === page || this.morphing) return;
+    this.morphing = true;
+    const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
+    const offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    const durMs = TRANS_DUR * 1000;
+
+    // Заголовок: розтанути → замінити → проявитись.
+    const newTitle = page === 'inventory' ? 'ІНВЕНТАР' : 'ЖИТЛО';
+    if (this.titleObj) {
+      const t = this.titleObj;
+      this.tweens.add({ targets: t, alpha: 0, duration: 240, ease: 'Sine.easeIn',
+        onComplete: () => { t.setText(newTitle); this.tweens.add({ targets: t, alpha: 1, duration: 300, ease: 'Sine.easeOut' }); } });
+    }
+
+    // Персонаж: встає/сідає + пливе на своє місце.
+    const char = this.lobbyChar, holder = this.charHolder;
+    const C = this.fx.char;
+    if (char && holder) {
+      if (page === 'inventory') {
+        // виміряти висоту ступень у СТОЯЧІЙ позі, тоді грати перехід
+        char.setAnim('idle'); char.tick(0, CHAR_FACING);
+        const standY = 522 + offY - char.feetOffset() * C.scale;
+        char.setAnim('stand_up');
+        this.tweens.add({ targets: holder, x: C.x + 55 + offX, y: standY, duration: durMs, ease: 'Sine.easeInOut' });
+        this.time.delayedCall(durMs, () => { if (this.lobbyChar === char) char.setAnim('idle'); });
+      } else {
+        char.setAnim('sit_down');
+        this.tweens.add({ targets: holder, x: C.x + offX, y: C.y + offY, duration: durMs, ease: 'Sine.easeInOut' });
+        this.time.delayedCall(durMs, () => { if (this.lobbyChar === char) char.setAnim('sit'); });
+      }
+    }
+
+    // Панель інвентаря.
+    if (page === 'inventory') {
+      this.invPanel?.destroy();
+      this.invPanel = buildInvPanel(this, offX, offY, () => this.lobbyChar);
+      applyEquipTo(char, loadEquip());
+    } else {
+      this.invPanel?.destroy(); this.invPanel = null;
+    }
+
+    this.curPage = page;
+    this.time.delayedCall(durMs, () => { this.morphing = false; });
   }
 
   // Гіперпосилання кнопки меню: сцени гри або інша сторінка меню.
@@ -224,7 +284,11 @@ export class MenuScene extends Phaser.Scene {
     if (target === 'khorugva') { this.scene.start('Khorugva'); return; }
     if (target === 'quests') { this.scene.start('Quests'); return; }
     if (target === 'achievements') { this.scene.start('Achievements'); return; }
-    if (target === 'inventory' || target === 'section:Інвентар') { this.scene.start('Inventory'); return; }
+    if (target === 'inventory' || target === 'section:Інвентар') {
+      if (this.sys.settings.key === 'Menu') this.morphTo(this.curPage === 'inventory' ? 'home' : 'inventory');
+      else this.scene.start('Inventory');
+      return;
+    }
     if (target.startsWith('section:')) { this.scene.start('Section', { title: target.slice(8), from: 'Menu' }); return; }
     if (target.startsWith('page:')) { this.scene.start('Menu', { pageId: target.slice(5) }); return; }
   }
@@ -343,6 +407,7 @@ export class MenuScene extends Phaser.Scene {
     // Поставити ступні на вказану висоту (для стоячих поз в Інвентарі).
     if (st.feetY != null) { char.tick(0, CHAR_FACING); holder.y = st.feetY + offY - char.feetOffset() * st.scale; }
     this.lobbyChar = char;
+    this.charHolder = holder;
     this.onCharReady(char);
   }
 
