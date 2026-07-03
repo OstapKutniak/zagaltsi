@@ -306,7 +306,7 @@ function renderAll() {
   else if (state.tab === 'accounts') renderAccounts();
   else if (state.tab === 'overview') renderOverview();
   else if (state.tab === 'recurring') renderRecurring();
-  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts' || state.tab === 'recurring');
+  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts');
 }
 
 function renderHeader() {
@@ -680,21 +680,17 @@ function generalTotal() {
 }
 function renderRecurring() {
   const el = document.getElementById('rec-mon-list');
-  const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r }));
-  if (!items.length) {
-    el.innerHTML = `<div class="empty" style="padding:60px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M12 12.5v3l2 1"/></svg></div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
-    return;
-  }
+  const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r })).sort((a, b) => a.day - b.day);
   const now = new Date(), mk = monthKey(now), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  items.sort((a, b) => a.day - b.day);
-  let unpaidNet = 0;
+  let allExp = 0, remExp = 0, remNet = 0;
   const rows = items.map(r => {
     const paid = !!(r.paid && r.paid[mk]);
     const day = Math.min(r.day, dim);
     const st = catStyle(r.category);
     const sign = r.type === 'income' ? '+' : '−';
     const col = r.type === 'income' ? 'var(--inc)' : 'var(--exp)';
-    if (!paid) unpaidNet += (r.type === 'income' ? +r.amount : -r.amount);
+    if (r.type === 'expense') allExp += +r.amount;
+    if (!paid) { if (r.type === 'expense') remExp += +r.amount; remNet += (r.type === 'income' ? +r.amount : -r.amount); }
     return `<div class="mon-item ${paid ? 'paid' : ''}" data-id="${r.id}">
       <div class="mon-day">${day}<span>число</span></div>
       <div class="mon-ic" style="--c:${st.color}">${st.icon}</div>
@@ -706,16 +702,24 @@ function renderRecurring() {
       <button class="mon-check ${paid ? 'done' : ''}" data-check="${r.id}">${paid ? '✓' : ''}</button>
     </div>`;
   }).join('');
-  const expected = generalTotal() + unpaidNet;
-  el.innerHTML = `<div class="mon-list">${rows}</div>
-    <div class="mon-foot">
-      <div class="mon-foot-row"><span>Разом щомісячні</span><span style="color:var(--exp)">${fmt(Math.abs(unpaidNet))} UAH</span></div>
-      <div class="mon-foot-row big"><span>Очікуваний баланс</span><span style="color:${expected < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(expected)} UAH</span></div>
+  const listHTML = items.length ? `<div class="mon-list">${rows}</div>`
+    : `<div class="empty" style="padding:60px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M12 12.5v3l2 1"/></svg></div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
+  const expected = generalTotal() + remNet;
+  el.innerHTML = `
+    <div class="mon-scroll">${listHTML}</div>
+    <div class="mon-panel">
+      <div class="mon-panel-nums">
+        <div class="mp-row"><span>Разом щомісячне</span><span style="color:var(--exp)">−${fmt(allExp)} UAH</span></div>
+        <div class="mp-row"><span>Лишилось щомісячне</span><span style="color:var(--exp)">−${fmt(remExp)} UAH</span></div>
+        <div class="mp-row big"><span>Очікуваний баланс</span><span style="color:${expected < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(expected)} UAH</span></div>
+      </div>
+      <button class="mon-add" id="mon-add">+</button>
     </div>`;
   el.querySelectorAll('.mon-item').forEach(it => {
     it.onclick = e => { if (e.target.closest('.mon-check')) return; openRecurringForm({ id: it.dataset.id, ...recurringMap[it.dataset.id] }); };
   });
   el.querySelectorAll('.mon-check').forEach(b => { b.onclick = async e => { e.stopPropagation(); await payRecurring(b.dataset.check); }; });
+  document.getElementById('mon-add').onclick = () => openRecurringForm();
 }
 async function payRecurring(id) {
   const r = recurringMap[id]; if (!r) return;
@@ -914,8 +918,6 @@ function openDateSheet() {
   const y = new Date(now); y.setDate(now.getDate() - 1);
   document.getElementById('yday-sub').textContent = `${y.getDate()} ${MONTHS_GEN[y.getMonth()]}`;
   document.getElementById('today-sub').textContent = `${now.getDate()} ${MONTHS_GEN[now.getMonth()]}`;
-  const cur = formState.date ? new Date(formState.date) : now;
-  document.getElementById('date-pick').value = `${cur.getFullYear()}-${p(cur.getMonth() + 1)}-${p(cur.getDate())}`;
   document.getElementById('date-overlay').classList.add('open');
 }
 function setFormDate(d) {
@@ -1315,7 +1317,7 @@ function bindEvents() {
   document.getElementById('date-overlay').onclick = e => { if (e.target.id === 'date-overlay') e.currentTarget.classList.remove('open'); };
   document.getElementById('date-yesterday').onclick = () => { const d = new Date(); d.setDate(d.getDate() - 1); setFormDate(d); };
   document.getElementById('date-today').onclick = () => setFormDate(new Date());
-  document.getElementById('date-pick').onchange = e => { if (e.target.value) { const [y, m, dd] = e.target.value.split('-').map(Number); setFormDate(new Date(y, m - 1, dd)); } };
+  document.getElementById('date-pickday').onclick = () => { document.getElementById('date-overlay').classList.remove('open'); openCal('txday'); };
 
   document.getElementById('sheet-overlay').onclick = e => { if (e.target.id === 'sheet-overlay') closePicker(null); };
 
@@ -1496,6 +1498,11 @@ function openCal(mode) {
   document.getElementById('cal-next').style.visibility = recday ? 'hidden' : '';
   document.querySelector('.cal-weekdays').style.display = recday ? 'none' : '';
   if (recday) { calStart = new Date(2001, 0, formState.recDay || 1); }
+  else if (mode === 'txday') {
+    const d = formState.date ? new Date(formState.date) : new Date();
+    calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
   else { calMonth = new Date(state.cursor.getFullYear(), state.cursor.getMonth(), 1); }
   drawCal();
   document.getElementById('cal-overlay').classList.add('open');
@@ -1518,14 +1525,14 @@ function drawCal() {
   const first = (new Date(y, m, 1).getDay() + 6) % 7;
   const days = new Date(y, m + 1, 0).getDate();
   let cells = '';
-  for (let i = 0; i < first; i++) cells += `<div class="cal-day empty"></div>`;
   for (let d = 1; d <= days; d++) {
     const cur = new Date(y, m, d);
     let cls = 'cal-day';
     if (calStart && calEnd && cur >= calStart && cur <= calEnd) cls += ' range';
     if (calStart && cur.getTime() === calStart.getTime()) cls += ' sel';
     if (calEnd && cur.getTime() === calEnd.getTime()) cls += ' sel';
-    cells += `<div class="${cls}" data-d="${d}">${d}</div>`;
+    const style = d === 1 ? ` style="grid-column-start:${first + 1}"` : '';
+    cells += `<div class="${cls}"${style} data-d="${d}">${d}</div>`;
   }
   const grid = document.getElementById('cal-grid');
   grid.innerHTML = cells;
