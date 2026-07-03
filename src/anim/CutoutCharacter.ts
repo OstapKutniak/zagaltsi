@@ -485,6 +485,28 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     return key;
   }
 
+  // Штани: силует ноги, ОБРІЗАНИЙ над черевиком (нижні ~18% текстури стерто з
+  // м'яким краєм) — тому черевик лишається рідним на будь-якому розкрої ноги.
+  private pantsTexture(slotKey: string): string | null {
+    const base = this.silTexture(slotKey);
+    if (!base) return null;
+    const key = 'pants_' + base;
+    if (!this.scene.textures.exists(key)) {
+      const src = this.scene.textures.get(base).getSourceImage() as HTMLCanvasElement;
+      const W = src.width, H = src.height;
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const x = c.getContext('2d')!;
+      x.drawImage(src, 0, 0);
+      // витерти все нижче лінії кісточки (fade 0.79→0.83 висоти)
+      const g = x.createLinearGradient(0, H * 0.79, 0, H * 0.83);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
+      x.globalCompositeOperation = 'destination-out';
+      x.fillStyle = g; x.fillRect(0, H * 0.79, W, H - H * 0.79);
+      this.scene.textures.addCanvas(key, c);
+    }
+    return key;
+  }
+
   setEquipment(eq: EquipVisual): void {
     for (const o of this.equipOvs) o.ov.destroy();
     this.equipOvs = [];
@@ -496,7 +518,11 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       this.moveTo(ov, this.getIndex(piece) + 1); // одразу над своєю частиною (шари не ламаються)
       this.equipOvs.push({ ov, src: piece });
     };
-    if (eq.pants) for (const k of ['leg_front', 'leg_back']) { addOv(this.parts[k], this.silTexture(k)); addOv(this.lower[k], this.silTexture(k)); }
+    // Штани — на ВСІ шматки ноги (стегно/гомілка/стопа): текстура штанів і так
+    // порожня нижче кісточки, тож черевик не фарбується, а «шортів» не буває.
+    if (eq.pants) for (const k of ['leg_front', 'leg_back']) {
+      for (const piece of [this.parts[k], this.lower[k], this.lower2[k], this.lower3[k]]) addOv(piece, this.pantsTexture(k));
+    }
     if (eq.armor) for (const k of ['torso', 'arm_front', 'arm_back']) { addOv(this.parts[k], this.silTexture(k)); addOv(this.lower[k], this.silTexture(k)); }
     if (eq.helmet) addOv(this.parts['head'], this.helmetTexture());
     if (eq.weapon) {
@@ -684,14 +710,15 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
       const cr = s as unknown as { isCropped: boolean; _crop: { x: number; y: number; width: number; height: number } | null };
       if (cr.isCropped && cr._crop) o.ov.setCrop(cr._crop.x, cr._crop.y, cr._crop.width, cr._crop.height);
     }
-    // Меч: хват — на кінці передпліччя передньої руки, клинок продовжує її напрямок.
+    // Меч: хват — на кінці передпліччя передньої руки; клинок трохи ВПЕРЕД
+    // (кінчик у бік погляду), а не тупо вниз — природніше тримання.
     if (this.weaponImg) {
       const lo = this.lower['arm_front'] ?? this.parts['arm_front'];
       if (lo) {
         const reach = (1 - lo.originY) * lo.height * lo.scaleY * 0.9; // до пензля
         const a = lo.rotation;
         this.weaponImg.setPosition(lo.x - Math.sin(a) * reach, lo.y + Math.cos(a) * reach);
-        this.weaponImg.setRotation(a);
+        this.weaponImg.setRotation(a + 0.72); // кінчик трохи вперед, у бік погляду
         const faLen = Math.abs((1 - lo.originY) * lo.height * lo.scaleY);
         this.weaponImg.setScale((faLen * 1.9) / 190);
       }

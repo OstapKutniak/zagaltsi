@@ -587,7 +587,9 @@ async function pullPublishedChar(): Promise<void> {
   try {
     const r = await fetch(`${import.meta.env.BASE_URL}character.json?t=${Date.now()}`);
     if (!r.ok) return;
-    const pub = await r.json() as Parameters<typeof loadCharFromDoc>[0] & { updatedAt?: number };
+    const pub = await r.json() as Parameters<typeof loadCharFromDoc>[0] & { updatedAt?: number; images?: Record<string, string> };
+    // Публікацію без картинок (зламану, з машини без ассетів) не підтягуємо.
+    if (!pub.images || !Object.keys(pub.images).length) return;
     if ((pub.updatedAt ?? 0) > localAt) { loadCharFromDoc(pub); saveLocal(); refreshUI(); draw(); status('Підтягнуто свіжішого персонажа з публікації'); }
   } catch { /* offline — лишаємось на локальному */ }
 }
@@ -1964,15 +1966,19 @@ document.getElementById('charBehaviorBtn')?.addEventListener('click', () => {
 // Рівень тепер додає рівневий редактор сам — тут лише персонаж, бібліотека, поведінки.
 registerPublisher(async () => {
   const character = buildDoc();
-  try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
-  // Освіжити бібліотечну копію ПОТОЧНОГО персонажа: лобі/портрети/мультиплеєр читають
-  // бібліотеку, і стара копія там давала «розʼїхану» позу на інших пристроях,
-  // хоч character.json публікувався свіжим.
-  {
+  // ЗАПОБІЖНИК: публікація з машини БЕЗ картинок персонажа (порожній state.images)
+  // ламала character.json для всіх (одного разу так і сталось). Такий стан не
+  // публікуємо і бібліотеку ним не освіжаємо.
+  const charOk = Object.keys(character.images).length > 0;
+  if (charOk) {
+    try { localStorage.setItem('zag_game_char', JSON.stringify(character)); } catch { /* ignore */ }
+    // Освіжити бібліотечну копію ПОТОЧНОГО персонажа: лобі/портрети/мультиплеєр читають
+    // бібліотеку, і стара копія там давала «розʼїхану» позу на інших пристроях,
+    // хоч character.json публікувався свіжим.
     const lib = loadLib();
     const i = lib.findIndex((x) => x.id === currentCharId);
     if (i >= 0) { lib[i] = { ...lib[i], doc: character, thumb: composeThumb(150, 190), updatedAt: Date.now() }; storeLib(lib); renderLibrary(); }
-  }
+  } else status('Персонаж без картинок — character.json не оновлюю (щоб не зламати гру)');
   // Злити локальні поведінки з опублікованими (LWW) — щоб публікація з «порожньої» машини
   // не затирала графи, збережені на іншому компі.
   const [local, published] = await Promise.all([
@@ -1996,12 +2002,16 @@ registerPublisher(async () => {
     for (const d of arr) { const r = byId.get(d.id); if (!r || (d.updatedAt ?? 0) >= (r.updatedAt ?? 0)) byId.set(d.id, d); }
     dialogs[cid] = [...byId.values()];
   }
-  return {
-    'public/character.json': JSON.stringify(character),
-    'public/studio-data/char-library.json': JSON.stringify(loadLib()),
+  const files: Record<string, string> = {
     'public/studio-data/behaviors.json': JSON.stringify(behaviors),
     'public/studio-data/dialogs.json': JSON.stringify(dialogs),
   };
+  // Персонажа і бібліотеку публікуємо лише зі здоровим станом (є картинки).
+  if (charOk) {
+    files['public/character.json'] = JSON.stringify(character);
+    files['public/studio-data/char-library.json'] = JSON.stringify(loadLib());
+  }
+  return files;
 });
 wirePublishButton($<HTMLButtonElement>('toGameBtn'), status, reloadPreview);
 
