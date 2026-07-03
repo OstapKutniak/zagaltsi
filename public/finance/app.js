@@ -106,11 +106,15 @@ const STYLE = [
   ['готівк','#27AE60','wallet'],['монобанк','#2D9CDB','card'],['карт','#2D9CDB','card'],['рахунок','#2D9CDB','card'],['кешбек','#1ABC9C','wallet'],
   ['інше','#EB5757','wand'],['друге','#EB5757','wand'],
 ];
+const metaKey = s => (s || '').toLowerCase().replace(/['’ʼ`]/g, "'").trim().replace(/[.#$\[\]\/]/g, '_');
 function catStyle(name) {
   const key = (name || '').toLowerCase();
-  for (const [k, c, i] of STYLE) if (key.includes(k)) return { color: c, icon: ic(i) };
-  let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return { color: `hsl(${h} 52% 56%)`, icon: ic('tag') };
+  let base = null;
+  for (const [k, c, i] of STYLE) if (key.includes(k)) { base = { color: c, icon: ic(i) }; break; }
+  if (!base) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 360; base = { color: `hsl(${h} 52% 56%)`, icon: ic('tag') }; }
+  const ov = catMeta.icons && catMeta.icons[metaKey(name)];
+  if (ov && ICONS[ov]) base = { color: base.color, icon: ic(ov) };
+  return base;
 }
 const parentCat = n => (n || 'Інше').split(' (')[0].trim();
 const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].trim() : ''; };
@@ -119,6 +123,7 @@ const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].
 let txMap = {};
 let accountsList = [];
 let recurringMap = {};
+let catMeta = { icons: {}, subs: {} };
 let selectedAccounts = null;
 let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
 let catsByDir = { expense: [], income: [] };
@@ -195,6 +200,7 @@ function subscribe() {
     migrateBaseBalances();
   });
   onValue(ref(db, REC_PATH), s => { recurringMap = s.val() || {}; scheduleRender(); });
+  onValue(ref(db, 'finance/catmeta'), s => { const v = s.val() || {}; catMeta = { icons: v.icons || {}, subs: v.subs || {} }; scheduleRender(); });
   onValue(ref(db, 'finance/meta/importedUpTo'), s => {
     importedUpTo = s.val() || null;
     migrateBaseBalances();
@@ -481,9 +487,90 @@ function openCatSheet(catName, dir, catList) {
     state.tab = 'records';
     syncTabs(); renderAll();
   };
+  el.querySelector('#cas-edit').onclick = () => { closeCatSheet(); openCatEdit(catName, dir); };
   el.classList.add('open');
 }
 function closeCatSheet() { document.getElementById('cat-action-overlay').classList.remove('open'); }
+
+// ── CATEGORY EDITOR ────────────────────────────────────────
+let ceState = null;
+let iconPickCb = null;
+
+function openCatEdit(parent, dir) {
+  const subs = getSubs(parent, dir).map(s => ({
+    orig: s, name: s,
+    icon: catMeta.icons?.[metaKey(`${parent} (${s})`)] || null, deleted: false,
+  }));
+  ceState = { parent, dir, icon: catMeta.icons?.[metaKey(parent)] || null, subs };
+  document.getElementById('ce-name').value = parent;
+  renderCatEdit();
+  document.getElementById('catedit-view').classList.add('active');
+}
+function closeCatEdit() { document.getElementById('catedit-view').classList.remove('active'); ceState = null; }
+
+function renderCatEdit() {
+  const pcol = catStyle(ceState.parent).color;
+  const pi = document.getElementById('ce-icon');
+  pi.style.setProperty('--c', pcol);
+  pi.innerHTML = ceState.icon ? ic(ceState.icon) : catStyle(ceState.parent).icon;
+  const box = document.getElementById('ce-subs');
+  box.innerHTML = ceState.subs.map((s, i) => s.deleted ? '' : `
+    <div class="ce-sub" data-i="${i}">
+      <button class="ce-sub-icon" data-icon="${i}" style="--c:${pcol}">${s.icon ? ic(s.icon) : catStyle(`${ceState.parent} (${s.name})`).icon}</button>
+      <input class="ce-sub-name" value="${escAttr(s.name)}" data-name="${i}" placeholder="Назва підкатегорії">
+      <button class="ce-sub-del" data-del="${i}">✕</button>
+    </div>`).join('');
+  box.querySelectorAll('.ce-sub-name').forEach(inp => inp.oninput = e => { ceState.subs[+e.target.dataset.name].name = e.target.value; });
+  box.querySelectorAll('.ce-sub-del').forEach(b => b.onclick = () => { ceState.subs[+b.dataset.del].deleted = true; renderCatEdit(); });
+  box.querySelectorAll('.ce-sub-icon').forEach(b => b.onclick = () => openIconPick(n => { ceState.subs[+b.dataset.icon].icon = n; renderCatEdit(); }));
+}
+
+async function saveCatEdit() {
+  const oldP = ceState.parent;
+  const newP = document.getElementById('ce-name').value.trim() || oldP;
+  const txUpd = {};
+  Object.entries(txMap).forEach(([id, t]) => {
+    if (t.type !== 'expense' && t.type !== 'income') return;
+    if (parentCat(t.category) !== oldP) return;
+    const s = subCat(t.category);
+    let newSub = s;
+    if (s) { const e = ceState.subs.find(x => x.orig === s); if (e) newSub = e.deleted ? '' : e.name.trim(); }
+    const newCat = newSub ? `${newP} (${newSub})` : newP;
+    if (newCat !== t.category) txUpd[`${id}/category`] = newCat;
+  });
+  const icons = { ...(catMeta.icons || {}) };
+  if (newP !== oldP) delete icons[metaKey(oldP)];
+  if (ceState.icon) icons[metaKey(newP)] = ceState.icon; else delete icons[metaKey(newP)];
+  const declared = [];
+  ceState.subs.forEach(x => {
+    if (x.deleted) { if (x.orig) delete icons[metaKey(`${oldP} (${x.orig})`)]; return; }
+    const nm = x.name.trim(); if (!nm) return;
+    declared.push(nm);
+    if (x.orig && x.orig !== nm) delete icons[metaKey(`${oldP} (${x.orig})`)];
+    if (x.icon) icons[metaKey(`${newP} (${nm})`)] = x.icon;
+  });
+  const subsMeta = { ...(catMeta.subs || {}) };
+  if (newP !== oldP) delete subsMeta[metaKey(oldP)];
+  subsMeta[metaKey(newP)] = declared;
+  try {
+    if (Object.keys(txUpd).length) await update(ref(db, TX_PATH), txUpd);
+    await set(ref(db, 'finance/catmeta'), { icons, subs: subsMeta });
+    toast('Збережено ✓');
+    closeCatEdit();
+  } catch (e) { toast('Помилка: ' + e.message); }
+}
+
+function openIconPick(cb) {
+  iconPickCb = cb;
+  const grid = document.getElementById('iconpick-grid');
+  grid.innerHTML = Object.keys(ICONS).map(k => `<button class="iconpick-cell" data-ic="${k}">${ic(k)}</button>`).join('');
+  grid.querySelectorAll('.iconpick-cell').forEach(b => b.onclick = () => {
+    document.getElementById('iconpick-overlay').classList.remove('open');
+    if (iconPickCb) iconPickCb(b.dataset.ic);
+    iconPickCb = null;
+  });
+  document.getElementById('iconpick-overlay').classList.add('open');
+}
 
 // ── RECORDS ────────────────────────────────────────────────
 const CARD_MINI = '<svg viewBox="0 0 24 24" style="width:15px;height:15px;vertical-align:-2px;stroke:#aaa;fill:none;stroke-width:1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 9h20"/></svg>';
@@ -924,7 +1011,6 @@ function setFormDate(d) {
   const p = n => String(n).padStart(2, '0');
   formState.date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T12:00`;
   document.getElementById('calc-date-label').textContent = dateLabel(formState.date);
-  const di = document.getElementById('date-input'); if (di) di.value = formState.date;
   document.getElementById('date-overlay').classList.remove('open');
 }
 
@@ -967,7 +1053,6 @@ function openForm(tx = null, presetParent = null, presetDir = null, presetAccoun
   };
   calcExpr = tx ? String(tx.amount) : '';
   document.getElementById('note-input').value = tx ? (tx.note || '') : '';
-  document.getElementById('date-input').value = formState.date;
   document.getElementById('form-del').style.display = tx ? '' : 'none';
   renderForm();
   document.getElementById('add-view').classList.add('active');
@@ -1027,10 +1112,16 @@ function renderForm() {
     : dateLabel(formState.date);
 }
 
+function getSubs(parent, dir) {
+  const derived = subsByDir[dir]?.get(parent) || new Set();
+  const declared = (catMeta.subs && catMeta.subs[metaKey(parent)]) || [];
+  return [...new Set([...derived, ...declared])].filter(Boolean).sort();
+}
+
 function renderSubchips() {
   const box = document.getElementById('subchips');
   if (formState.type === 'transfer' || !formState.parent) { box.innerHTML = ''; return; }
-  const subs = [...(subsByDir[formState.type].get(formState.parent) || [])].filter(Boolean).sort();
+  const subs = getSubs(formState.parent, formState.type);
   box.innerHTML = subs.map(s => `<button class="chip ${formState.sub === s ? 'on' : ''}" data-sub="${escAttr(s)}">${esc(s)}</button>`).join('')
     + `<button class="chip add" data-sub="__new">＋</button>`;
   box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
@@ -1313,8 +1404,14 @@ function bindEvents() {
   document.getElementById('keypad').querySelectorAll('button').forEach(b => b.onclick = () => keyPress(b.dataset.k));
   document.getElementById('side-left').onclick = pickSideLeft;
   document.getElementById('side-right').onclick = pickSideRight;
-  document.getElementById('date-input').onchange = e => { formState.date = e.target.value; document.getElementById('calc-date-label').textContent = dateLabel(formState.date); };
   document.getElementById('date-overlay').onclick = e => { if (e.target.id === 'date-overlay') e.currentTarget.classList.remove('open'); };
+
+  // category editor
+  document.getElementById('ce-close').onclick = closeCatEdit;
+  document.getElementById('ce-save').onclick = saveCatEdit;
+  document.getElementById('ce-icon').onclick = () => openIconPick(n => { ceState.icon = n; renderCatEdit(); });
+  document.getElementById('ce-addsub').onclick = () => { ceState.subs.push({ orig: null, name: '', icon: null, deleted: false }); renderCatEdit(); };
+  document.getElementById('iconpick-overlay').onclick = e => { if (e.target.id === 'iconpick-overlay') e.currentTarget.classList.remove('open'); };
   document.getElementById('date-yesterday').onclick = () => { const d = new Date(); d.setDate(d.getDate() - 1); setFormDate(d); };
   document.getElementById('date-today').onclick = () => setFormDate(new Date());
   document.getElementById('date-pickday').onclick = () => { document.getElementById('date-overlay').classList.remove('open'); openCal('txday'); };

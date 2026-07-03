@@ -127,7 +127,6 @@
       <button data-k="+" class="kop">+</button><button data-k="cur" class="kop">UAH</button><button data-k="0">0</button><button data-k="," >,</button>
     </div>
     <div class="calc-date" id="calc-date-label"></div>
-    <input type="datetime-local" id="date-input" class="hidden-date">
   </div>
 
   <!-- PICKER / GENERIC SHEET -->
@@ -308,8 +307,36 @@
       </div>
       <div class="cas-subs"></div>
       <div class="cas-foot">
+        <button class="cas-edit-btn" id="cas-edit">Редагувати</button>
         <button class="cas-ops-btn">Операції</button>
       </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY EDITOR -->
+  <div class="sheet-full" id="catedit-view">
+    <div class="ce-bar">
+      <button class="ce-close" id="ce-close">✕</button>
+      <span class="ce-title">Категорія</span>
+      <button class="ce-save" id="ce-save">Готово</button>
+    </div>
+    <div class="ce-scroll">
+      <div class="ce-namewrap">
+        <button class="ce-icon" id="ce-icon"></button>
+        <input class="ce-name" id="ce-name" placeholder="Назва категорії">
+      </div>
+      <div class="ce-section">Підкатегорії</div>
+      <div id="ce-subs"></div>
+      <button class="ce-addsub" id="ce-addsub">+ Додати підкатегорію</button>
+    </div>
+  </div>
+
+  <!-- ICON PICKER -->
+  <div class="sheet-overlay" id="iconpick-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Оберіть піктограму</div>
+      <div class="iconpick-grid" id="iconpick-grid"></div>
     </div>
   </div>
 
