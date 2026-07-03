@@ -17,9 +17,31 @@ const firebaseConfig = {
 const db = getDatabase(initializeApp(firebaseConfig));
 const TX_PATH = 'finance/transactions';
 const ACC_PATH = 'finance/accounts';
+const REC_PATH = 'finance/recurring';
 const CUR_SUFFIX = { UAH: 'UAH', USD: '$', EUR: 'EUR', PLN: 'zł' };
 const isSavings = n => /лежить|скарбничк|заощад/i.test(n || '');
 const accIncluded = a => a.includeInTotal !== undefined ? a.includeInTotal : !(isSavings(a.name) || a.group === 'savings');
+
+// ── LIVE FX (NBU) ──────────────────────────────────────────
+let fxRates = { UAH: 1, USD: 41, EUR: 47, PLN: 11 };
+try { const s = JSON.parse(localStorage.getItem('fin_fx') || '{}'); if (s.rates) fxRates = { ...fxRates, ...s.rates }; } catch {}
+async function loadFx() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('fin_fx') || '{}');
+    if (cached.ts && Date.now() - cached.ts < 86400000) return;
+    const res = await fetch('https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json');
+    const arr = await res.json();
+    const r = { UAH: 1 };
+    arr.forEach(x => { if (['USD', 'EUR', 'PLN'].includes(x.cc)) r[x.cc] = x.rate; });
+    fxRates = { ...fxRates, ...r };
+    localStorage.setItem('fin_fx', JSON.stringify({ ts: Date.now(), rates: fxRates }));
+    scheduleRender();
+  } catch (e) { /* keep cached/defaults */ }
+}
+function accUah(a) {
+  const lb = computeLiveBalance(a.name) ?? a.balance;
+  return a.currency === 'UAH' ? lb : Math.round((a.balance || 0) * (fxRates[a.currency] || 1));
+}
 
 // ── CONST ──────────────────────────────────────────────────
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
@@ -96,6 +118,7 @@ const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].
 // ── STATE ──────────────────────────────────────────────────
 let txMap = {};
 let accountsList = [];
+let recurringMap = {};
 let selectedAccounts = null;
 let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
 let catsByDir = { expense: [], income: [] };
@@ -114,7 +137,7 @@ let catFilter = null;
 let accFormMode = null;
 let accFormEditIdx = -1;
 let accFormCurrency = 'UAH';
-const SWIPE_TABS = ['accounts', 'categories', 'records', 'overview'];
+const SWIPE_TABS = ['accounts', 'categories', 'records', 'recurring', 'overview'];
 
 const CURRENCIES_LIST = [
   { code: 'UAH', label: 'Українська гривня — UAH' },
@@ -132,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
   subscribe();
   renderAll();
+  loadFx();
 });
 
 // ── SYNC ───────────────────────────────────────────────────
@@ -170,6 +194,7 @@ function subscribe() {
     scheduleRender();
     migrateBaseBalances();
   });
+  onValue(ref(db, REC_PATH), s => { recurringMap = s.val() || {}; scheduleRender(); });
   onValue(ref(db, 'finance/meta/importedUpTo'), s => {
     importedUpTo = s.val() || null;
     migrateBaseBalances();
@@ -280,7 +305,8 @@ function renderAll() {
   else if (state.tab === 'records') renderRecords();
   else if (state.tab === 'accounts') renderAccounts();
   else if (state.tab === 'overview') renderOverview();
-  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts');
+  else if (state.tab === 'recurring') renderRecurring();
+  document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts' || state.tab === 'recurring');
 }
 
 function renderHeader() {
@@ -288,7 +314,7 @@ function renderHeader() {
   if (accountsList.length) {
     net = accountsList
       .filter(a => !a.archived && accIncluded(a))
-      .reduce((s, a) => s + (a.currency === 'UAH' ? (computeLiveBalance(a.name) ?? a.balance) : (Number(a.uah) || 0)), 0);
+      .reduce((s, a) => s + accUah(a), 0);
   } else { net = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') net -= Number(t.amount); else if (t.type === 'income') net += Number(t.amount); }); }
   document.getElementById('total-amount').innerHTML = `${fmt(net)} <span>UAH</span>`;
 
@@ -553,10 +579,7 @@ function renderAccounts() {
   }
   const reg = accountsList.filter(a => !a.archived && !isSavings(a.name) && a.group !== 'savings');
   const sav = accountsList.filter(a => !a.archived && (isSavings(a.name) || a.group === 'savings'));
-  const liveSum = arr => arr.filter(accIncluded).reduce((s, a) => {
-    const lb = computeLiveBalance(a.name) ?? a.balance;
-    return s + (a.currency === 'UAH' ? lb : (a.uah || 0));
-  }, 0);
+  const liveSum = arr => arr.reduce((s, a) => s + accUah(a), 0);
   const section = (title, arr) => arr.length
     ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${liveSum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(liveSum(arr))} UAH</span></div>${arr.map(a => accRow(a)).join('')}`
     : '';
@@ -647,6 +670,65 @@ async function deleteAccForm() {
     toast('Рахунок видалено');
     closeAccForm();
   } catch(e) { toast('Помилка: ' + e.message); }
+}
+
+// ── RECURRING (Щомісячне) ──────────────────────────────────
+function monthKey(d) { return `${d.getFullYear()}-${d.getMonth() + 1}`; }
+function generalTotal() {
+  if (!accountsList.length) { let n = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') n -= +t.amount; else if (t.type === 'income') n += +t.amount; }); return n; }
+  return accountsList.filter(a => !a.archived && accIncluded(a)).reduce((s, a) => s + accUah(a), 0);
+}
+function renderRecurring() {
+  const el = document.getElementById('rec-mon-list');
+  const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r }));
+  if (!items.length) {
+    el.innerHTML = `<div class="empty" style="padding:60px 20px"><div class="ic">🔁</div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
+    return;
+  }
+  const now = new Date(), mk = monthKey(now), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  items.sort((a, b) => a.day - b.day);
+  let unpaidNet = 0;
+  const rows = items.map(r => {
+    const paid = !!(r.paid && r.paid[mk]);
+    const day = Math.min(r.day, dim);
+    const st = catStyle(r.category);
+    const sign = r.type === 'income' ? '+' : '−';
+    const col = r.type === 'income' ? 'var(--inc)' : 'var(--exp)';
+    if (!paid) unpaidNet += (r.type === 'income' ? +r.amount : -r.amount);
+    return `<div class="mon-item ${paid ? 'paid' : ''}" data-id="${r.id}">
+      <div class="mon-day">${day}<span>число</span></div>
+      <div class="mon-ic" style="--c:${st.color}">${st.icon}</div>
+      <div class="mon-info">
+        <div class="mon-cat">${esc(r.category)}</div>
+        ${r.note ? `<div class="mon-note">${esc(r.note)}</div>` : ''}
+      </div>
+      <div class="mon-amt" style="color:${paid ? 'var(--text3)' : col}">${sign}${fmt(r.amount)} <span>UAH</span></div>
+      <button class="mon-check ${paid ? 'done' : ''}" data-check="${r.id}">${paid ? '✓' : ''}</button>
+    </div>`;
+  }).join('');
+  const expected = generalTotal() + unpaidNet;
+  el.innerHTML = `<div class="mon-list">${rows}</div>
+    <div class="mon-foot">
+      <div class="mon-foot-row"><span>Разом щомісячні</span><span style="color:var(--exp)">${fmt(Math.abs(unpaidNet))} UAH</span></div>
+      <div class="mon-foot-row big"><span>Очікуваний баланс</span><span style="color:${expected < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(expected)} UAH</span></div>
+    </div>`;
+  el.querySelectorAll('.mon-item').forEach(it => {
+    it.onclick = e => { if (e.target.closest('.mon-check')) return; openRecurringForm({ id: it.dataset.id, ...recurringMap[it.dataset.id] }); };
+  });
+  el.querySelectorAll('.mon-check').forEach(b => { b.onclick = async e => { e.stopPropagation(); await payRecurring(b.dataset.check); }; });
+}
+async function payRecurring(id) {
+  const r = recurringMap[id]; if (!r) return;
+  const now = new Date(), mk = monthKey(now);
+  if (r.paid && r.paid[mk]) return;
+  const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const day = Math.min(r.day, dim);
+  const date = new Date(now.getFullYear(), now.getMonth(), day, 12, 0, 0).toISOString();
+  try {
+    await saveTx({ type: r.type, amount: r.amount, account: r.account, category: r.category, date, note: r.note || null });
+    await update(ref(db, `${REC_PATH}/${id}/paid`), { [mk]: true });
+    toast('Проведено ✓');
+  } catch (e) { toast('Помилка: ' + e.message); }
 }
 
 // ── OVERVIEW ───────────────────────────────────────────────
@@ -822,6 +904,8 @@ function initSwipeLayout() {
 
 // ── ADD / EDIT (calculator) ────────────────────────────────
 let calcExpr = '';
+let formMode = 'tx';       // 'tx' | 'recurring'
+let editingRec = null;     // {id, ...} when editing a recurring item
 const ARROW_ICON = '<svg viewBox="0 0 24 24" style="stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 9h13l-4-4M20 15H7l4 4"/></svg>';
 
 function openDateSheet() {
@@ -842,7 +926,30 @@ function setFormDate(d) {
   document.getElementById('date-overlay').classList.remove('open');
 }
 
+function openRecurringForm(rec = null) {
+  formMode = 'recurring';
+  editingRec = rec;
+  editingTx = null;
+  const defaultAcc = accountsList.find(a => !isSavings(a.name) && a.group !== 'savings')?.name || accountsAll[0] || '';
+  formState = {
+    type: rec ? rec.type : 'expense',
+    parent: rec ? (rec.type === 'transfer' ? '' : parentCat(rec.category)) : '',
+    sub: rec ? subCat(rec.category) : '',
+    account: rec ? (rec.account || '') : defaultAcc,
+    toAccount: '',
+    date: nowLocal(),
+    recDay: rec ? rec.day : new Date().getDate(),
+  };
+  calcExpr = rec ? String(rec.amount) : '';
+  document.getElementById('note-input').value = rec ? (rec.note || '') : '';
+  document.getElementById('form-del').style.display = rec ? '' : 'none';
+  renderForm();
+  document.getElementById('add-view').classList.add('active');
+}
+
 function openForm(tx = null, presetParent = null, presetDir = null, presetAccount = null) {
+  formMode = 'tx';
+  editingRec = null;
   editingTx = tx;
   const dir = tx ? tx.type : (presetDir || (state.catDir === 'income' ? 'income' : 'expense'));
   const defaultAcc = presetAccount
@@ -913,7 +1020,9 @@ function renderForm() {
   orbInner.querySelectorAll('svg').forEach(s => s.style.stroke = t === 'transfer' ? '#2D9CDB' : pcol);
   renderSubchips();
   renderDisplay();
-  document.getElementById('calc-date-label').textContent = dateLabel(formState.date);
+  document.getElementById('calc-date-label').textContent = formMode === 'recurring'
+    ? `Щомісяця ${formState.recDay}-го числа`
+    : dateLabel(formState.date);
 }
 
 function renderSubchips() {
@@ -941,7 +1050,7 @@ function renderDisplay() {
 
 function keyPress(k) {
   if (k === 'back') calcExpr = calcExpr.slice(0, -1);
-  else if (k === 'cal') { openDateSheet(); return; }
+  else if (k === 'cal') { formMode === 'recurring' ? openCal('recday') : openDateSheet(); return; }
   else if (k === 'cur') return;
   else if (k === 'ok') return saveCalc();
   else if ('÷×−+'.includes(k)) { if (calcExpr && !/[÷×−+]$/.test(calcExpr)) calcExpr += k; }
@@ -977,6 +1086,17 @@ async function saveCalc() {
   if (t === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
   const category = t === 'transfer' ? formState.toAccount : (formState.sub ? `${formState.parent} (${formState.sub})` : formState.parent);
   const note = document.getElementById('note-input').value.trim();
+
+  if (formMode === 'recurring') {
+    const rec = { type: t, amount, account: formState.account, category, note: note || null, day: formState.recDay || 1 };
+    try {
+      if (editingRec) { rec.paid = editingRec.paid || null; await update(ref(db, `${REC_PATH}/${editingRec.id}`), rec); toast('Оновлено ✓'); }
+      else { await set(push(ref(db, REC_PATH)), rec); toast('Додано ✓'); }
+      closeForm();
+    } catch (e) { toast('Помилка: ' + e.message); }
+    return;
+  }
+
   const dv = formState.date;
   const tx = { type: t, amount, account: formState.account, category, date: dv ? new Date(dv).toISOString() : new Date().toISOString(), note: note || null };
   try {
@@ -1173,9 +1293,13 @@ function bindEvents() {
   document.getElementById('prev-month').onclick = () => shiftWithAnim(-1);
   document.getElementById('next-month').onclick = () => shiftWithAnim(1);
 
-  document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : openForm();
+  document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : state.tab === 'recurring' ? openRecurringForm() : openForm();
   document.getElementById('add-close').onclick = closeForm;
   document.getElementById('form-del').onclick = async () => {
+    if (formMode === 'recurring' && editingRec) {
+      if (confirm('Видалити щомісячну операцію?')) { await remove(ref(db, `${REC_PATH}/${editingRec.id}`)); closeForm(); toast('Видалено'); }
+      return;
+    }
     if (!editingTx) return;
     if (confirm('Видалити операцію?')) { await deleteTx(editingTx.id); closeForm(); toast('Видалено'); }
   };
@@ -1390,12 +1514,12 @@ function drawCal() {
   grid.innerHTML = cells;
   grid.querySelectorAll('.cal-day[data-d]').forEach(el => el.onclick = () => calPick(new Date(y, m, +el.dataset.d)));
   const hint = document.getElementById('cal-hint'), done = document.getElementById('cal-done');
-  if (calMode === 'day') { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
+  if (calMode === 'day' || calMode === 'recday') { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
   else { hint.textContent = !calStart ? 'Оберіть початок' : !calEnd ? 'Оберіть кінець' : ''; done.disabled = !(calStart && calEnd); }
 }
 function calPick(d) {
   d.setHours(0, 0, 0, 0);
-  if (calMode === 'day') { calStart = d; calEnd = null; }
+  if (calMode === 'day' || calMode === 'recday') { calStart = d; calEnd = null; }
   else {
     if (!calStart || calEnd) { calStart = d; calEnd = null; }
     else if (d < calStart) { calEnd = calStart; calStart = d; }
@@ -1404,6 +1528,13 @@ function calPick(d) {
   drawCal();
 }
 function applyCal() {
+  if (calMode === 'recday') {
+    if (!calStart) return;
+    formState.recDay = calStart.getDate();
+    document.getElementById('cal-overlay').classList.remove('open');
+    document.getElementById('calc-date-label').textContent = `Щомісяця ${formState.recDay}-го числа`;
+    return;
+  }
   if (calMode === 'day') {
     if (!calStart) return;
     state.period = 'day'; state.cursor = calStart;
