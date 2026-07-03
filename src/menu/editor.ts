@@ -45,6 +45,9 @@ const FIXED_TARGETS: Array<{ v: string; l: string }> = [
   { v: '', l: '— нікуди (заглушка)' },
   { v: 'world', l: 'Мандри (глобальна карта)' },
   { v: 'game', l: 'Бітемап-рівень (гра)' },
+  { v: 'khorugva', l: 'Хоругва (паті)' },
+  { v: 'quests', l: 'Завдання' },
+  { v: 'achievements', l: 'Досягнення' },
   { v: 'section:Завдання', l: 'Розділ: Завдання' },
   { v: 'section:Прогрес', l: 'Розділ: Прогрес' },
   { v: 'section:Інвентар', l: 'Розділ: Інвентар' },
@@ -61,15 +64,18 @@ export function initMenuEditor(prefix: string): void {
   let _uid = Date.now();
   const uid = (): string => (++_uid).toString(36);
 
+  // Дефолт = СПРАВЖНЄ меню гри (як хардкод ITEMS у MenuScene) — інакше публікація
+  // дефолтної сторінки «з'їдала» кнопки Хоругва/Досягнення.
   const defaultDoc = (): MenuDoc => ({
     version: 1,
     pages: [{
       id: 'main', name: 'Головна', bg: '',
       buttons: [
         { id: uid(), label: 'Мандри', x: 92, y: 210, size: 34, target: 'world' },
-        { id: uid(), label: 'Завдання', x: 92, y: 284, size: 34, target: 'section:Завдання' },
-        { id: uid(), label: 'Прогрес', x: 92, y: 358, size: 34, target: 'section:Прогрес' },
-        { id: uid(), label: 'Інвентар', x: 92, y: 432, size: 34, target: 'section:Інвентар' },
+        { id: uid(), label: 'Хоругва', x: 92, y: 284, size: 34, target: 'khorugva' },
+        { id: uid(), label: 'Завдання', x: 92, y: 358, size: 34, target: 'quests' },
+        { id: uid(), label: 'Досягнення', x: 92, y: 432, size: 34, target: 'achievements' },
+        { id: uid(), label: 'Інвентар', x: 92, y: 506, size: 34, target: 'section:Інвентар' },
       ],
     }],
   });
@@ -567,8 +573,19 @@ export function initMenuEditor(prefix: string): void {
   if (exp) wirePublishButton(exp, setStatus, () => {});
 
   // ── Завантаження ────────────────────────────────────────────────────────────
-  void idbGet<MenuDoc>('zag_menu').then((d) => {
-    if (d?.pages?.length) state.doc = d;
+  // LWW: локальна IDB-копія проти опублікованої menu.json — виграє свіжіша
+  // (щоб стара локальна копія не воскрешала обрізане/старе меню після лікування).
+  void Promise.all([
+    idbGet<MenuDoc>('zag_menu').catch(() => null),
+    fetch(`${import.meta.env.BASE_URL}studio-data/menu.json?t=${Date.now()}`)
+      .then((r) => (r.ok ? r.json() as Promise<MenuDoc> : null)).catch(() => null),
+  ]).then(([local, pub]) => {
+    const best = [local, pub].filter((d): d is MenuDoc => !!d?.pages?.length)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+    if (best) {
+      state.doc = best;
+      if (best === pub) void idbSet('zag_menu', pub); // осідає локально
+    }
     renderPages(); renderProps(); renderFx(); draw();
   }).catch(() => { renderPages(); renderFx(); draw(); });
   void idbGet<typeof state.assets>('zag_menu_assets').then((a) => {

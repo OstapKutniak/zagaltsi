@@ -49,16 +49,19 @@ interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDo
 interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
 
 async function loadMenuDoc(): Promise<MenuDocData | null> {
+  // LWW: локальна копія (студія на цьому пристрої) проти опублікованої — виграє свіжіша.
+  let local: MenuDocData | null = null, pub: MenuDocData | null = null;
   try {
     const { idbGet } = await import('../store');
     const d = await idbGet<MenuDocData>('zag_menu');
-    if (d?.pages?.length) return d;
+    if (d?.pages?.length) local = d;
   } catch { /* ignore */ }
   try {
     const r = await fetch(`${import.meta.env.BASE_URL}studio-data/menu.json?t=${Date.now()}`);
-    if (r.ok) { const d = await r.json() as MenuDocData; if (d?.pages?.length) return d; }
+    if (r.ok) { const d = await r.json() as MenuDocData; if (d?.pages?.length) pub = d; }
   } catch { /* ignore */ }
-  return null;
+  if (local && pub) return (pub.updatedAt ?? 0) > (local.updatedAt ?? 0) ? pub : local;
+  return local ?? pub;
 }
 
 export class MenuScene extends Phaser.Scene {
@@ -109,14 +112,15 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private async buildScene(offX: number, offY: number): Promise<void> {
-    const doc = await loadMenuDoc();
+    const doc = await loadMenuDoc().catch(() => null);
     if (!this.scene.isActive()) return;
     const pg = doc?.pages.find((p) => p.id === (this.pageId ?? 'main')) ?? doc?.pages[0] ?? null;
     this.fx = normFx(pg?.fx ?? null);
-    if (this.fx.fire.on) this.buildFire(offX, offY);
-    this.buildStorm(offX, offY);
-    this.buildButtons(doc, pg, offX, offY);
-    if (this.fx.char.on) void this.seatCharacter(offX, offY);
+    // Кожен ефект — окремо в try: збій на конкретному пристрої не має з'їдати КНОПКИ.
+    try { if (this.fx.fire.on) this.buildFire(offX, offY); } catch { /* без вогню */ }
+    try { this.buildStorm(offX, offY); } catch { /* без шторму */ }
+    try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
+    try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
   }
 
   // Шибки вікна: прямокутник дощу з редактора; panes — ділимо хрестовиною 2×2.
