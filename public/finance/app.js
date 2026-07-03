@@ -759,6 +759,24 @@ function initSwipeLayout() {
 let calcExpr = '';
 const ARROW_ICON = '<svg viewBox="0 0 24 24" style="stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 9h13l-4-4M20 15H7l4 4"/></svg>';
 
+function openDateSheet() {
+  const p = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  document.getElementById('yday-sub').textContent = `${y.getDate()} ${MONTHS_GEN[y.getMonth()]}`;
+  document.getElementById('today-sub').textContent = `${now.getDate()} ${MONTHS_GEN[now.getMonth()]}`;
+  const cur = formState.date ? new Date(formState.date) : now;
+  document.getElementById('date-pick').value = `${cur.getFullYear()}-${p(cur.getMonth() + 1)}-${p(cur.getDate())}`;
+  document.getElementById('date-overlay').classList.add('open');
+}
+function setFormDate(d) {
+  const p = n => String(n).padStart(2, '0');
+  formState.date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T12:00`;
+  document.getElementById('calc-date-label').textContent = dateLabel(formState.date);
+  const di = document.getElementById('date-input'); if (di) di.value = formState.date;
+  document.getElementById('date-overlay').classList.remove('open');
+}
+
 function openForm(tx = null, presetParent = null, presetDir = null, presetAccount = null) {
   editingTx = tx;
   const dir = tx ? tx.type : (presetDir || (state.catDir === 'income' ? 'income' : 'expense'));
@@ -858,7 +876,7 @@ function renderDisplay() {
 
 function keyPress(k) {
   if (k === 'back') calcExpr = calcExpr.slice(0, -1);
-  else if (k === 'cal') { document.getElementById('date-input').click(); return; }
+  else if (k === 'cal') { openDateSheet(); return; }
   else if (k === 'cur') return;
   else if (k === 'ok') return saveCalc();
   else if ('÷×−+'.includes(k)) { if (calcExpr && !/[÷×−+]$/.test(calcExpr)) calcExpr += k; }
@@ -894,7 +912,7 @@ async function saveCalc() {
   if (t === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
   const category = t === 'transfer' ? formState.toAccount : (formState.sub ? `${formState.parent} (${formState.sub})` : formState.parent);
   const note = document.getElementById('note-input').value.trim();
-  const dv = document.getElementById('date-input').value;
+  const dv = formState.date;
   const tx = { type: t, amount, account: formState.account, category, date: dv ? new Date(dv).toISOString() : new Date().toISOString(), note: note || null };
   try {
     if (editingTx) { await updateTx(editingTx.id, tx); toast('Оновлено ✓'); }
@@ -1105,6 +1123,10 @@ function bindEvents() {
   document.getElementById('side-left').onclick = pickSideLeft;
   document.getElementById('side-right').onclick = pickSideRight;
   document.getElementById('date-input').onchange = e => { formState.date = e.target.value; document.getElementById('calc-date-label').textContent = dateLabel(formState.date); };
+  document.getElementById('date-overlay').onclick = e => { if (e.target.id === 'date-overlay') e.currentTarget.classList.remove('open'); };
+  document.getElementById('date-yesterday').onclick = () => { const d = new Date(); d.setDate(d.getDate() - 1); setFormDate(d); };
+  document.getElementById('date-today').onclick = () => setFormDate(new Date());
+  document.getElementById('date-pick').onchange = e => { if (e.target.value) { const [y, m, dd] = e.target.value.split('-').map(Number); setFormDate(new Date(y, m - 1, dd)); } };
 
   document.getElementById('sheet-overlay').onclick = e => { if (e.target.id === 'sheet-overlay') closePicker(null); };
 
