@@ -235,11 +235,34 @@ function rebuildLookups() {
   accountsAll = [...acc];
 }
 
+function weekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); return x; }
+function periodBounds() {
+  const c = state.cursor;
+  if (state.period === 'all') {
+    const ds = Object.values(txMap).map(t => new Date(t.date));
+    if (!ds.length) return { start: new Date(c.getFullYear(), 0, 1), end: c };
+    return { start: new Date(Math.min(...ds)), end: new Date(Math.max(...ds)) };
+  }
+  if (state.period === 'year') return { start: new Date(c.getFullYear(), 0, 1), end: new Date(c.getFullYear(), 11, 31, 23, 59, 59) };
+  if (state.period === 'week') { const s = weekStart(c); const e = new Date(s); e.setDate(s.getDate() + 6); e.setHours(23, 59, 59); return { start: s, end: e }; }
+  if (state.period === 'day') { const s = new Date(c); s.setHours(0, 0, 0, 0); const e = new Date(c); e.setHours(23, 59, 59); return { start: s, end: e }; }
+  if (state.period === 'range' && state.rangeStart && state.rangeEnd) {
+    const s = new Date(state.rangeStart); s.setHours(0, 0, 0, 0);
+    const e = new Date(state.rangeEnd); e.setHours(23, 59, 59);
+    return { start: s, end: e };
+  }
+  return { start: new Date(c.getFullYear(), c.getMonth(), 1), end: new Date(c.getFullYear(), c.getMonth() + 1, 0, 23, 59, 59) };
+}
 function inPeriod(t) {
-  const d = new Date(t.date);
   if (state.period === 'all') return true;
-  if (state.period === 'year') return d.getFullYear() === state.cursor.getFullYear();
-  return d.getFullYear() === state.cursor.getFullYear() && d.getMonth() === state.cursor.getMonth();
+  const b = periodBounds(), d = new Date(t.date);
+  return d >= b.start && d <= b.end;
+}
+function elapsedDays() {
+  const b = periodBounds();
+  const today = new Date(); today.setHours(23, 59, 59, 999);
+  const end = b.end < today ? b.end : today;
+  return Math.max(1, Math.round((end - b.start) / 86400000) + 1);
 }
 function inFilter(t) {
   if (!selectedAccounts) return true;
@@ -273,6 +296,9 @@ function renderHeader() {
   let label, day;
   if (state.period === 'all') { label = 'ВЕСЬ ЧАС'; day = '∞'; }
   else if (state.period === 'year') { label = String(c.getFullYear()); day = '365'; }
+  else if (state.period === 'week') { const b = periodBounds(); label = `${b.start.getDate()} ${MON_SHORT[b.start.getMonth()]} – ${b.end.getDate()} ${MON_SHORT[b.end.getMonth()]}`.toUpperCase(); day = '7'; }
+  else if (state.period === 'day') { const t = new Date(); t.setHours(0,0,0,0); const x = new Date(c); x.setHours(0,0,0,0); label = x.getTime() === t.getTime() ? 'СЬОГОДНІ' : `${c.getDate()} ${MONTHS_GEN[c.getMonth()].toUpperCase()}`; day = '1'; }
+  else if (state.period === 'range') { const b = periodBounds(); label = `${b.start.getDate()} ${MON_SHORT[b.start.getMonth()]} – ${b.end.getDate()} ${MON_SHORT[b.end.getMonth()]}`.toUpperCase(); day = String(Math.round((b.end - b.start) / 86400000) + 1); }
   else { label = `${MONTHS[c.getMonth()].toUpperCase()} ${c.getFullYear()}`; day = String(new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate()); }
   document.getElementById('month-label').textContent = label;
   document.getElementById('daycount').textContent = day;
@@ -632,10 +658,16 @@ function renderBarChart(txs, dir) {
     buckets = Array.from({ length: 12 }, () => new Map());
     dirTx.forEach(t => { const m = new Date(t.date).getMonth(); const p = parentCat(t.category); buckets[m].set(p, (buckets[m].get(p) || 0) + Number(t.amount)); });
   } else {
-    const year = state.cursor.getFullYear(), month = state.cursor.getMonth();
-    const days = new Date(year, month + 1, 0).getDate();
-    buckets = Array.from({ length: days }, () => new Map());
-    dirTx.forEach(t => { const d = new Date(t.date).getDate(); const p = parentCat(t.category); buckets[d - 1].set(p, (buckets[d - 1].get(p) || 0) + Number(t.amount)); });
+    const b = periodBounds();
+    const start = new Date(b.start); start.setHours(0, 0, 0, 0);
+    const nDays = Math.max(1, Math.round((b.end - start) / 86400000) + 1);
+    if (nDays === 1) return '';
+    buckets = Array.from({ length: nDays }, () => new Map());
+    dirTx.forEach(t => {
+      const idx = Math.floor((new Date(t.date) - start) / 86400000);
+      if (idx < 0 || idx >= nDays) return;
+      const p = parentCat(t.category); buckets[idx].set(p, (buckets[idx].get(p) || 0) + Number(t.amount));
+    });
   }
   const totals = buckets.map(m => [...m.values()].reduce((s, v) => s + v, 0));
   const max = Math.max(...totals, 1);
@@ -694,6 +726,10 @@ function renderOverview() {
     </div>${subRows}`;
   }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
 
+  const days = elapsedDays();
+  const avgD = total / days, avgW = avgD * 7, avgM = avgD * 30.44;
+  const avgCol = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
+
   document.getElementById('ov-wrap').innerHTML = `
     ${renderBarChart(txs, dir)}
     <div class="ov-balance-label">Баланс</div>
@@ -701,6 +737,11 @@ function renderOverview() {
     <div class="ov-toggle">
       <button class="ov-tg ${dir === 'expense' ? 'exp' : 'dim'}" data-ov="expense"><div class="l">Витрати</div><div class="v">${fmt(exp)} UAH</div></button>
       <button class="ov-tg ${dir === 'income' ? 'inc' : 'dim'}" data-ov="income"><div class="l">Доходи</div><div class="v">${fmt(inc)} UAH</div></button>
+    </div>
+    <div class="ov-avg">
+      <div class="ov-avg-tile"><div class="l">День (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgD)} UAH</div></div>
+      <div class="ov-avg-tile"><div class="l">Тиждень (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgW)} UAH</div></div>
+      <div class="ov-avg-tile"><div class="l">Місяць (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgM)} UAH</div></div>
     </div>
     ${breakdown}`;
 
@@ -1157,10 +1198,20 @@ function bindEvents() {
   document.getElementById('btn-period').onclick = openPeriod;
   document.getElementById('period-overlay').onclick = e => { if (e.target.id === 'period-overlay') e.currentTarget.classList.remove('open'); };
   document.querySelectorAll('.period-btn').forEach(b => b.onclick = () => {
-    state.period = b.dataset.period;
+    const p = b.dataset.period;
     document.getElementById('period-overlay').classList.remove('open');
-    renderAll();
+    if (p === 'today') { state.period = 'day'; state.cursor = new Date(); renderAll(); }
+    else if (p === 'week') { state.period = 'week'; state.cursor = new Date(); renderAll(); }
+    else if (p === 'pickday') { openCal('day'); }
+    else if (p === 'range') { openCal('range'); }
+    else { state.period = p; renderAll(); }
   });
+
+  // calendar sheet
+  document.getElementById('cal-overlay').onclick = e => { if (e.target.id === 'cal-overlay') e.currentTarget.classList.remove('open'); };
+  document.getElementById('cal-prev').onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); drawCal(); };
+  document.getElementById('cal-next').onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); drawCal(); };
+  document.getElementById('cal-done').onclick = applyCal;
 
   document.getElementById('btn-accounts-filter').onclick = openFilter;
   document.getElementById('btn-accounts-filter2').onclick = () => { state.tab = 'accounts'; syncTabs(); renderAll(); };
@@ -1210,9 +1261,12 @@ function bindEvents() {
 }
 
 function shift(d) {
-  if (state.period === 'all') return;
-  if (state.period === 'year') state.cursor = new Date(state.cursor.getFullYear() + d, 0, 1);
-  else state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + d, 1);
+  if (state.period === 'all' || state.period === 'range') return;
+  const c = state.cursor;
+  if (state.period === 'year') state.cursor = new Date(c.getFullYear() + d, 0, 1);
+  else if (state.period === 'week') { const x = new Date(c); x.setDate(c.getDate() + d * 7); state.cursor = x; }
+  else if (state.period === 'day') { const x = new Date(c); x.setDate(c.getDate() + d); state.cursor = x; }
+  else state.cursor = new Date(c.getFullYear(), c.getMonth() + d, 1);
   renderAll();
 }
 function shiftWithAnim(d) {
@@ -1298,8 +1352,67 @@ function openPeriod() {
   document.getElementById('pb-month-day').textContent = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
   document.getElementById('pb-month-sub').textContent = `${MONTHS[c.getMonth()]} ${c.getFullYear()}`;
   document.getElementById('pb-year-sub').textContent = `Рік ${c.getFullYear()}`;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === state.period));
+  const now = new Date(), ws = weekStart(now), we = new Date(ws); we.setDate(ws.getDate() + 6);
+  document.getElementById('pb-week-sub').textContent = `${ws.getDate()} ${MON_SHORT[ws.getMonth()]} – ${we.getDate()} ${MON_SHORT[we.getMonth()]}`;
+  document.getElementById('pb-today-sub').textContent = `${now.getDate()} ${MONTHS_GEN[now.getMonth()]}`;
+  const rs = document.getElementById('pb-range-sub');
+  rs.textContent = state.period === 'range' && state.rangeStart ? `${new Date(state.rangeStart).getDate()} ${MON_SHORT[new Date(state.rangeStart).getMonth()]} – ${new Date(state.rangeEnd).getDate()} ${MON_SHORT[new Date(state.rangeEnd).getMonth()]}` : '';
+  const map = { day: 'today', week: 'week', range: 'range', year: 'year', month: 'month', all: 'all' };
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === map[state.period]));
   document.getElementById('period-overlay').classList.add('open');
+}
+
+// ── CALENDAR (day / range picker) ──────────────────────────
+let calMode = 'day', calMonth = new Date(), calStart = null, calEnd = null;
+function openCal(mode) {
+  calMode = mode;
+  calStart = calEnd = null;
+  calMonth = new Date(state.cursor.getFullYear(), state.cursor.getMonth(), 1);
+  drawCal();
+  document.getElementById('cal-overlay').classList.add('open');
+}
+function drawCal() {
+  document.getElementById('cal-title').textContent = `${MONTHS[calMonth.getMonth()]} ${calMonth.getFullYear()}`;
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  const first = (new Date(y, m, 1).getDay() + 6) % 7;
+  const days = new Date(y, m + 1, 0).getDate();
+  let cells = '';
+  for (let i = 0; i < first; i++) cells += `<div class="cal-day empty"></div>`;
+  for (let d = 1; d <= days; d++) {
+    const cur = new Date(y, m, d);
+    let cls = 'cal-day';
+    if (calStart && calEnd && cur >= calStart && cur <= calEnd) cls += ' range';
+    if (calStart && cur.getTime() === calStart.getTime()) cls += ' sel';
+    if (calEnd && cur.getTime() === calEnd.getTime()) cls += ' sel';
+    cells += `<div class="${cls}" data-d="${d}">${d}</div>`;
+  }
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML = cells;
+  grid.querySelectorAll('.cal-day[data-d]').forEach(el => el.onclick = () => calPick(new Date(y, m, +el.dataset.d)));
+  const hint = document.getElementById('cal-hint'), done = document.getElementById('cal-done');
+  if (calMode === 'day') { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
+  else { hint.textContent = !calStart ? 'Оберіть початок' : !calEnd ? 'Оберіть кінець' : ''; done.disabled = !(calStart && calEnd); }
+}
+function calPick(d) {
+  d.setHours(0, 0, 0, 0);
+  if (calMode === 'day') { calStart = d; calEnd = null; }
+  else {
+    if (!calStart || calEnd) { calStart = d; calEnd = null; }
+    else if (d < calStart) { calEnd = calStart; calStart = d; }
+    else calEnd = d;
+  }
+  drawCal();
+}
+function applyCal() {
+  if (calMode === 'day') {
+    if (!calStart) return;
+    state.period = 'day'; state.cursor = calStart;
+  } else {
+    if (!calStart || !calEnd) return;
+    state.period = 'range'; state.rangeStart = +calStart; state.rangeEnd = +calEnd; state.cursor = calStart;
+  }
+  document.getElementById('cal-overlay').classList.remove('open');
+  renderAll();
 }
 
 // ── HELPERS ────────────────────────────────────────────────

@@ -137,21 +137,55 @@
       <div class="sheet-handle"></div>
       <div class="sheet-title">Період</div>
       <div class="period-grid">
-        <button class="period-btn wide" data-period="month" id="pb-month">
-          <div class="pb-ic" id="pb-month-day">30</div>
-          <div class="pb-lbl">Місяць</div>
-          <div class="pb-sub" id="pb-month-sub">Червень 2026</div>
+        <button class="period-btn wide" data-period="range" id="pb-range">
+          <div class="pb-ic">•••</div>
+          <div class="pb-lbl">Вибрати діапазон</div>
+          <div class="pb-sub" id="pb-range-sub"></div>
         </button>
         <button class="period-btn" data-period="all">
           <div class="pb-ic">∞</div>
           <div class="pb-lbl">Весь час</div>
+        </button>
+        <button class="period-btn" data-period="pickday">
+          <div class="pb-ic">📅</div>
+          <div class="pb-lbl">Виберіть день</div>
+        </button>
+        <button class="period-btn" data-period="week">
+          <div class="pb-ic">7</div>
+          <div class="pb-lbl">Тиждень</div>
+          <div class="pb-sub" id="pb-week-sub"></div>
+        </button>
+        <button class="period-btn" data-period="today">
+          <div class="pb-ic">1</div>
+          <div class="pb-lbl">Сьогодні</div>
+          <div class="pb-sub" id="pb-today-sub"></div>
         </button>
         <button class="period-btn" data-period="year">
           <div class="pb-ic">365</div>
           <div class="pb-lbl">Рік</div>
           <div class="pb-sub" id="pb-year-sub">Рік 2026</div>
         </button>
+        <button class="period-btn" data-period="month" id="pb-month">
+          <div class="pb-ic" id="pb-month-day">30</div>
+          <div class="pb-lbl">Місяць</div>
+          <div class="pb-sub" id="pb-month-sub">Червень 2026</div>
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- CALENDAR SHEET (day / range picker) -->
+  <div class="sheet-overlay" id="cal-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="cal-head">
+        <button class="cal-nav" id="cal-prev">‹</button>
+        <span class="cal-title" id="cal-title"></span>
+        <button class="cal-nav" id="cal-next">›</button>
+      </div>
+      <div class="cal-weekdays"><span>П</span><span>В</span><span>С</span><span>Ч</span><span>П</span><span>С</span><span>Н</span></div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-foot"><span class="cal-hint" id="cal-hint"></span><button class="cal-done" id="cal-done">Готово</button></div>
     </div>
   </div>
 
