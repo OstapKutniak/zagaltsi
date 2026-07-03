@@ -9,6 +9,12 @@ import { getPlayerId } from '../multiplayer/lobby';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { oakScene } from '../world/locationArt';
 import { ensureFogTexture } from '../level/fogTexture';
+import { CutoutCharacter } from '../anim/CutoutCharacter';
+import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
+import { playDialogDoc, closeDialogPlay } from '../dialogPlay';
+import { loadQuests, type Quest } from '../story/quests';
+import { acceptQuest } from '../story/questState';
+import { idbGet } from '../store';
 
 // Сцена локації (хаб): арт із Редактора Локацій (фон + розставлені будівлі), а поки
 // його нема — білі куби-заглушки. Внизу — 5 слотів Хоругви (як герої в HoMM):
@@ -30,13 +36,16 @@ export class LocationScene extends Phaser.Scene {
   constructor() { super('Location'); }
 
   private icon = '';
+  private encounterQuestId: string | null = null; // енкаунтер: НПС з квестом на передньому плані
+  private npc: CutoutCharacter | null = null;
 
-  init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string; icon?: string }): void {
+  init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string; icon?: string; encounterQuestId?: string }): void {
     this.nodeId = data?.nodeId ?? '';
     this.label = data?.label ?? 'Локація';
     this.locationId = data?.locationId;
     this.worldId = data?.worldId ?? '';
     this.icon = data?.icon ?? '';
+    this.encounterQuestId = data?.encounterQuestId ?? null;
   }
 
   create(): void {
@@ -63,11 +72,80 @@ export class LocationScene extends Phaser.Scene {
 
     void this.renderLocation();
     this.setupPresence();
+    this.npc = null;
+    if (this.encounterQuestId) void this.spawnEncounter(this.encounterQuestId);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unwatch?.(); this.unwatch = null;
+      closeDialogPlay();
       leaveLocation();
     });
+  }
+
+  update(_t: number, dtMs: number): void {
+    this.npc?.tick(dtMs / 1000, -1); // гість дивиться ліворуч (до гравця/центру)
+  }
+
+  // ── Енкаунтер: «у вашій локації хтось є» — НПС виходить на передній план,
+  //    грає його діалог; кінцівка 'positive' → квест на дошку «Завдання». ─────
+  private async spawnEncounter(questId: string): Promise<void> {
+    const store = await loadQuests();
+    const q = store.quests.find((x) => x.id === questId);
+    if (!q?.giver || !this.scene.isActive()) return;
+    const lib = await loadCharLibrary();
+    const giver = lib.find((c) => c.id === q.giver);
+    if (!giver?.doc?.images || !this.scene.isActive()) { this.startDialog(q); return; }
+    const char = await CutoutCharacter.load(this, giver.doc, 'enc_' + giver.id + '_').catch(() => null);
+    if (!char || !this.scene.isActive()) { this.startDialog(q); return; }
+    char.setAnim('idle');
+    // Передній план: праворуч від центру, «на землі», великим планом.
+    const holder = this.add.container(LOGICAL_W / 2 + 240 + this.offX, LOGICAL_H - 118 + this.offY, [char]);
+    holder.setScrollFactor(0).setDepth(30).setScale(0.9);
+    this.npc = char;
+    this.startDialog(q);
+  }
+
+  private startDialog(q: Quest): void {
+    void this.loadDialog(q).then((doc) => {
+      if (!this.scene.isActive()) return;
+      if (!doc) {
+        // діалогу нема — гість мовчки лишає записку: квест одразу на дошку
+        acceptQuest(q);
+        this.toastQuest();
+        return;
+      }
+      playDialogDoc(doc, {
+        onOutcome: (o) => {
+          if (o === 'positive') { acceptQuest(q); this.toastQuest(); }
+        },
+      });
+    });
+  }
+
+  private async loadDialog(q: Quest): Promise<DialogDoc | null> {
+    if (!q.giver) return null;
+    let docs: DialogDoc[] = [];
+    // Опубліковані — надійний fetch; локальні (IDB) — з таймаут-гонкою, бо відкриття
+    // IDB може «зависнути» (заблоковане інше з'єднання) і proміс не резолвиться.
+    try {
+      const pub = await loadPublishedDialogs();
+      docs = [...(pub[q.giver] ?? [])];
+    } catch { /* ignore */ }
+    try {
+      const local = await Promise.race([
+        idbGet<DialogDoc[]>(dialogsKey(q.giver)),
+        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
+      ]);
+      if (Array.isArray(local)) for (const d of local) if (!docs.some((x) => x.id === d.id)) docs.push(d);
+    } catch { /* ignore */ }
+    return docs.find((d) => d.id === q.dialogId) ?? docs[0] ?? null;
+  }
+
+  private toastQuest(): void {
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 40 + this.offY, 'Нове завдання — на дошці', {
+      fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(40).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 600, onComplete: () => t.destroy() });
   }
 
   // ── Арт локації (або куби) ─────────────────────────────────────────────────

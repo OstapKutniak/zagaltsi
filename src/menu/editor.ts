@@ -6,7 +6,7 @@
 
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
-import { initBotEditor } from '../bot/editor';
+import { initStoryEditor } from '../story/editor';
 
 export interface MenuButton {
   id: string; label: string;
@@ -596,7 +596,7 @@ export function initMenuEditor(prefix: string): void {
   window.addEventListener('menuTabActivated', () => draw());
   draw();
 
-  // Секція «Бот (Telegram)» у цій же правій панелі: тексти/кнопки бота →
-  // bot-config.json (спільна публікація) → воркер читає живцем.
-  initBotEditor();
+  // Редактор Історії: перемикач [Меню|Квести|Бот|Діалоги] у правій панелі.
+  // Меню-редактор стає першим розділом; квести/бот/діалоги — поряд.
+  initStoryEditor();
 }

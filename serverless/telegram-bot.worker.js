@@ -25,6 +25,9 @@ const FALLBACK = {
     ['Завдання', 'zavdannya'], ['Досягнення', 'dosyagnennya'], ['Інвентар', 'inventar'],
   ],
   gatherText: '{from} розгортає хоругву — загін збирається у мандри. Стань під хоругву!',
+  // Випадковий енкаунтер (cron щогодини: шанс на гравця) і нагадування про квести.
+  encounter: { text: 'У вашій локації хтось є…', button: 'Перевірити', chance: 0.15 },
+  remind: { text: 'Дошка нагадує: «{title}» досі чекає.', button: 'До завдань', hours: 5 },
 };
 
 async function loadConfig(env) {
@@ -74,11 +77,63 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+// Надіслати одному гравцю енкаунтер «у вашій локації хтось є».
+async function sendEncounter(env, cfg, chatId) {
+  await tg(env, 'sendMessage', {
+    chat_id: chatId,
+    text: cfg.encounter.text,
+    reply_markup: { inline_keyboard: [[{ text: cfg.encounter.button, url: appLink(env, 'enc') }]] },
+  });
+}
+
 export default {
+  // ── CRON (щогодини, wrangler.toml [triggers]) ────────────────────────────────
+  // 1) Енкаунтери: кожному відомому гравцю з шансом cfg.encounter.chance.
+  // 2) Нагадування: по player_quests/{playerId}/{questId}, якщо минуло remind.hours.
+  //    У приваті chat_id == tg user id == playerId гри — тож шлемо напряму.
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil((async () => {
+      const cfg = await loadConfig(env);
+      const users = (await fbGet(env, 'tg_users')) || {};
+      for (const rec of Object.values(users)) {
+        if (rec?.chatId && Math.random() < (cfg.encounter?.chance ?? 0)) {
+          try { await sendEncounter(env, cfg, rec.chatId); } catch { /* далі */ }
+        }
+      }
+      const all = (await fbGet(env, 'player_quests')) || {};
+      const now = Date.now();
+      const gapMs = (cfg.remind?.hours ?? 5) * 3600 * 1000;
+      for (const [playerId, quests] of Object.entries(all)) {
+        if (!/^\d+$/.test(playerId)) continue; // лише телеграм-гравці (числовий id = chat_id)
+        for (const [qid, q] of Object.entries(quests || {})) {
+          if (!q || now - (q.lastRemind ?? q.takenAt ?? 0) < gapMs) continue;
+          try {
+            await tg(env, 'sendMessage', {
+              chat_id: playerId,
+              text: String(cfg.remind.text).replace('{title}', q.title || 'завдання'),
+              reply_markup: { inline_keyboard: [[{ text: cfg.remind.button, url: appLink(env, 'zavdannya') }]] },
+            });
+            await fbPut(env, `player_quests/${playerId}/${qid}/lastRemind`, now);
+          } catch { /* далі */ }
+        }
+      }
+    })());
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+
+    // ── Тест: миттєвий енкаунтер собі (GET /test-encounter?nick=<нік>) ─────────
+    if (url.pathname === '/test-encounter') {
+      const nick = (url.searchParams.get('nick') || '').replace(/^@/, '').toLowerCase();
+      const rec = await fbGet(env, `tg_users/${nick}`);
+      if (!rec?.chatId) return new Response(JSON.stringify({ ok: false, err: 'user unknown to bot' }), { status: 404, headers: CORS });
+      const cfg = await loadConfig(env);
+      await sendEncounter(env, cfg, rec.chatId);
+      return new Response(JSON.stringify({ ok: true }), { headers: CORS });
+    }
 
     // ── Telegram webhook ─────────────────────────────────────────────────────
     if (url.pathname === '/webhook' && request.method === 'POST') {

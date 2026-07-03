@@ -57,6 +57,36 @@ const START_ROUTES: Record<string, { scene: string; data?: object }> = {
   dosyagnennya: { scene: 'Achievements' },
   inventar: { scene: 'Inventory' },
 };
+// Енкаунтер «у вашій локації хтось є» (кнопка «Перевірити» з бота): відкриваємо
+// ПОТОЧНУ локацію мандрівника з випадковим невзятим квестом, у якого є «Хто дає».
+async function openEncounter(menu: Phaser.Scene): Promise<void> {
+  const [{ loadWorldsForGame, findGlobalWorld, loadTravel }, { loadQuests }, { takenQuests }] = await Promise.all([
+    import('./world/worldData'), import('./story/quests'), import('./story/questState'),
+  ]);
+  const worlds = await loadWorldsForGame();
+  const t = loadTravel();
+  let world = worlds.find((w) => w.id === t?.worldId) ?? null;
+  let node = world?.nodes.find((n) => n.id === t?.nodeId && n.type === 'location') ?? null;
+  if (!node) {
+    // мандрівник ще ніде не був (або стоїть на регіоні) → перша ЛОКАЦІЯ будь-якого
+    // світу (глобальний зазвичай має лише регіони, тож шукаємо по всіх)
+    const ordered = [findGlobalWorld(worlds), ...worlds].filter((w): w is NonNullable<typeof w> => !!w);
+    for (const w of ordered) {
+      const n = w.nodes.find((x) => x.type === 'location');
+      if (n) { world = w; node = n; break; }
+    }
+  }
+  if (!world || !node) { menu.scene.start('World', {}); return; }
+  const taken = takenQuests();
+  const store = await loadQuests();
+  const candidates = store.quests.filter((q) => q.giver && !taken[q.id]);
+  const quest = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+  menu.scene.start('Location', {
+    nodeId: node.id, label: node.label, locationId: node.locationId, worldId: world.id,
+    icon: node.icon ?? '', encounterQuestId: quest?.id,
+  });
+}
+
 const startParam = getStartParam();
 if (startParam) {
   // Меню стартує з Boot; перемикаємось, щойно воно піднялось.
@@ -67,6 +97,8 @@ if (startParam) {
         void joinKhorugva(startParam.slice(3))
           .catch(() => null)
           .then(() => menu.scene.start('Khorugva'));
+      } else if (startParam === 'enc') {
+        void openEncounter(menu).catch(() => menu.scene.start('World', {}));
       } else {
         const r = START_ROUTES[startParam];
         if (r && r.scene !== 'Menu') menu.scene.start(r.scene, r.data);

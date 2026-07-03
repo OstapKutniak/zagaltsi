@@ -8,6 +8,10 @@ main = "telegram-bot.worker.js"
 account_id = "063b0830021bdfad979d2bef54f2edc5"
 compatibility_date = "2026-07-01"
 
+# Щогодинний cron: випадкові енкаунтери + нагадування про взяті квести (кожні N год).
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 BOT_USERNAME = "Zagaltsi_Bot"
 APP_SHORT = "Horugva"

@@ -6,13 +6,22 @@
 const DB = 'zagaltsi';
 const STORE = 'kv';
 
+// ОДНЕ з'єднання на сторінку (кешований проміс). Раніше кожен idbGet/idbSet
+// відкривав нове з'єднання й не закривав — сотні «висячих» конектів, і зрештою
+// indexedDB.open() переставав резолвитись (зависали квести/діалоги/локації).
+let _db: Promise<IDBDatabase> | null = null;
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
+  _db ??= new Promise((res, rej) => {
     const r = indexedDB.open(DB, 1);
     r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
+    r.onsuccess = () => {
+      // якщо інша вкладка колись підніме версію БД — віддамо з'єднання і перевідкриємось
+      r.result.onversionchange = () => { r.result.close(); _db = null; };
+      res(r.result);
+    };
+    r.onerror = () => { _db = null; rej(r.error); };
   });
+  return _db;
 }
 
 export async function idbGet<T>(key: string): Promise<T | null> {
