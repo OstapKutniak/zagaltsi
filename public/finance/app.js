@@ -291,9 +291,11 @@ function inPeriod(t) {
 }
 function elapsedDays() {
   const b = periodBounds();
-  const today = new Date(); today.setHours(23, 59, 59, 999);
+  const today = new Date();
   const end = b.end < today ? b.end : today;
-  return Math.max(1, Math.round((end - b.start) / 86400000) + 1);
+  const s = new Date(b.start); s.setHours(0, 0, 0, 0);
+  const e = new Date(end); e.setHours(0, 0, 0, 0);
+  return Math.max(1, Math.round((e - s) / 86400000) + 1);
 }
 function inFilter(t) {
   if (!selectedAccounts) return true;
@@ -824,17 +826,22 @@ async function payRecurring(id) {
 
 // ── OVERVIEW ───────────────────────────────────────────────
 function renderBarChart(txs, dir) {
-  if (state.period === 'all') return '';
   const dirTx = txs.filter(t => t.type === dir);
   let buckets;
-  if (state.period === 'year') {
+  if (state.period === 'all') {
+    const allYears = Object.values(txMap).map(t => new Date(t.date).getFullYear());
+    if (!allYears.length) return '';
+    const minY = Math.min(...allYears), maxY = new Date().getFullYear();
+    const nY = Math.max(1, maxY - minY + 1);
+    buckets = Array.from({ length: nY }, () => new Map());
+    dirTx.forEach(t => { const yi = new Date(t.date).getFullYear() - minY; if (yi < 0 || yi >= nY) return; const p = parentCat(t.category); buckets[yi].set(p, (buckets[yi].get(p) || 0) + Number(t.amount)); });
+  } else if (state.period === 'year') {
     buckets = Array.from({ length: 12 }, () => new Map());
     dirTx.forEach(t => { const m = new Date(t.date).getMonth(); const p = parentCat(t.category); buckets[m].set(p, (buckets[m].get(p) || 0) + Number(t.amount)); });
   } else {
     const b = periodBounds();
     const start = new Date(b.start); start.setHours(0, 0, 0, 0);
     const nDays = Math.max(1, Math.round((b.end - start) / 86400000) + 1);
-    if (nDays === 1) return '';
     buckets = Array.from({ length: nDays }, () => new Map());
     dirTx.forEach(t => {
       const idx = Math.floor((new Date(t.date) - start) / 86400000);
@@ -845,10 +852,10 @@ function renderBarChart(txs, dir) {
   const totals = buckets.map(m => [...m.values()].reduce((s, v) => s + v, 0));
   const max = Math.max(...totals, 1);
   const n = buckets.length, H = 100, gap = 2;
-  const bw = Math.max(2, (300 - (n - 1) * gap) / n);
+  const bw = Math.min(40, Math.max(6, (340 - (n - 1) * gap) / n));
   const bars = buckets.map((m, i) => {
     const x = i * (bw + gap), total = totals[i];
-    if (total <= 0) return `<rect x="${x}" y="${H - 2}" width="${bw}" height="2" fill="#eee"/>`;
+    if (total <= 0) return `<rect x="${x}" y="${H - 2}" width="${bw.toFixed(2)}" height="2" fill="#eee"/>`;
     const barH = Math.max(3, total / max * H);
     let y = H - barH, out = '';
     [...m.entries()].sort((a, b) => b[1] - a[1]).forEach(([name, v]) => {
@@ -858,7 +865,11 @@ function renderBarChart(txs, dir) {
     });
     return out;
   }).join('');
-  return `<div class="ov-barchart"><svg viewBox="0 0 ${n * (bw + gap)} ${H}" preserveAspectRatio="none" style="width:100%;height:110px;display:block">${bars}</svg></div>`;
+  const vw = Math.round(n * (bw + gap));
+  const wide = n > 8;
+  const svgStyle = wide ? 'width:100%;height:110px;display:block' : `width:${vw}px;max-width:100%;height:110px;display:block;margin:0 auto`;
+  const par = wide ? 'none' : 'xMidYMid meet';
+  return `<div class="ov-barchart"><svg viewBox="0 0 ${vw} ${H}" preserveAspectRatio="${par}" style="${svgStyle}">${bars}</svg></div>`;
 }
 
 function renderOverview() {
@@ -900,7 +911,7 @@ function renderOverview() {
   }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
 
   const days = elapsedDays();
-  const avgD = total / days, avgW = avgD * 7, avgM = avgD * 30.44;
+  const avgD = total / days, avgW = avgD * 7, avgM = avgD * 30;
   const avgCol = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
 
   document.getElementById('ov-wrap').innerHTML = `
