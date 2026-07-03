@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H } from '../config';
 import { setupMenuCamera, addTitle, addBack, MENU_FONT } from './menuTheme';
 import { loadQuests, type Quest } from '../story/quests';
+import { takenQuests } from '../story/questState';
 
 // «Завдання» — дерев'яна дошка на стіні з пришпиленими нотатками-квестами
 // (з Редактора Історії → панель «Квести»). Головні квести — з ★. Тап по нотатці
@@ -42,8 +43,12 @@ export class QuestsScene extends Phaser.Scene {
 
     void loadQuests().then((store) => {
       if (!this.scene.isActive()) return;
-      // головні першими
-      const quests = [...store.quests].sort((a, b) => (a.cat === 'main' ? -1 : 1) - (b.cat === 'main' ? -1 : 1));
+      // На дошці — лише ВЗЯТІ квести (енкаунтери/НПС видають), головні першими.
+      // Квест без giver вважаємо «одразу відомим» (авторський, видимий без видачі).
+      const taken = takenQuests();
+      const quests = store.quests
+        .filter((q) => !q.giver || taken[q.id])
+        .sort((a, b) => (a.cat === 'main' ? -1 : 1) - (b.cat === 'main' ? -1 : 1));
       NOTE_POS.forEach((n, i) => this.drawNote(bx, by, n, quests[i] ?? null));
     });
   }

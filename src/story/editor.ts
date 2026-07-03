@@ -11,6 +11,7 @@ import { registerPublisher } from '../publish';
 import { initBotEditor } from '../bot/editor';
 import { mountDialogEditor, unmountDialogEditor } from '../rig/dialogEditor';
 import { loadCharLibrary } from '../charlib';
+import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
 import { type Quest, type QuestStore, loadQuests, newQuestId } from './quests';
 
 const INPUT_CSS = 'background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box';
@@ -126,6 +127,38 @@ function initQuestsPanel(panel: HTMLElement): void {
     cat.value = q.cat;
     cat.addEventListener('change', () => { q.cat = cat.value as Quest['cat']; q.updatedAt = Date.now(); save(); renderList(); });
     props.appendChild(cat);
+
+    // Хто дає квест (енкаунтер «у вашій локації хтось є») + яким діалогом.
+    // Кінцівка діалогу з outcome 'positive' = гравець погодився → квест на дошку.
+    props.appendChild(lbl('Хто дає (НПС для енкаунтера; порожньо = не видається)'));
+    const giver = document.createElement('select');
+    giver.style.cssText = INPUT_CSS;
+    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '— ніхто'; giver.appendChild(noneOpt);
+    props.appendChild(giver);
+    props.appendChild(lbl('Діалог НПС (кінцівка positive = взяти квест)'));
+    const dlg = document.createElement('select');
+    dlg.style.cssText = INPUT_CSS;
+    props.appendChild(dlg);
+
+    const fillDialogs = async (charId: string): Promise<void> => {
+      dlg.innerHTML = '';
+      const d0 = document.createElement('option'); d0.value = ''; d0.textContent = '— перший наявний'; dlg.appendChild(d0);
+      if (!charId) return;
+      let docs: DialogDoc[] = [];
+      try { const local = await idbGet<DialogDoc[]>(dialogsKey(charId)); if (Array.isArray(local)) docs = local; } catch { /* ignore */ }
+      try { const pub = await loadPublishedDialogs(); for (const d of pub[charId] ?? []) if (!docs.some((x) => x.id === d.id)) docs.push(d); } catch { /* ignore */ }
+      for (const d of docs) { const o = document.createElement('option'); o.value = d.id; o.textContent = `${d.id} — ${d.name}`; dlg.appendChild(o); }
+      dlg.value = q.dialogId ?? '';
+    };
+    void loadCharLibrary().then((lib) => {
+      for (const c of lib.filter((x) => x.cat === 'enemy' || x.cat === 'neutral' || x.cat === 'char')) {
+        const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; giver.appendChild(o);
+      }
+      giver.value = q.giver ?? '';
+      void fillDialogs(giver.value);
+    });
+    giver.addEventListener('change', () => { q.giver = giver.value || undefined; q.updatedAt = Date.now(); save(); void fillDialogs(giver.value); });
+    dlg.addEventListener('change', () => { q.dialogId = dlg.value || undefined; q.updatedAt = Date.now(); save(); });
 
     const del = document.createElement('button');
     del.textContent = 'Видалити квест';

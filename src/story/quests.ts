@@ -9,6 +9,8 @@ export interface Quest {
   title: string;        // заголовок на нотатці дошки
   text: string;         // повний текст (розгортається по кліку)
   cat: 'main' | 'side'; // головний / побічний
+  giver?: string;       // charId НПС, що видає квест (енкаунтер у локації)
+  dialogId?: string;    // id діалогу цього НПС (кінцівка 'positive' = квест узято)
   updatedAt?: number;
 }
 export interface QuestStore { quests: Quest[]; updatedAt?: number }

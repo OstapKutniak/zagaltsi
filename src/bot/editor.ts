@@ -11,6 +11,9 @@ interface BotCfg {
   menuText: string;
   sections: [string, string][]; // [підпис, deep-link параметр]
   gatherText: string;
+  // Випадковий енкаунтер (cron щогодини, шанс на гравця) і нагадування про квести.
+  encounter?: { text: string; button: string; chance: number };
+  remind?: { text: string; button: string; hours: number };
   updatedAt?: number;
 }
 
@@ -25,6 +28,8 @@ const DEFAULT_CFG: BotCfg = {
   menuText: 'Хоругва кличе. Обирай, куди рушити:',
   sections: PARAMS.map(([p, l]) => [l, p]),
   gatherText: '{from} розгортає хоругву — стань під хоругву!',
+  encounter: { text: 'У вашій локації хтось є…', button: 'Перевірити', chance: 0.15 },
+  remind: { text: 'Дошка нагадує: «{title}» досі чекає.', button: 'До завдань', hours: 5 },
 };
 
 let _init = false;
@@ -111,6 +116,32 @@ export function initBotEditor(container?: HTMLElement): void {
     gt.value = cfg.gatherText;
     gt.addEventListener('input', () => { cfg.gatherText = gt.value; save(); });
     body.appendChild(gt);
+
+    const mkText = (label: string, get: () => string, set: (v: string) => void, area = false): void => {
+      body.appendChild(lbl(label));
+      const el = document.createElement(area ? 'textarea' : 'input') as HTMLInputElement;
+      if (!area) el.type = 'text';
+      el.style.cssText = inputCss + (area ? ';min-height:52px;resize:vertical' : '');
+      el.value = get();
+      el.addEventListener('input', () => { set(el.value); save(); });
+      body.appendChild(el);
+    };
+    const mkNum = (label: string, get: () => number, set: (v: number) => void, step = 1): void => {
+      body.appendChild(lbl(label));
+      const el = document.createElement('input');
+      el.type = 'number'; el.step = String(step); el.style.cssText = inputCss;
+      el.value = String(get());
+      el.addEventListener('input', () => { const v = parseFloat(el.value); if (Number.isFinite(v)) { set(v); save(); } });
+      body.appendChild(el);
+    };
+    cfg.encounter ??= { ...DEFAULT_CFG.encounter! };
+    cfg.remind ??= { ...DEFAULT_CFG.remind! };
+    mkText('Енкаунтер: текст сповіщення', () => cfg.encounter!.text, (v) => { cfg.encounter!.text = v; }, true);
+    mkText('Енкаунтер: кнопка', () => cfg.encounter!.button, (v) => { cfg.encounter!.button = v; });
+    mkNum('Енкаунтер: шанс на гравця за годину (0..1)', () => cfg.encounter!.chance, (v) => { cfg.encounter!.chance = v; }, 0.05);
+    mkText('Нагадування: текст ({title} = назва квесту)', () => cfg.remind!.text, (v) => { cfg.remind!.text = v; }, true);
+    mkText('Нагадування: кнопка', () => cfg.remind!.button, (v) => { cfg.remind!.button = v; });
+    mkNum('Нагадування: раз на скільки годин', () => cfg.remind!.hours, (v) => { cfg.remind!.hours = v; });
 
     body.appendChild(lbl('Кнопки бота (підпис → куди веде)'));
     cfg.sections.forEach((s, i) => {
