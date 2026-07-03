@@ -125,7 +125,7 @@ let accountsList = [];
 let recurringMap = {};
 let catMeta = { icons: {}, subs: {} };
 let selectedAccounts = null;
-let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date() };
+let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date(), catShowPct: false };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
 let subsByDir = { expense: new Map(), income: new Map() };
@@ -384,18 +384,25 @@ function renderCategories() {
       </div>
     </div></div>`;
 
+  const dirTotal = dir === 'expense' ? expTotal : incTotal;
   const cats = catList.map(x => {
     const st = catStyle(x.name);
+    const valHtml = state.catShowPct
+      ? `${dirTotal ? Math.round(x.v / dirTotal * 100) : 0}<span>%</span>`
+      : `${fmt(x.v)} <span>UAH</span>`;
     return `<button class="cat ${x.v ? '' : 'zero'}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
       <div class="cat-name">${esc(x.name)}</div>
       <div class="cat-circle">${st.icon}</div>
-      <div class="cat-amt">${fmt(x.v)} <span>UAH</span></div>
+      <div class="cat-amt">${valHtml}</div>
     </button>`;
   }).join('');
 
   const grid = document.getElementById('cat-grid');
   grid.innerHTML = donut + cats;
-  document.getElementById('donut-cell').onclick = () => {
+
+  const cell = document.getElementById('donut-cell');
+  let lpTimer = null, lpFired = false;
+  const toggleDir = () => {
     const donutEl = document.querySelector('#donut-cell .donut');
     if (!donutEl || donutEl._animating) return;
     donutEl._animating = true;
@@ -403,10 +410,20 @@ function renderCategories() {
     setTimeout(() => {
       state.catDir = state.catDir === 'expense' ? 'income' : 'expense';
       renderCategories();
-      const newDonut = document.querySelector('#donut-cell .donut');
-      if (newDonut) newDonut.style.animation = 'donutIn 0.32s cubic-bezier(0.34,1.56,0.64,1) both';
+      const nd = document.querySelector('#donut-cell .donut');
+      if (nd) nd.style.animation = 'donutIn 0.32s cubic-bezier(0.34,1.56,0.64,1) both';
     }, 220);
   };
+  const togglePct = () => {
+    state.catShowPct = !state.catShowPct;
+    renderCategories();
+    const nd = document.querySelector('#donut-cell .donut');
+    if (nd) nd.style.animation = 'orbPct 0.6s ease';
+  };
+  cell.onclick = () => { if (lpFired) { lpFired = false; return; } toggleDir(); };
+  cell.addEventListener('touchstart', () => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true; togglePct(); }, 450); }, { passive: true });
+  cell.addEventListener('touchend', () => clearTimeout(lpTimer), { passive: true });
+  cell.addEventListener('touchmove', () => clearTimeout(lpTimer), { passive: true });
 
   // Short tap → add form; long press → category detail sheet
   grid.querySelectorAll('.cat').forEach(el => {
@@ -919,19 +936,21 @@ function renderOverview() {
   const avgCol = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
 
   document.getElementById('ov-wrap').innerHTML = `
-    ${renderBarChart(txs, dir)}
-    <div class="ov-balance-label">Баланс</div>
-    <div class="ov-balance" style="color:${balance < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(balance)} UAH</div>
-    <div class="ov-toggle">
-      <button class="ov-tg ${dir === 'expense' ? 'exp' : 'dim'}" data-ov="expense"><div class="l">Витрати</div><div class="v">${fmt(exp)} UAH</div></button>
-      <button class="ov-tg ${dir === 'income' ? 'inc' : 'dim'}" data-ov="income"><div class="l">Доходи</div><div class="v">${fmt(inc)} UAH</div></button>
+    <div class="ov-top">
+      ${renderBarChart(txs, dir)}
+      <div class="ov-balance-label">Баланс</div>
+      <div class="ov-balance" style="color:${balance < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(balance)} UAH</div>
+      <div class="ov-toggle">
+        <button class="ov-tg ${dir === 'expense' ? 'exp' : 'dim'}" data-ov="expense"><div class="l">Витрати</div><div class="v">${fmt(exp)} UAH</div></button>
+        <button class="ov-tg ${dir === 'income' ? 'inc' : 'dim'}" data-ov="income"><div class="l">Доходи</div><div class="v">${fmt(inc)} UAH</div></button>
+      </div>
+      <div class="ov-avg">
+        <div class="ov-avg-tile"><div class="l">День (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgD)} UAH</div></div>
+        <div class="ov-avg-tile"><div class="l">Тиждень (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgW)} UAH</div></div>
+        <div class="ov-avg-tile"><div class="l">Місяць (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgM)} UAH</div></div>
+      </div>
     </div>
-    <div class="ov-avg">
-      <div class="ov-avg-tile"><div class="l">День (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgD)} UAH</div></div>
-      <div class="ov-avg-tile"><div class="l">Тиждень (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgW)} UAH</div></div>
-      <div class="ov-avg-tile"><div class="l">Місяць (сер.)</div><div class="v" style="color:${avgCol}">${fmt(avgM)} UAH</div></div>
-    </div>
-    ${breakdown}`;
+    <div class="ov-list">${breakdown}</div>`;
 
   document.querySelectorAll('#ov-wrap .ov-tg').forEach(b => b.onclick = () => { state.ovDir = b.dataset.ov; renderOverview(); });
   document.querySelectorAll('#ov-wrap .ov-cat[data-cat]').forEach(el => {
