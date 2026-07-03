@@ -1,8 +1,12 @@
 // World map editor — намальований фон + вузли-локації + лінії-переходи між ними.
+// Вьюпорт = WYSIWYG мапи гри: пергаментне тло, чорнильні іконки (ті самі, що
+// малює WorldScene), пунктирні шляхи. Іконку вузла можна вибрати зі списку або
+// завантажити свою картинку.
 import { idbGet, idbSet } from '../store';
 import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { keyDataUrl } from '../rig/keyer';
+import { locationIcon, regionSeal, iconFromLabel, MAP_ICON_KINDS, type MapIconKind } from './mapArt';
 
 interface WorldNode {
   id: string;
@@ -13,6 +17,8 @@ interface WorldNode {
   locationId?: string; // type=location → id LocationDoc (нема — гра шукає за назвою)
   desc?: string;       // короткий опис для прапорця на ігровій мапі
   icon?: string;       // вид чорнильної іконки на мапі (нема — гра вгадує з назви)
+  img?: string;        // своя картинка-іконка (dataURL) — перекриває icon
+  iconScale?: number;  // множник розміру іконки/картинки на мапі
 }
 
 interface WorldEdge {
@@ -86,6 +92,31 @@ export function initWorldEditor(prefix: string): void {
 
   const NODE_R = 14;
   const HIT_R = 18;
+  const INK = '#231a12';
+
+  // Кеш чорнильних іконок (ті самі, що малює гра) + своїх картинок вузлів.
+  const iconCache = new Map<string, HTMLCanvasElement>();
+  function iconCanvas(kind: MapIconKind): HTMLCanvasElement {
+    let c = iconCache.get('i_' + kind);
+    if (!c) { c = locationIcon(kind, 108); iconCache.set('i_' + kind, c); }
+    return c;
+  }
+  function sealCanvas(locked: boolean): HTMLCanvasElement {
+    const k = 's_' + (locked ? 1 : 0);
+    let c = iconCache.get(k);
+    if (!c) { c = regionSeal(124, locked); iconCache.set(k, c); }
+    return c;
+  }
+  const nodeImgs = new Map<string, HTMLImageElement>(); // nodeId → своя картинка
+  function nodeImg(n: WorldNode): HTMLImageElement | null {
+    if (!n.img) return null;
+    let im = nodeImgs.get(n.id);
+    if (!im || im.dataset.src !== n.img.slice(0, 64)) {
+      im = new Image(); im.dataset.src = n.img.slice(0, 64); im.src = n.img;
+      nodeImgs.set(n.id, im);
+    }
+    return im;
+  }
 
   function nodeById(id: string): WorldNode | undefined {
     return world().nodes.find(n => n.id === id);
@@ -160,7 +191,8 @@ export function initWorldEditor(prefix: string): void {
     const h = canvas.height = canvas.clientHeight;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#1a1a1a';
+    // Пергаментне тло — щоб мапа в редакторі виглядала як у грі (чорнильні іконки на світлому).
+    ctx.fillStyle = '#cdbb97';
     ctx.fillRect(0, 0, w, h);
 
     if (!world()) { requestAnimationFrame(draw); return; }
@@ -169,14 +201,14 @@ export function initWorldEditor(prefix: string): void {
       const p = toScreen(0, 0);
       ctx.drawImage(state.bgImg, p.x, p.y, state.bgImg.naturalWidth * sc(), state.bgImg.naturalHeight * sc());
     } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.fillStyle = 'rgba(35,26,18,0.35)';
       ctx.font = '14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Тягни PNG карти сюди або клацни «Фон»', w / 2, h / 2);
+      ctx.fillText('Тягни PNG карти сюди або клацни «Фон» (гра малює його поверх пергаменту)', w / 2, h / 2);
     }
 
     if (state.showGrid) {
-      ctx.strokeStyle = '#282828';
+      ctx.strokeStyle = 'rgba(90,72,50,0.18)';
       ctx.lineWidth = 1;
       const gs = 60 * sc();
       const ox = ((w / 2 + state.pan.x) % gs + gs) % gs;
@@ -187,15 +219,15 @@ export function initWorldEditor(prefix: string): void {
 
     const nm = new Map(world().nodes.map(n => [n.id, n]));
 
-    // Edges
+    // Edges — чорнильний пунктир, як малює гра (з рівнем — щільніший і темніший)
     for (const e of world().edges) {
       const a = nm.get(e.from), b = nm.get(e.to);
       if (!a || !b) continue;
       const pa = toScreen(a.x, a.y), pb = toScreen(b.x, b.y);
       const isSel = state.sel === e.id;
-      ctx.strokeStyle = isSel ? '#ffcc00' : '#aaaaaa';
-      ctx.lineWidth = isSel ? 3 : 2;
-      ctx.setLineDash(e.levelId ? [] : [6, 4]);
+      ctx.strokeStyle = isSel ? '#b0721f' : 'rgba(35,26,18,' + (e.levelId ? '0.8' : '0.42') + ')';
+      ctx.lineWidth = isSel ? 3.2 : 2.4;
+      ctx.setLineDash(e.levelId ? [12, 8] : [7, 8]);
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
       ctx.setLineDash([]);
 
@@ -205,7 +237,7 @@ export function initWorldEditor(prefix: string): void {
         if (len > 40) {
           const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
           const ux = dx / len, uy = dy / len;
-          ctx.fillStyle = isSel ? '#ffcc00' : '#aaaaaa';
+          ctx.fillStyle = isSel ? '#b0721f' : 'rgba(35,26,18,0.65)';
           ctx.beginPath();
           ctx.moveTo(mx + ux * 8, my + uy * 8);
           ctx.lineTo(mx - ux * 8 - uy * 5, my - uy * 8 + ux * 5);
@@ -216,7 +248,7 @@ export function initWorldEditor(prefix: string): void {
 
       if (e.levelId) {
         const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
-        ctx.fillStyle = isSel ? '#ffcc00' : '#888';
+        ctx.fillStyle = isSel ? '#b0721f' : 'rgba(35,26,18,0.7)';
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
         ctx.fillText(e.levelId, mx, my - 8);
@@ -236,46 +268,46 @@ export function initWorldEditor(prefix: string): void {
       }
     }
 
-    // Nodes
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 480); // дихання для зупинок
+    // Nodes — ті самі чорнильні іконки, що малює гра (WYSIWYG)
     for (const n of world().nodes) {
       const p = toScreen(n.x, n.y);
       const isSel = state.sel === n.id;
+      const iscale = n.iconScale ?? 1;
       if (n.type === 'stop') {
-        // Привал на перехресті — намет, що підсвічується (пульсує)
-        ctx.shadowColor = isSel ? '#ffcc00' : '#3fe6c0';
-        ctx.shadowBlur = isSel ? 16 : 8 + pulse * 12;
-        ctx.fillStyle = '#2fa890';
-        ctx.strokeStyle = isSel ? '#ffcc00' : '#dffff4';
-        ctx.lineWidth = isSel ? 2.5 : 1.5;
-        const r = NODE_R - 1;
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y - r);
-        ctx.lineTo(p.x + r, p.y + r * 0.8);
-        ctx.lineTo(p.x - r, p.y + r * 0.8);
-        ctx.closePath(); ctx.fill(); ctx.stroke();
+        // Привал/зупинка — чорнильна крапка, як на ігровій мапі
+        if (isSel) { ctx.shadowColor = '#b0721f'; ctx.shadowBlur = 12; }
+        ctx.fillStyle = 'rgba(35,26,18,0.9)';
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4.5 * sc(), 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
-        // вхід намету
-        ctx.fillStyle = 'rgba(0,0,0,0.45)';
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y - r * 0.2);
-        ctx.lineTo(p.x + r * 0.32, p.y + r * 0.8);
-        ctx.lineTo(p.x - r * 0.32, p.y + r * 0.8);
-        ctx.closePath(); ctx.fill();
       } else {
-        ctx.shadowColor = isSel ? '#ffcc00' : 'rgba(0,0,0,0.6)';
-        ctx.shadowBlur = isSel ? 14 : 6;
-        ctx.fillStyle = n.type === 'region' ? '#5577dd' : '#c89030';
-        ctx.strokeStyle = isSel ? '#ffcc00' : '#ffffff';
-        ctx.lineWidth = isSel ? 2.5 : 1.5;
-        ctx.beginPath(); ctx.arc(p.x, p.y, NODE_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        const im = nodeImg(n);
+        const custom = im?.complete && im.naturalWidth ? im : null;
+        if (isSel) { ctx.shadowColor = '#b0721f'; ctx.shadowBlur = 14; }
+        if (custom) {
+          const fit = 96 / Math.max(custom.naturalWidth, custom.naturalHeight);
+          const wI = custom.naturalWidth * fit * iscale * sc(), hI = custom.naturalHeight * fit * iscale * sc();
+          ctx.drawImage(custom, p.x - wI / 2, p.y - hI / 2, wI, hI);
+        } else {
+          const cvI = n.type === 'region' ? sealCanvas(!n.regionId) : iconCanvas(((n.icon as MapIconKind) || iconFromLabel(n.label)));
+          const base = n.type === 'region' ? 0.86 : 0.8;
+          const wI = cvI.width * base * iscale * sc(), hI = cvI.height * base * iscale * sc();
+          if (n.type === 'region' && !n.regionId) ctx.globalAlpha = 0.55;
+          ctx.drawImage(cvI, p.x - wI / 2, p.y - hI / 2, wI, hI);
+          ctx.globalAlpha = 1;
+        }
         ctx.shadowBlur = 0;
+        if (isSel) {
+          ctx.strokeStyle = '#b0721f'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+          const r = 48 * iscale * sc();
+          ctx.strokeRect(p.x - r, p.y - r, r * 2, r * 2);
+          ctx.setLineDash([]);
+        }
       }
       if (state.showLabels) {
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = isSel ? '#b0721f' : INK;
+        ctx.font = 'italic 13px Georgia, serif';
         ctx.textAlign = 'center';
-        ctx.fillText(n.label, p.x, p.y + NODE_R + 13);
+        ctx.fillText(n.label, p.x, p.y + 44 * sc() + 12);
       }
     }
 
@@ -761,6 +793,21 @@ export function initWorldEditor(prefix: string): void {
       $('nodeLocRow').style.display = n.type === 'location' ? 'flex' : 'none';
       fillRegionSelect(n);
       void fillLocSelect(n);
+      // Іконка/картинка/розмір/опис
+      const iconRow = $('nodeIconRow'); if (iconRow) iconRow.style.display = n.type === 'stop' ? 'none' : 'flex';
+      const iconSel = $<HTMLSelectElement>('nodeIcon');
+      if (iconSel) {
+        if (!iconSel.options.length) {
+          const auto = document.createElement('option'); auto.value = ''; auto.textContent = '— авто (вгадати з назви)';
+          iconSel.appendChild(auto);
+          for (const k of MAP_ICON_KINDS) { const o = document.createElement('option'); o.value = k.v; o.textContent = k.l; iconSel.appendChild(o); }
+        }
+        iconSel.value = n.icon ?? '';
+      }
+      const isc = $<HTMLInputElement>('nodeIconScale');
+      if (isc) { isc.value = String(n.iconScale ?? 1); const v = $('nodeIconScaleV'); if (v) v.textContent = String(n.iconScale ?? 1); }
+      const dsc = $<HTMLTextAreaElement>('nodeDesc');
+      if (dsc) dsc.value = n.desc ?? '';
     }
 
     if (state.selType === 'edge') {
@@ -842,6 +889,34 @@ export function initWorldEditor(prefix: string): void {
   $<HTMLSelectElement>('nodeLocId')?.addEventListener('change', function () {
     const n = nodeById(state.sel!);
     if (n) { n.locationId = this.value || undefined; save(); }
+  });
+
+  $<HTMLSelectElement>('nodeIcon')?.addEventListener('change', function () {
+    const n = nodeById(state.sel!);
+    if (n) { n.icon = this.value || undefined; save(); }
+  });
+  $<HTMLInputElement>('nodeIconScale')?.addEventListener('input', function () {
+    const n = nodeById(state.sel!);
+    if (n) { n.iconScale = Number(this.value); const v = $('nodeIconScaleV'); if (v) v.textContent = this.value; save(); }
+  });
+  $<HTMLTextAreaElement>('nodeDesc')?.addEventListener('input', function () {
+    const n = nodeById(state.sel!);
+    if (n) { n.desc = this.value || undefined; save(); }
+  });
+  $('nodeImgBtn')?.addEventListener('click', () => $<HTMLInputElement>('nodeImgInput')?.click());
+  $<HTMLInputElement>('nodeImgInput')?.addEventListener('change', function () {
+    const file = this.files?.[0]; if (!file) return;
+    const n = nodeById(state.sel!); if (!n) return;
+    const r = new FileReader();
+    r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((url) => {
+      n.img = url; nodeImgs.delete(n.id); save(); setStatus('Картинку вузла встановлено');
+    });
+    r.readAsDataURL(file);
+    this.value = '';
+  });
+  $('nodeImgClear')?.addEventListener('click', () => {
+    const n = nodeById(state.sel!);
+    if (n?.img) { n.img = undefined; nodeImgs.delete(n.id); save(); setStatus('Картинку вузла прибрано — чорнильна іконка'); }
   });
 
   $<HTMLInputElement>('edgeLevelId')?.addEventListener('input', function () {

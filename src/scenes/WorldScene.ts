@@ -96,7 +96,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.computeFit();
     await this.drawUserBg();
-    this.drawMap();
+    await this.drawMap();
     this.placeDot();
     this.addBackButton();
     this.addTitle();
@@ -169,7 +169,28 @@ export class WorldScene extends Phaser.Scene {
     return key;
   }
 
-  private drawMap(): void {
+  // Текстура вузла: своя картинка (з Редактора Карти) або чорнильна іконка.
+  private async nodeTexture(n: WorldNode, locked: boolean): Promise<{ key: string; scale: number }> {
+    const iscale = n.iconScale ?? 1;
+    if (n.img) {
+      const key = 'nimg_' + n.id;
+      if (!this.textures.exists(key)) {
+        await new Promise<void>((res) => {
+          this.textures.once('addtexture-' + key, () => res());
+          this.textures.addBase64(key, n.img!);
+        });
+      }
+      const src = this.textures.get(key).getSourceImage() as HTMLImageElement;
+      const fit = 96 / Math.max(src.width, src.height); // у габарит чорнильної іконки
+      return { key, scale: fit * iscale };
+    }
+    const key = n.type === 'region'
+      ? this.sealTexture(locked)
+      : this.iconTexture((n.icon as MapIconKind) || iconFromLabel(n.label));
+    return { key, scale: (n.type === 'region' ? 0.86 : 0.8) * iscale };
+  }
+
+  private async drawMap(): Promise<void> {
     const w = this.world!;
     const g = this.gfx;
     g.clear();
@@ -193,10 +214,10 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
 
-      const texKey = n.type === 'region'
-        ? this.sealTexture(locked)
-        : this.iconTexture((n.icon as MapIconKind) || iconFromLabel(n.label));
-      const baseScale = n.type === 'region' ? 0.86 : 0.8;
+      const tex = await this.nodeTexture(n, locked);
+      if (!this.scene.isActive()) return;
+      const texKey = tex.key;
+      const baseScale = tex.scale;
 
       // Золота підсвітка — копія текстури за іконкою (видима лише в hover)
       const glow = this.add.image(x, y, texKey).setScrollFactor(0).setDepth(6)

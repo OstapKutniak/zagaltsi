@@ -318,6 +318,26 @@ function loadTextures(scene: Phaser.Scene, images: Record<string, string>, prefi
   })));
 }
 
+// Видимі шматки спорядження (плейсхолдери): білі силуети поверх частин + меч.
+export interface EquipVisual { pants?: boolean; armor?: boolean; helmet?: boolean; weapon?: boolean }
+
+// Умовний білий меч (вістрям униз; хват біля верху — origin ~(0.5, 0.14)).
+function swordCanvas(): HTMLCanvasElement {
+  const c = document.createElement('canvas'); c.width = 44; c.height = 190;
+  const x = c.getContext('2d')!;
+  x.strokeStyle = '#f2efe8'; x.fillStyle = 'rgba(242,239,232,0.85)';
+  x.lineWidth = 2.5; x.lineJoin = 'round'; x.lineCap = 'round';
+  // яблуко + руків'я
+  x.beginPath(); x.arc(22, 7, 4.5, 0, Math.PI * 2); x.fill(); x.stroke();
+  x.fillRect(19, 11, 6, 20); x.strokeRect(19, 11, 6, 20);
+  // гарда
+  x.beginPath(); x.moveTo(6, 33); x.lineTo(38, 33); x.stroke();
+  // клинок з долом, вістря внизу
+  x.beginPath(); x.moveTo(16, 36); x.lineTo(28, 36); x.lineTo(26, 160); x.lineTo(22, 184); x.lineTo(18, 160); x.closePath(); x.fill(); x.stroke();
+  x.beginPath(); x.moveTo(22, 40); x.lineTo(22, 150); x.strokeStyle = 'rgba(90,90,90,0.5)'; x.stroke();
+  return c;
+}
+
 export class CutoutCharacter extends Phaser.GameObjects.Container {
   private prop: CharDoc['proportions'];
   private slots: Record<string, Slot>;
@@ -325,6 +345,10 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   private lower: Record<string, Phaser.GameObjects.Image> = {}; // нижня частина розрізаної кінцівки (за суглобом)
   private lower2: Record<string, Phaser.GameObjects.Image> = {};
   private lower3: Record<string, Phaser.GameObjects.Image> = {};
+  private texPrefix = 'char_';
+  // «Одяг»: накладки-силуети, що щокадру копіюють трансформ/кроп своєї частини.
+  private equipOvs: Array<{ ov: Phaser.GameObjects.Image; src: Phaser.GameObjects.Image }> = [];
+  private weaponImg: Phaser.GameObjects.Image | null = null;
   private anim = 'idle';
   private t = 0;
   private docFacing = 1; // базовий напрямок арту (1 праворуч, -1 ліворуч)
@@ -382,6 +406,7 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   static async load(scene: Phaser.Scene, doc: CharDoc, keyPrefix = 'char_'): Promise<CutoutCharacter> {
     await loadTextures(scene, doc.images, keyPrefix);
     const c = new CutoutCharacter(scene, doc);
+    c.texPrefix = keyPrefix;
     for (const d of SLOT_DEFS) {
       const sl = c.slots[d.key];
       if (!sl || !sl.image) continue;
@@ -408,6 +433,79 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
   }
 
   setAnim(name: string): void { if (name !== this.anim) { this.anim = name; this.t = 0; } }
+
+  // ── Спорядження (плейсхолдери): білі силуети поверх частин + меч у руці ─────
+  // Штани = силуети ніг до кісточки (ступню перемальовують рідні шматки зверху);
+  // обладунок = торс + руки; шолом = верхня половина голови; меч — до передпліччя.
+  private silTexture(slotKey: string): string | null {
+    const sl = this.slots[slotKey];
+    if (!sl?.image) return null;
+    const srcKey = this.texPrefix + sl.image;
+    if (!this.scene.textures.exists(srcKey)) return null;
+    const outKey = 'sil_' + srcKey;
+    if (!this.scene.textures.exists(outKey)) {
+      const src = this.scene.textures.get(srcKey).getSourceImage() as HTMLImageElement;
+      const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+      const x = c.getContext('2d')!;
+      x.drawImage(src, 0, 0);
+      x.globalCompositeOperation = 'source-in'; // альфа частини → суцільний білий силует
+      x.fillStyle = '#f2efe8'; x.fillRect(0, 0, c.width, c.height);
+      this.scene.textures.addCanvas(outKey, c);
+    }
+    return outKey;
+  }
+
+  // Умовний шолом: купол з наносником у КООРДИНАТАХ текстури голови (та сама канва
+  // W×H, накладка їздить з головою як звичайний силует). Волосся не фарбуємо.
+  private helmetTexture(): string | null {
+    const sl = this.slots['head'];
+    if (!sl?.image) return null;
+    const srcKey = this.texPrefix + sl.image;
+    if (!this.scene.textures.exists(srcKey)) return null;
+    const key = 'helm_' + srcKey;
+    if (!this.scene.textures.exists(key)) {
+      const src = this.scene.textures.get(srcKey).getSourceImage() as HTMLImageElement;
+      const W = src.width, H = src.height;
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const x = c.getContext('2d')!;
+      x.fillStyle = '#f2efe8'; x.strokeStyle = '#c9c2b2';
+      x.lineWidth = Math.max(2, W * 0.01); x.lineJoin = 'round';
+      const cx = W * 0.5, brimY = H * 0.52, rx = W * 0.335, ry = H * 0.36;
+      // купол (накриває більшу частину волосся; що стирчить з-під — хай стирчить)
+      x.beginPath(); x.ellipse(cx, brimY, rx, ry, 0, Math.PI, 0); x.closePath(); x.fill(); x.stroke();
+      // обідок
+      x.lineWidth = Math.max(3, W * 0.014);
+      x.beginPath(); x.moveTo(cx - rx * 1.04, brimY); x.lineTo(cx + rx * 1.04, brimY); x.stroke();
+      // наносник
+      x.fillRect(cx - W * 0.02, brimY, W * 0.04, H * 0.16);
+      // шишак
+      x.beginPath(); x.arc(cx, brimY - ry, W * 0.025, 0, Math.PI * 2); x.fill();
+      this.scene.textures.addCanvas(key, c);
+    }
+    return key;
+  }
+
+  setEquipment(eq: EquipVisual): void {
+    for (const o of this.equipOvs) o.ov.destroy();
+    this.equipOvs = [];
+    this.weaponImg?.destroy(); this.weaponImg = null;
+    const addOv = (piece: Phaser.GameObjects.Image | undefined, tex: string | null): void => {
+      if (!piece || !tex) return;
+      const ov = this.scene.add.image(0, 0, tex).setAlpha(0.92);
+      this.add(ov);
+      this.moveTo(ov, this.getIndex(piece) + 1); // одразу над своєю частиною (шари не ламаються)
+      this.equipOvs.push({ ov, src: piece });
+    };
+    if (eq.pants) for (const k of ['leg_front', 'leg_back']) { addOv(this.parts[k], this.silTexture(k)); addOv(this.lower[k], this.silTexture(k)); }
+    if (eq.armor) for (const k of ['torso', 'arm_front', 'arm_back']) { addOv(this.parts[k], this.silTexture(k)); addOv(this.lower[k], this.silTexture(k)); }
+    if (eq.helmet) addOv(this.parts['head'], this.helmetTexture());
+    if (eq.weapon) {
+      const key = 'equip_sword';
+      if (!this.scene.textures.exists(key)) this.scene.textures.addCanvas(key, swordCanvas());
+      this.weaponImg = this.scene.add.image(0, 0, key).setOrigin(0.5, 0.14);
+      this.add(this.weaponImg); // поверх — передня рука і так найближчий шар
+    }
+  }
 
   // відстань від кореня (стегна) до найнижчої точки ніг — щоб ступні стали на землю
   feetOffset(): number {
@@ -577,6 +675,25 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
         lo3.setRotation(r2 + rad(bend3Val)); lo3.setScale(flip * scX, scY);
         lo3.setCrop(0, cut3Px, W, H - cut3Px);
         this.applyTint(lo3, hurt);
+      }
+    }
+    // «Одяг»: силует копіює трансформ і кроп своєї частини (тому їздить з анімацією).
+    for (const o of this.equipOvs) {
+      const s = o.src;
+      o.ov.setOrigin(s.originX, s.originY).setPosition(s.x, s.y).setRotation(s.rotation).setScale(s.scaleX, s.scaleY);
+      const cr = s as unknown as { isCropped: boolean; _crop: { x: number; y: number; width: number; height: number } | null };
+      if (cr.isCropped && cr._crop) o.ov.setCrop(cr._crop.x, cr._crop.y, cr._crop.width, cr._crop.height);
+    }
+    // Меч: хват — на кінці передпліччя передньої руки, клинок продовжує її напрямок.
+    if (this.weaponImg) {
+      const lo = this.lower['arm_front'] ?? this.parts['arm_front'];
+      if (lo) {
+        const reach = (1 - lo.originY) * lo.height * lo.scaleY * 0.9; // до пензля
+        const a = lo.rotation;
+        this.weaponImg.setPosition(lo.x - Math.sin(a) * reach, lo.y + Math.cos(a) * reach);
+        this.weaponImg.setRotation(a);
+        const faLen = Math.abs((1 - lo.originY) * lo.height * lo.scaleY);
+        this.weaponImg.setScale((faLen * 1.9) / 190);
       }
     }
     this.scaleX = facing * this.docFacing; // напрямок руху * базовий напрямок арту

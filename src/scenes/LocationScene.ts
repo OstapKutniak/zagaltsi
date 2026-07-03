@@ -152,6 +152,20 @@ export class LocationScene extends Phaser.Scene {
         .setAngle(p.rot)
         .setScrollFactor(0).setDepth(2);
     }
+    // Шари туману з редактора: задні — між фоном (1) і будівлями (2), передні — поверх (3).
+    if (doc.fogs?.length) {
+      ensureFogTexture(this);
+      const fogW = (maxX - minX) * s; // по ширині вписаного арту локації
+      const fogCx = ox + ((minX + maxX) / 2) * s;
+      for (const fg of doc.fogs) {
+        const tint = parseInt((fg.tint || '#aaa1bd').replace('#', ''), 16);
+        const ts = this.add.tileSprite(
+          fogCx, oy + fg.y * s, fogW, Math.max(8, fg.h * s), 'fog_noise',
+        ).setScrollFactor(0).setDepth(fg.front ? 3 : 1.5).setTint(tint).setAlpha(fg.alpha);
+        const spd = fg.speed || 10;
+        this.tweens.add({ targets: ts, tilePositionX: Math.sign(spd) * 512, duration: Math.max(4000, 512000 / Math.abs(spd)), repeat: -1 });
+      }
+    }
   }
 
   // Заглушка: «земля» + пара білих кубів-будівель, поки локацію не зібрано в редакторі.
