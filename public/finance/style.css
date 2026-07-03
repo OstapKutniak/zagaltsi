@@ -382,6 +382,11 @@ html, body {
 .period-btn.active .pb-ic { border-color: var(--active-ink); color: var(--active-ink); }
 .period-btn .pb-lbl { font-size: 15px; font-weight: 600; color: var(--text); }
 .period-btn .pb-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.period-btn .pb-ic.svg { display: inline-flex; align-items: center; justify-content: center; }
+.period-btn .pb-ic.svg svg { width: 18px; height: 18px; fill: none; stroke: #666; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.period-btn .pb-ic.svg svg .fill { fill: #666; stroke: none; }
+.period-btn.active .pb-ic.svg svg { stroke: var(--active-ink); }
+.period-btn.active .pb-ic.svg svg .fill { fill: var(--active-ink); }
 
 /* recurring (Щомісячне) */
 .mon-list { padding: 8px 0; }
@@ -500,3 +505,5 @@ input[type="file"] { display: none; }
 
 .empty { text-align: center; padding: 60px 20px; color: var(--text2); }
 .empty .ic { font-size: 44px; margin-bottom: 10px; }
+.empty .ic-svg { display: flex; justify-content: center; margin-bottom: 14px; }
+.empty .ic-svg svg { width: 54px; height: 54px; fill: none; stroke: var(--text3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

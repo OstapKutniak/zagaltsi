@@ -682,7 +682,7 @@ function renderRecurring() {
   const el = document.getElementById('rec-mon-list');
   const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r }));
   if (!items.length) {
-    el.innerHTML = `<div class="empty" style="padding:60px 20px"><div class="ic">🔁</div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
+    el.innerHTML = `<div class="empty" style="padding:60px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M12 12.5v3l2 1"/></svg></div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
     return;
   }
   const now = new Date(), mk = monthKey(now), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -1491,11 +1491,28 @@ let calMode = 'day', calMonth = new Date(), calStart = null, calEnd = null;
 function openCal(mode) {
   calMode = mode;
   calStart = calEnd = null;
-  calMonth = new Date(state.cursor.getFullYear(), state.cursor.getMonth(), 1);
+  const recday = mode === 'recday';
+  document.getElementById('cal-prev').style.visibility = recday ? 'hidden' : '';
+  document.getElementById('cal-next').style.visibility = recday ? 'hidden' : '';
+  document.querySelector('.cal-weekdays').style.display = recday ? 'none' : '';
+  if (recday) { calStart = new Date(2001, 0, formState.recDay || 1); }
+  else { calMonth = new Date(state.cursor.getFullYear(), state.cursor.getMonth(), 1); }
   drawCal();
   document.getElementById('cal-overlay').classList.add('open');
 }
 function drawCal() {
+  if (calMode === 'recday') {
+    document.getElementById('cal-title').textContent = 'День місяця';
+    const sel = calStart ? calStart.getDate() : 0;
+    let cells = '';
+    for (let d = 1; d <= 31; d++) cells += `<div class="cal-day${d === sel ? ' sel' : ''}" data-rd="${d}">${d}</div>`;
+    const grid = document.getElementById('cal-grid');
+    grid.innerHTML = cells;
+    grid.querySelectorAll('.cal-day[data-rd]').forEach(el => el.onclick = () => { calStart = new Date(2001, 0, +el.dataset.rd); drawCal(); });
+    document.getElementById('cal-hint').textContent = '';
+    document.getElementById('cal-done').disabled = !calStart;
+    return;
+  }
   document.getElementById('cal-title').textContent = `${MONTHS[calMonth.getMonth()]} ${calMonth.getFullYear()}`;
   const y = calMonth.getFullYear(), m = calMonth.getMonth();
   const first = (new Date(y, m, 1).getDay() + 6) % 7;
