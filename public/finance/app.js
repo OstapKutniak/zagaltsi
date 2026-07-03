@@ -279,6 +279,24 @@ function renderHeader() {
 }
 
 // ── CATEGORIES ─────────────────────────────────────────────
+const CAT_ORDER = {
+  expense: ['Їжа', 'Транспорт', 'Щомісячне', 'Дозвілля', 'Подарунки', 'Випивка', 'Придбання', 'Навчання', "Здоров'я", 'Поїздки', 'Інше', 'Борг'],
+  income: ['Геймдев', 'Візуалізація', 'Викладання', 'Архдизайн', 'Інше', 'Стипендія', 'K.O.D.Print', '3D Друк', 'Подарунки', 'Борг', 'Спільняк?', 'Продаж ігор'],
+};
+const normCat = s => (s || '').toLowerCase().replace(/['’ʼ`]/g, "'").trim();
+
+function orderedCats(dir, names, sums) {
+  const byNorm = new Map(names.map(n => [normCat(n), n]));
+  const used = new Set(), out = [];
+  for (const o of CAT_ORDER[dir]) {
+    const actual = byNorm.get(normCat(o)) || o;
+    used.add(normCat(actual));
+    out.push({ name: actual, v: sums.get(actual) || 0 });
+  }
+  for (const n of names) if (!used.has(normCat(n))) out.push({ name: n, v: sums.get(n) || 0 });
+  return out;
+}
+
 function renderCategories() {
   const dir = state.catDir;
   const txs = periodTxs();
@@ -287,8 +305,7 @@ function renderCategories() {
     const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
   });
   const names = [...new Set([...catsParent[dir], ...sums.keys()])];
-  const catList = names.map(n => ({ name: n, v: sums.get(n) || 0 }))
-                       .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name));
+  const catList = orderedCats(dir, names, sums);
 
   const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
   const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
@@ -609,27 +626,34 @@ async function deleteAccForm() {
 // ── OVERVIEW ───────────────────────────────────────────────
 function renderBarChart(txs, dir) {
   if (state.period === 'all') return '';
-  const col = dir === 'expense' ? '#eb3b7e' : '#27ae60';
-  let vals;
+  const dirTx = txs.filter(t => t.type === dir);
+  let buckets;
   if (state.period === 'year') {
-    vals = Array.from({ length: 12 }, (_, m) =>
-      txs.filter(t => t.type === dir && new Date(t.date).getMonth() === m).reduce((s, t) => s + Number(t.amount), 0)
-    );
+    buckets = Array.from({ length: 12 }, () => new Map());
+    dirTx.forEach(t => { const m = new Date(t.date).getMonth(); const p = parentCat(t.category); buckets[m].set(p, (buckets[m].get(p) || 0) + Number(t.amount)); });
   } else {
     const year = state.cursor.getFullYear(), month = state.cursor.getMonth();
     const days = new Date(year, month + 1, 0).getDate();
-    const dm = {};
-    txs.filter(t => t.type === dir).forEach(t => { const d = new Date(t.date).getDate(); dm[d] = (dm[d] || 0) + Number(t.amount); });
-    vals = Array.from({ length: days }, (_, i) => dm[i + 1] || 0);
+    buckets = Array.from({ length: days }, () => new Map());
+    dirTx.forEach(t => { const d = new Date(t.date).getDate(); const p = parentCat(t.category); buckets[d - 1].set(p, (buckets[d - 1].get(p) || 0) + Number(t.amount)); });
   }
-  const max = Math.max(...vals, 1);
-  const n = vals.length, H = 42, gap = 2;
-  const bw = Math.max(2, Math.floor((320 - (n - 1) * gap) / n));
-  const bars = vals.map((v, i) => {
-    const h = v > 0 ? Math.max(3, Math.round(v / max * H)) : 0;
-    return `<rect x="${i * (bw + gap)}" y="${H - h}" width="${bw}" height="${h}" fill="${v > 0 ? col : '#eee'}" rx="1.5"/>`;
+  const totals = buckets.map(m => [...m.values()].reduce((s, v) => s + v, 0));
+  const max = Math.max(...totals, 1);
+  const n = buckets.length, H = 100, gap = 2;
+  const bw = Math.max(2, (300 - (n - 1) * gap) / n);
+  const bars = buckets.map((m, i) => {
+    const x = i * (bw + gap), total = totals[i];
+    if (total <= 0) return `<rect x="${x}" y="${H - 2}" width="${bw}" height="2" fill="#eee"/>`;
+    const barH = Math.max(3, total / max * H);
+    let y = H - barH, out = '';
+    [...m.entries()].sort((a, b) => b[1] - a[1]).forEach(([name, v]) => {
+      const sh = v / total * barH;
+      out += `<rect x="${x}" y="${y.toFixed(2)}" width="${bw.toFixed(2)}" height="${sh.toFixed(2)}" fill="${catStyle(name).color}"/>`;
+      y += sh;
+    });
+    return out;
   }).join('');
-  return `<div class="ov-barchart"><svg viewBox="0 0 ${n * (bw + gap)} ${H}" preserveAspectRatio="none" style="width:100%;height:52px;display:block">${bars}</svg></div>`;
+  return `<div class="ov-barchart"><svg viewBox="0 0 ${n * (bw + gap)} ${H}" preserveAspectRatio="none" style="width:100%;height:110px;display:block">${bars}</svg></div>`;
 }
 
 function renderOverview() {
