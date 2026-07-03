@@ -411,20 +411,22 @@ html, body {
 .mon-foot-row.big { font-size: 17px; font-weight: 700; color: var(--text); border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }
 
 /* calendar sheet */
-.cal-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 20px 10px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 16px 12px; }
 .cal-title { font-size: 16px; font-weight: 700; }
-.cal-nav { background: none; border: none; font-size: 24px; color: var(--active-ink); cursor: pointer; padding: 0 10px; }
-.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 12px; }
-.cal-weekdays span { text-align: center; font-size: 12px; color: var(--text2); padding: 4px 0; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 4px 12px; }
-.cal-day { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 15px; border-radius: 50%; cursor: pointer; color: var(--text); }
+.cal-nav { background: none; border: none; font-size: 22px; color: var(--active-ink); cursor: pointer; width: 40px; height: 40px; border-radius: 50%; }
+.cal-nav:active { background: var(--active); }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 14px; }
+.cal-weekdays span { text-align: center; font-size: 12px; color: var(--text3); padding: 2px 0 6px; font-weight: 600; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px 2px; padding: 2px 14px; }
+.cal-day { height: 40px; display: flex; align-items: center; justify-content: center; font-size: 15px; border-radius: 10px; cursor: pointer; color: var(--text); }
+.cal-day:active { background: #eee; }
 .cal-day.empty { visibility: hidden; }
-.cal-day.range { background: var(--active); border-radius: 0; }
-.cal-day.sel { background: var(--active-ink); color: #fff; }
-.cal-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px calc(var(--bottom) + 12px); }
+.cal-day.range { background: var(--active); border-radius: 0; color: var(--active-ink); }
+.cal-day.sel { background: var(--active-ink); color: #fff; border-radius: 10px; position: relative; z-index: 1; }
+.cal-foot { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px calc(var(--bottom) + 14px); }
 .cal-hint { font-size: 13px; color: var(--text2); }
-.cal-done { background: var(--active-ink); color: #fff; border: none; border-radius: 12px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer; }
-.cal-done:disabled { opacity: 0.4; }
+.cal-done { background: var(--active-ink); color: #fff; border: none; border-radius: 12px; padding: 12px 26px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.cal-done:disabled { opacity: 0.35; }
 
 /* overview averages */
 .ov-avg { display: flex; gap: 8px; margin-bottom: 16px; }
