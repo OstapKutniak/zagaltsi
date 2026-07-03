@@ -931,7 +931,7 @@ function renderOverview() {
   }).join('') || `<div class="empty" style="font-size:13px">Немає даних</div>`;
 
   const days = elapsedDays();
-  const monMul = state.period === 'month' ? new Date(state.cursor.getFullYear(), state.cursor.getMonth() + 1, 0).getDate() : 30.44;
+  const monMul = ['month', 'day', 'week'].includes(state.period) ? new Date(state.cursor.getFullYear(), state.cursor.getMonth() + 1, 0).getDate() : 30.44;
   const avgD = total / days, avgW = avgD * 7, avgM = avgD * monMul;
   const avgCol = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
 
