@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Покупки">
+  <meta name="theme-color" content="#f4f4f7">
+  <title>Покупки</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="topbar">
+      <button class="icon-btn" id="btn-settings" title="Налаштування">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+      <div class="total">
+        <div class="total-label" id="total-label">Список покупок</div>
+        <div class="total-amount" id="total-amount">0 <span>позицій</span></div>
+      </div>
+      <button class="icon-btn" id="btn-cats" title="Категорії">
+        <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="screen-wrap">
+    <!-- LIST -->
+    <div class="screen active" id="list-screen">
+      <div class="list-wrap" id="list-wrap"></div>
+    </div>
+
+    <!-- ARCHIVE -->
+    <div class="screen" id="archive-screen">
+      <div class="arch-wrap" id="arch-wrap"></div>
+    </div>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tabbar">
+    <button class="tab active" data-tab="list">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.4" class="fill"/><circle cx="17" cy="20" r="1.4" class="fill"/><path d="M3 4h2l2.5 11h10L20 7H6.5"/></svg></span>
+      Список
+    </button>
+    <button class="tab" data-tab="archive">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span>
+      Архів
+    </button>
+  </div>
+
+  <button class="fab show" id="fab">+</button>
+
+  <!-- ADD PRODUCTS (fullscreen sheet) -->
+  <div class="sheet-full" id="add-view">
+    <div class="add-bar">
+      <button class="calc-x" id="add-close">✕</button>
+      <div class="add-title">Що купити?</div>
+      <button class="add-edit-btn" id="add-edit-toggle" title="Режим редагування">
+        <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+    </div>
+    <div class="add-chips" id="add-chips"></div>
+    <input class="add-search" id="add-search" type="text" placeholder="Пошук продукту…">
+    <div class="add-grid-wrap"><div class="add-grid" id="add-grid"></div></div>
+  </div>
+
+  <!-- CATEGORY MANAGER SHEET -->
+  <div class="sheet-overlay" id="cats-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Категорії</div>
+      <div class="sheet-list" id="cats-list"></div>
+    </div>
+  </div>
+
+  <!-- CATEGORY FORM SHEET -->
+  <div class="sheet-overlay" id="cat-form-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="cat-form-title">Нова категорія</div>
+      <input class="sheet-search" id="cat-form-name" type="text" placeholder="Назва категорії">
+      <div class="form-sub">Колір</div>
+      <div class="color-grid" id="cat-form-colors"></div>
+      <div class="form-sub">Піктограма</div>
+      <div class="icon-grid" id="cat-form-icons"></div>
+      <div class="form-foot">
+        <button class="form-delete" id="cat-form-delete" style="display:none">Видалити</button>
+        <button class="form-done" id="cat-form-done">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRODUCT FORM SHEET -->
+  <div class="sheet-overlay" id="prod-form-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="prod-form-title">Новий продукт</div>
+      <input class="sheet-search" id="prod-form-name" type="text" placeholder="Назва продукту">
+      <div class="form-sub">Категорія</div>
+      <div class="add-chips form-chips" id="prod-form-cats"></div>
+      <div class="form-sub">Піктограма</div>
+      <div class="icon-grid" id="prod-form-icons"></div>
+      <div class="form-foot">
+        <button class="form-delete" id="prod-form-delete" style="display:none">Видалити</button>
+        <button class="form-done" id="prod-form-done">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCHIVE DAY SHEET -->
+  <div class="sheet-overlay" id="day-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="day-title">День</div>
+      <div class="sheet-list" id="day-list"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS SHEET -->
+  <div class="sheet-overlay" id="settings-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Налаштування</div>
+      <div class="settings-row" id="btn-clear-done">
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+        <div class="r-tx">Прибрати куплене<div class="r-sub">Сховати позначені зі списку зараз (в архіві залишаться)</div></div>
+      </div>
+      <div class="settings-row" style="cursor:default">
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="M8 7l4-4 4 4"/><circle cx="12" cy="18" r="3"/></svg></span>
+        <div class="r-tx">Синхронізація<div class="r-sub">Firebase · спільна база на два телефони</div></div>
+        <span class="dot"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

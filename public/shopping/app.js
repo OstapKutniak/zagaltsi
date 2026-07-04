@@ -1,0 +1,668 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js';
+import {
+  getDatabase, ref, get, push, set, update, remove, onValue,
+} from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+
+// ── FIREBASE ────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: 'AIzaSyBvg2av881ZTi9op-bzwicL70vh2UENItw',
+  authDomain: 'horugva-ff8bd.firebaseapp.com',
+  databaseURL: 'https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId: 'horugva-ff8bd',
+  storageBucket: 'horugva-ff8bd.firebasestorage.app',
+  messagingSenderId: '1011491870660',
+  appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
+};
+const db = getDatabase(initializeApp(firebaseConfig));
+const CATS_PATH = 'shopping/categories';
+const PRODS_PATH = 'shopping/products';
+const LIST_PATH = 'shopping/list';
+const ARCH_PATH = 'shopping/archive';
+
+// ── ICONS (inline SVG, viewBox 0 0 24 24) ───────────────────
+const ICONS = {
+  // базові
+  tag:'<path d="M3 12l9-9 9 9-9 9z"/><circle cx="12" cy="9" r="1.5" class="fill"/>',
+  cart:'<circle cx="9" cy="20" r="1.4" class="fill"/><circle cx="17" cy="20" r="1.4" class="fill"/><path d="M3 4h2l2.5 11h10L20 7H6.5"/>',
+  bag:'<path d="M6 8h12l-1 12H7z"/><path d="M9 8a3 3 0 016 0"/>',
+  box:'<path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
+  // їжа
+  bowl:'<path d="M3 11h18a9 9 0 01-18 0z"/><path d="M8 11V8M12 11V6.5M16 11V8"/>',
+  pasta:'<path d="M8 3v6a4 4 0 008 0V3"/><path d="M10.7 3v5.5M13.3 3v5.5"/><path d="M12 13v8"/>',
+  egg:'<path d="M12 3c3.5 0 6.5 5 6.5 10a6.5 6.5 0 01-13 0C5.5 8 8.5 3 12 3z"/>',
+  milk:'<path d="M8 3h8v3l2 4v9a2 2 0 01-2 2H8a2 2 0 01-2-2v-9l2-4z"/><path d="M6 10h12"/><path d="M8 6h8"/>',
+  cereal:'<path d="M3 12h18a9 9 0 01-18 0z"/><circle cx="9" cy="9" r="1" class="fill"/><circle cx="13" cy="8" r="1" class="fill"/><circle cx="16.5" cy="10" r="1" class="fill"/>',
+  coffee:'<path d="M4 9h13v6a5 5 0 01-5 5H9a5 5 0 01-5-5z"/><path d="M17 10.5h1.5a2.5 2.5 0 010 5H17"/><path d="M8 6c0-1 1-1.2 1-2.2M12 6c0-1 1-1.2 1-2.2"/>',
+  water:'<path d="M9.5 3h5M10.5 3v3M13.5 3v3"/><path d="M10.5 6c-2 2-3.5 3.2-3.5 5.2V19a2 2 0 002 2h6a2 2 0 002-2v-7.8c0-2-1.5-3.2-3.5-5.2z"/><path d="M7 13h10"/>',
+  salt:'<path d="M9 9.5h6L16 20H8z"/><path d="M10 9.5V6.5a2 2 0 014 0v3"/><circle cx="11" cy="13" r="0.7" class="fill"/><circle cx="13.2" cy="15" r="0.7" class="fill"/><circle cx="11.4" cy="17" r="0.7" class="fill"/>',
+  sugar:'<rect x="4.5" y="12" width="6.5" height="6.5" rx="1"/><rect x="13" y="12" width="6.5" height="6.5" rx="1"/><rect x="8.75" y="5" width="6.5" height="6.5" rx="1"/>',
+  bread:'<path d="M3 11c0-2.5 2-4.5 4.5-4.5h9A4.5 4.5 0 0121 11c0 1.2-.7 2.1-1.5 2.5V18h-15v-4.5C3.7 13.1 3 12.2 3 11z"/><path d="M9 6.5L8 11M14.5 6.5l-1 4.5"/>',
+  butter:'<rect x="4" y="10" width="16" height="7" rx="1.5"/><path d="M7 10V8.5A1.5 1.5 0 018.5 7h7A1.5 1.5 0 0117 8.5V10"/>',
+  cheese:'<path d="M21 9L3 14.5V19h18z"/><circle cx="8" cy="16.5" r="1"/><circle cx="13" cy="15.5" r="1"/><circle cx="17.5" cy="16.5" r="1"/>',
+  yogurt:'<path d="M7 8.5h10L15.5 21h-7z"/><ellipse cx="12" cy="8.5" rx="5" ry="1.8"/><path d="M14 5l3-2"/>',
+  chicken:'<path d="M12.5 4a6 6 0 016 6c0 3.5-2.8 5.5-6.3 5.2L9.5 18"/><path d="M12.5 4C9 4 6.5 6.5 6.7 10c.2 2.6 2 4.6 5.5 5.2"/><circle cx="6.8" cy="19.2" r="1.5"/><circle cx="9.2" cy="20.4" r="1.5"/>',
+  meat:'<ellipse cx="12" cy="12" rx="9" ry="6.5"/><ellipse cx="14.5" cy="12" rx="3" ry="2.2"/>',
+  fish:'<path d="M16 12c0 3-3 6-7 6-3.5 0-6-3-7-6 1-3 3.5-6 7-6 4 0 7 3 7 6z"/><path d="M16 12l5.5-4v8z"/><circle cx="6.5" cy="10.8" r="0.9" class="fill"/>',
+  sack:'<path d="M7.5 8.5c-2.2 2.8-3.5 5-3.5 7.5a4.5 4.5 0 004.5 4.5h7a4.5 4.5 0 004.5-4.5c0-2.5-1.3-4.7-3.5-7.5"/><path d="M7.5 8.5C7.5 6.6 9.5 5.5 12 5.5s4.5 1.1 4.5 3-2 3-4.5 3-4.5-1.1-4.5-3z"/>',
+  grain:'<path d="M7.5 8.5c-2.2 2.8-3.5 5-3.5 7.5a4.5 4.5 0 004.5 4.5h7a4.5 4.5 0 004.5-4.5c0-2.5-1.3-4.7-3.5-7.5"/><path d="M7.5 8.5C7.5 6.6 9.5 5.5 12 5.5s4.5 1.1 4.5 3-2 3-4.5 3-4.5-1.1-4.5-3z"/><circle cx="10" cy="15" r="0.8" class="fill"/><circle cx="14" cy="14.5" r="0.8" class="fill"/><circle cx="12" cy="17.5" r="0.8" class="fill"/>',
+  oil:'<path d="M10 3h4v4l2 3v9a2 2 0 01-2 2h-4a2 2 0 01-2-2v-9l2-3z"/><path d="M8 14h8"/>',
+  potato:'<ellipse cx="12" cy="12" rx="8.5" ry="6" transform="rotate(-18 12 12)"/><circle cx="9" cy="11" r="0.7" class="fill"/><circle cx="14.5" cy="13.5" r="0.7" class="fill"/><circle cx="12.5" cy="9.5" r="0.7" class="fill"/>',
+  onion:'<path d="M12 8c4 0 7 2.6 7 6.2a7 7 0 01-14 0C5 10.6 8 8 12 8z"/><path d="M12 8c-1.4-1.5-1.9-3-1-5M12 8c1.4-1.5 1.9-3 1-5"/><path d="M9.5 14c0 2.6.9 4.6 2.5 6.5 1.6-1.9 2.5-3.9 2.5-6.5"/>',
+  garlic:'<path d="M12 6.5c1 2 5.5 3 5.5 8a5.5 5.5 0 01-11 0c0-5 4.5-6 5.5-8z"/><path d="M12 6.5V3.5"/><path d="M12 20v-6.5"/>',
+  tomato:'<circle cx="12" cy="13.5" r="7.5"/><path d="M12 6c-1-1.6-2.8-2.2-4.3-1.7C9 5.4 10.2 6 12 6zM12 6c1-1.6 2.8-2.2 4.3-1.7C15 5.4 13.8 6 12 6z"/><path d="M12 6V3.8"/>',
+  cucumber:'<rect x="2.5" y="9.7" width="19" height="5" rx="2.5" transform="rotate(-32 12 12)"/><circle cx="9" cy="14" r="0.6" class="fill"/><circle cx="13" cy="11.6" r="0.6" class="fill"/><circle cx="16.4" cy="9.4" r="0.6" class="fill"/>',
+  apple:'<path d="M12 7c-4-2-8 1-8 6 0 4 3 8 5.5 8 1 0 1.7-.6 2.5-.6s1.5.6 2.5.6C17 21 20 17 20 13c0-5-4-8-8-6z"/><path d="M12 7c0-2 1-3.5 3-4"/>',
+  banana:'<path d="M5.5 4.5l1.8 1C7.3 13 11.5 17.3 19 18l1.2 1.7c-1.2.8-2.7 1.3-4.7 1.3C9 21 4.5 15.5 4.5 8c0-1.4.4-2.6 1-3.5z"/>',
+  tea:'<rect x="8" y="9" width="8" height="11" rx="1.5"/><path d="M12 9V4M12 4h3.5"/><path d="M10.5 13h3M10.5 16h3"/>',
+  chocolate:'<rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M12 4v16M5 12h14"/>',
+  cookie:'<circle cx="12" cy="12" r="8"/><circle cx="9" cy="10" r="1" class="fill"/><circle cx="14" cy="9" r="1" class="fill"/><circle cx="15" cy="14" r="1" class="fill"/><circle cx="10" cy="15" r="1" class="fill"/>',
+  sauce:'<path d="M9.5 8h5l1.5 2.5V19a2 2 0 01-2 2h-4a2 2 0 01-2-2v-8.5z"/><path d="M10.5 8V5.5h3V8"/><path d="M12 3.2v2.3"/>',
+  jar:'<rect x="6" y="8" width="12" height="13" rx="2"/><path d="M6 11.5h12"/><path d="M8 8V6.5A1.5 1.5 0 019.5 5h5A1.5 1.5 0 0116 6.5V8"/>',
+  sausage:'<rect x="2.5" y="9.5" width="19" height="5.5" rx="2.75" transform="rotate(-24 12 12)"/><path d="M3.5 17.5L2 19M20.5 6.5L22 5"/>',
+  // господарче
+  spray:'<rect x="7" y="11" width="8" height="10" rx="2"/><path d="M9 11V7.5h4.5l1.5 2"/><path d="M17.5 5.5l2-1.2M18 8.5l2.2.5M18.5 7h2.7"/>',
+  dishsoap:'<path d="M10 3.5h4v3l2 3V19a2 2 0 01-2 2h-4a2 2 0 01-2-2V9.5l2-3z"/><circle cx="12" cy="14" r="2.3"/>',
+  laundry:'<rect x="5" y="7" width="14" height="14" rx="2"/><path d="M8 7V4.5h8V7"/><circle cx="12" cy="14" r="3.2"/><path d="M9.5 12.8c1.5 1.2 3.5 1.2 5 0"/>',
+  sponge:'<rect x="4" y="8" width="16" height="9" rx="2.5"/><circle cx="8.5" cy="11" r="0.8" class="fill"/><circle cx="13" cy="14" r="0.8" class="fill"/><circle cx="16" cy="10.8" r="0.8" class="fill"/>',
+  trashbag:'<path d="M9 8.5c-2.8 2.7-4 5.3-4 8a7 7 0 0014 0c0-2.7-1.2-5.3-4-8"/><path d="M9 8.5L8 5M15 8.5L16 5"/><path d="M9 8.5h6"/>',
+  paper:'<ellipse cx="10" cy="8" rx="6.5" ry="4.5"/><ellipse cx="10" cy="8" rx="2.2" ry="1.5"/><path d="M3.5 8v8c0 2.5 3 4.5 6.5 4.5s6.5-2 6.5-4.5V8"/><path d="M16.5 13H21v5h-4"/>',
+  napkin:'<rect x="4" y="9" width="16" height="10" rx="1.5"/><path d="M4 12h16"/><path d="M8 9L12 5l4 4"/>',
+  broom:'<path d="M13.5 3l-3 9.5"/><path d="M10.5 12.5c-2.5 1.5-4 4-5 8.5 4.5-.5 7.5-1.5 9.5-4z"/><path d="M10.5 12.5l4.5 4.5"/>',
+  bucket:'<path d="M5 8h14l-1.5 12h-11z"/><path d="M5 8a7 4 0 0114 0"/>',
+  bulb:'<path d="M9 18c-.5-2.5-3-3.5-3-7a6 6 0 0112 0c0 3.5-2.5 4.5-3 7z"/><path d="M9.5 21h5"/>',
+  battery:'<rect x="3" y="8" width="16" height="8" rx="2"/><path d="M21 11v2"/><path d="M7 11v2M11 11v2"/>',
+  // ліки
+  pill:'<rect x="2.5" y="8.5" width="19" height="7" rx="3.5"/><path d="M12 8.5v7"/>',
+  pills:'<rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="9.3" cy="9.3" r="1" class="fill"/><circle cx="14.7" cy="9.3" r="1" class="fill"/><circle cx="9.3" cy="14.7" r="1" class="fill"/><circle cx="14.7" cy="14.7" r="1" class="fill"/>',
+  health:'<rect x="4" y="4" width="16" height="16" rx="5"/><path d="M12 9v6M9 12h6"/>',
+  vitamins:'<rect x="6" y="7" width="12" height="14" rx="2"/><path d="M8 7V4.5h8V7"/><circle cx="10" cy="13" r="1" class="fill"/><circle cx="14" cy="15.5" r="1" class="fill"/><circle cx="13" cy="11" r="1" class="fill"/>',
+  bandage:'<g transform="rotate(-25 12 12)"><rect x="2.5" y="8.5" width="19" height="7" rx="3.5"/><circle cx="10.5" cy="12" r="0.7" class="fill"/><circle cx="13.5" cy="12" r="0.7" class="fill"/><circle cx="12" cy="10.5" r="0.7" class="fill"/><circle cx="12" cy="13.5" r="0.7" class="fill"/></g>',
+  thermometer:'<path d="M10 13.5V5a2 2 0 014 0v8.5a4.5 4.5 0 11-4 0z"/><circle cx="12" cy="17.5" r="1.5" class="fill"/>',
+  drops:'<path d="M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z"/>',
+  syrup:'<path d="M9 9h6l1 2v8a2 2 0 01-2 2h-4a2 2 0 01-2-2v-8z"/><path d="M10 9V6h4v3"/><path d="M12 13v4M10 15h4"/>',
+  // гігієна
+  toothpaste:'<path d="M8 9h8v10a2 2 0 01-2 2h-4a2 2 0 01-2-2z"/><path d="M8 9V6h8v3"/><path d="M10 6V3.5h4V6"/><path d="M10 13h4"/>',
+  toothbrush:'<path d="M4 20L15 9"/><path d="M15 9l4.5-4.5"/><path d="M15.8 5.2l1.6 1.6M17.5 3.5l1.6 1.6M14 7l1.6 1.6"/>',
+  shampoo:'<rect x="8" y="9" width="8" height="12" rx="2"/><path d="M10 9V6.5h4V9M12 6.5v-2h3.5"/><path d="M10 14h4"/>',
+  showergel:'<path d="M8 21V11.5a4 4 0 018 0V21z"/><path d="M10 7.5h4v-2h-4z"/><path d="M8 16h8"/>',
+  deo:'<rect x="8" y="8.5" width="8" height="12.5" rx="2"/><path d="M8 8.5c0-4.5 8-4.5 8 0"/><path d="M10 5h4"/>',
+  soap:'<rect x="4" y="10" width="16" height="8.5" rx="4.25"/><circle cx="16" cy="5.5" r="1.3"/><circle cx="12" cy="4" r="0.8"/>',
+  razor:'<rect x="7" y="3" width="10" height="4.5" rx="1.5"/><path d="M9.5 7.5v2M14.5 7.5v2M12 7.5v2"/><path d="M10.5 9.5h3l-.8 9.5c0 1-.4 1.5-.7 1.5s-.7-.5-.7-1.5z"/>',
+  cotton:'<circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/>',
+  pads:'<rect x="8" y="3" width="8" height="18" rx="4"/><path d="M8 9H5.5a1.5 1.5 0 000 3H8M16 12h2.5a1.5 1.5 0 000-3H16"/>',
+  cream:'<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M5 13h14"/><path d="M7 10V8.5A1.5 1.5 0 018.5 7h7A1.5 1.5 0 0117 8.5V10"/>',
+  perfume:'<rect x="7.5" y="10" width="9" height="11" rx="2.5"/><path d="M10.5 10V8h3v2"/><path d="M10.5 5.5h3"/><path d="M17.5 6.5l2-1M18 9l2.2.3"/>',
+};
+const ic = k => `<svg viewBox="0 0 24 24">${ICONS[k] || ICONS.tag}</svg>`;
+
+const COLORS = [
+  '#2D9CDB','#2F80ED','#6a5ae0','#9B51E0','#EB5C8B','#eb3b7e','#EB5757','#F2994A',
+  '#F2C94C','#9E9D24','#27AE60','#1ABC9C','#4CAF7D','#5D4037','#607D8B','#9E9E9E',
+];
+
+// ── DEFAULTS (сідяться в базу при першому запуску) ──────────
+const DEFAULT_CATS = {
+  food:    { name: 'Їжа',        color: '#2D9CDB', icon: 'bowl',   order: 0 },
+  house:   { name: 'Господарче', color: '#F2994A', icon: 'spray',  order: 1 },
+  meds:    { name: 'Ліки',       color: '#1ABC9C', icon: 'health', order: 2 },
+  hygiene: { name: 'Гігієна',    color: '#EB5C8B', icon: 'soap',   order: 3 },
+};
+const DEFAULT_PRODS = [
+  // Їжа
+  ['food','Макарони','pasta'],['food','Яйця','egg'],['food','Молоко','milk'],['food','Кранч','cereal'],
+  ['food','Кава','coffee'],['food','Вода','water'],['food','Сіль','salt'],['food','Цукор','sugar'],
+  ['food','Хліб','bread'],['food','Масло','butter'],['food','Сир','cheese'],['food','Йогурт','yogurt'],
+  ['food','Сметана','jar'],['food','Курка','chicken'],['food','Фарш','meat'],['food','Риба','fish'],
+  ['food','Ковбаса','sausage'],['food','Рис','sack'],['food','Гречка','grain'],['food','Борошно','sack'],
+  ['food','Олія','oil'],['food','Картопля','potato'],['food','Цибуля','onion'],['food','Часник','garlic'],
+  ['food','Помідори','tomato'],['food','Огірки','cucumber'],['food','Яблука','apple'],['food','Банани','banana'],
+  ['food','Чай','tea'],['food','Шоколад','chocolate'],['food','Печиво','cookie'],['food','Кетчуп','sauce'],
+  ['food','Майонез','sauce'],
+  // Господарче
+  ['house','Засіб для посуду','dishsoap'],['house','Засіб для прання','laundry'],['house','Губки','sponge'],
+  ['house','Пакети для сміття','trashbag'],['house','Туалетний папір','paper'],['house','Серветки','napkin'],
+  ['house','Засіб для підлоги','bucket'],['house','Засіб для скла','spray'],['house','Лампочки','bulb'],
+  ['house','Батарейки','battery'],
+  // Ліки
+  ['meds','Знеболювальне','pill'],['meds','Вітаміни','vitamins'],['meds','Пластир','bandage'],
+  ['meds','Краплі','drops'],['meds','Сироп','syrup'],
+  // Гігієна
+  ['hygiene','Зубна паста','toothpaste'],['hygiene','Зубна щітка','toothbrush'],['hygiene','Шампунь','shampoo'],
+  ['hygiene','Гель для душу','showergel'],['hygiene','Дезодорант','deo'],['hygiene','Мило','soap'],
+  ['hygiene','Бритви','razor'],['hygiene','Ватні диски','cotton'],['hygiene','Прокладки','pads'],
+  ['hygiene','Крем','cream'],
+];
+
+// ── STATE ──────────────────────────────────────────────────
+let cats = {};      // id → {name,color,icon,order}
+let prods = {};     // id → {name,icon,cat,order}
+let listMap = {};   // id → {pid,name,icon,cat,ts,done,doneTs,day,archDay,archKey}
+let archMap = {};   // 'YYYY-MM-DD' → { key → {name,icon,catName,catColor,catIcon,ts} }
+let state = { tab: 'list' };
+let collapsedCats = new Set();
+let addCurCat = null;       // активна категорія в шторці додавання
+let addEditMode = false;
+let addSearch = '';
+let catFormId = null;       // null = нова
+let catFormSel = { color: COLORS[0], icon: 'tag' };
+let prodFormId = null;
+let prodFormSel = { icon: 'tag', cat: null };
+let renderTimer = null;
+const SWIPE_TABS = ['list', 'archive'];
+const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
+const WEEKDAYS_SHORT = ['нд','пн','вт','ср','чт','пт','сб'];
+
+const $ = id => document.getElementById(id);
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const catOf = item => cats[item.cat] || { name: 'Інше', color: '#9E9E9E', icon: 'tag' };
+
+// ── INIT ───────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  if ('serviceWorker' in navigator)
+    navigator.serviceWorker.register('/zagaltsi/shopping/sw.js', { scope: '/zagaltsi/shopping/' }).catch(() => {});
+  initSwipeLayout();
+  bindEvents();
+  seedIfEmpty().finally(subscribe);
+  renderAll();
+  // перевірка зміни дня раз на хвилину — опівночі куплене йде зі списку
+  setInterval(purgeOldDone, 60000);
+});
+
+async function seedIfEmpty() {
+  try {
+    const snap = await get(ref(db, CATS_PATH));
+    if (snap.exists()) return;
+    const prodObj = {};
+    DEFAULT_PRODS.forEach(([cat, name, icon], i) => {
+      prodObj[`p${String(i).padStart(3,'0')}`] = { name, icon, cat, order: i };
+    });
+    await update(ref(db, 'shopping'), { categories: DEFAULT_CATS, products: prodObj });
+  } catch (e) { console.warn('seed failed', e); }
+}
+
+// ── SYNC ───────────────────────────────────────────────────
+function subscribe() {
+  onValue(ref(db, CATS_PATH), s => { cats = s.val() || {}; scheduleRender(); });
+  onValue(ref(db, PRODS_PATH), s => { prods = s.val() || {}; scheduleRender(); });
+  onValue(ref(db, LIST_PATH), s => { listMap = s.val() || {}; purgeOldDone(); scheduleRender(); });
+  onValue(ref(db, ARCH_PATH), s => { archMap = s.val() || {}; scheduleRender(); });
+}
+function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
+
+// куплене вчора (і раніше) зникає зі списку; в архіві залишається
+function purgeOldDone() {
+  const today = dayKey();
+  const upd = {};
+  Object.entries(listMap).forEach(([id, it]) => {
+    if (it.done && it.day && it.day < today) upd[id] = null;
+  });
+  if (Object.keys(upd).length) update(ref(db, LIST_PATH), upd).catch(() => {});
+}
+
+// ── LIST ACTIONS ───────────────────────────────────────────
+function addToList(pid) {
+  const p = prods[pid];
+  if (!p) return;
+  const item = { pid, name: p.name, icon: p.icon, cat: p.cat, ts: Date.now(), done: false };
+  set(push(ref(db, LIST_PATH)), item);
+}
+function removeFromList(id) { remove(ref(db, `${LIST_PATH}/${id}`)); }
+const listEntryFor = pid => Object.entries(listMap).find(([, it]) => it.pid === pid && !it.done);
+
+async function toggleDone(id) {
+  const it = listMap[id];
+  if (!it) return;
+  if (!it.done) {
+    const c = catOf(it);
+    const day = dayKey();
+    const archRef = push(ref(db, `${ARCH_PATH}/${day}`));
+    await set(archRef, { name: it.name, icon: it.icon, catName: c.name, catColor: c.color, catIcon: c.icon, ts: Date.now() });
+    await update(ref(db, `${LIST_PATH}/${id}`), { done: true, doneTs: Date.now(), day, archDay: day, archKey: archRef.key });
+  } else {
+    if (it.archDay && it.archKey) await remove(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`)).catch(() => {});
+    await update(ref(db, `${LIST_PATH}/${id}`), { done: false, doneTs: null, day: null, archDay: null, archKey: null });
+  }
+}
+
+// ── RENDER ─────────────────────────────────────────────────
+function renderAll() {
+  renderHeader();
+  renderList();
+  renderArchive();
+  if ($('add-view').classList.contains('active')) { renderAddChips(); renderAddGrid(); }
+}
+
+function renderHeader() {
+  const remaining = Object.values(listMap).filter(it => !it.done).length;
+  $('total-amount').innerHTML = `${remaining} <span>${plural(remaining, 'позиція', 'позиції', 'позицій')}</span>`;
+  $('total-label').textContent = remaining ? 'Треба купити' : 'Все куплено';
+}
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+function sortedCats() {
+  return Object.entries(cats).sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99));
+}
+
+function renderList() {
+  const wrap = $('list-wrap');
+  const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
+  if (!items.length) {
+    wrap.innerHTML = `<div class="empty">${ic('cart')}<div>Список порожній.<br>Натисни «+», щоб додати покупки.</div></div>`;
+    return;
+  }
+  const byCat = new Map();
+  items.forEach(it => {
+    const k = cats[it.cat] ? it.cat : '_other';
+    if (!byCat.has(k)) byCat.set(k, []);
+    byCat.get(k).push(it);
+  });
+  const order = sortedCats().map(([id]) => id).filter(id => byCat.has(id));
+  if (byCat.has('_other')) order.push('_other');
+
+  let html = '';
+  order.forEach(cid => {
+    const c = cats[cid] || { name: 'Інше', color: '#9E9E9E', icon: 'tag' };
+    const arr = byCat.get(cid);
+    arr.sort((a, b) => (a.done - b.done) || (a.ts - b.ts));
+    const remaining = arr.filter(i => !i.done).length;
+    const collapsed = collapsedCats.has(cid);
+    html += `<div class="lcat ${collapsed ? 'collapsed' : ''}" data-cid="${cid}">
+      <div class="lcat-head" data-cid="${cid}">
+        <div class="lcat-ic" style="--c:${c.color}">${ic(c.icon)}</div>
+        <div class="lcat-name">${esc(c.name)}</div>
+        <div class="lcat-count ${remaining ? '' : 'alldone'}" style="--c:${c.color}">${remaining || '✓'}</div>
+        <span class="lcat-chevron">▼</span>
+      </div>
+      <div class="lcat-items">` +
+      arr.map(it => `
+        <div class="litem ${it.done ? 'done' : ''}" data-id="${it.id}">
+          <div class="litem-ic" style="--c:${c.color}">${ic(it.icon)}</div>
+          <div class="litem-name">${esc(it.name)}</div>
+          <button class="litem-check" data-id="${it.id}"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></button>
+        </div>`).join('') +
+      `</div></div>`;
+  });
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('.lcat-head').forEach(el => el.addEventListener('click', () => {
+    const cid = el.dataset.cid;
+    collapsedCats.has(cid) ? collapsedCats.delete(cid) : collapsedCats.add(cid);
+    el.parentElement.classList.toggle('collapsed');
+  }));
+  wrap.querySelectorAll('.litem-check').forEach(el => el.addEventListener('click', e => {
+    e.stopPropagation();
+    const svg = el.querySelector('svg');
+    svg.style.animation = 'none'; svg.offsetWidth;
+    svg.style.animation = 'popIn 0.3s ease-out both';
+    toggleDone(el.dataset.id);
+  }));
+}
+
+function renderArchive() {
+  const wrap = $('arch-wrap');
+  const days = Object.keys(archMap).sort().reverse();
+  if (!days.length) {
+    wrap.innerHTML = `<div class="empty">${ic('box')}<div>Архів порожній.<br>Куплене з галочкою з'являтиметься тут по днях.</div></div>`;
+    return;
+  }
+  // групуємо по місяцях
+  const byMonth = new Map();
+  days.forEach(d => {
+    const mk = d.slice(0, 7);
+    if (!byMonth.has(mk)) byMonth.set(mk, []);
+    byMonth.get(mk).push(d);
+  });
+  let html = '';
+  byMonth.forEach((ds, mk) => {
+    const [y, m] = mk.split('-').map(Number);
+    html += `<div class="arch-month">${MONTHS[m-1]} ${y}</div><div class="arch-grid">` +
+      ds.map(d => {
+        const cnt = Object.keys(archMap[d] || {}).length;
+        const dt = new Date(d + 'T12:00:00');
+        return `<button class="arch-day" data-day="${d}">
+          <div class="arch-circle">${dt.getDate()}</div>
+          <div class="arch-sub">${WEEKDAYS_SHORT[dt.getDay()]}, ${dt.getDate()} ${MONTHS_GEN[dt.getMonth()]}</div>
+          <div class="arch-cnt">${cnt} ${plural(cnt, 'покупка', 'покупки', 'покупок')}</div>
+        </button>`;
+      }).join('') + `</div>`;
+  });
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.arch-day').forEach(el => el.addEventListener('click', () => openDaySheet(el.dataset.day)));
+}
+
+function openDaySheet(day) {
+  const dt = new Date(day + 'T12:00:00');
+  $('day-title').textContent = `${dt.getDate()} ${MONTHS_GEN[dt.getMonth()]} ${dt.getFullYear()}`;
+  const entries = Object.values(archMap[day] || {}).sort((a, b) => a.ts - b.ts);
+  const byCat = new Map();
+  entries.forEach(e => {
+    const k = e.catName || 'Інше';
+    if (!byCat.has(k)) byCat.set(k, { color: e.catColor || '#9E9E9E', icon: e.catIcon || 'tag', items: [] });
+    byCat.get(k).items.push(e);
+  });
+  let html = '';
+  byCat.forEach((g, name) => {
+    html += `<div class="day-cat">
+        <div class="day-cat-ic" style="--c:${g.color}">${ic(g.icon)}</div>
+        <div class="day-cat-name">${esc(name)}</div>
+      </div>` +
+      g.items.map(e => {
+        const t = new Date(e.ts);
+        return `<div class="day-item">
+          <div class="day-item-ic" style="--c:${g.color}">${ic(e.icon)}</div>
+          <div class="day-item-name">${esc(e.name)}</div>
+          <div class="day-item-time">${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}</div>
+        </div>`;
+      }).join('');
+  });
+  $('day-list').innerHTML = html || '<div class="empty">Порожньо</div>';
+  $('day-overlay').classList.add('open');
+}
+
+// ── ADD VIEW ───────────────────────────────────────────────
+function openAdd() {
+  addSearch = '';
+  $('add-search').value = '';
+  addEditMode = false;
+  $('add-edit-toggle').classList.remove('on');
+  if (!addCurCat || !cats[addCurCat]) addCurCat = sortedCats()[0]?.[0] || null;
+  renderAddChips();
+  renderAddGrid();
+  $('add-view').classList.add('active');
+}
+function closeAdd() { $('add-view').classList.remove('active'); }
+
+function renderAddChips() {
+  const el = $('add-chips');
+  el.innerHTML = sortedCats().map(([id, c]) =>
+    `<button class="chip ${id === addCurCat && !addSearch ? 'on' : ''}" data-cid="${id}" style="--c:${c.color}">
+      <span class="chip-ic">${ic(c.icon)}</span>${esc(c.name)}
+    </button>`).join('') +
+    `<button class="chip add" id="chip-new-cat">+</button>`;
+  el.querySelectorAll('.chip[data-cid]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      addCurCat = chip.dataset.cid;
+      if (addEditMode) { openCatForm(addCurCat); return; }
+      addSearch = ''; $('add-search').value = '';
+      renderAddChips(); renderAddGrid();
+    });
+    longPress(chip, () => openCatForm(chip.dataset.cid));
+  });
+  $('chip-new-cat').addEventListener('click', () => openCatForm(null));
+}
+
+function renderAddGrid() {
+  const grid = $('add-grid');
+  grid.classList.toggle('editing', addEditMode);
+  const q = addSearch.trim().toLowerCase();
+  let entries = Object.entries(prods);
+  if (q) entries = entries.filter(([, p]) => p.name.toLowerCase().includes(q));
+  else entries = entries.filter(([, p]) => p.cat === addCurCat);
+  entries.sort((a, b) => (a[1].order ?? 999) - (b[1].order ?? 999) || a[1].name.localeCompare(b[1].name, 'uk'));
+
+  let html = entries.map(([pid, p]) => {
+    const c = cats[p.cat] || { color: '#9E9E9E' };
+    const inList = !!listEntryFor(pid);
+    return `<button class="ptile ${inList ? 'inlist' : ''}" data-pid="${pid}">
+      <div class="ptile-circle" style="--c:${c.color}">${ic(p.icon)}
+        <span class="ptile-badge"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+        <span class="ptile-edit-dot"><svg viewBox="0 0 24 24"><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+      </div>
+      <div class="ptile-name">${esc(p.name)}</div>
+    </button>`;
+  }).join('');
+  if (!q) html += `<button class="ptile new" id="ptile-new"><div class="ptile-circle">+</div><div class="ptile-name">Новий</div></button>`;
+  grid.innerHTML = html;
+
+  grid.querySelectorAll('.ptile[data-pid]').forEach(tile => {
+    tile.addEventListener('click', () => {
+      const pid = tile.dataset.pid;
+      if (addEditMode) { openProdForm(pid); return; }
+      const entry = listEntryFor(pid);
+      if (entry) {
+        removeFromList(entry[0]);
+        tile.classList.remove('inlist');
+      } else {
+        addToList(pid);
+        tile.classList.add('inlist');
+        const badge = tile.querySelector('.ptile-badge');
+        badge.style.animation = 'none'; badge.offsetWidth;
+        badge.style.animation = 'popIn 0.3s ease-out both';
+      }
+    });
+    longPress(tile, () => openProdForm(tile.dataset.pid));
+  });
+  const newTile = $('ptile-new');
+  if (newTile) newTile.addEventListener('click', () => openProdForm(null));
+}
+
+// ── CATEGORY MANAGER / FORM ────────────────────────────────
+function openCatsSheet() {
+  const el = $('cats-list');
+  el.innerHTML = sortedCats().map(([id, c]) => {
+    const cnt = Object.values(prods).filter(p => p.cat === id).length;
+    return `<div class="sheet-item" data-cid="${id}">
+      <div class="sheet-item-ic" style="--c:${c.color}">${ic(c.icon)}</div>
+      <div class="si-name">${esc(c.name)}<div class="si-sub">${cnt} ${plural(cnt, 'продукт', 'продукти', 'продуктів')}</div></div>
+      <span class="si-arrow">›</span>
+    </div>`;
+  }).join('') +
+  `<div class="sheet-item" id="cats-new"><div class="sheet-item-ic" style="--c:#c9c9d2">${ic('tag')}</div><div class="si-name" style="color:var(--active-ink)">Нова категорія</div></div>`;
+  el.querySelectorAll('.sheet-item[data-cid]').forEach(row =>
+    row.addEventListener('click', () => { $('cats-overlay').classList.remove('open'); openCatForm(row.dataset.cid); }));
+  $('cats-new').addEventListener('click', () => { $('cats-overlay').classList.remove('open'); openCatForm(null); });
+  $('cats-overlay').classList.add('open');
+}
+
+function openCatForm(cid) {
+  catFormId = cid;
+  const c = cid ? cats[cid] : null;
+  catFormSel = { color: c?.color || COLORS[Math.floor(Math.random() * COLORS.length)], icon: c?.icon || 'tag' };
+  $('cat-form-title').textContent = c ? 'Редагувати категорію' : 'Нова категорія';
+  $('cat-form-name').value = c?.name || '';
+  $('cat-form-delete').style.display = c ? '' : 'none';
+  renderCatFormPickers();
+  $('cat-form-overlay').classList.add('open');
+}
+function renderCatFormPickers() {
+  $('cat-form-colors').innerHTML = COLORS.map(col =>
+    `<button class="color-sw ${col === catFormSel.color ? 'sel' : ''}" data-col="${col}" style="--c:${col}"></button>`).join('');
+  $('cat-form-colors').querySelectorAll('.color-sw').forEach(sw =>
+    sw.addEventListener('click', () => { catFormSel.color = sw.dataset.col; renderCatFormPickers(); }));
+  $('cat-form-icons').innerHTML = Object.keys(ICONS).map(k =>
+    `<button class="icon-cell ${k === catFormSel.icon ? 'sel' : ''}" data-ic="${k}">${ic(k)}</button>`).join('');
+  $('cat-form-icons').querySelectorAll('.icon-cell').forEach(cell =>
+    cell.addEventListener('click', () => { catFormSel.icon = cell.dataset.ic; renderCatFormPickers(); }));
+}
+async function saveCatForm() {
+  const name = $('cat-form-name').value.trim();
+  if (!name) { toast('Введи назву категорії'); return; }
+  if (catFormId) {
+    await update(ref(db, `${CATS_PATH}/${catFormId}`), { name, color: catFormSel.color, icon: catFormSel.icon });
+  } else {
+    const order = Math.max(-1, ...Object.values(cats).map(c => c.order ?? 0)) + 1;
+    await set(push(ref(db, CATS_PATH)), { name, color: catFormSel.color, icon: catFormSel.icon, order });
+  }
+  $('cat-form-overlay').classList.remove('open');
+}
+async function deleteCatForm() {
+  if (!catFormId) return;
+  const cnt = Object.values(prods).filter(p => p.cat === catFormId).length;
+  if (!confirm(`Видалити категорію разом з ${cnt} ${plural(cnt, 'продуктом', 'продуктами', 'продуктами')}?`)) return;
+  const upd = {};
+  Object.entries(prods).forEach(([pid, p]) => { if (p.cat === catFormId) upd[`products/${pid}`] = null; });
+  upd[`categories/${catFormId}`] = null;
+  await update(ref(db, 'shopping'), upd);
+  if (addCurCat === catFormId) addCurCat = null;
+  $('cat-form-overlay').classList.remove('open');
+}
+
+// ── PRODUCT FORM ───────────────────────────────────────────
+function openProdForm(pid) {
+  prodFormId = pid;
+  const p = pid ? prods[pid] : null;
+  prodFormSel = { icon: p?.icon || 'tag', cat: p?.cat || addCurCat || sortedCats()[0]?.[0] };
+  $('prod-form-title').textContent = p ? 'Редагувати продукт' : 'Новий продукт';
+  $('prod-form-name').value = p?.name || (addSearch.trim() || '');
+  $('prod-form-delete').style.display = p ? '' : 'none';
+  renderProdFormPickers();
+  $('prod-form-overlay').classList.add('open');
+}
+function renderProdFormPickers() {
+  $('prod-form-cats').innerHTML = sortedCats().map(([id, c]) =>
+    `<button class="chip ${id === prodFormSel.cat ? 'on' : ''}" data-cid="${id}" style="--c:${c.color}">
+      <span class="chip-ic">${ic(c.icon)}</span>${esc(c.name)}
+    </button>`).join('');
+  $('prod-form-cats').querySelectorAll('.chip').forEach(chip =>
+    chip.addEventListener('click', () => { prodFormSel.cat = chip.dataset.cid; renderProdFormPickers(); }));
+  $('prod-form-icons').innerHTML = Object.keys(ICONS).map(k =>
+    `<button class="icon-cell ${k === prodFormSel.icon ? 'sel' : ''}" data-ic="${k}">${ic(k)}</button>`).join('');
+  $('prod-form-icons').querySelectorAll('.icon-cell').forEach(cell =>
+    cell.addEventListener('click', () => { prodFormSel.icon = cell.dataset.ic; renderProdFormPickers(); }));
+}
+async function saveProdForm() {
+  const name = $('prod-form-name').value.trim();
+  if (!name) { toast('Введи назву продукту'); return; }
+  if (!prodFormSel.cat) { toast('Обери категорію'); return; }
+  if (prodFormId) {
+    await update(ref(db, `${PRODS_PATH}/${prodFormId}`), { name, icon: prodFormSel.icon, cat: prodFormSel.cat });
+    // оновити назву/іконку в активному списку
+    const upd = {};
+    Object.entries(listMap).forEach(([id, it]) => {
+      if (it.pid === prodFormId) { upd[`${id}/name`] = name; upd[`${id}/icon`] = prodFormSel.icon; upd[`${id}/cat`] = prodFormSel.cat; }
+    });
+    if (Object.keys(upd).length) await update(ref(db, LIST_PATH), upd);
+  } else {
+    const order = Math.max(0, ...Object.values(prods).map(p => p.order ?? 0)) + 1;
+    await set(push(ref(db, PRODS_PATH)), { name, icon: prodFormSel.icon, cat: prodFormSel.cat, order });
+  }
+  $('prod-form-overlay').classList.remove('open');
+}
+async function deleteProdForm() {
+  if (!prodFormId) return;
+  await remove(ref(db, `${PRODS_PATH}/${prodFormId}`));
+  $('prod-form-overlay').classList.remove('open');
+}
+
+// ── EVENTS ─────────────────────────────────────────────────
+function bindEvents() {
+  $('fab').addEventListener('click', openAdd);
+  $('add-close').addEventListener('click', closeAdd);
+  $('add-edit-toggle').addEventListener('click', () => {
+    addEditMode = !addEditMode;
+    $('add-edit-toggle').classList.toggle('on', addEditMode);
+    renderAddGrid();
+    toast(addEditMode ? 'Режим редагування: тапни продукт чи категорію' : 'Режим додавання');
+  });
+  $('add-search').addEventListener('input', e => { addSearch = e.target.value; renderAddChips(); renderAddGrid(); });
+
+  $('btn-cats').addEventListener('click', openCatsSheet);
+  $('btn-settings').addEventListener('click', () => $('settings-overlay').classList.add('open'));
+  $('btn-clear-done').addEventListener('click', () => {
+    const upd = {};
+    Object.entries(listMap).forEach(([id, it]) => { if (it.done) upd[id] = null; });
+    if (Object.keys(upd).length) update(ref(db, LIST_PATH), upd);
+    $('settings-overlay').classList.remove('open');
+    toast('Куплене прибрано зі списку');
+  });
+
+  $('cat-form-done').addEventListener('click', saveCatForm);
+  $('cat-form-delete').addEventListener('click', deleteCatForm);
+  $('prod-form-done').addEventListener('click', saveProdForm);
+  $('prod-form-delete').addEventListener('click', deleteProdForm);
+
+  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+    state.tab = tab.dataset.tab;
+    updateTabs();
+    syncTabs();
+  }));
+
+  document.querySelectorAll('.sheet-overlay').forEach(ov =>
+    ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
+}
+
+function updateTabs() {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
+  $('fab').classList.toggle('show', state.tab === 'list');
+}
+
+// ── SWIPE між екранами ─────────────────────────────────────
+function syncTabs() {
+  const cur = SWIPE_TABS.indexOf(state.tab);
+  SWIPE_TABS.forEach((t, i) => {
+    const s = $(t + '-screen');
+    s.style.transition = '';
+    s.style.transform = `translateX(${(i - cur) * 100}%)`;
+    s.classList.toggle('active', t === state.tab);
+  });
+}
+function initSwipeLayout() {
+  syncTabs();
+  const wrap = $('screen-wrap');
+  let swX = 0, swY = 0, swActive = false, swLocked = false;
+  wrap.addEventListener('touchstart', e => {
+    swX = e.touches[0].clientX; swY = e.touches[0].clientY;
+    swActive = true; swLocked = false;
+  }, { passive: true });
+  wrap.addEventListener('touchmove', e => {
+    if (!swActive) return;
+    const dx = e.touches[0].clientX - swX, dy = e.touches[0].clientY - swY;
+    if (!swLocked) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) >= Math.abs(dx)) { swActive = false; return; }
+      swLocked = true;
+    }
+    e.preventDefault();
+    const cur = SWIPE_TABS.indexOf(state.tab), W = wrap.offsetWidth;
+    SWIPE_TABS.forEach((t, i) => {
+      const s = $(t + '-screen');
+      s.style.transition = 'none';
+      s.style.transform = `translateX(${(i - cur) * W + dx}px)`;
+    });
+  }, { passive: false });
+  wrap.addEventListener('touchend', e => {
+    if (!swActive || !swLocked) { swActive = false; return; }
+    swActive = false;
+    const dx = e.changedTouches[0].clientX - swX;
+    const threshold = wrap.offsetWidth * 0.28;
+    const cur = SWIPE_TABS.indexOf(state.tab);
+    let next = cur;
+    if (dx < -threshold && cur < SWIPE_TABS.length - 1) next = cur + 1;
+    else if (dx > threshold && cur > 0) next = cur - 1;
+    if (next !== cur) { state.tab = SWIPE_TABS[next]; updateTabs(); }
+    syncTabs();
+  }, { passive: true });
+}
+
+// ── HELPERS ────────────────────────────────────────────────
+function longPress(el, fn, ms = 480) {
+  let timer = null, fired = false;
+  const start = e => {
+    fired = false;
+    timer = setTimeout(() => { fired = true; fn(); }, ms);
+  };
+  const cancel = () => clearTimeout(timer);
+  el.addEventListener('touchstart', start, { passive: true });
+  el.addEventListener('touchmove', cancel, { passive: true });
+  el.addEventListener('touchend', e => { cancel(); if (fired) e.preventDefault(); }, { passive: false });
+  el.addEventListener('contextmenu', e => e.preventDefault());
+  // клік після спрацьованого лонгпреса гасимо
+  el.addEventListener('click', e => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
+
+let toastTimer = null;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
