@@ -7,6 +7,8 @@ import { buildInvPanel, applyEquipTo } from './invPanel';
 import { buildQuestsPanel, buildAchievementsPanel, buildKhorugvaPanel } from './pagePanels';
 import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
+import { publishMyChar, loadMemberCharDoc, loadMemberEquip } from '../multiplayer/sharedChars';
+import { cachedMembers, refreshMembers, type KhMember } from '../khorugva';
 
 // Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
 // лише напис + панель праворуч). Мандри — окрема сцена (реальний перехід на карту).
@@ -85,6 +87,10 @@ export class MenuScene extends Phaser.Scene {
   private curPage: PageKey = 'home';
   private sectionPanel: { destroy(): void } | null = null;
   private morphing = false;
+  // Збір побратимів біля вогнища (сторінка Хоругва): персонажі всіх учасників паті
+  // зі своїм спорядженням, розставлені по колу. Свій lobbyChar на цей час ховаємо.
+  private gather: Array<{ char: CutoutCharacter; holder: Phaser.GameObjects.Container; facing: number }> = [];
+  private gatherGen = 0;
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private startPage: PageKey | null = null; // deep-link: одразу зморфити в цей розділ
   private bgImg: Phaser.GameObjects.Image | null = null;
@@ -147,7 +153,7 @@ export class MenuScene extends Phaser.Scene {
     void this.buildScene(offX, offY);
 
     // Панель розділу тримає підписку (watchKhorugva) — знімаємо на виході зі сцени.
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.sectionPanel?.destroy(); this.sectionPanel = null; });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.sectionPanel?.destroy(); this.sectionPanel = null; this.clearGathering(); });
   }
 
   private async buildScene(offX: number, offY: number): Promise<void> {
@@ -291,6 +297,11 @@ export class MenuScene extends Phaser.Scene {
       this.sectionPanel = buildKhorugvaPanel(this, offX, offY);
     }
 
+    // Збір біля вогнища: на сторінці Хоругва ховаємо одинокого lobbyChar і
+    // показуємо ВСІХ побратимів; на інших сторінках — навпаки.
+    if (page === 'khorugva') this.buildGathering(offX, offY);
+    else this.clearGathering();
+
     this.curPage = page;
     // Таймер-подія (time.delayedCall) у цій сцені не спрацьовує надійно — тому
     // завершення морфу веземо на твіні (він точно тікає): скидаємо блок і
@@ -427,14 +438,20 @@ export class MenuScene extends Phaser.Scene {
 
   // Тягне персонажа гравця (localStorage zag_game_char → fallback public/character.json)
   // і саджає перед вогнищем у позі 'sit'. Немає арту → просто не показуємо (без падінь).
+  private seatingChar = false;
   private async seatCharacter(offX: number, offY: number): Promise<void> {
+    // Захист від дубля: якщо персонаж уже саджається або вже стоїть — не створюємо
+    // другого (два асинхронні виклики або повторний вхід давали двох персонажів).
+    if (this.seatingChar || this.lobbyChar) return;
+    this.seatingChar = true;
     const doc = await MenuScene.loadCharDoc();
-    if (!doc) return; // нема персонажа з артом → просто без нього
+    if (!doc || !this.scene.isActive()) { this.seatingChar = false; return; }
     // Дефолт лише коли розрізу НЕМА: авторський cut торса з рігу не перетираємо
     // (перетирання ламало позу — персонаж у меню виходив нахилений/зіжмаканий).
     if (doc.slots?.torso && doc.slots.torso.cut == null) doc.slots.torso.cut = 0.5;
     const char = await CutoutCharacter.load(this, doc, 'lobby_').catch(() => null);
-    if (!char || !this.scene.isActive()) return;
+    this.seatingChar = false;
+    if (!char || !this.scene.isActive() || this.lobbyChar) { char?.destroy(); return; }
     const st = this.charSetup();
     char.setAnim(st.anim);
     // Обгортка задає позицію/масштаб: tick() щокадру перезаписує scaleX/Y самого персонажа.
@@ -445,6 +462,70 @@ export class MenuScene extends Phaser.Scene {
     this.lobbyChar = char;
     this.charHolder = holder;
     this.onCharReady(char);
+  }
+
+  // ── Збір побратимів біля вогнища (сторінка Хоругва) ─────────────────────────
+  // 5 місць по колу: правий стоїть (як інвентар), сидить на лавці (як житло),
+  // двоє ліворуч у айдлі (дзеркально), пʼятий за вогнищем. Плановості ще нема —
+  // пʼятий поки «на вогні» (Остап потім переробить локацію).
+  private gatherSlots(): Array<{ x: number; feetY?: number; y?: number; anim: string; facing: number; depth: number }> {
+    const C = this.fx.char;
+    return [
+      { x: C.x + 55, feetY: 522, anim: 'idle', facing: -1, depth: 5 }, // правий стоїть
+      { x: C.x, y: C.y, anim: 'sit', facing: -1, depth: 5 },           // на лавці сидить
+      { x: 2 * this.fx.fire.x - (C.x + 55), feetY: 522, anim: 'idle', facing: 1, depth: 5 }, // дзеркало правого
+      { x: 2 * this.fx.fire.x - C.x, feetY: 500, anim: 'idle', facing: 1, depth: 5 },        // дзеркало лавки
+      { x: this.fx.fire.x, feetY: 468, anim: 'idle', facing: -1, depth: 4 },                 // за вогнищем
+    ];
+  }
+
+  private clearGathering(): void {
+    this.gatherGen++;
+    for (const g of this.gather) g.holder.destroy(true);
+    this.gather = [];
+    this.charHolder?.setVisible(true); // повертаємо одинокого lobbyChar
+  }
+
+  private buildGathering(offX: number, offY: number): void {
+    this.clearGathering();
+    const gen = ++this.gatherGen;
+    void publishMyChar().catch(() => {}); // хай побратими бачать МЕНЕ (док+спорядження)
+    const slots = this.gatherSlots();
+    const place = (members: KhMember[]): void => {
+      if (gen !== this.gatherGen || !this.scene.isActive()) return;
+      // Збір потрібен лише для паті 2+. Сам (0-1) — звичайний одинокий lobbyChar.
+      if (members.length < 2) {
+        for (const g of this.gather) g.holder.destroy(true);
+        this.gather = []; this.charHolder?.setVisible(true);
+        return;
+      }
+      this.charHolder?.setVisible(false); // у зборі свій lobbyChar ховаємо — він у колі
+      // Перебудова лише коли склад змінився (щоб не мерехтіло при кожному оновленні).
+      if (this.gather.length === Math.min(members.length, 5)) return;
+      for (const g of this.gather) g.holder.destroy(true);
+      this.gather = [];
+      members.slice(0, 5).forEach((m, i) => {
+        const slot = slots[i];
+        // Спершу МАЛЮЄМО персонажа (не чекаючи спорядження — його доліпимо пізніше,
+        // щоб повільний Firebase не тримав увесь збір порожнім).
+        void loadMemberCharDoc(m.id, m.charId ?? '').then((doc) => {
+          if (gen !== this.gatherGen || !this.scene.isActive() || !doc) return;
+          if (doc.slots?.torso && doc.slots.torso.cut == null) doc.slots.torso.cut = 0.5;
+          void CutoutCharacter.load(this, doc, 'gath_' + m.id + '_').then((char) => {
+            if (gen !== this.gatherGen || !this.scene.isActive()) { char.destroy(); return; }
+            char.setAnim(slot.anim);
+            const holder = this.add.container(slot.x + offX, (slot.y ?? 0) + offY, [char]);
+            holder.setScrollFactor(0).setScale(this.fx.char.scale).setDepth(slot.depth);
+            if (slot.feetY != null) { char.tick(0, slot.facing); holder.y = slot.feetY + offY - char.feetOffset() * this.fx.char.scale; }
+            this.gather.push({ char, holder, facing: slot.facing });
+            // Спорядження — окремо, коли приїде (не блокує появу персонажа).
+            void loadMemberEquip(m.id).then((equip) => { if (gen === this.gatherGen) char.setEquipment(equip); });
+          });
+        });
+      });
+    };
+    place(cachedMembers());              // миттєво з кешу
+    void refreshMembers().then(place);   // оновлення з мережі
   }
 
   private static hasImages(doc: CharDoc | null | undefined): boolean {
@@ -472,6 +553,7 @@ export class MenuScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     this.lobbyChar?.tick(deltaMs / 1000, CHAR_FACING);
+    for (const g of this.gather) g.char.tick(deltaMs / 1000, g.facing); // збір біля вогнища
     // Мерехтіння вогню: сума неспівмірних синусів = живий нерівний ритм.
     this.fireTime += deltaMs / 1000;
     const t = this.fireTime;

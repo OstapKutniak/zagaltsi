@@ -8,10 +8,17 @@ import { db } from '../firebase';
 import { ref, set, get } from 'firebase/database';
 import { getPlayerId, getPlayerName, getChosenChar } from './lobby';
 import { loadCharLibrary, docById } from '../charlib';
+import { loadEquip } from '../inventory';
 import type { CharDoc } from '../anim/CutoutCharacter';
 
 function hasImages(doc: CharDoc | null | undefined): boolean {
   return !!(doc?.slots && doc.images && Object.keys(doc.images).length > 0);
+}
+
+// Firebase get без таймауту вічно висить при відсутній мережі — обгортаємо, щоб
+// збір біля вогнища не «зависав» назавжди без відповіді.
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p.catch(() => fallback), new Promise<T>((res) => setTimeout(() => res(fallback), ms))]);
 }
 
 // Мій персонаж — той самий, що в лоббі: явно обраний (zag_chosen_char) →
@@ -48,21 +55,34 @@ export async function resolveMyThumb(): Promise<string | null> {
   return null;
 }
 
-interface SharedChar { name: string; charId: string; doc: CharDoc; thumb?: string; at: number }
+export interface EquipVis { pants?: boolean; armor?: boolean; helmet?: boolean; weapon?: boolean }
+interface SharedChar { name: string; charId: string; doc: CharDoc; thumb?: string; equip?: EquipVis; at: number }
 
 let _publishedSig: string | null = null;
 
 // Публікуємо СВІЙ док (раз на сесію, поки не змінився). Викликаємо при вході в
 // паті та в локацію — саме там побратими нас шукатимуть.
+export function myEquipVis(): EquipVis {
+  const e = loadEquip();
+  return { pants: !!e.pants, armor: !!e.armor, helmet: !!e.helmet, weapon: !!e.weapon };
+}
 export async function publishMyChar(): Promise<void> {
   const doc = await resolveMyCharDoc();
   if (!doc) return;
   const pid = getPlayerId();
-  const sig = pid + ':' + (doc.updatedAt ?? 0) + ':' + (getChosenChar() ?? '');
+  const equip = myEquipVis();
+  // Підпис включає спорядження — перевдягнувся → перепублікуємо (щоб побратими бачили).
+  const sig = pid + ':' + (doc.updatedAt ?? 0) + ':' + (getChosenChar() ?? '') + ':' + JSON.stringify(equip);
   if (_publishedSig === sig) return;
   const thumb = await resolveMyThumb();
-  const payload: SharedChar = { name: getPlayerName(), charId: getChosenChar() ?? '', doc, at: Date.now(), ...(thumb ? { thumb } : {}) };
+  const payload: SharedChar = { name: getPlayerName(), charId: getChosenChar() ?? '', doc, equip, at: Date.now(), ...(thumb ? { thumb } : {}) };
   try { await set(ref(db, `shared_chars/${pid}`), payload); _publishedSig = sig; } catch { /* офлайн — не критично */ }
+}
+// Спорядження учасника (для збору біля вогнища). Я → локальний інвентар.
+export async function loadMemberEquip(id: string): Promise<EquipVis> {
+  if (id === getPlayerId()) return myEquipVis();
+  const snap = await withTimeout(get(ref(db, `shared_chars/${id}/equip`)), 3500, null);
+  return (snap?.val() as EquipVis | null) ?? {};
 }
 
 const _docCache = new Map<string, CharDoc | null>();
@@ -78,13 +98,11 @@ export async function loadMemberCharDoc(id: string, charId: string): Promise<Cha
     const local = charId ? docById(lib, charId) : null;
     if (local && hasImages(local)) { _docCache.set(id, local); return local; }
   } catch { /* ignore */ }
-  try {
-    const snap = await get(ref(db, `shared_chars/${id}`));
-    const v = snap.val() as SharedChar | null;
-    const doc = v?.doc && hasImages(v.doc) ? v.doc : null;
-    _docCache.set(id, doc);
-    return doc;
-  } catch { _docCache.set(id, null); return null; }
+  const snap = await withTimeout(get(ref(db, `shared_chars/${id}`)), 4000, null);
+  const v = snap?.val() as SharedChar | null;
+  const doc = v?.doc && hasImages(v.doc) ? v.doc : null;
+  _docCache.set(id, doc);
+  return doc;
 }
 
 // Мініатюра учасника (для портретних слотів локації).
