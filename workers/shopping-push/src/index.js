@@ -20,7 +20,10 @@ const concat = (...arrs) => {
 
 // ── VAPID (RFC 8292): JWT ES256 ────────────────────────────
 async function vapidAuthHeader(audience, env) {
-  const jwk = JSON.parse(env.VAPID_PRIVATE_JWK);
+  // секрет міг приїхати з BOM/лапками/переносами (PowerShell при `wrangler secret put`
+  // додає невидимий BOM) — вирізаємо чистий JSON від першої { до останньої }
+  const raw = String(env.VAPID_PRIVATE_JWK);
+  const jwk = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
   const key = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
   const header = bytesToB64u(te.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
   const claims = bytesToB64u(te.encode(JSON.stringify({

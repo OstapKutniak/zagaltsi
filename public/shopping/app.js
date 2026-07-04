@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 8; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 9; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -308,6 +308,15 @@ async function refreshPushSub() {
   try {
     const reg = swReg || await navigator.serviceWorker.ready;
     let s = await reg.pushManager.getSubscription();
+    // підписка під чужий/старий серверний ключ — Apple відхилить JWT, перевипускаємо
+    try {
+      const cur = s?.options?.applicationServerKey && new Uint8Array(s.options.applicationServerKey);
+      const want = b64uToU8(VAPID_PUBLIC);
+      if (cur && (cur.length !== want.length || cur.some((b, i) => b !== want[i]))) {
+        await s.unsubscribe().catch(() => {});
+        s = null;
+      }
+    } catch {}
     if (!s) s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(VAPID_PUBLIC) });
     await set(ref(db, `${PUSH_PATH}/${deviceId()}`), {
       sub: JSON.stringify(s.toJSON()),
