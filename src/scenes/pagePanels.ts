@@ -199,7 +199,13 @@ export function buildKhorugvaPanel(scene: Phaser.Scene, offX: number, offY: numb
         if (myGen !== gen || !scene.scene.isActive()) return;
         init.destroy();
         const im = add(scene.add.image(x, y, key).setScrollFactor(0).setDepth(31));
-        im.setScale(Math.min((CELL_SIZE - 8) / im.width, (CELL_SIZE - 8) / im.height));
+        // Розміри з ДЖЕРЕЛА текстури: im.width інколи ще 1px (кадр не готовий) →
+        // портрет роздувало на весь екран (баг, що ти показав).
+        const src = scene.textures.get(key).getSourceImage() as { width: number; height: number } | null;
+        const iw = (src?.width && src.width > 1 ? src.width : im.width) || CELL_SIZE;
+        const ih = (src?.height && src.height > 1 ? src.height : im.height) || CELL_SIZE;
+        const sc = Math.min((CELL_SIZE - 8) / iw, (CELL_SIZE - 8) / ih);
+        im.setDisplaySize(iw * sc, ih * sc);
       };
       if (scene.textures.exists(key)) place();
       else { scene.textures.once('addtexture-' + key, place); scene.textures.addBase64(key, thumb); }
