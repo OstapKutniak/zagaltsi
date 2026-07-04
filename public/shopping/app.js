@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 9; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 10; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -159,7 +159,7 @@ let catFormSel = { color: COLORS[0], icon: 'tag' };
 let prodFormId = null;
 let prodFormSel = { icon: 'tag', cat: null };
 let renderTimer = null;
-const SWIPE_TABS = ['list', 'archive'];
+const SWIPE_TABS = ['list', 'add', 'archive'];
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
 const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
 const WEEKDAYS_SHORT = ['нд','пн','вт','ср','чт','пт','сб'];
@@ -183,7 +183,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   window.addEventListener('pagehide', flushNotify);
   initSwipeLayout();
-  initAddSwipe();
   bindEvents();
   seedIfEmpty().finally(subscribe);
   renderAll();
@@ -415,7 +414,7 @@ function renderAll() {
   renderHeader();
   renderList();
   renderArchive();
-  if ($('add-view').classList.contains('active')) { renderAddChips(); renderAddGrid(); }
+  if (state.tab === 'add') { renderAddChips(); renderAddGrid(); }
 }
 
 function renderHeader() {
@@ -454,7 +453,7 @@ function renderList() {
   const wrap = $('list-wrap');
   const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
   if (!items.length) {
-    wrap.innerHTML = `<div class="empty">${ic('cart')}<div>Список порожній.<br>Натисни «+», щоб додати покупки.</div></div>`;
+    wrap.innerHTML = `<div class="empty">${ic('cart')}<div>Список порожній.<br>Натисни + внизу, щоб додати покупки.</div></div>`;
     return;
   }
   const byCat = new Map();
@@ -666,8 +665,9 @@ function openDaySheet(day) {
   $('day-overlay').classList.add('open');
 }
 
-// ── ADD VIEW ───────────────────────────────────────────────
-function openAdd() {
+// ── ADD VIEW (середня сторінка Список | + | Архів) ─────────
+// Свіжий стан при кожному вході на сторінку (пошук/редагування/мультивибір скидаються)
+function prepAdd() {
   addSearch = '';
   $('add-search').value = '';
   addEditMode = false;
@@ -676,9 +676,9 @@ function openAdd() {
   if (!addCurCat || !cats[addCurCat]) addCurCat = sortedCats()[0]?.[0] || null;
   renderAddChips();
   renderAddGrid();
-  $('add-view').classList.add('active');
 }
-function closeAdd() { addSelect = null; $('add-view').classList.remove('active'); }
+// «закрити додавання» = плавно поїхати на сторінку списку
+function closeAdd() { addSelect = null; renderAddCommit(); setTab('list'); }
 
 function renderAddCommit() {
   const bar = $('add-commit');
@@ -691,7 +691,7 @@ function commitAddSelect() {
   let n = 0;
   addSelect.forEach(pid => { if (addToList(pid, { silent: true })) n++; });
   toast(n ? `Додано: ${n} ${plural(n, 'позиція', 'позиції', 'позицій')}` : 'Все обране вже у списку');
-  closeAdd(); // плавно з'їжджає вниз (transition sheet-full)
+  closeAdd(); // плавно їде на сторінку списку
 }
 
 function renderAddChips() {
@@ -878,8 +878,6 @@ function deleteProdForm() {
 
 // ── EVENTS ─────────────────────────────────────────────────
 function bindEvents() {
-  $('fab').addEventListener('click', openAdd);
-  $('add-close').addEventListener('click', closeAdd);
   $('add-edit-toggle').addEventListener('click', () => {
     addEditMode = !addEditMode;
     $('add-edit-toggle').classList.toggle('on', addEditMode);
@@ -909,21 +907,24 @@ function bindEvents() {
   $('prod-form-done').addEventListener('click', saveProdForm);
   $('prod-form-delete').addEventListener('click', deleteProdForm);
 
-  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
-    state.tab = tab.dataset.tab;
-    refreshListOrder();
-    renderList();
-    updateTabs();
-    syncTabs();
-  }));
+  document.querySelectorAll('.tabbar [data-tab]').forEach(tab =>
+    tab.addEventListener('click', () => setTab(tab.dataset.tab)));
 
   document.querySelectorAll('.sheet-overlay').forEach(ov =>
     ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
 }
 
+function setTab(t) {
+  if (t === 'add' && state.tab !== 'add') prepAdd(); // свіжий стан сторінки додавання
+  state.tab = t;
+  refreshListOrder();
+  renderList();
+  updateTabs();
+  syncTabs();
+}
+
 function updateTabs() {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
-  $('fab').classList.toggle('show', state.tab === 'list');
+  document.querySelectorAll('.tabbar [data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
 }
 
 // ── SWIPE між екранами ─────────────────────────────────────
@@ -941,6 +942,8 @@ function initSwipeLayout() {
   const wrap = $('screen-wrap');
   let swX = 0, swY = 0, swActive = false, swLocked = false;
   wrap.addEventListener('touchstart', e => {
+    // чіпси категорій і пошук мають власний горизонтальний скрол — не перехоплюємо
+    if (e.target.closest('.add-chips') || e.target.closest('.add-search')) { swActive = false; return; }
     swX = e.touches[0].clientX; swY = e.touches[0].clientY;
     swActive = true; swLocked = false;
   }, { passive: true });
@@ -969,55 +972,8 @@ function initSwipeLayout() {
     let next = cur;
     if (dx < -threshold && cur < SWIPE_TABS.length - 1) next = cur + 1;
     else if (dx > threshold && cur > 0) next = cur - 1;
-    if (next !== cur) { state.tab = SWIPE_TABS[next]; refreshListOrder(); renderList(); updateTabs(); }
-    syncTabs();
-  }, { passive: true });
-}
-
-// ── SWIPE «назад» у шторці додавання ───────────────────────
-// Свайп зліва направо тягне шторку за пальцем (як системний back-жест):
-// відпустив далі чверті ширини — доїжджає вправо і закривається до списку,
-// інакше пружинить назад. Чіпси категорій і пошук не перехоплюємо (там свій
-// горизонтальний скрол); вертикальний рух лишається скролом сітки.
-function initAddSwipe() {
-  const view = $('add-view');
-  let x0 = 0, y0 = 0, active = false, locked = false, W = 0;
-  view.addEventListener('touchstart', e => {
-    if (e.target.closest('.add-chips') || e.target.closest('.add-search')) { active = false; return; }
-    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-    active = true; locked = false; W = view.offsetWidth;
-  }, { passive: true });
-  view.addEventListener('touchmove', e => {
-    if (!active) return;
-    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
-    if (!locked) {
-      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-      if (Math.abs(dy) >= Math.abs(dx) || dx < 0) { active = false; return; } // вертикаль чи вліво — не наш жест
-      locked = true;
-    }
-    e.preventDefault();
-    view.style.transition = 'none';
-    view.style.transform = `translateX(${Math.max(0, e.touches[0].clientX - x0)}px)`;
-  }, { passive: false });
-  view.addEventListener('touchend', e => {
-    if (!active || !locked) { active = false; return; }
-    active = false;
-    const dx = e.changedTouches[0].clientX - x0;
-    if (dx > W * 0.25) {
-      view.style.transition = 'transform 0.26s cubic-bezier(0.32, 0.72, 0, 1)';
-      view.style.transform = 'translateX(100%)';
-      setTimeout(() => {
-        view.style.transition = 'none'; // прибрати .active без діагонального прольоту через екран
-        addSelect = null;
-        view.classList.remove('active');
-        view.style.transform = '';
-        requestAnimationFrame(() => { view.style.transition = ''; });
-      }, 270);
-    } else {
-      view.style.transition = 'transform 0.26s ease';
-      view.style.transform = 'translateX(0)';
-      setTimeout(() => { view.style.transition = ''; view.style.transform = ''; }, 270);
-    }
+    if (next !== cur) setTab(SWIPE_TABS[next]);
+    else syncTabs();
   }, { passive: true });
 }
 

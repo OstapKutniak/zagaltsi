@@ -37,6 +37,24 @@
       <div class="list-wrap" id="list-wrap"></div>
     </div>
 
+    <!-- ADD PRODUCTS (середня сторінка) -->
+    <div class="screen" id="add-screen">
+      <div class="add-bar">
+        <span class="add-bar-spacer"></span>
+        <div class="add-title">Що купити?</div>
+        <button class="add-edit-btn" id="add-edit-toggle" title="Режим редагування">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+      </div>
+      <div class="add-chips" id="add-chips"></div>
+      <input class="add-search" id="add-search" type="text" placeholder="Пошук продукту…">
+      <div class="add-commit" id="add-commit" style="display:none">
+        <button class="add-commit-btn" id="add-commit-btn">Додати до списку</button>
+        <button class="add-commit-cancel" id="add-commit-cancel">✕</button>
+      </div>
+      <div class="add-grid-wrap"><div class="add-grid" id="add-grid"></div></div>
+    </div>
+
     <!-- ARCHIVE -->
     <div class="screen" id="archive-screen">
       <div class="arch-wrap" id="arch-wrap"></div>
@@ -49,30 +67,11 @@
       <span class="tab-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.4" class="fill"/><circle cx="17" cy="20" r="1.4" class="fill"/><path d="M3 4h2l2.5 11h10L20 7H6.5"/></svg></span>
       Список
     </button>
+    <button class="tab-plus" data-tab="add">+</button>
     <button class="tab" data-tab="archive">
       <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span>
       Архів
     </button>
-  </div>
-
-  <button class="fab show" id="fab">+</button>
-
-  <!-- ADD PRODUCTS (fullscreen sheet) -->
-  <div class="sheet-full" id="add-view">
-    <div class="add-bar">
-      <button class="calc-x" id="add-close">✕</button>
-      <div class="add-title">Що купити?</div>
-      <button class="add-edit-btn" id="add-edit-toggle" title="Режим редагування">
-        <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-      </button>
-    </div>
-    <div class="add-chips" id="add-chips"></div>
-    <input class="add-search" id="add-search" type="text" placeholder="Пошук продукту…">
-    <div class="add-commit" id="add-commit" style="display:none">
-      <button class="add-commit-btn" id="add-commit-btn">Додати до списку</button>
-      <button class="add-commit-cancel" id="add-commit-cancel">✕</button>
-    </div>
-    <div class="add-grid-wrap"><div class="add-grid" id="add-grid"></div></div>
   </div>
 
   <!-- CATEGORY MANAGER SHEET -->

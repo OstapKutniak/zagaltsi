@@ -191,26 +191,21 @@ html, body {
 .tab.active { color: var(--active-ink); font-weight: 600; }
 .tab.active .tab-ic { background: var(--active); }
 
-/* ── FAB ── */
-.fab {
-  position: fixed; right: 18px; bottom: calc(var(--bottom) + 78px);
-  width: 56px; height: 56px; border-radius: 18px; border: none;
-  background: var(--active); color: var(--active-ink); font-size: 30px;
-  display: none; align-items: center; justify-content: center; cursor: pointer;
-  box-shadow: 0 6px 18px rgba(106,90,224,0.25); z-index: 50;
+/* кнопка «+» по центру таб-бара — вхід на сторінку додавання */
+.tab-plus {
+  flex: 0 0 auto; align-self: center; width: 58px; height: 44px; margin: 0 6px;
+  border: none; border-radius: 16px; cursor: pointer;
+  background: var(--active); color: var(--active-ink); font-size: 26px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s, color 0.2s;
 }
-.fab.show { display: flex; }
-.fab:active { transform: scale(0.93); }
+.tab-plus:active { transform: scale(0.93); }
+.tab-plus.active { background: var(--active-ink); color: #fff; }
 
-/* ── ADD VIEW (fullscreen) ── */
-.sheet-full {
-  position: fixed; inset: 0; background: var(--bg); z-index: 100;
-  transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
-  display: flex; flex-direction: column;
-}
-.sheet-full.active { transform: translateY(0); }
-.add-bar { display: flex; align-items: center; gap: 10px; padding: calc(var(--top) + 12px) 14px 8px; flex-shrink: 0; }
-.calc-x { background: none; border: none; font-size: 20px; color: var(--text2); cursor: pointer; width: 36px; height: 36px; }
+/* ── ADD VIEW (середня сторінка Список | + | Архів) ── */
+#add-screen { display: flex; flex-direction: column; overflow: hidden; }
+.add-bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; flex-shrink: 0; }
+.add-bar-spacer { width: 36px; flex-shrink: 0; }
 .add-title { flex: 1; text-align: center; font-size: 17px; font-weight: 700; }
 .add-edit-btn {
   background: none; border: none; cursor: pointer; width: 36px; height: 36px;
