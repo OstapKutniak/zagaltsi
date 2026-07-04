@@ -123,10 +123,10 @@
     <div class="sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-title" id="item-title">Продукт</div>
-      <div class="form-sub">Яке саме</div>
-      <input class="sheet-search" id="item-variant" type="text" placeholder="Напр.: Always Ultra Night, 12 шт…">
+      <div class="form-sub" id="item-which">Яке саме</div>
+      <input class="sheet-search" id="item-variant" type="text">
       <div class="form-sub">Де купити</div>
-      <input class="sheet-search" id="item-place" type="text" placeholder="Напр.: АТБ, аптека біля дому…">
+      <input class="sheet-search" id="item-place" type="text">
       <div class="form-foot">
         <button class="form-done" id="item-done">Готово</button>
       </div>
@@ -162,8 +162,8 @@
       </div>
       <div class="settings-row" style="cursor:default">
         <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="M8 7l4-4 4 4"/><circle cx="12" cy="18" r="3"/></svg></span>
-        <div class="r-tx">Синхронізація<div class="r-sub">Firebase · спільна база на два телефони</div></div>
-        <span class="dot"></span>
+        <div class="r-tx">Синхронізація<div class="r-sub" id="sync-sub">Firebase · спільна база на два телефони</div></div>
+        <span class="dot" id="sync-dot"></span>
       </div>
     </div>
   </div>

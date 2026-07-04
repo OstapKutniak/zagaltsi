@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 3; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 4; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 const CATS_PATH = 'shopping/categories';
 const PRODS_PATH = 'shopping/products';
 const LIST_PATH = 'shopping/list';
@@ -171,7 +171,10 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(r => { swReg = r; }).catch(() => {});
   // iOS тримає PWA замороженим — при поверненні у форграунд перевіряємо оновлення SW
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && swReg) swReg.update().catch(() => {});
+    if (document.hidden) return;
+    if (swReg) swReg.update().catch(() => {});
+    refreshListOrder(); // повернення в додаток = свіже пересортування
+    renderList();
   });
   initSwipeLayout();
   bindEvents();
@@ -211,8 +214,20 @@ function subscribe() {
   });
   onValue(ref(db, CATS_PATH), s => { cats = s.val() || {}; scheduleRender(); });
   onValue(ref(db, PRODS_PATH), s => { prods = s.val() || {}; scheduleRender(); });
-  onValue(ref(db, LIST_PATH), s => { listMap = s.val() || {}; purgeOldDone(); scheduleRender(); });
+  onValue(ref(db, LIST_PATH), s => {
+    listMap = s.val() || {};
+    if (!listOrder) refreshListOrder(); // перший прихід даних — фіксуємо порядок
+    purgeOldDone();
+    scheduleRender();
+  });
   onValue(ref(db, ARCH_PATH), s => { archMap = s.val() || {}; scheduleRender(); });
+  // індикатор з'єднання з базою (зелена/червона крапка в налаштуваннях)
+  onValue(ref(db, '.info/connected'), s => {
+    const ok = !!s.val();
+    const dot = $('sync-dot'), sub = $('sync-sub');
+    if (dot) dot.style.background = ok ? 'var(--done)' : 'var(--danger)';
+    if (sub) sub.textContent = ok ? 'Онлайн · база доступна' : 'Немає з’єднання з базою!';
+  });
 }
 function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 80); }
 
@@ -277,6 +292,20 @@ function sortedCats() {
   return Object.entries(cats).sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99));
 }
 
+// «Заморожений» порядок списку: галочка не кидає продукт одразу вниз —
+// пересортування (куплене в кінець) відбувається лише при refreshListOrder():
+// відкриття додатка, перемикання вкладки, згортання/розгортання категорії.
+let listOrder = null; // Map id → ранг
+function refreshListOrder() {
+  const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
+  items.sort((a, b) => (a.done - b.done) || (a.ts - b.ts));
+  listOrder = new Map(items.map((it, i) => [it.id, i]));
+}
+// нові/невідомі позиції — в кінець своєї категорії (куплені після активних)
+const listRank = it => listOrder?.has(it.id)
+  ? listOrder.get(it.id)
+  : 1e9 + (it.done ? 5e8 : 0) + it.ts / 1e6;
+
 function renderList() {
   const wrap = $('list-wrap');
   const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
@@ -297,7 +326,7 @@ function renderList() {
   order.forEach(cid => {
     const c = cats[cid] || { name: 'Інше', color: '#9E9E9E', icon: 'tag' };
     const arr = byCat.get(cid);
-    arr.sort((a, b) => (a.done - b.done) || (a.ts - b.ts));
+    arr.sort((a, b) => listRank(a) - listRank(b));
     const remaining = arr.filter(i => !i.done).length;
     const collapsed = collapsedCats.has(cid);
     html += `<div class="lcat ${collapsed ? 'collapsed' : ''}" data-cid="${cid}">
@@ -329,7 +358,8 @@ function renderList() {
   wrap.querySelectorAll('.lcat-head').forEach(el => el.addEventListener('click', () => {
     const cid = el.dataset.cid;
     collapsedCats.has(cid) ? collapsedCats.delete(cid) : collapsedCats.add(cid);
-    el.parentElement.classList.toggle('collapsed');
+    refreshListOrder(); // при згортанні/розгортанні куплене осідає вниз
+    renderList();
   }));
   wrap.querySelectorAll('.litem-check').forEach(el => el.addEventListener('click', e => {
     e.stopPropagation();
@@ -368,6 +398,7 @@ function openItemSheet(id) {
   itemSheetId = id;
   const c = catOf(it);
   $('item-title').innerHTML = `<span class="sheet-item-ic" style="--c:${c.color};display:inline-flex;vertical-align:middle;margin-right:8px">${ic(it.icon)}</span>${esc(it.name)}`;
+  $('item-which').textContent = `${whichWord(it.name)} саме`;
   $('item-variant').value = it.variant || '';
   $('item-place').value = it.place || '';
   $('item-overlay').classList.add('open');
@@ -494,9 +525,7 @@ function commitAddSelect() {
   let n = 0;
   addSelect.forEach(pid => { if (addToList(pid, { silent: true })) n++; });
   toast(n ? `Додано: ${n} ${plural(n, 'позиція', 'позиції', 'позицій')}` : 'Все обране вже у списку');
-  addSelect = null;
-  renderAddCommit();
-  renderAddGrid();
+  closeAdd(); // плавно з'їжджає вниз (transition sheet-full)
 }
 
 function renderAddChips() {
@@ -554,17 +583,14 @@ function renderAddGrid() {
         renderAddCommit();
         return;
       }
-      // звичайний режим: тап одразу додає до списку
+      // звичайний режим: тап одразу додає і шторка плавно закривається
       if (addToList(pid)) {
         const badge = tile.querySelector('.ptile-badge');
         tile.classList.add('sel');
         badge.style.animation = 'none'; badge.offsetWidth;
         badge.style.animation = 'popIn 0.3s ease-out both';
-        setTimeout(() => {
-          badge.style.animation = 'popOut 0.25s ease-in both';
-          setTimeout(() => tile.classList.remove('sel'), 250);
-        }, 650);
         toast(`Додано: ${prods[pid]?.name || ''}`);
+        setTimeout(closeAdd, 380);
       }
     });
     longPress(tile, () => {
@@ -719,6 +745,8 @@ function bindEvents() {
 
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
     state.tab = tab.dataset.tab;
+    refreshListOrder();
+    renderList();
     updateTabs();
     syncTabs();
   }));
@@ -775,17 +803,24 @@ function initSwipeLayout() {
     let next = cur;
     if (dx < -threshold && cur < SWIPE_TABS.length - 1) next = cur + 1;
     else if (dx > threshold && cur > 0) next = cur - 1;
-    if (next !== cur) { state.tab = SWIPE_TABS[next]; updateTabs(); }
+    if (next !== cur) { state.tab = SWIPE_TABS[next]; refreshListOrder(); renderList(); updateTabs(); }
     syncTabs();
   }, { passive: true });
 }
 
 // ── HELPERS ────────────────────────────────────────────────
-function longPress(el, fn, ms = 480) {
+// Клік, що прилітає ПІСЛЯ спрацьованого затиску, гасимо глобально —
+// інакше він одразу закривав кнопки дій / знімав щойно поставлену позначку.
+let lpUntil = 0;
+document.addEventListener('click', e => {
+  if (Date.now() < lpUntil) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+function longPress(el, fn, ms = 430) {
   let timer = null, fired = false;
-  const start = e => {
+  const start = () => {
     fired = false;
-    timer = setTimeout(() => { fired = true; fn(); }, ms);
+    timer = setTimeout(() => { fired = true; lpUntil = Date.now() + 700; fn(); }, ms);
   };
   const cancel = () => clearTimeout(timer);
   el.addEventListener('touchstart', start, { passive: true });
@@ -796,8 +831,14 @@ function longPress(el, fn, ms = 480) {
   el.addEventListener('mouseup', cancel);
   el.addEventListener('mouseleave', cancel);
   el.addEventListener('contextmenu', e => e.preventDefault());
-  // клік після спрацьованого лонгпреса гасимо
-  el.addEventListener('click', e => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
+}
+
+// рід першого слова назви: Який/Яка/Яке/Які
+const GENDER_EX = { 'яйця': 'p', 'яблука': 'p', 'сіль': 'f', 'краплі': 'p' };
+function whichWord(name) {
+  const w = (name || '').trim().split(/\s+/)[0].toLowerCase();
+  const g = GENDER_EX[w] || (/[иії]$/.test(w) ? 'p' : /[ая]$/.test(w) ? 'f' : /[ое]$/.test(w) ? 'n' : 'm');
+  return { p: 'Які', f: 'Яка', n: 'Яке', m: 'Який' }[g];
 }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
