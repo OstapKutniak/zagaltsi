@@ -12,7 +12,12 @@ import { initBotEditor } from '../bot/editor';
 import { mountDialogEditor, unmountDialogEditor } from '../rig/dialogEditor';
 import { loadCharLibrary } from '../charlib';
 import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
-import { type Quest, type QuestStore, loadQuests, newQuestId } from './quests';
+import { loadLocationsForGame, loadWorldsForGame } from '../world/worldData';
+import { CATALOG } from '../inventory';
+import {
+  type Quest, type QuestStore, type QuestAcq, type QuestObjective, type ObjectiveKind,
+  type QuestSuccess, type QuestFail, loadQuests, newQuestId, newObjectiveId,
+} from './quests';
 
 const INPUT_CSS = 'background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box';
 
@@ -22,6 +27,74 @@ function lbl(t: string): HTMLElement {
   e.style.cssText = 'font-size:12px;color:var(--muted);font-weight:600';
   return e;
 }
+
+// ── Дрібні хелпери форми (для розширеного редактора квестів) ──────────────────
+function fieldWrap(labelText: string, control: HTMLElement): HTMLElement {
+  const w = document.createElement('div');
+  w.style.cssText = 'display:flex;flex-direction:column;gap:3px';
+  w.appendChild(lbl(labelText));
+  w.appendChild(control);
+  return w;
+}
+function selRow(labelText: string, opts: [string, string][], value: string, onChange: (v: string) => void): HTMLElement {
+  const s = document.createElement('select'); s.style.cssText = INPUT_CSS;
+  for (const [v, l] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = l; s.appendChild(o); }
+  s.value = value;
+  s.addEventListener('change', () => onChange(s.value));
+  return fieldWrap(labelText, s);
+}
+function numRow(labelText: string, value: number | undefined, onChange: (v: number) => void): HTMLElement {
+  const i = document.createElement('input'); i.type = 'number'; i.style.cssText = INPUT_CSS;
+  i.value = value != null ? String(value) : '';
+  i.addEventListener('input', () => onChange(Number(i.value) || 0));
+  return fieldWrap(labelText, i);
+}
+function textRow(labelText: string, value: string | undefined, onChange: (v: string) => void): HTMLElement {
+  const i = document.createElement('input'); i.type = 'text'; i.style.cssText = INPUT_CSS;
+  i.value = value ?? '';
+  i.addEventListener('input', () => onChange(i.value));
+  return fieldWrap(labelText, i);
+}
+function sectionEl(t: string): HTMLElement {
+  const e = document.createElement('div'); e.textContent = t;
+  e.style.cssText = 'font-size:11px;font-weight:800;color:var(--ink);letter-spacing:.05em;margin-top:10px;border-top:1px solid var(--line);padding-top:8px';
+  return e;
+}
+
+// Списки опцій для селектів квесту.
+const ACQ_OPTS: [QuestAcq, string][] = [
+  ['auto', 'Одразу відомий (без видачі)'],
+  ['tg_encounter', 'TG-сповіщення + НПС у поточній локації'],
+  ['location_npc', 'НПС у конкретній локації'],
+  ['travel', 'Енкаунтер при переході між локаціями'],
+  ['level', 'НПС/тригер у бітемап-рівні'],
+  ['board', 'Дошка оголошень у локації (береш сам)'],
+  ['item', 'Підбір предмета відкриває квест'],
+  ['chain', 'Після завершення іншого квесту'],
+];
+const OBJ_OPTS: [ObjectiveKind, string][] = [
+  ['talk', 'Поговорити з НПС'],
+  ['kill', 'Здолати ворогів'],
+  ['reach', 'Дійти до локації'],
+  ['collect', 'Зібрати предмети'],
+  ['survive', 'Вижити (сек)'],
+  ['escort', 'Супроводити НПС'],
+  ['custom', 'Довільна ціль (текст)'],
+];
+const SUCCESS_OPTS: [QuestSuccess, string][] = [
+  ['objectives', 'Виконано всі цілі'],
+  ['dialog_positive', 'Діалог завершено позитивно'],
+  ['reach', 'Досягнуто цілі-локації'],
+  ['custom', 'Вручну / скриптом'],
+];
+const FAIL_OPTS: [QuestFail, string][] = [
+  ['none', 'Не провалюється'],
+  ['dialog_negative', 'Діалог завершено негативно'],
+  ['player_death', 'Смерть гравця'],
+  ['timeout', 'Вичерпано час'],
+  ['abandon', 'Гравець відмовився'],
+];
+const NONE_OPT: [string, string] = ['', '— нема'];
 
 let _init = false;
 export function initStoryEditor(): void {
@@ -72,9 +145,23 @@ export function initStoryEditor(): void {
 }
 
 // ── Квести ─────────────────────────────────────────────────────────────────────
+// Список рівнів (для селекта у способі «level»): IDB студії → опублікований layout.
+async function loadLevelsList(): Promise<{ id: string; name: string }[]> {
+  let store = await idbGet<{ levels?: { id?: string; name: string }[] }>('zag_levels').catch(() => null);
+  if (!store?.levels?.length) {
+    try { const r = await fetch(`${import.meta.env.BASE_URL}studio-data/level-layouts.json`); if (r.ok) store = await r.json() as typeof store; } catch { /* ignore */ }
+  }
+  return (store?.levels ?? []).map((l) => ({ id: l.id || 'L:' + l.name, name: l.name || (l.id ?? '?') }));
+}
+
 function initQuestsPanel(panel: HTMLElement): void {
   let store: QuestStore = { quests: [] };
   let sel: string | null = null;
+  // Довідники для селектів (вантажимо один раз, перемальовуємо панель, коли приїхали).
+  let chars: { id: string; name: string }[] = [];
+  let locs: { id: string; name: string }[] = [];
+  let nodes: { id: string; label: string }[] = [];
+  let levels: { id: string; name: string }[] = [];
 
   let saveTimer = 0;
   const save = (): void => {
@@ -82,6 +169,12 @@ function initQuestsPanel(panel: HTMLElement): void {
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => { void idbSet('zag_quests', store); }, 250);
   };
+  const touch = (q: Quest): void => { q.updatedAt = Date.now(); save(); };
+  const charOpts = (): [string, string][] => [NONE_OPT, ...chars.map((c) => [c.id, c.name] as [string, string])];
+  const locOpts = (): [string, string][] => [NONE_OPT, ...locs.map((l) => [l.id, l.name] as [string, string])];
+  const nodeOpts = (): [string, string][] => [NONE_OPT, ...nodes.map((n) => [n.id, n.label] as [string, string])];
+  const lvlOpts = (): [string, string][] => [NONE_OPT, ...levels.map((l) => [l.id, l.name] as [string, string])];
+  const itemOpts = (): [string, string][] => [NONE_OPT, ...CATALOG.map((i) => [i.id, i.name] as [string, string])];
 
   const list = document.createElement('div');
   list.style.cssText = 'display:flex;flex-direction:column;gap:4px';
@@ -100,46 +193,15 @@ function initQuestsPanel(panel: HTMLElement): void {
     }
   }
 
-  function renderProps(): void {
-    const q = store.quests.find((x) => x.id === sel);
-    if (!q) { props.style.display = 'none'; return; }
-    props.style.display = 'flex';
-    props.innerHTML = '';
-
-    props.appendChild(lbl('Назва (на нотатці дошки)'));
-    const title = document.createElement('input');
-    title.type = 'text'; title.style.cssText = INPUT_CSS; title.value = q.title;
-    title.addEventListener('input', () => { q.title = title.value; q.updatedAt = Date.now(); save(); renderList(); });
-    props.appendChild(title);
-
-    props.appendChild(lbl('Текст (розгортається по кліку на нотатку)'));
-    const text = document.createElement('textarea');
-    text.style.cssText = INPUT_CSS + ';min-height:110px;resize:vertical'; text.value = q.text;
-    text.addEventListener('input', () => { q.text = text.value; q.updatedAt = Date.now(); save(); });
-    props.appendChild(text);
-
-    props.appendChild(lbl('Тип'));
-    const cat = document.createElement('select');
-    cat.style.cssText = INPUT_CSS;
-    for (const [v, l] of [['main', 'Головний'], ['side', 'Побічний']] as const) {
-      const o = document.createElement('option'); o.value = v; o.textContent = l; cat.appendChild(o);
-    }
-    cat.value = q.cat;
-    cat.addEventListener('change', () => { q.cat = cat.value as Quest['cat']; q.updatedAt = Date.now(); save(); renderList(); });
-    props.appendChild(cat);
-
-    // Хто дає квест (енкаунтер «у вашій локації хтось є») + яким діалогом.
-    // Кінцівка діалогу з outcome 'positive' = гравець погодився → квест на дошку.
-    props.appendChild(lbl('Хто дає (НПС для енкаунтера; порожньо = не видається)'));
-    const giver = document.createElement('select');
-    giver.style.cssText = INPUT_CSS;
-    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '— ніхто'; giver.appendChild(noneOpt);
-    props.appendChild(giver);
-    props.appendChild(lbl('Діалог НПС (кінцівка positive = взяти квест)'));
-    const dlg = document.createElement('select');
-    dlg.style.cssText = INPUT_CSS;
-    props.appendChild(dlg);
-
+  // Хто дає (НПС) + діалог видачі — для способів отримання через персонажа.
+  function npcRows(q: Quest): HTMLElement {
+    const box = document.createElement('div'); box.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+    const giver = document.createElement('select'); giver.style.cssText = INPUT_CSS;
+    for (const [v, l] of charOpts()) { const o = document.createElement('option'); o.value = v; o.textContent = l; giver.appendChild(o); }
+    giver.value = q.giver ?? '';
+    box.appendChild(fieldWrap('Хто дає (НПС)', giver));
+    const dlg = document.createElement('select'); dlg.style.cssText = INPUT_CSS;
+    box.appendChild(fieldWrap('Діалог видачі (кінцівка positive = взяти)', dlg));
     const fillDialogs = async (charId: string): Promise<void> => {
       dlg.innerHTML = '';
       const d0 = document.createElement('option'); d0.value = ''; d0.textContent = '— перший наявний'; dlg.appendChild(d0);
@@ -150,19 +212,106 @@ function initQuestsPanel(panel: HTMLElement): void {
       for (const d of docs) { const o = document.createElement('option'); o.value = d.id; o.textContent = `${d.id} — ${d.name}`; dlg.appendChild(o); }
       dlg.value = q.dialogId ?? '';
     };
-    void loadCharLibrary().then((lib) => {
-      for (const c of lib.filter((x) => x.cat === 'enemy' || x.cat === 'neutral' || x.cat === 'char')) {
-        const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; giver.appendChild(o);
-      }
-      giver.value = q.giver ?? '';
-      void fillDialogs(giver.value);
-    });
-    giver.addEventListener('change', () => { q.giver = giver.value || undefined; q.updatedAt = Date.now(); save(); void fillDialogs(giver.value); });
-    dlg.addEventListener('change', () => { q.dialogId = dlg.value || undefined; q.updatedAt = Date.now(); save(); });
+    void fillDialogs(giver.value);
+    giver.addEventListener('change', () => { q.giver = giver.value || undefined; touch(q); void fillDialogs(giver.value); });
+    dlg.addEventListener('change', () => { q.dialogId = dlg.value || undefined; touch(q); });
+    return box;
+  }
+
+  // Конфіг способу отримання — залежить від q.acq.
+  function acqConfig(q: Quest): HTMLElement {
+    const box = document.createElement('div'); box.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+    const acq: QuestAcq = q.acq ?? (q.giver ? 'tg_encounter' : 'auto');
+    if (acq === 'tg_encounter' || acq === 'location_npc' || acq === 'board') {
+      box.appendChild(selRow('Локація', locOpts(), q.locationId ?? '', (v) => { q.locationId = v || undefined; touch(q); }));
+    }
+    if (acq === 'travel') {
+      box.appendChild(selRow('Звідки (вузол)', nodeOpts(), q.edgeFrom ?? '', (v) => { q.edgeFrom = v || undefined; touch(q); }));
+      box.appendChild(selRow('Куди (вузол)', nodeOpts(), q.edgeTo ?? '', (v) => { q.edgeTo = v || undefined; touch(q); }));
+    }
+    if (acq === 'level') {
+      box.appendChild(selRow('Рівень', lvlOpts(), q.levelId ?? '', (v) => { q.levelId = v || undefined; touch(q); }));
+      box.appendChild(textRow('Тригер у рівні (необовʼязково)', q.triggerId, (v) => { q.triggerId = v || undefined; touch(q); }));
+    }
+    if (acq === 'item') {
+      box.appendChild(selRow('Предмет-тригер', itemOpts(), q.itemId ?? '', (v) => { q.itemId = v || undefined; touch(q); }));
+    }
+    if (acq === 'chain') {
+      const opts: [string, string][] = [NONE_OPT, ...store.quests.filter((x) => x.id !== q.id).map((x) => [x.id, x.title || x.id] as [string, string])];
+      box.appendChild(selRow('Після квесту', opts, q.prevQuestId ?? '', (v) => { q.prevQuestId = v || undefined; touch(q); }));
+    }
+    if (acq === 'tg_encounter' || acq === 'location_npc' || acq === 'travel' || acq === 'level') {
+      box.appendChild(npcRows(q));
+    }
+    return box;
+  }
+
+  // Рядок однієї цілі (кроку) квесту.
+  function objectiveRow(q: Quest, o: QuestObjective): HTMLElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px';
+    row.appendChild(selRow('Тип кроку', OBJ_OPTS, o.kind, (v) => { o.kind = v as ObjectiveKind; touch(q); renderProps(); }));
+    if (o.kind === 'talk' || o.kind === 'kill' || o.kind === 'escort') {
+      row.appendChild(selRow('Кого', charOpts(), o.target ?? '', (v) => { o.target = v || undefined; touch(q); }));
+    } else if (o.kind === 'reach') {
+      row.appendChild(selRow('Куди', nodeOpts(), o.target ?? '', (v) => { o.target = v || undefined; touch(q); }));
+    } else if (o.kind === 'collect') {
+      row.appendChild(selRow('Предмет', itemOpts(), o.target ?? '', (v) => { o.target = v || undefined; touch(q); }));
+    }
+    if (o.kind === 'kill' || o.kind === 'collect' || o.kind === 'survive') {
+      row.appendChild(numRow(o.kind === 'survive' ? 'Скільки секунд' : 'Скільки', o.count, (v) => { o.count = v; touch(q); }));
+    }
+    row.appendChild(textRow('Опис на дошці', o.desc, (v) => { o.desc = v; touch(q); }));
+    const del = document.createElement('button'); del.textContent = '– крок';
+    del.style.cssText = 'align-self:flex-end;font-size:11px;padding:2px 8px';
+    del.addEventListener('click', () => { q.objectives = (q.objectives ?? []).filter((x) => x !== o); touch(q); renderProps(); });
+    row.appendChild(del);
+    return row;
+  }
+
+  function renderProps(): void {
+    const q = store.quests.find((x) => x.id === sel);
+    if (!q) { props.style.display = 'none'; return; }
+    props.style.display = 'flex';
+    props.innerHTML = '';
+
+    // ── Основне ──
+    props.appendChild(textRow('Назва (на нотатці дошки)', q.title, (v) => { q.title = v; touch(q); renderList(); }));
+    props.appendChild(lbl('Текст (розгортається по кліку на нотатку)'));
+    const text = document.createElement('textarea');
+    text.style.cssText = INPUT_CSS + ';min-height:90px;resize:vertical'; text.value = q.text;
+    text.addEventListener('input', () => { q.text = text.value; touch(q); });
+    props.appendChild(text);
+    props.appendChild(selRow('Тип', [['main', 'Головний'], ['side', 'Побічний']], q.cat, (v) => { q.cat = v as Quest['cat']; touch(q); renderList(); }));
+
+    // ── Отримання ──
+    props.appendChild(sectionEl('ОТРИМАННЯ'));
+    props.appendChild(selRow('Спосіб', ACQ_OPTS, q.acq ?? (q.giver ? 'tg_encounter' : 'auto'), (v) => { q.acq = v as QuestAcq; touch(q); renderProps(); }));
+    props.appendChild(acqConfig(q));
+
+    // ── Виконання ──
+    props.appendChild(sectionEl('ВИКОНАННЯ'));
+    props.appendChild(lbl('Цілі (кроки)'));
+    for (const o of q.objectives ?? []) props.appendChild(objectiveRow(q, o));
+    const addObj = document.createElement('button'); addObj.textContent = '+ крок';
+    addObj.style.cssText = 'align-self:flex-start;font-size:11px;padding:3px 10px';
+    addObj.addEventListener('click', () => { (q.objectives ??= []).push({ id: newObjectiveId(), kind: 'talk', desc: '' }); touch(q); renderProps(); });
+    props.appendChild(addObj);
+    props.appendChild(selRow('Умова успіху', SUCCESS_OPTS, q.successOn ?? 'objectives', (v) => { q.successOn = v as QuestSuccess; touch(q); }));
+    props.appendChild(selRow('Умова провалу', FAIL_OPTS, q.failOn ?? 'none', (v) => { q.failOn = v as QuestFail; touch(q); renderProps(); }));
+    if ((q.failOn ?? 'none') === 'timeout') props.appendChild(numRow('Час, сек', q.timeoutSec, (v) => { q.timeoutSec = v; touch(q); }));
+
+    // ── Нагорода ──
+    props.appendChild(sectionEl('НАГОРОДА'));
+    const rw = (q.reward ??= {});
+    props.appendChild(numRow('Золото', rw.gold, (v) => { rw.gold = v || undefined; touch(q); }));
+    props.appendChild(numRow('Досвід', rw.xp, (v) => { rw.xp = v || undefined; touch(q); }));
+    props.appendChild(selRow('Предмет', itemOpts(), rw.itemId ?? '', (v) => { rw.itemId = v || undefined; touch(q); }));
+    props.appendChild(textRow('Нотатка (напр. репутація)', rw.note, (v) => { rw.note = v || undefined; touch(q); }));
 
     const del = document.createElement('button');
     del.textContent = 'Видалити квест';
-    del.style.cssText = 'width:100%;padding:6px;font-size:12px';
+    del.style.cssText = 'width:100%;padding:6px;font-size:12px;margin-top:10px';
     del.addEventListener('click', () => {
       if (!confirm(`Видалити «${q.title}»?`)) return;
       store.quests = store.quests.filter((x) => x.id !== q.id);
@@ -175,14 +324,19 @@ function initQuestsPanel(panel: HTMLElement): void {
   add.textContent = 'Новий квест';
   add.style.cssText = 'width:100%;padding:6px;font-size:12px';
   add.addEventListener('click', () => {
-    const q: Quest = { id: newQuestId(), title: 'Новий квест', text: '', cat: 'side', updatedAt: Date.now() };
+    const q: Quest = { id: newQuestId(), title: 'Новий квест', text: '', cat: 'side', acq: 'auto', updatedAt: Date.now() };
     store.quests.push(q); sel = q.id; save(); renderList(); renderProps();
   });
 
   panel.appendChild(add); panel.appendChild(list); panel.appendChild(props);
 
   registerPublisher(() => ({ 'public/studio-data/quests.json': JSON.stringify(store, null, 2) }));
+  const refreshIfOpen = (): void => { if (sel) renderProps(); };
   void loadQuests().then((s) => { store = s; renderList(); });
+  void loadCharLibrary().then((lib) => { chars = lib.filter((x) => x.cat === 'enemy' || x.cat === 'neutral' || x.cat === 'char').map((c) => ({ id: c.id, name: c.name })); refreshIfOpen(); });
+  void loadLocationsForGame().then((l) => { locs = l.map((x) => ({ id: x.id, name: x.name })); refreshIfOpen(); }).catch(() => {});
+  void loadWorldsForGame().then((ws) => { nodes = ws.flatMap((w) => w.nodes.map((n) => ({ id: n.id, label: n.label || n.id }))); refreshIfOpen(); }).catch(() => {});
+  void loadLevelsList().then((ls) => { levels = ls; refreshIfOpen(); }).catch(() => {});
 }
 
 // ── Діалоги (перенесено з поведінки ворогів; у рігу лишилося як прев'ю) ───────
