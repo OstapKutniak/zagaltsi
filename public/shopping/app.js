@@ -14,9 +14,9 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 6; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 7; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
-const WORKER_URL = ''; // адреса Cloudflare Worker (shopping-push); порожньо = вимкнено
+const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
 const PUSH_PATH = 'shopping/push';
 

@@ -1,6 +1,6 @@
 {
-  "name": "Покупки",
-  "short_name": "Покупки",
+  "name": "SList",
+  "short_name": "SList",
   "description": "Спільний список покупок для сім'ї",
   "start_url": "/zagaltsi/shopping/",
   "scope": "/zagaltsi/shopping/",
