@@ -74,8 +74,9 @@ export class WorldScene extends Phaser.Scene {
         // Соло (0-1 учасник) — HUD не потрібен.
         if (members.length < 2) { this.partyLayer = null; return; }
         this.partyLayer = this.add.container(0, 0).setScrollFactor(0).setDepth(14);
-        const size = 60, gap = 10;
-        const x = 24 + this.offX, y0 = 122 + this.offY;
+        // Праворуч, ІДЕНТИЧНО панелям Хоругви/Інвентаря (CELL_X=1185, y0=128, 68px).
+        const size = 68, gap = 22;
+        const x = 1185 - size / 2 + this.offX, y0 = 128 - size / 2 + this.offY;
         members.slice(0, 5).forEach((m, i) => kp.drawKhSlot(this, x, y0 + i * (size + gap), size, m, this.partyLayer!));
       };
       render(kh.cachedMembers());          // миттєво з кешу

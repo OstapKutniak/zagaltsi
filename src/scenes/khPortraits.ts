@@ -22,12 +22,14 @@ function addBase64Texture(scene: Phaser.Scene, key: string, dataURL: string): Pr
 // Малює слот size×size у (x,y) (верхній лівий кут). member=null → порожній.
 // into — контейнер-власник (щоб destroy(true) чисто прибирав слоти при оновленні).
 export function drawKhSlot(scene: Phaser.Scene, x: number, y: number, size: number, member: KhMember | null, into?: Phaser.GameObjects.Container): void {
+  // Стиль слота — ІДЕНТИЧНИЙ панелям Хоругви/Інвентаря (заокруглена рамка,
+  // золота обводка в зайнятого). x,y — верхній лівий кут.
   const own = <T extends Phaser.GameObjects.GameObject>(o: T): T => { if (into) into.add(o); return o; };
   const g = own(scene.add.graphics().setScrollFactor(0).setDepth(50));
-  g.fillStyle(0x120d14, member ? 0.85 : 0.5);
-  g.fillRect(x, y, size, size);
-  g.lineStyle(2, member ? 0x8a7a5c : 0x3a3240, 1);
-  g.strokeRect(x, y, size, size);
+  g.fillStyle(0x14101a, member ? 0.92 : 0.6);
+  g.fillRoundedRect(x, y, size, size, 9);
+  g.lineStyle(2, member ? 0xcbb98a : 0x3a3346, 1);
+  g.strokeRoundedRect(x, y, size, size, 9);
   if (!member) return;
 
   const alive = (): boolean => scene.scene.isActive() && (!into || into.active);
