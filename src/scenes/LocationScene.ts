@@ -6,6 +6,7 @@ import {
 } from '../world/worldData';
 import { enterLocation, leaveLocation, watchLocationPresence, type PresenceEntry } from '../multiplayer/presence';
 import { getPlayerId } from '../multiplayer/lobby';
+import { loadMemberThumb } from '../multiplayer/sharedChars';
 import { loadCharLibrary, type LibItem } from '../charlib';
 import { oakScene } from '../world/locationArt';
 import { ensureFogTexture } from '../level/fogTexture';
@@ -32,6 +33,7 @@ export class LocationScene extends Phaser.Scene {
   private unwatch: (() => void) | null = null;
   private slotObjs: Phaser.GameObjects.GameObject[] = [];
   private lib: LibItem[] = [];
+  private presGen = 0; // покоління слотів — щоб async-мініатюра не лягла у вже стерті слоти
 
   constructor() { super('Location'); }
 
@@ -283,6 +285,7 @@ export class LocationScene extends Phaser.Scene {
   private drawSlots(list: PresenceEntry[]): void {
     for (const o of this.slotObjs) o.destroy();
     this.slotObjs = [];
+    const gen = ++this.presGen;
     const myId = getPlayerId();
     // я — завжди в першому слоті; решта за часом заходу
     const others = list.filter((p) => p.id !== myId).slice(0, 4);
@@ -310,25 +313,28 @@ export class LocationScene extends Phaser.Scene {
       this.slotObjs.push(g);
       if (!p) return;
 
-      // Портрет: thumb персонажа з бібліотеки, або ініціал.
-      const item = p.charId ? this.lib.find((l) => l.id === p.charId) : undefined;
-      if (item?.thumb) {
-        const key = 'pth_' + item.id;
+      // Ініціал одразу (поки вантажиться мініатюра — або якщо її нема).
+      const init = this.add.text(x + SLOT / 2, y + SLOT / 2 - 6, (p.name || '?').slice(0, 1).toUpperCase(), {
+        fontFamily: MENU_FONT, fontSize: '34px', color: COL_TEXT,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(21);
+      this.slotObjs.push(init);
+
+      // Портрет: мій — з локальної бібліотеки; чужий — зі спільного каналу
+      // (shared_chars/{id}), інакше портрет побратима не намалювати на цьому пристрої.
+      void loadMemberThumb(p.id, p.charId).then((thumb) => {
+        if (!thumb || gen !== this.presGen || !this.scene.isActive()) return;
+        const key = 'pth_' + p.id;
         const place = (): void => {
-          if (!this.scene.isActive()) return;
+          if (gen !== this.presGen || !this.scene.isActive()) return;
+          init.destroy();
           const im = this.add.image(x + SLOT / 2, y + SLOT / 2, key).setScrollFactor(0).setDepth(21);
           const sc = Math.min((SLOT - 8) / im.width, (SLOT - 8) / im.height);
           im.setScale(sc);
           this.slotObjs.push(im);
         };
         if (this.textures.exists(key)) place();
-        else { this.textures.once('addtexture-' + key, place); this.textures.addBase64(key, item.thumb); }
-      } else {
-        const init = this.add.text(x + SLOT / 2, y + SLOT / 2 - 6, (p.name || '?').slice(0, 1).toUpperCase(), {
-          fontFamily: MENU_FONT, fontSize: '34px', color: COL_TEXT,
-        }).setOrigin(0.5).setScrollFactor(0).setDepth(21);
-        this.slotObjs.push(init);
-      }
+        else { this.textures.once('addtexture-' + key, place); this.textures.addBase64(key, thumb); }
+      });
       const nm = this.add.text(x + SLOT / 2, y + SLOT - 4, p.id === myId ? 'ти' : p.name, {
         fontFamily: MENU_FONT, fontSize: '13px', color: p.id === myId ? '#ffcf8f' : COL_TEXT,
       }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(22).setShadow(1, 1, '#000', 4, false, true);

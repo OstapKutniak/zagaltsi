@@ -5,6 +5,7 @@
 import { db } from '../firebase';
 import { ref, set, remove, onValue, off, onDisconnect, type Unsubscribe } from 'firebase/database';
 import { getPlayerId, getPlayerName, getChosenChar } from './lobby';
+import { publishMyChar } from './sharedChars';
 
 export interface PresenceEntry {
   id: string;
@@ -23,6 +24,7 @@ export function enterLocation(locNodeId: string): void {
   const entry: PresenceEntry = { id: pid, name: getPlayerName(), charId: getChosenChar() ?? '', t: Date.now() };
   set(r, entry).catch(() => {});
   onDisconnect(r).remove().catch(() => {});
+  void publishMyChar(); // щоб побратими побачили мій справжній вигляд у цій локації
 }
 
 export function leaveLocation(): void {
