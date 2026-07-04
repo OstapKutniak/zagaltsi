@@ -185,6 +185,37 @@ html, body {
 .day-item-name { flex: 1; font-size: 15px; }
 .day-item-time { font-size: 12px; color: var(--text3); }
 
+/* ── ЦІНОВА ПАНЕЛЬ (порівняння списку по магазинах) ── */
+.price-panel { flex-shrink: 0; background: #fff; border-top: 1px solid var(--line); padding: 7px 0 3px; }
+.pp-drum { height: 34px; overflow: hidden; }
+.pp-track {
+  display: flex; height: 100%; overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 0 calc(50% - 60px); /* крайні магазини теж стають у центр */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
+}
+.pp-track::-webkit-scrollbar { display: none; }
+.pp-item {
+  flex: 0 0 120px; scroll-snap-align: center; height: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  font-size: 15.5px; font-weight: 700; color: var(--text3);
+  cursor: pointer; transition: color 0.15s;
+}
+.pp-item.sel { color: var(--text); }
+.pp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #c9c9d2); flex-shrink: 0; }
+.pp-bottom { text-align: center; padding: 3px 0 1px; min-height: 26px; }
+.pp-amount { font-size: 20px; font-weight: 800; color: var(--text); transition: opacity 0.2s; }
+.pp-amount.load { opacity: 0.4; }
+.pp-note { font-size: 12.5px; color: var(--danger); font-weight: 600; margin-left: 8px; }
+
+/* позиція, якої нема в обраному магазині */
+.litem.unavail::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: rgba(235, 59, 126, 0.10);
+}
+.litem.unavail .litem-name { color: var(--text3); }
+
 /* ── TAB BAR ── */
 .tabbar {
   display: flex; background: #fff; border-top: 1px solid var(--line);

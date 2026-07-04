@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 13; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 14; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -184,6 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('pagehide', flushNotify);
   initSwipeLayout();
   initSheetDrag();
+  initPricePanel();
   bindEvents();
   seedIfEmpty().finally(subscribe);
   renderAll();
@@ -455,6 +456,7 @@ function renderList() {
   const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
   if (!items.length) {
     wrap.innerHTML = `<div class="empty">${ic('cart')}<div>Список порожній.<br>Натисни + внизу, щоб додати покупки.</div></div>`;
+    refreshPrices();
     return;
   }
   const byCat = new Map();
@@ -544,6 +546,7 @@ function renderList() {
   wrap.querySelectorAll('.lact-del').forEach(b => b.addEventListener('click', e => {
     e.stopPropagation(); closeActions(); removeFromList(b.dataset.id);
   }));
+  refreshPrices(); // оновити ціни/полоски після перемальовування списку
 }
 
 // ── ITEM DETAIL (уточнення) ────────────────────────────────
@@ -726,6 +729,102 @@ function openDaySheet(day) {
   $('day-list').querySelectorAll('.day-cat').forEach(el =>
     el.addEventListener('click', () => el.parentElement.classList.toggle('collapsed')));
   $('day-overlay').classList.add('open');
+}
+
+// ── ЦІНОВА ПАНЕЛЬ (порівняння списку по магазинах) ─────────
+// Закріплена знизу вкладки «Список»: барабан магазинів (Середня/Сільпо/Новус/
+// Ашан), під ним ≈ ціна списку в обраному магазині + скільки позицій там нема
+// (їх у списку підсвічує червона полоска). Ціни бере воркер shopping-price.
+const WORKER_PRICE = 'https://shopping-price.priko1isf.workers.dev';
+const PP_ITEM = 120; // ширина рядка барабана, синхронно зі style.css
+// магазини за замовчуванням (Русанівка/Осокорки, Київ). Пізніше — вибір у налаштуваннях.
+const PRICE_STORES = [
+  { key: 'avg',    name: 'Середня', color: '#8a8a90' },
+  { key: 'silpo',  name: 'Сільпо',  color: '#2D9CDB', chain: 'silpo',  branch: '1edb6b1b-2d1b-66f4-9b4b-eb10f39e9fe0' },
+  { key: 'novus',  name: 'Новус',   color: '#EB5C8B', chain: 'novus',  branch: '48201070' },
+  { key: 'auchan', name: 'Ашан',    color: '#F2994A', chain: 'auchan', branch: '48246414' },
+];
+let ppSel = 'avg';
+let ppData = {};       // storeKey → { nameLower → {price,title,oldPrice} | null }
+let ppFetchKey = '';   // хеш назв, для яких уже тягнули ціни
+let ppScrollTimer = null;
+
+function initPricePanel() {
+  const track = $('pp-track');
+  track.innerHTML = PRICE_STORES.map(s =>
+    `<div class="pp-item" data-key="${s.key}"><span class="pp-dot" style="--c:${s.color}"></span>${s.name}</div>`).join('');
+  track.querySelectorAll('.pp-item').forEach((el, i) =>
+    el.addEventListener('click', () => track.scrollTo({ left: i * PP_ITEM, behavior: 'smooth' })));
+  track.addEventListener('scroll', () => {
+    markPpSel(Math.round(track.scrollLeft / PP_ITEM));
+    clearTimeout(ppScrollTimer);
+    ppScrollTimer = setTimeout(() => {
+      const i = Math.max(0, Math.min(PRICE_STORES.length - 1, Math.round(track.scrollLeft / PP_ITEM)));
+      if (PRICE_STORES[i].key !== ppSel) { ppSel = PRICE_STORES[i].key; renderPriceTotals(); }
+    }, 90);
+  });
+  markPpSel(0);
+}
+function markPpSel(i) {
+  $('pp-track').querySelectorAll('.pp-item').forEach((el, j) => el.classList.toggle('sel', j === i));
+}
+// назви активних (не куплених) позицій — унікальні
+function activeNames() { return [...new Set(Object.values(listMap).filter(it => !it.done).map(it => it.name))]; }
+
+async function refreshPrices() {
+  if (state.tab !== 'list') return;
+  const names = activeNames();
+  const key = names.map(n => n.toLowerCase()).sort().join('|');
+  if (!names.length) { ppFetchKey = ''; renderPriceTotals(); return; }
+  if (key === ppFetchKey) { renderPriceTotals(); return; } // дані вже є — лише перемалювати
+  ppFetchKey = key;
+  $('pp-amount').classList.add('load');
+  await Promise.all(PRICE_STORES.filter(s => s.chain).map(async s => {
+    try {
+      const r = await fetch(`${WORKER_PRICE}/prices`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain: s.chain, branch: s.branch, queries: names }),
+      });
+      const j = await r.json();
+      const map = {};
+      Object.entries(j.results || {}).forEach(([n, v]) => { map[n.toLowerCase()] = v; });
+      ppData[s.key] = map;
+    } catch { ppData[s.key] = null; }
+  }));
+  if (key !== ppFetchKey) return; // список змінився, поки тягнули — не чіпаємо
+  $('pp-amount').classList.remove('load');
+  renderPriceTotals();
+}
+
+function priceFor(storeKey, nameLower) {
+  if (storeKey === 'avg') {
+    const vals = PRICE_STORES.filter(s => s.chain)
+      .map(s => ppData[s.key] && ppData[s.key][nameLower]).filter(v => v && v.price != null).map(v => v.price);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }
+  const v = ppData[storeKey] && ppData[storeKey][nameLower];
+  return v && v.price != null ? v.price : null;
+}
+
+function renderPriceTotals() {
+  const names = activeNames();
+  let total = 0, missing = 0;
+  names.forEach(n => { const p = priceFor(ppSel, n.toLowerCase()); if (p == null) missing++; else total += p; });
+  const amt = $('pp-amount'), note = $('pp-note');
+  if (!names.length) { amt.textContent = '≈ —'; note.textContent = ''; }
+  else {
+    amt.textContent = `≈ ${Math.round(total)} ₴`;
+    note.textContent = missing ? `нема ${missing} ${plural(missing, 'позиції', 'позиції', 'позицій')}` : '';
+  }
+  applyUnavail();
+}
+// червона полоска на позиціях, яких нема в обраному магазині (крім «Середня»)
+function applyUnavail() {
+  document.querySelectorAll('#list-wrap .litem').forEach(row => {
+    const it = listMap[row.dataset.id];
+    const bad = it && !it.done && ppSel !== 'avg' && priceFor(ppSel, it.name.toLowerCase()) == null;
+    row.classList.toggle('unavail', !!bad);
+  });
 }
 
 // ── ADD VIEW (середня сторінка Список | + | Архів) ─────────
@@ -996,6 +1095,9 @@ function updateTabs() {
   $('btn-cats').style.display = state.tab === 'list' ? '' : 'none';
   $('btn-edit-prods').style.display = state.tab === 'add' ? '' : 'none';
   $('btn-calendar').style.display = state.tab === 'archive' ? '' : 'none';
+  // цінова панель — лише на «Списку»
+  $('price-panel').style.display = state.tab === 'list' ? '' : 'none';
+  if (state.tab === 'list') refreshPrices();
 }
 
 // ── SWIPE між екранами ─────────────────────────────────────
