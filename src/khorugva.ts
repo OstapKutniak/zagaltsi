@@ -80,6 +80,7 @@ export function memberList(kh: Khorugva | null): KhMember[] {
 // екрані (Мандри/Локація), не чекаючи відповіді Firebase (яка інколи повільна
 // й тоді портрети «зникали»). Оновлюється щоразу, коли ми бачимо свіжий стан.
 const MEMBERS_CACHE = 'zag_kh_members';
+const LEADER_CACHE = 'zag_kh_leader';
 export function cacheMembers(list: KhMember[]): void {
   try { localStorage.setItem(MEMBERS_CACHE, JSON.stringify(list)); } catch { /* ignore */ }
 }
@@ -88,12 +89,24 @@ export function cachedMembers(): KhMember[] {
   try { const s = localStorage.getItem(MEMBERS_CACHE); if (s) return JSON.parse(s) as KhMember[]; } catch { /* ignore */ }
   return [];
 }
+// Хто веде: id лідера кешуємо, щоб СИНХРОННО знати, я головний чи ведений.
+export function cacheLeader(leaderId: string | null): void {
+  try { if (leaderId) localStorage.setItem(LEADER_CACHE, leaderId); else localStorage.removeItem(LEADER_CACHE); } catch { /* ignore */ }
+}
+export function iAmLeaderCached(): boolean {
+  if (!myKhorugvaId()) return false;
+  try { return localStorage.getItem(LEADER_CACHE) === getPlayerId(); } catch { return false; }
+}
+// Чи я в хоругві з КИМОСЬ (2+) — тоді діють правила «ведений/головний».
+export function inPartyCached(): boolean { return !!myKhorugvaId() && cachedMembers().length >= 2; }
+
 // Свіжий список паті: спершу кеш (миттєво), тоді оновлення з Firebase (кешуємо).
 export async function refreshMembers(): Promise<KhMember[]> {
   const id = myKhorugvaId();
-  if (!id) { cacheMembers([]); return []; }
+  if (!id) { cacheMembers([]); cacheLeader(null); return []; }
   try {
     const kh = await getKhorugva(id);
+    cacheLeader(kh?.leader ?? null);
     const list = memberList(kh);
     cacheMembers(list);
     return list;

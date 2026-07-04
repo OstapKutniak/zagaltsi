@@ -7,6 +7,8 @@ import {
 } from '../world/worldData';
 import { parchmentCanvas, drawInkDecor, locationIcon, regionSeal, compassRose, iconFromLabel, type MapIconKind } from '../world/mapArt';
 import { ensureAmbience } from '../sound/ambience';
+import { inPartyCached, iAmLeaderCached } from '../khorugva';
+import { broadcastNav } from '../multiplayer/partyNav';
 
 // Сцена мандрів — «стара мапа»: процедурний пергамент + чорнильні іконки локацій
 // (стиль DD1: товсті контури, штриховка). Глобальна (Карпатський край) → регіон.
@@ -333,8 +335,11 @@ export class WorldScene extends Phaser.Scene {
 
   private onNodeClick(n: WorldNode): void {
     if (this.travelling) return;
+    // У хоругві напрям обирає ГОЛОВНИЙ. Ведений лише слідує (екран веде лідер).
+    if (inPartyCached() && !iAmLeaderCached()) { this.toast('Веде осавул (головний хоругви)'); return; }
     if (n.type === 'region') {
       if (!n.regionId) { this.toast('Регіон ще зачинено'); return; }
+      if (iAmLeaderCached()) broadcastNav('World', { worldId: n.regionId });
       this.scene.start('World', { worldId: n.regionId });
       return;
     }
@@ -346,10 +351,12 @@ export class WorldScene extends Phaser.Scene {
 
   private openNode(n: WorldNode): void {
     if (n.type === 'location') {
-      this.scene.start('Location', {
+      const data = {
         nodeId: n.id, label: n.label, locationId: n.locationId, worldId: this.world!.id,
         icon: (n.icon as MapIconKind) || iconFromLabel(n.label),
-      });
+      };
+      if (iAmLeaderCached()) broadcastNav('Location', data); // веду хоругву в локацію
+      this.scene.start('Location', data);
     }
   }
 
@@ -453,6 +460,7 @@ export class WorldScene extends Phaser.Scene {
         void import('../khorugva').then(({ myKhorugvaId }) => {
           const kh = myKhorugvaId();
           try { if (kh) sessionStorage.setItem('zag_coop_lobby', kh); else sessionStorage.removeItem('zag_coop_lobby'); } catch { /* ignore */ }
+          if (iAmLeaderCached()) broadcastNav('Game', { levelId }); // веду хоругву в бій
         }).finally(() => {
           void import('../level/launch').then(({ stageLevelById }) =>
             stageLevelById(levelId).finally(() => { if (this.scene.isActive()) this.scene.start('Game'); }));

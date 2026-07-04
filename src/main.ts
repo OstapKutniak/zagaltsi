@@ -13,7 +13,8 @@ import { initTelegram, getStartParam } from './telegram';
 import { setupViewport } from './viewport';
 import { initLobbyUI } from './multiplayer/lobbyUI';
 import { registerPlayer } from './players';
-import { joinKhorugva } from './khorugva';
+import { joinKhorugva, myKhorugvaId } from './khorugva';
+import { startPartyNavSync } from './multiplayer/partyNav';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from './config';
 
 initTelegram();
@@ -44,6 +45,21 @@ const game = new Phaser.Game({
 });
 
 setupViewport(game);
+
+// Хоругва йде за головним: коли лідер переходить (карта/локація/рівень) — той
+// самий екран отримують усі побратими. Соло-гравці (без хоругви) не зачеплені.
+startPartyNavSync((intent) => {
+  const active = game.scene.getScenes(true).find((s) => s.scene.key !== 'Boot');
+  if (!active) return;
+  if (intent.scene === 'Game') {
+    const levelId = String(intent.data?.levelId ?? '');
+    try { const kh = myKhorugvaId(); if (kh) sessionStorage.setItem('zag_coop_lobby', kh); } catch { /* ignore */ }
+    void import('./level/launch').then(({ stageLevelById }) =>
+      stageLevelById(levelId).finally(() => { if (active.scene.isActive()) active.scene.start('Game'); }));
+  } else {
+    active.scene.start(intent.scene, intent.data ?? {});
+  }
+});
 
 // Deep-link роутинг (кнопки бота / сповіщення збору): ?startapp=<param>.
 // zhytlo→Житло, mandry→Карта, khorugva→Хоругва, zavdannya→Завдання,

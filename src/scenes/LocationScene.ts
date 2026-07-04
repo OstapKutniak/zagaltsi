@@ -70,7 +70,13 @@ export class LocationScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     back.on('pointerover', () => back.setColor('#ffcf8f'));
     back.on('pointerout', () => back.setColor(COL_TEXT));
-    back.on('pointerup', () => this.scene.start('World', { worldId: this.worldId }));
+    back.on('pointerup', () => {
+      // Повернутись на карту може будь-хто (особисто, не застрягаєш). Але напрям
+      // подорожі далі обирає лише головний — це гейтить WorldScene.
+      void import('../khorugva').then(({ iAmLeaderCached }) => {
+        if (iAmLeaderCached()) void import('../multiplayer/partyNav').then(({ broadcastNav }) => broadcastNav('World', { worldId: this.worldId }));
+      }).finally(() => this.scene.start('World', { worldId: this.worldId }));
+    });
 
     void this.renderLocation();
     this.setupPresence();

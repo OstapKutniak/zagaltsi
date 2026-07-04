@@ -4,7 +4,7 @@ import { loadQuests, type Quest } from '../story/quests';
 import { takenQuests } from '../story/questState';
 import { listPlayers } from '../players';
 import {
-  myKhorugvaId, createKhorugva, watchKhorugva, memberList, cacheMembers, callToGather,
+  myKhorugvaId, createKhorugva, watchKhorugva, memberList, cacheMembers, cacheLeader, callToGather,
   leaveKhorugva, BOT_USERNAME, APP_SHORT, type Khorugva,
 } from '../khorugva';
 import { loadMemberThumb } from '../multiplayer/sharedChars';
@@ -227,6 +227,7 @@ export function buildKhorugvaPanel(scene: Phaser.Scene, offX: number, offY: numb
 
     const members = khId ? memberList(currentKh) : [];
     cacheMembers(members); // паті поїде з нами на Мандри/у бій (миттєвий HUD)
+    cacheLeader(currentKh?.leader ?? null); // хто головний — для «веде осавул»
     add(scene.add.text(cx, 108 + offY, `Побратимів: ${members.length}/5`, {
       fontFamily: FONT, fontStyle: 'small-caps', fontSize: '20px', color: '#8a8171',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31));

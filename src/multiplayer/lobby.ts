@@ -122,6 +122,7 @@ export interface PlayerState {
   anim: string; facing: number;
   charId: string; name: string;
   t: number; // timestamp
+  equip?: { pants?: boolean; armor?: boolean; helmet?: boolean; weapon?: boolean }; // спорядження (кооп)
 }
 
 export function pushPlayerState(code: string, state: PlayerState): void {

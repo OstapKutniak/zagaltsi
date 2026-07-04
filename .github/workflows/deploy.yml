@@ -33,6 +33,10 @@ jobs:
         # (Settings → Secrets and variables → Actions → Variables), НЕ secret. Не заданий → генерація вимкнена.
         env:
           VITE_FAL_PROXY: ${{ vars.VITE_FAL_PROXY }}
+          # URL бот-воркера (horugva-bot) — щоб «Оголосити збір» слав сповіщення в
+          # Telegram із кнопкою «Приєднатись». Це лише АДРЕСА (не ключ). Задається як
+          # repo VARIABLE VITE_BOT_PROXY = https://horugva-bot.<акаунт>.workers.dev
+          VITE_BOT_PROXY: ${{ vars.VITE_BOT_PROXY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

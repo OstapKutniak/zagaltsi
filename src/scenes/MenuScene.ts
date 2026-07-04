@@ -308,7 +308,15 @@ export class MenuScene extends Phaser.Scene {
   private followTarget(target: string): void {
     if (!target) return;
     const t = target === 'section:Інвентар' ? 'inventory' : target;
-    if (t === 'world') { this.scene.start('World', {}); return; }
+    if (t === 'world') {
+      // Лідер веде хоругву на карту; ведений теж може відкрити карту, але далі
+      // напрям обирає головний (WorldScene це вже гейтить).
+      void import('../khorugva').then(({ iAmLeaderCached }) => {
+        if (iAmLeaderCached()) void import('../multiplayer/partyNav').then(({ broadcastNav }) => broadcastNav('World', {}));
+      });
+      this.scene.start('World', {});
+      return;
+    }
     if (t === 'game') { this.scene.start('Game'); return; }
     if (t.startsWith('page:')) { this.scene.start('Menu', { pageId: t.slice(5) }); return; }
     if (t.startsWith('section:')) { this.scene.start('Section', { title: t.slice(8), from: 'Menu' }); return; }

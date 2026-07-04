@@ -30,6 +30,7 @@ interface Remote {
   rx: number; ry: number; rz: number;  // згладжена позиція (+ висота підскоку)
   tx: number; ty: number; tz: number;  // ціль із мережі
   anim: string; facing: number;
+  equipSig?: string; // підпис спорядження — перевдягаємо лише при зміні
 }
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -750,9 +751,11 @@ export class GameScene extends Phaser.Scene {
     if (time - this.lastNetPush < 80) return; // ~12 апдейтів/сек — щадимо Firebase
     this.lastNetPush = time;
     const p = this.player;
+    const eq = loadEquip();
     pushPlayerState(this.lobbyCode, {
       x: p.floorX, y: p.floorY, z: p.airHeight, hp: p.hp, maxHp: PLAYER.maxHp,
       anim: this.curAnim, facing: p.facing, charId: this.myCharId, name: getPlayerName(), t: time,
+      equip: { pants: !!eq.pants, armor: !!eq.armor, helmet: !!eq.helmet, weapon: !!eq.weapon }, // спорядження — щоб побратими бачили одяг
     });
   }
 
@@ -777,6 +780,11 @@ export class GameScene extends Phaser.Scene {
             else c.destroy();
           }).catch(() => { r.loading = false; });
         }
+      }
+      // Одяг побратима: перевдягаємо ЛИШЕ при зміні (setEquipment важкий — перебудова силуетів).
+      if (r.container && st.equip) {
+        const sig = `${+!!st.equip.pants}${+!!st.equip.armor}${+!!st.equip.helmet}${+!!st.equip.weapon}`;
+        if (r.equipSig !== sig) { r.equipSig = sig; r.container.setEquipment(st.equip); }
       }
       // згладжування позиції + рендер (rz — висота підскоку, піднімає над землею)
       r.rx += (r.tx - r.rx) * Math.min(1, dt * 12);
