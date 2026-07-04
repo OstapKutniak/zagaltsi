@@ -179,3 +179,15 @@ export function watchMyDamage(code: string, myId: string, cb: (ev: DmgEvent) => 
   const h = onChildAdded(r, (snap) => { const v = snap.val() as DmgEvent | null; if (v) cb(v); void remove(snap.ref); });
   return () => off(r, 'child_added', h);
 }
+
+// Діалог ворога (кооп): хост веде його й транслює поточну ноду; всі БАЧАТЬ кульку,
+// але обирати відповіді може лише хост. null = діалог закрито.
+export interface DialogSync { netId: number; nodeId: string }
+export function pushDialog(code: string, state: DialogSync | null): void {
+  set(ref(db, `lobbies/${code.toUpperCase()}/dialog`), state).catch(() => {});
+}
+export function watchDialog(code: string, cb: (s: DialogSync | null) => void): Unsubscribe {
+  const r = ref(db, `lobbies/${code.toUpperCase()}/dialog`);
+  onValue(r, (snap) => cb(snap.exists() ? (snap.val() as DialogSync) : null));
+  return () => off(r);
+}

@@ -10,11 +10,12 @@ import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
 import { loadPublishedBehaviors } from '../behaviors';
-import { openDialog, isDialogActive } from '../dialogUI';
+import { openDialog, isDialogActive, type DialogHandle } from '../dialogUI';
 import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
   pushEnemies, watchEnemies, pushEnemyHit, watchEnemyHits, pushPlayerDamage, watchMyDamage,
+  pushDialog, watchDialog,
   type EnemyNet, type EnemyHit,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
@@ -159,6 +160,9 @@ export class GameScene extends Phaser.Scene {
   private unwatchEnemies: (() => void) | null = null;
   private unwatchHits: (() => void) | null = null;
   private unwatchDmg: (() => void) | null = null;
+  private unwatchDialog: (() => void) | null = null;
+  private coopDialog: DialogHandle | null = null; // «глядацька» кулька в не-хоста
+  private coopDialogNetId = -1;
 
   constructor() {
     super('Game');
@@ -257,6 +261,7 @@ export class GameScene extends Phaser.Scene {
     this.remotes = {};
     this.netStates = {};
     this.amHost = false; this.lastEnemyPush = 0; this.netEnemies = {}; this.seenEnemyIds.clear();
+    this.coopDialog = null; this.coopDialogNetId = -1;
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
     this.cameras.main.setBackgroundColor('#2a2233');
@@ -343,8 +348,9 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
-      this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.();
-      this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = null;
+      this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.(); this.unwatchDialog?.();
+      this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = this.unwatchDialog = null;
+      this.coopDialog?.close(); this.coopDialog = null;
     });
     // Якщо лобі немає (вхід з карти або прев'ю студії) — старт без екрана лобі.
     // Маркер zag_coop_lobby (ставить WorldScene при подорожі з хоругвою) → кооп
@@ -378,28 +384,50 @@ export class GameScene extends Phaser.Scene {
     this.scale.on('resize', this.onResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
 
-    // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку.
-    const onDialog = (d: { graph: NodeGraph; nodeId: string; getHeadPos?: () => { wx: number; wy: number }; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
+    // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку. Це буває
+    // ЛИШЕ в хоста (лише він рахує think). Хост веде розмову інтерактивно й транслює
+    // поточну ноду — побратими БАЧАТЬ кульку, але обирати відповіді може лише хост.
+    const onDialog = (d: { graph: NodeGraph; nodeId: string; netId?: number; getHeadPos?: () => { wx: number; wy: number }; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
       if (isDialogActive()) return;
-      // getHeadPos — живий callback: кожного кадру запитуємо поточну позицію голови
-      // ворога, тож кулька й хвіст слідкують навіть якщо ворог рухається і камера їде.
-      const getAnchor = d.getHeadPos
-        ? (): { x: number; y: number } => {
-            const { wx, wy } = d.getHeadPos!();
-            const cam = this.cameras.main;
-            const v = cam.worldView;
-            const canvas = this.sys.game.canvas;
-            const rect = canvas.getBoundingClientRect();
-            return {
-              x: rect.left + (wx - v.x) / v.width  * rect.width,
-              y: rect.top  + (wy - v.y) / v.height * rect.height,
-            };
-          }
-        : undefined;
-      openDialog(d.graph, d.nodeId, { getAnchor, onOutcome: d.onOutcome });
+      const netId = d.netId ?? -1;
+      const getAnchor = d.getHeadPos ? (): { x: number; y: number } => this.screenAnchor(d.getHeadPos!()) : undefined;
+      openDialog(d.graph, d.nodeId, {
+        getAnchor,
+        onOutcome: d.onOutcome,
+        onAdvance: (nodeId) => { if (this.isMulti) pushDialog(this.lobbyCode, { netId, nodeId }); },
+        onClose: () => { if (this.isMulti) pushDialog(this.lobbyCode, null); },
+      });
+      if (this.isMulti) pushDialog(this.lobbyCode, { netId, nodeId: d.nodeId });
     };
     this.events.on('enemyDialog', onDialog);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off('enemyDialog', onDialog));
+  }
+
+  // Світова точка голови ворога → екранні координати (для DOM-кульки діалогу).
+  private screenAnchor(p: { wx: number; wy: number }): { x: number; y: number } {
+    const cam = this.cameras.main;
+    const v = cam.worldView;
+    const rect = this.sys.game.canvas.getBoundingClientRect();
+    return {
+      x: rect.left + (p.wx - v.x) / v.width * rect.width,
+      y: rect.top + (p.wy - v.y) / v.height * rect.height,
+    };
+  }
+
+  // Не-хост: дзеркалимо діалог хоста (кулька + варіанти видно, кнопки неактивні).
+  private onDialogSync(s: { netId: number; nodeId: string } | null): void {
+    if (this.amHost) return; // хост — джерело розмови, сам не дзеркалить
+    if (!s) { this.coopDialog?.close(); this.coopDialog = null; this.coopDialogNetId = -1; return; }
+    const e = this.enemies.find((x) => x.netId === s.netId);
+    if (!e || !e.dialogGraph) return; // ворога/граф ще не готово — покажемо на наступному оновленні
+    if (this.coopDialog && this.coopDialogNetId === s.netId) { this.coopDialog.goto(s.nodeId); return; }
+    this.coopDialog?.close();
+    this.coopDialogNetId = s.netId;
+    this.coopDialog = openDialog(e.dialogGraph, s.nodeId, {
+      interactive: false,
+      getAnchor: () => this.screenAnchor(e.headWorldPos()),
+      onClose: () => { this.coopDialog = null; this.coopDialogNetId = -1; },
+    });
   }
 
   // Рахує смугу підлоги під поточний розмір екрана (без зуму: 1 світ = 1 піксель,
@@ -732,6 +760,8 @@ export class GameScene extends Phaser.Scene {
       this.unwatchDmg = watchMyDamage(code, this.myId, (ev) => {
         if (this.playerSpawned) this.player.takeDamage(this.simTime, ev.dmg, ev.fromX);
       });
+      // Діалог ворога: не-хост дзеркалить кульку (бачать усі, обирає лише хост).
+      this.unwatchDialog = watchDialog(code, (s) => this.onDialogSync(s));
     }
   }
 

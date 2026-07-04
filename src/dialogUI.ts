@@ -26,6 +26,7 @@ function injectStyle(): void {
   transition:transform .06s;text-align:left}
 .zag-dlg .ans button:hover{transform:translate(-1px,-1px)}
 .zag-dlg .ans button:active{transform:translate(1px,2px);box-shadow:1px 1px 0 #1b1b1b}
+.zag-dlg .ans button:disabled{opacity:.5;cursor:default;box-shadow:2px 3px 0 #1b1b1b;transform:none}
 .zag-dlg .bubble{position:absolute;background:#fff;color:#1b1b1b;border:4px solid #1b1b1b;border-radius:22px;
   padding:16px 20px;max-width:220px;min-width:140px;font-size:17px;font-weight:600;line-height:1.35;
   box-shadow:4px 5px 0 rgba(0,0,0,.35);pointer-events:auto;cursor:pointer}
@@ -51,15 +52,28 @@ function tailPath(b: DOMRect, tip: { x: number; y: number }): string {
        + ` C ${tip.x + 6} ${my}, ${x2} ${my}, ${x2} ${baseY} Z`;
 }
 
+// Керований ззовні діалог (для кооп-дзеркала): вести на іншу ноду / закрити.
+export interface DialogHandle { goto(nodeId: string): void; close(): void }
+
 export function openDialog(
   graph: NodeGraph,
   startId: string,
-  opts?: { getAnchor?: () => { x: number; y: number } | null; onClose?: () => void; onOutcome?: (o: 'positive' | 'negative') => void },
-): void {
-  if (active) return;
+  opts?: {
+    getAnchor?: () => { x: number; y: number } | null;
+    onClose?: () => void;
+    onOutcome?: (o: 'positive' | 'negative') => void;
+    // interactive=false → «глядацький» діалог (кооп): текст і варіанти видно, але
+    // кнопки НЕактивні; ноду/закриття веде хост через goto()/close().
+    interactive?: boolean;
+    // Хост: коли обрано відповідь і перейшли на нову ноду (для трансляції побратимам).
+    onAdvance?: (nodeId: string) => void;
+  },
+): DialogHandle | null {
+  if (active) return null;
+  const interactive = opts?.interactive !== false;
   const byId = (id: string): GraphNode | undefined => graph.nodes.find((n) => n.id === id);
   const start = byId(startId);
-  if (!start) { opts?.onClose?.(); return; }
+  if (!start) { opts?.onClose?.(); return null; }
   injectStyle();
   active = true;
 
@@ -127,7 +141,10 @@ export function openDialog(
     if (outcome) opts?.onOutcome?.(outcome);
     opts?.onClose?.();
   }
-  closeBtn.onclick = (e) => { e.stopPropagation(); close(); };
+  // Закрити може лише «хазяїн» діалогу (інтерактивний). Глядачам X ховаємо —
+  // закриється, коли хост закриє (через мережу → handle.close()).
+  if (interactive) closeBtn.onclick = (e) => { e.stopPropagation(); close(); };
+  else closeBtn.style.display = 'none';
 
   // наступна діалог-нода з виходу port (інакше — кінець розмови)
   function nextDialog(n: GraphNode, port: number): GraphNode | null {
@@ -152,7 +169,14 @@ export function openDialog(
       labels.forEach((label, idx) => {
         const b = document.createElement('button');
         b.textContent = label;
-        b.onclick = () => { const nx = nextDialog(node, idx); if (nx) show(nx); else close(); };
+        if (interactive) {
+          b.onclick = () => {
+            const nx = nextDialog(node, idx);
+            if (nx) { show(nx); opts?.onAdvance?.(nx.id); } else close();
+          };
+        } else {
+          b.disabled = true; // глядач бачить варіанти, але обрати не може
+        }
         ans.appendChild(b);
       });
     };
@@ -168,4 +192,10 @@ export function openDialog(
   }
 
   show(start);
+
+  // Ручка для кооп-дзеркала: хост веде ноду/закриття, глядач лише відображає.
+  return {
+    goto(nodeId: string): void { const n = byId(nodeId); if (n && n.type === 'dialog') show(n); },
+    close,
+  };
 }

@@ -42,6 +42,10 @@ export class Enemy extends Actor {
     if (cellSize > 0) this.cellSize = cellSize;
   }
 
+  // Граф поведінки (містить діалог-ноди) — не-хост бере його, щоб показати ту саму
+  // діалог-кульку, що й хост (граф однаковий на всіх, вантажиться з тих самих даних).
+  get dialogGraph(): NodeGraph | null { return this.behavior; }
+
   async attachChar(doc: CharDoc, keyPrefix: string): Promise<void> {
     const c = await CutoutCharacter.load(this.scene, doc, keyPrefix).catch(() => null);
     if (!c) return;
@@ -184,7 +188,7 @@ export class Enemy extends Actor {
           this.dialogTriggered = true;
           // onOutcome — діалог повідомить, чим скінчився («Кінець» у репліці).
           this.scene.events.emit('enemyDialog', {
-            graph: this.behavior, nodeId: act.id,
+            graph: this.behavior, nodeId: act.id, netId: this.netId,
             getHeadPos: (): { wx: number; wy: number } => this.headWorldPos(),
             onOutcome: (o: 'positive' | 'negative') => { this.dialogOutcome = o; },
           });
