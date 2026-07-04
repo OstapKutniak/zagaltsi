@@ -45,6 +45,7 @@ html, body {
   color: #6b6b70; cursor: pointer; border-radius: 50%;
 }
 .icon-btn:active { background: rgba(0,0,0,0.05); }
+.icon-btn.on { background: var(--active); color: var(--active-ink); }
 .icon-btn svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .total { text-align: center; }
 .total-label { font-size: 13px; color: var(--text2); }
@@ -75,7 +76,11 @@ html, body {
 .lcat-ic {
   width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; background: var(--c);
+  transition: opacity 0.3s;
 }
+/* все в категорії куплено — шапка теж пригасає, як куплені рядки */
+.lcat.alldone .lcat-ic { opacity: 0.35; }
+.lcat.alldone .lcat-name { color: var(--text3); }
 .lcat-ic svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .lcat-ic svg .fill { fill: #fff; stroke: none; }
 .lcat-name { flex: 1; font-size: 16px; font-weight: 700; }
@@ -162,8 +167,20 @@ html, body {
 .arch-day:active .arch-circle { background: #d8d8e0; }
 .arch-cnt { font-size: 12px; font-weight: 700; color: var(--text3); }
 
+/* активний фільтр архіву (місяць/рік) */
+.arch-filter-note {
+  display: block; width: calc(100% - 20px); margin: 6px 10px 0;
+  background: var(--active); color: var(--active-ink); border: none; cursor: pointer;
+  border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; text-align: center;
+}
+
 /* archive day sheet items */
-.day-cat { display: flex; align-items: center; gap: 10px; padding: 12px 20px 6px; }
+.day-cat { display: flex; align-items: center; gap: 10px; padding: 12px 20px 6px; cursor: pointer; }
+.day-cat .lcat-chevron { margin-left: auto; }
+.day-items { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1); }
+.day-items-in { min-height: 0; overflow: hidden; }
+.day-group.collapsed .day-items { grid-template-rows: 0fr; }
+.day-group.collapsed .lcat-chevron { transform: rotate(-90deg); }
 .day-cat-ic { width: 28px; height: 28px; border-radius: 50%; background: var(--c); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .day-cat-ic svg { width: 15px; height: 15px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .day-cat-ic svg .fill { fill: #fff; stroke: none; }
@@ -191,30 +208,15 @@ html, body {
 .tab.active { color: var(--active-ink); font-weight: 600; }
 .tab.active .tab-ic { background: var(--active); }
 
-/* кнопка «+» по центру таб-бара — вхід на сторінку додавання */
-.tab-plus {
-  flex: 0 0 auto; align-self: center; width: 58px; height: 44px; margin: 0 6px;
-  border: none; border-radius: 16px; cursor: pointer;
-  background: var(--active); color: var(--active-ink); font-size: 26px; font-weight: 500;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.2s, color 0.2s;
-}
-.tab-plus:active { transform: scale(0.93); }
-.tab-plus.active { background: var(--active-ink); color: #fff; }
+/* середній таб «Додати»: плюс у пігулці, підпис як у сусідів */
+.tab-add .tab-ic { background: var(--active); color: var(--active-ink); }
+.tab-add.active .tab-ic { background: var(--active-ink); color: #fff; }
+.tab-add .tab-ic svg { stroke-width: 2.2; }
 
 /* ── ADD VIEW (середня сторінка Список | + | Архів) ── */
 #add-screen { display: flex; flex-direction: column; overflow: hidden; }
-.add-bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px 8px; flex-shrink: 0; }
-.add-bar-spacer { width: 36px; flex-shrink: 0; }
-.add-title { flex: 1; text-align: center; font-size: 17px; font-weight: 700; }
-.add-edit-btn {
-  background: none; border: none; cursor: pointer; width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center; color: var(--text2); border-radius: 10px;
-}
-.add-edit-btn svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.add-edit-btn.on { background: var(--active); color: var(--active-ink); }
 
-.add-chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 14px; flex-shrink: 0; }
+.add-chips { display: flex; gap: 8px; overflow-x: auto; padding: 12px 14px 10px; flex-shrink: 0; }
 .add-chips::-webkit-scrollbar { display: none; }
 .chip {
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
@@ -312,7 +314,9 @@ html, body {
   transform: translateY(100%); transition: transform 0.36s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sheet-overlay.open .sheet { transform: translateY(0); }
-.sheet-handle { width: 36px; height: 4px; background: #d8d8de; border-radius: 2px; margin: 12px auto 8px; flex-shrink: 0; }
+.sheet-handle { width: 36px; height: 4px; background: #d8d8de; border-radius: 2px; margin: 12px auto 8px; flex-shrink: 0; position: relative; }
+/* широка невидима зона хвата — щоб шторку легко тягнути за полоску */
+.sheet-handle::after { content: ''; position: absolute; inset: -16px -70px; }
 .sheet-title { font-size: 16px; font-weight: 700; padding: 4px 20px 12px; flex-shrink: 0; }
 .sheet-search {
   margin: 0 16px 10px; background: #f1f1f4; border: none; border-radius: 10px;
@@ -357,7 +361,14 @@ html, body {
 .form-chips { padding: 4px 16px 8px; flex-wrap: wrap; overflow-x: visible; }
 .form-foot { display: flex; gap: 12px; padding: 12px 16px calc(var(--bottom) + 12px); flex-shrink: 0; }
 .form-delete { flex: 1; background: #fde7ef; color: var(--danger); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.form-alt { flex: 1; background: #f1f1f4; color: var(--text2); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .form-done { flex: 2; background: var(--active-ink); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; color: #fff; }
+
+/* календар архіву: підпис + два повзунки */
+.cal-label { text-align: center; font-size: 19px; font-weight: 700; color: var(--active-ink); padding: 2px 20px 12px; }
+.cal-row { display: flex; align-items: center; gap: 14px; padding: 6px 20px 10px; }
+.cal-cap { width: 58px; font-size: 13px; font-weight: 600; color: var(--text2); flex-shrink: 0; }
+.cal-row input[type="range"] { flex: 1; accent-color: var(--active-ink); height: 34px; margin: 0; }
 
 /* settings rows */
 .settings-row { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--line); cursor: pointer; }

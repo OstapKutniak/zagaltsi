@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 10; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 11; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -183,6 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   window.addEventListener('pagehide', flushNotify);
   initSwipeLayout();
+  initSheetDrag();
   bindEvents();
   seedIfEmpty().finally(subscribe);
   renderAll();
@@ -472,7 +473,7 @@ function renderList() {
     arr.sort((a, b) => listRank(a) - listRank(b));
     const remaining = arr.filter(i => !i.done).length;
     const collapsed = collapsedCats.has(cid);
-    html += `<div class="lcat ${collapsed ? 'collapsed' : ''}" data-cid="${cid}">
+    html += `<div class="lcat ${collapsed ? 'collapsed' : ''} ${remaining ? '' : 'alldone'}" data-cid="${cid}">
       <div class="lcat-head" data-cid="${cid}">
         <div class="lcat-ic" style="--c:${c.color}">${ic(c.icon)}</div>
         <div class="lcat-name">${esc(c.name)}</div>
@@ -513,7 +514,10 @@ function renderList() {
   wrap.querySelectorAll('.litem-check').forEach(el => el.addEventListener('click', e => {
     e.stopPropagation();
     // оптимістичний відгук: рядок сіріє/зеленіє миттєво, база доганяє
-    el.closest('.litem').classList.toggle('done');
+    const row = el.closest('.litem');
+    row.classList.toggle('done');
+    const cat = row.closest('.lcat');
+    cat.classList.toggle('alldone', !cat.querySelector('.litem:not(.done)'));
     const svg = el.querySelector('svg');
     svg.style.animation = 'none'; svg.offsetWidth;
     svg.style.animation = 'popIn 0.3s ease-out both';
@@ -605,11 +609,37 @@ function renderReplaceGrid() {
     }));
 }
 
+// ── КАЛЕНДАР АРХІВУ (місяць/рік двома повзунками) ──────────
+let archFilter = null; // 'YYYY-MM' або null = всі місяці
+function openCalSheet() {
+  const now = new Date();
+  const years = Object.keys(archMap).map(d => +d.slice(0, 4));
+  const y = $('cal-year'), m = $('cal-month');
+  y.min = years.length ? Math.min(...years, now.getFullYear()) : now.getFullYear();
+  y.max = Math.max(now.getFullYear(), ...(years.length ? years : [now.getFullYear()]));
+  y.value = archFilter ? +archFilter.slice(0, 4) : now.getFullYear();
+  m.value = archFilter ? +archFilter.slice(5, 7) : now.getMonth() + 1;
+  updateCalLabel();
+  $('cal-overlay').classList.add('open');
+}
+function updateCalLabel() {
+  $('cal-label').textContent = `${MONTHS[$('cal-month').value - 1]} ${$('cal-year').value}`;
+}
+function clearArchFilter() { archFilter = null; renderArchive(); }
+
 function renderArchive() {
   const wrap = $('arch-wrap');
-  const days = Object.keys(archMap).sort().reverse();
+  $('btn-calendar').classList.toggle('on', !!archFilter);
+  let days = Object.keys(archMap).sort().reverse();
+  if (archFilter) days = days.filter(d => d.startsWith(archFilter));
+  const note = archFilter
+    ? `<button class="arch-filter-note" id="arch-clear">Показано: ${MONTHS[+archFilter.slice(5, 7) - 1]} ${archFilter.slice(0, 4)} · показати все</button>`
+    : '';
   if (!days.length) {
-    wrap.innerHTML = `<div class="empty">${ic('box')}<div>Архів порожній.<br>Куплене з галочкою з'являтиметься тут по днях.</div></div>`;
+    wrap.innerHTML = note + `<div class="empty">${ic('box')}<div>${archFilter
+      ? 'За цей місяць нічого не куплено.'
+      : `Архів порожній.<br>Куплене з галочкою з'являтиметься тут по днях.`}</div></div>`;
+    $('arch-clear')?.addEventListener('click', clearArchFilter);
     return;
   }
   // групуємо по місяцях
@@ -619,7 +649,7 @@ function renderArchive() {
     if (!byMonth.has(mk)) byMonth.set(mk, []);
     byMonth.get(mk).push(d);
   });
-  let html = '';
+  let html = note;
   byMonth.forEach((ds, mk) => {
     const [y, m] = mk.split('-').map(Number);
     html += `<div class="arch-month">${MONTHS[m-1]} ${y}</div><div class="arch-grid">` +
@@ -633,6 +663,7 @@ function renderArchive() {
       }).join('') + `</div>`;
   });
   wrap.innerHTML = html;
+  $('arch-clear')?.addEventListener('click', clearArchFilter);
   wrap.querySelectorAll('.arch-day').forEach(el => el.addEventListener('click', () => openDaySheet(el.dataset.day)));
 }
 
@@ -648,10 +679,13 @@ function openDaySheet(day) {
   });
   let html = '';
   byCat.forEach((g, name) => {
-    html += `<div class="day-cat">
+    html += `<div class="day-group">
+      <div class="day-cat">
         <div class="day-cat-ic" style="--c:${g.color}">${ic(g.icon)}</div>
         <div class="day-cat-name">${esc(name)}</div>
-      </div>` +
+        <span class="lcat-chevron">▼</span>
+      </div>
+      <div class="day-items"><div class="day-items-in">` +
       g.items.map(e => {
         const t = new Date(e.ts);
         return `<div class="day-item">
@@ -659,9 +693,13 @@ function openDaySheet(day) {
           <div class="day-item-name">${esc(e.name)}</div>
           <div class="day-item-time">${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}</div>
         </div>`;
-      }).join('');
+      }).join('') +
+      `</div></div></div>`;
   });
   $('day-list').innerHTML = html || '<div class="empty">Порожньо</div>';
+  // категорії дня згортаються/розгортаються, як у списку (та сама анімація)
+  $('day-list').querySelectorAll('.day-cat').forEach(el =>
+    el.addEventListener('click', () => el.parentElement.classList.toggle('collapsed')));
   $('day-overlay').classList.add('open');
 }
 
@@ -672,7 +710,7 @@ function prepAdd() {
   $('add-search').value = '';
   addEditMode = false;
   addSelect = null;
-  $('add-edit-toggle').classList.remove('on');
+  $('btn-edit-prods').classList.remove('on');
   if (!addCurCat || !cats[addCurCat]) addCurCat = sortedCats()[0]?.[0] || null;
   renderAddChips();
   renderAddGrid();
@@ -878,11 +916,24 @@ function deleteProdForm() {
 
 // ── EVENTS ─────────────────────────────────────────────────
 function bindEvents() {
-  $('add-edit-toggle').addEventListener('click', () => {
+  $('btn-edit-prods').addEventListener('click', () => {
     addEditMode = !addEditMode;
-    $('add-edit-toggle').classList.toggle('on', addEditMode);
+    $('btn-edit-prods').classList.toggle('on', addEditMode);
     renderAddGrid();
     toast(addEditMode ? 'Режим редагування: тапни продукт чи категорію' : 'Режим додавання');
+  });
+  $('btn-calendar').addEventListener('click', openCalSheet);
+  $('cal-month').addEventListener('input', updateCalLabel);
+  $('cal-year').addEventListener('input', updateCalLabel);
+  $('cal-apply').addEventListener('click', () => {
+    archFilter = `${$('cal-year').value}-${String($('cal-month').value).padStart(2, '0')}`;
+    renderArchive();
+    $('cal-overlay').classList.remove('open');
+  });
+  $('cal-all').addEventListener('click', () => {
+    archFilter = null;
+    renderArchive();
+    $('cal-overlay').classList.remove('open');
   });
   $('add-search').addEventListener('input', e => { addSearch = e.target.value; renderAddChips(); renderAddGrid(); });
   $('add-commit-btn').addEventListener('click', commitAddSelect);
@@ -925,6 +976,10 @@ function setTab(t) {
 
 function updateTabs() {
   document.querySelectorAll('.tabbar [data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
+  // права кнопка шапки — своя на кожній сторінці
+  $('btn-cats').style.display = state.tab === 'list' ? '' : 'none';
+  $('btn-edit-prods').style.display = state.tab === 'add' ? '' : 'none';
+  $('btn-calendar').style.display = state.tab === 'archive' ? '' : 'none';
 }
 
 // ── SWIPE між екранами ─────────────────────────────────────
@@ -975,6 +1030,34 @@ function initSwipeLayout() {
     if (next !== cur) setTab(SWIPE_TABS[next]);
     else syncTabs();
   }, { passive: true });
+}
+
+// ── ШТОРКИ: закриття свайпом за полоску ────────────────────
+// Тягнеш полоску вниз — шторка їде за пальцем; відпустив нижче порога —
+// закривається (CSS довозить), інакше пружинить назад.
+function initSheetDrag() {
+  document.querySelectorAll('.sheet-overlay').forEach(ov => {
+    const sheet = ov.querySelector('.sheet');
+    const handle = sheet?.querySelector('.sheet-handle');
+    if (!handle) return;
+    let y0 = 0, dragging = false;
+    handle.addEventListener('touchstart', e => {
+      y0 = e.touches[0].clientY; dragging = true;
+      sheet.style.transition = 'none';
+    }, { passive: true });
+    handle.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      sheet.style.transform = `translateY(${Math.max(0, e.touches[0].clientY - y0)}px)`;
+    }, { passive: true });
+    handle.addEventListener('touchend', e => {
+      if (!dragging) return;
+      dragging = false;
+      const dy = e.changedTouches[0].clientY - y0;
+      sheet.style.transition = '';
+      sheet.style.transform = '';
+      if (dy > 70) ov.classList.remove('open'); // з поточної позиції плавно вниз
+    }, { passive: true });
+  });
 }
 
 // ── HELPERS ────────────────────────────────────────────────
