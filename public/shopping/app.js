@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 11; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 12; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -609,21 +609,38 @@ function renderReplaceGrid() {
     }));
 }
 
-// ── КАЛЕНДАР АРХІВУ (місяць/рік двома повзунками) ──────────
+// ── КАЛЕНДАР АРХІВУ (скрол місяців: «Липень 2026», …) ──────
 let archFilter = null; // 'YYYY-MM' або null = всі місяці
 function openCalSheet() {
   const now = new Date();
-  const years = Object.keys(archMap).map(d => +d.slice(0, 4));
-  const y = $('cal-year'), m = $('cal-month');
-  y.min = years.length ? Math.min(...years, now.getFullYear()) : now.getFullYear();
-  y.max = Math.max(now.getFullYear(), ...(years.length ? years : [now.getFullYear()]));
-  y.value = archFilter ? +archFilter.slice(0, 4) : now.getFullYear();
-  m.value = archFilter ? +archFilter.slice(5, 7) : now.getMonth() + 1;
-  updateCalLabel();
+  const nowMk = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const have = Object.keys(archMap).map(d => d.slice(0, 7)).sort();
+  // суцільний ряд місяців від найранішого в архіві до поточного, новіші згори
+  const list = [];
+  let [y, m] = (have[0] && have[0] < nowMk ? have[0] : nowMk).split('-').map(Number);
+  const [ny, nm] = nowMk.split('-').map(Number);
+  while (y < ny || (y === ny && m <= nm)) {
+    list.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (++m > 12) { m = 1; y++; }
+  }
+  list.reverse();
+  $('cal-list').innerHTML =
+    `<div class="cal-item ${archFilter ? '' : 'sel'}" data-mk="">Всі місяці</div>` +
+    list.map(mk => {
+      const [yy, mm] = mk.split('-').map(Number);
+      const cnt = Object.keys(archMap).filter(d => d.startsWith(mk)).length;
+      return `<div class="cal-item ${archFilter === mk ? 'sel' : ''}" data-mk="${mk}">
+        ${MONTHS[mm - 1]} ${yy}
+        <span class="cal-cnt">${cnt ? `${cnt} ${plural(cnt, 'день', 'дні', 'днів')}` : ''}</span>
+      </div>`;
+    }).join('');
+  $('cal-list').querySelectorAll('.cal-item').forEach(row =>
+    row.addEventListener('click', () => {
+      archFilter = row.dataset.mk || null;
+      renderArchive();
+      $('cal-overlay').classList.remove('open');
+    }));
   $('cal-overlay').classList.add('open');
-}
-function updateCalLabel() {
-  $('cal-label').textContent = `${MONTHS[$('cal-month').value - 1]} ${$('cal-year').value}`;
 }
 function clearArchFilter() { archFilter = null; renderArchive(); }
 
@@ -923,18 +940,6 @@ function bindEvents() {
     toast(addEditMode ? 'Режим редагування: тапни продукт чи категорію' : 'Режим додавання');
   });
   $('btn-calendar').addEventListener('click', openCalSheet);
-  $('cal-month').addEventListener('input', updateCalLabel);
-  $('cal-year').addEventListener('input', updateCalLabel);
-  $('cal-apply').addEventListener('click', () => {
-    archFilter = `${$('cal-year').value}-${String($('cal-month').value).padStart(2, '0')}`;
-    renderArchive();
-    $('cal-overlay').classList.remove('open');
-  });
-  $('cal-all').addEventListener('click', () => {
-    archFilter = null;
-    renderArchive();
-    $('cal-overlay').classList.remove('open');
-  });
   $('add-search').addEventListener('input', e => { addSearch = e.target.value; renderAddChips(); renderAddGrid(); });
   $('add-commit-btn').addEventListener('click', commitAddSelect);
   $('add-commit-cancel').addEventListener('click', () => { addSelect = null; renderAddCommit(); renderAddGrid(); });
