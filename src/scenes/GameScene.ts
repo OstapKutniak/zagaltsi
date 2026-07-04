@@ -16,6 +16,8 @@ import {
   getPlayerId, getPlayerName, type PlayerState,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
+import { loadEquip } from '../inventory';
+import { stopAmbience } from '../sound/ambience';
 import type { NodeGraph } from '../node-editor';
 import { type Atmosphere, parseHex, hexToInt, evalSky, evalTod, evalWeather, type LayerKey, type FogLayer, type WeatherState } from '../level/atmosphere';
 import { ensureFogTexture } from '../level/fogTexture';
@@ -229,6 +231,7 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     // Тач-керування (джойстик/удар/стрибок) живе лише тут, у бітемапі.
     setTouchUI(true);
+    stopAmbience(); // ембієнт лоббі/карти замовкає в бою
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => setTouchUI(false));
     this.finished = false;
     this.enemies = [];
@@ -722,6 +725,9 @@ export class GameScene extends Phaser.Scene {
     if (!c) return;
     this.character = c;
     this.add.existing(c);
+    // Вдягнене в Інвентарі спорядження — видно й у бою (ті самі білі силуети/меч).
+    const eq = loadEquip();
+    c.setEquipment({ pants: !!eq.pants, armor: !!eq.armor, helmet: !!eq.helmet, weapon: !!eq.weapon });
     this.player.setVisible(false);
     if (doc.clips) {
       const hotkeyHandler = (ev: KeyboardEvent): void => {

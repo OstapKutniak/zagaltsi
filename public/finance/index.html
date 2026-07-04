@@ -92,6 +92,9 @@
     </button>
   </div>
 
+  <button class="fab-arch" id="cat-arch" title="Показати архівні">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
   <button class="fab show" id="fab">+</button>
 
   <!-- ADD / EDIT FORM (1money-style calculator) -->
@@ -240,17 +243,17 @@
       <div class="sheet-handle"></div>
       <div class="sheet-title">Налаштування</div>
       <div class="settings-row" id="btn-import">
-        <span class="r-ic">⬆️</span>
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg></span>
         <div class="r-tx">Імпорт CSV<div class="r-sub">Завантажити дані з 1money</div></div>
         <span style="color:var(--text3)">›</span>
       </div>
       <div class="settings-row" id="btn-export">
-        <span class="r-ic">⬇️</span>
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg></span>
         <div class="r-tx">Експорт CSV<div class="r-sub">Зберегти всі операції</div></div>
         <span style="color:var(--text3)">›</span>
       </div>
       <div class="settings-row">
-        <span class="r-ic">🔗</span>
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M9 15l6-6M10 6l1-1a4 4 0 015.7 5.7l-1 1M14 18l-1 1a4 4 0 01-5.7-5.7l1-1"/></svg></span>
         <div class="r-tx">Синхронізація<div class="r-sub">Firebase · horugva-ff8bd</div></div>
         <span class="dot"></span>
       </div>
@@ -325,9 +328,12 @@
         <button class="ce-icon" id="ce-icon"></button>
         <input class="ce-name" id="ce-name" placeholder="Назва категорії">
       </div>
+      <div class="ce-section">Колір</div>
+      <div class="pal" id="ce-colors"></div>
       <div class="ce-section">Підкатегорії</div>
       <div id="ce-subs"></div>
       <button class="ce-addsub" id="ce-addsub">+ Додати підкатегорію</button>
+      <div class="ce-actions" id="ce-actions"></div>
     </div>
   </div>
 
@@ -349,6 +355,11 @@
     </div>
     <div class="afv-scroll">
       <input class="afv-name" id="acc-form-name" type="text" placeholder="Назва рахунку">
+      <div class="afv-section">Вигляд</div>
+      <div class="afv-appear">
+        <button class="afv-icon" id="acc-form-icon"></button>
+        <div class="pal" id="acc-form-colors"></div>
+      </div>
       <div class="afv-section">Рахунок</div>
       <div class="afv-row afv-row-tap" id="acc-form-currency-row">
         <span class="afv-row-label">Валюта</span>

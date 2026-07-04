@@ -6,6 +6,7 @@ import {
   loadTravel, saveTravel,
 } from '../world/worldData';
 import { parchmentCanvas, drawInkDecor, locationIcon, regionSeal, compassRose, iconFromLabel, type MapIconKind } from '../world/mapArt';
+import { ensureAmbience } from '../sound/ambience';
 
 // Сцена мандрів — «стара мапа»: процедурний пергамент + чорнильні іконки локацій
 // (стиль DD1: товсті контури, штриховка). Глобальна (Карпатський край) → регіон.
@@ -58,6 +59,7 @@ export class WorldScene extends Phaser.Scene {
 
     void this.loadAndRender();
     this.drawParty();
+    ensureAmbience(this); // звук лоббі триває на карті (якщо ще не грає — з першого тапу)
   }
 
   // Портрети паті (Хоругва) — квадратики ліворуч, вертикально. Малюємо ТІЛЬКИ

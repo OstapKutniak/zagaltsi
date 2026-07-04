@@ -1,6 +1,7 @@
 import { ref, set, get, onValue, type Unsubscribe } from 'firebase/database';
 import { db } from './firebase';
 import { getPlayerId, getPlayerName, getChosenChar } from './multiplayer/lobby';
+import { publishMyChar } from './multiplayer/sharedChars';
 
 // Хоругва — загін до 5 гравців. Живе у Firebase: khorugvas/{id}.
 // Створюється лідером; інші приєднуються за deep-link (?startapp=kh_<id>)
@@ -32,6 +33,7 @@ export async function createKhorugva(): Promise<string> {
   const kh: Khorugva = { id, leader: m.id, createdAt: Date.now(), members: { [m.id]: m } };
   await withTimeout(set(ref(db, `khorugvas/${id}`), kh));
   setMyKhorugva(id);
+  void publishMyChar(); // щоб побратими побачили мій справжній вигляд біля вогнища
   return id;
 }
 
@@ -43,6 +45,7 @@ export async function joinKhorugva(id: string): Promise<Khorugva | null> {
   if (!kh.members[m.id] && Object.keys(kh.members).length >= 5) throw new Error('Хоругва вже повна (5)');
   await withTimeout(set(ref(db, `khorugvas/${id}/members/${m.id}`), m));
   setMyKhorugva(id);
+  void publishMyChar(); // щоб побратими побачили мій справжній вигляд біля вогнища
   kh.members[m.id] = m;
   return kh;
 }

@@ -107,14 +107,24 @@ const STYLE = [
   ['інше','#EB5757','wand'],['друге','#EB5757','wand'],
 ];
 const metaKey = s => (s || '').toLowerCase().replace(/['’ʼ`]/g, "'").trim().replace(/[.#$\[\]\/]/g, '_');
+const PALETTE = ['#EB3B7E','#EB5C8B','#F2994A','#F2C94C','#E0B84D','#9E9D24','#27AE60','#4CAF7D','#1ABC9C','#17B9CE','#2D9CDB','#2F80ED','#6A5AE0','#9B51E0','#B39DDB','#EB5757','#607D8B','#5D4037','#9E9E9E','#111827'];
 function catStyle(name) {
   const key = (name || '').toLowerCase();
   let base = null;
   for (const [k, c, i] of STYLE) if (key.includes(k)) { base = { color: c, icon: ic(i) }; break; }
   if (!base) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) % 360; base = { color: `hsl(${h} 52% 56%)`, icon: ic('tag') }; }
-  const ov = catMeta.icons && catMeta.icons[metaKey(name)];
-  if (ov && ICONS[ov]) base = { color: base.color, icon: ic(ov) };
-  return base;
+  const mk = metaKey(name);
+  const oc = catMeta.colors && catMeta.colors[mk];
+  const oi = catMeta.icons && catMeta.icons[mk];
+  return { color: oc || base.color, icon: (oi && ICONS[oi]) ? ic(oi) : base.icon };
+}
+function accStyle(a) {
+  const base = catStyle(a.name);
+  return { color: a.color || base.color, icon: (a.icon && ICONS[a.icon]) ? ic(a.icon) : base.icon };
+}
+function accStyleName(name) {
+  const a = accountsList.find(x => x.name === name);
+  return a ? accStyle(a) : catStyle(name);
 }
 const parentCat = n => (n || 'Інше').split(' (')[0].trim();
 const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].trim() : ''; };
@@ -123,9 +133,9 @@ const subCat = n => { const m = (n || '').match(/\(([^)]*)\)/); return m ? m[1].
 let txMap = {};
 let accountsList = [];
 let recurringMap = {};
-let catMeta = { icons: {}, subs: {} };
+let catMeta = { icons: {}, subs: {}, colors: {}, archived: {}, cats: {} };
 let selectedAccounts = null;
-let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date(), catShowPct: false };
+let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date(), catShowPct: false, showArchived: false };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
 let subsByDir = { expense: new Map(), income: new Map() };
@@ -142,6 +152,8 @@ let catFilter = null;
 let accFormMode = null;
 let accFormEditIdx = -1;
 let accFormCurrency = 'UAH';
+let accFormIcon = null;
+let accFormColor = null;
 const SWIPE_TABS = ['accounts', 'categories', 'records', 'recurring', 'overview'];
 
 const CURRENCIES_LIST = [
@@ -200,7 +212,7 @@ function subscribe() {
     migrateBaseBalances();
   });
   onValue(ref(db, REC_PATH), s => { recurringMap = s.val() || {}; scheduleRender(); });
-  onValue(ref(db, 'finance/catmeta'), s => { const v = s.val() || {}; catMeta = { icons: v.icons || {}, subs: v.subs || {} }; scheduleRender(); });
+  onValue(ref(db, 'finance/catmeta'), s => { const v = s.val() || {}; catMeta = { icons: v.icons || {}, subs: v.subs || {}, colors: v.colors || {}, archived: v.archived || {}, cats: v.cats || {} }; scheduleRender(); });
   onValue(ref(db, 'finance/meta/importedUpTo'), s => {
     importedUpTo = s.val() || null;
     migrateBaseBalances();
@@ -315,6 +327,9 @@ function renderAll() {
   else if (state.tab === 'overview') renderOverview();
   else if (state.tab === 'recurring') renderRecurring();
   document.getElementById('fab').classList.toggle('show', state.tab === 'categories' || state.tab === 'records' || state.tab === 'accounts');
+  const archBtn = document.getElementById('cat-arch');
+  archBtn.classList.toggle('show', state.tab === 'categories');
+  archBtn.classList.toggle('on', state.showArchived);
 }
 
 function renderHeader() {
@@ -364,8 +379,12 @@ function renderCategories() {
   txs.filter(t => t.type === dir).forEach(t => {
     const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
   });
-  const names = [...new Set([...catsParent[dir], ...sums.keys()])];
-  const catList = orderedCats(dir, names, sums);
+  const archived = catMeta.archived || {};
+  const declared = catMeta.cats?.[dir] || [];
+  const names = [...new Set([...catsParent[dir], ...declared, ...sums.keys()])];
+  let catList = orderedCats(dir, names, sums);
+  if (!state.showArchived) catList = catList.filter(x => !archived[metaKey(x.name)]);
+  if (state.catShowPct) catList = [...catList].sort((a, b) => b.v - a.v);
 
   const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
   const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
@@ -390,7 +409,7 @@ function renderCategories() {
     const valHtml = state.catShowPct
       ? `${dirTotal ? Math.round(x.v / dirTotal * 100) : 0}<span>%</span>`
       : `${fmt(x.v)} <span>UAH</span>`;
-    return `<button class="cat ${x.v ? '' : 'zero'}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
+    return `<button class="cat ${x.v ? '' : 'zero'}${archived[metaKey(x.name)] ? ' arch' : ''}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
       <div class="cat-name">${esc(x.name)}</div>
       <div class="cat-circle">${st.icon}</div>
       <div class="cat-amt">${valHtml}</div>
@@ -402,28 +421,46 @@ function renderCategories() {
 
   const cell = document.getElementById('donut-cell');
   let lpTimer = null, lpFired = false;
+  const donutNow = () => document.querySelector('#donut-cell .donut');
   const toggleDir = () => {
-    const donutEl = document.querySelector('#donut-cell .donut');
+    const donutEl = donutNow();
     if (!donutEl || donutEl._animating) return;
     donutEl._animating = true;
     donutEl.style.animation = 'donutOut 0.22s ease-in both';
     setTimeout(() => {
       state.catDir = state.catDir === 'expense' ? 'income' : 'expense';
       renderCategories();
-      const nd = document.querySelector('#donut-cell .donut');
+      const nd = donutNow();
       if (nd) nd.style.animation = 'donutIn 0.32s cubic-bezier(0.34,1.56,0.64,1) both';
     }, 220);
   };
   const togglePct = () => {
-    state.catShowPct = !state.catShowPct;
-    renderCategories();
-    const nd = document.querySelector('#donut-cell .donut');
-    if (nd) nd.style.animation = 'orbPct 0.6s ease';
+    flipCats(() => {
+      state.catShowPct = !state.catShowPct;
+      renderCategories();
+    });
+    const nd = donutNow();
+    if (nd) nd.style.animation = 'orbPct 0.6s cubic-bezier(0.34,1.56,0.64,1)';
+  };
+  // Hold-to-charge: orb slowly grows while pressed, then fires the percent toggle.
+  const startHold = () => {
+    lpFired = false;
+    const d = donutNow();
+    if (d) { d.style.transition = 'transform 0.45s cubic-bezier(0.4,0,0.2,1)'; d.style.transform = 'scale(1.13)'; }
+    lpTimer = setTimeout(() => { lpFired = true; togglePct(); }, 450);
+  };
+  const endHold = () => {
+    clearTimeout(lpTimer);
+    const d = donutNow();
+    if (d && !lpFired) { d.style.transition = 'transform 0.28s ease'; d.style.transform = ''; }
   };
   cell.onclick = () => { if (lpFired) { lpFired = false; return; } toggleDir(); };
-  cell.addEventListener('touchstart', () => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true; togglePct(); }, 450); }, { passive: true });
-  cell.addEventListener('touchend', () => clearTimeout(lpTimer), { passive: true });
-  cell.addEventListener('touchmove', () => clearTimeout(lpTimer), { passive: true });
+  cell.addEventListener('touchstart', startHold, { passive: true });
+  cell.addEventListener('touchend', endHold, { passive: true });
+  cell.addEventListener('touchmove', endHold, { passive: true });
+  cell.addEventListener('mousedown', startHold);
+  cell.addEventListener('mouseup', endHold);
+  cell.addEventListener('mouseleave', endHold);
 
   // Short tap → add form; long press → category detail sheet
   grid.querySelectorAll('.cat').forEach(el => {
@@ -437,6 +474,29 @@ function renderCategories() {
     el.addEventListener('mouseup', cancelLP);
     el.addEventListener('mouseleave', cancelLP);
     el.onclick = () => { if (activated) { activated = false; return; } openForm(null, el.dataset.cat, state.catDir); };
+  });
+}
+
+// FLIP: smoothly animate category tiles from their old positions to the new
+// order (used when toggling percent mode so they glide bigger→smaller and back).
+function flipCats(mutate) {
+  const grid = document.getElementById('cat-grid');
+  if (!grid) { mutate(); return; }
+  const before = new Map();
+  grid.querySelectorAll('.cat[data-cat]').forEach(el => before.set(el.dataset.cat, el.getBoundingClientRect()));
+  mutate();
+  grid.querySelectorAll('.cat[data-cat]').forEach(el => {
+    const b = before.get(el.dataset.cat);
+    if (!b) return;
+    const a = el.getBoundingClientRect();
+    const dx = b.left - a.left, dy = b.top - a.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    requestAnimationFrame(() => {
+      el.style.transition = 'transform 0.5s cubic-bezier(0.22,1,0.36,1)';
+      el.style.transform = '';
+    });
   });
 }
 
@@ -521,18 +581,40 @@ function openCatEdit(parent, dir) {
     orig: s, name: s,
     icon: catMeta.icons?.[metaKey(`${parent} (${s})`)] || null, deleted: false,
   }));
-  ceState = { parent, dir, icon: catMeta.icons?.[metaKey(parent)] || null, subs };
+  ceState = { parent, dir, create: false, icon: catMeta.icons?.[metaKey(parent)] || null, color: catMeta.colors?.[metaKey(parent)] || null, subs };
   document.getElementById('ce-name').value = parent;
+  renderCatEdit();
+  document.getElementById('catedit-view').classList.add('active');
+}
+function openCatCreate(dir) {
+  ceState = { parent: '', dir, create: true, icon: null, color: PALETTE[0], subs: [] };
+  document.getElementById('ce-name').value = '';
   renderCatEdit();
   document.getElementById('catedit-view').classList.add('active');
 }
 function closeCatEdit() { document.getElementById('catedit-view').classList.remove('active'); ceState = null; }
 
 function renderCatEdit() {
-  const pcol = catStyle(ceState.parent).color;
+  document.querySelector('#catedit-view .ce-title').textContent = ceState.create ? 'Нова категорія' : 'Категорія';
+  const pcol = ceState.color || catStyle(ceState.parent).color;
   const pi = document.getElementById('ce-icon');
   pi.style.setProperty('--c', pcol);
   pi.innerHTML = ceState.icon ? ic(ceState.icon) : catStyle(ceState.parent).icon;
+  // color palette
+  const pal = document.getElementById('ce-colors');
+  pal.innerHTML = PALETTE.map(c => `<button class="pal-sw${ceState.color === c ? ' sel' : ''}" data-c="${c}" style="background:${c}"></button>`).join('');
+  pal.querySelectorAll('.pal-sw').forEach(b => b.onclick = () => { ceState.color = b.dataset.c; renderCatEdit(); });
+  // archive / delete actions (only when editing an existing category)
+  const actions = document.getElementById('ce-actions');
+  if (ceState.create) { actions.innerHTML = ''; }
+  else {
+    const isArch = !!(catMeta.archived && catMeta.archived[metaKey(ceState.parent)]);
+    actions.innerHTML = `
+      <button class="ce-act" id="ce-archive">${isArch ? 'Розархівувати категорію' : 'Архівувати категорію'}</button>
+      <button class="ce-act ce-act-del" id="ce-delete">Видалити категорію</button>`;
+    document.getElementById('ce-archive').onclick = () => toggleArchiveCat(ceState.parent, !isArch);
+    document.getElementById('ce-delete').onclick = deleteCatFlow;
+  }
   const box = document.getElementById('ce-subs');
   box.innerHTML = ceState.subs.map((s, i) => s.deleted ? '' : `
     <div class="ce-sub" data-i="${i}">
@@ -545,11 +627,20 @@ function renderCatEdit() {
   box.querySelectorAll('.ce-sub-icon').forEach(b => b.onclick = () => openIconPick(n => { ceState.subs[+b.dataset.icon].icon = n; renderCatEdit(); }));
 }
 
+function saveCatMeta(patch) {
+  const next = {
+    icons: catMeta.icons || {}, subs: catMeta.subs || {}, colors: catMeta.colors || {},
+    archived: catMeta.archived || {}, cats: catMeta.cats || {}, ...patch,
+  };
+  return set(ref(db, 'finance/catmeta'), next);
+}
+
 async function saveCatEdit() {
   const oldP = ceState.parent;
   const newP = document.getElementById('ce-name').value.trim() || oldP;
+  if (!newP) return toast('Введи назву категорії');
   const txUpd = {};
-  Object.entries(txMap).forEach(([id, t]) => {
+  if (!ceState.create) Object.entries(txMap).forEach(([id, t]) => {
     if (t.type !== 'expense' && t.type !== 'income') return;
     if (parentCat(t.category) !== oldP) return;
     const s = subCat(t.category);
@@ -559,8 +650,10 @@ async function saveCatEdit() {
     if (newCat !== t.category) txUpd[`${id}/category`] = newCat;
   });
   const icons = { ...(catMeta.icons || {}) };
-  if (newP !== oldP) delete icons[metaKey(oldP)];
+  const colors = { ...(catMeta.colors || {}) };
+  if (!ceState.create && newP !== oldP) { delete icons[metaKey(oldP)]; delete colors[metaKey(oldP)]; }
   if (ceState.icon) icons[metaKey(newP)] = ceState.icon; else delete icons[metaKey(newP)];
+  if (ceState.color) colors[metaKey(newP)] = ceState.color; else delete colors[metaKey(newP)];
   const declared = [];
   ceState.subs.forEach(x => {
     if (x.deleted) { if (x.orig) delete icons[metaKey(`${oldP} (${x.orig})`)]; return; }
@@ -570,12 +663,63 @@ async function saveCatEdit() {
     if (x.icon) icons[metaKey(`${newP} (${nm})`)] = x.icon;
   });
   const subsMeta = { ...(catMeta.subs || {}) };
-  if (newP !== oldP) delete subsMeta[metaKey(oldP)];
+  if (!ceState.create && newP !== oldP) delete subsMeta[metaKey(oldP)];
   subsMeta[metaKey(newP)] = declared;
+  // keep a declared-categories list per direction so new/renamed cats persist without operations
+  const cats = { ...(catMeta.cats || {}) };
+  const arr = new Set(cats[ceState.dir] || []);
+  if (!ceState.create && newP !== oldP) arr.delete(oldP);
+  arr.add(newP);
+  cats[ceState.dir] = [...arr];
   try {
     if (Object.keys(txUpd).length) await update(ref(db, TX_PATH), txUpd);
-    await set(ref(db, 'finance/catmeta'), { icons, subs: subsMeta });
+    await saveCatMeta({ icons, subs: subsMeta, colors, cats });
     toast('Збережено ✓');
+    closeCatEdit();
+  } catch (e) { toast('Помилка: ' + e.message); }
+}
+
+async function toggleArchiveCat(parent, archive) {
+  const archived = { ...(catMeta.archived || {}) };
+  if (archive) archived[metaKey(parent)] = true; else delete archived[metaKey(parent)];
+  try {
+    await saveCatMeta({ archived });
+    catMeta.archived = archived;
+    toast(archive ? 'Заархівовано ✓' : 'Розархівовано ✓');
+    closeCatEdit();
+  } catch (e) { toast('Помилка: ' + e.message); }
+}
+
+// Delete a category without losing its money: reassign all its operations to
+// another category, or move the whole category to the archive.
+async function deleteCatFlow() {
+  const oldP = ceState.parent, dir = ceState.dir;
+  const names = [...new Set([...catsParent[dir], ...(catMeta.cats?.[dir] || [])])];
+  const others = orderedCats(dir, names, new Map()).map(x => x.name).filter(n => normCat(n) !== normCat(oldP));
+  const ARCH = 'Перемістити в архів';
+  const choice = await openPicker('Перенести операції в…', [...others, ARCH]);
+  if (!choice) return;
+  if (choice === ARCH) { await toggleArchiveCat(oldP, true); return; }
+  const txUpd = {};
+  Object.entries(txMap).forEach(([id, t]) => {
+    if (t.type !== 'expense' && t.type !== 'income') return;
+    if (parentCat(t.category) !== oldP) return;
+    const s = subCat(t.category);
+    txUpd[`${id}/category`] = s ? `${choice} (${s})` : choice;
+  });
+  const icons = { ...(catMeta.icons || {}) };
+  const colors = { ...(catMeta.colors || {}) };
+  const subsMeta = { ...(catMeta.subs || {}) };
+  const archived = { ...(catMeta.archived || {}) };
+  const cats = { ...(catMeta.cats || {}) };
+  delete icons[metaKey(oldP)]; delete colors[metaKey(oldP)];
+  delete subsMeta[metaKey(oldP)]; delete archived[metaKey(oldP)];
+  Object.keys(icons).forEach(k => { if (k.startsWith(metaKey(oldP) + ' (')) delete icons[k]; });
+  if (cats[dir]) cats[dir] = cats[dir].filter(n => normCat(n) !== normCat(oldP));
+  try {
+    if (Object.keys(txUpd).length) await update(ref(db, TX_PATH), txUpd);
+    await saveCatMeta({ icons, colors, subs: subsMeta, archived, cats });
+    toast('Категорію видалено ✓');
     closeCatEdit();
   } catch (e) { toast('Помилка: ' + e.message); }
 }
@@ -620,7 +764,7 @@ function renderRecords() {
     }
   }
 
-  if (!txs.length) { el.innerHTML = `<div class="empty"><div class="ic">📭</div>Немає операцій за період</div>`; return; }
+  if (!txs.length) { el.innerHTML = `<div class="empty"><div class="ic-svg"><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h4"/></svg></div>Немає операцій за період</div>`; return; }
 
   const groups = {};
   txs.forEach(t => {
@@ -667,7 +811,7 @@ function recItem(t) {
 
 // ── ACCOUNTS ───────────────────────────────────────────────
 function accRow(a) {
-  const st = catStyle(a.name);
+  const st = accStyle(a);
   const cur = CUR_SUFFIX[a.currency] || a.currency || 'UAH';
   const lb = computeLiveBalance(a.name) ?? a.balance;
   const v = a.currency === 'UAH' ? fmt(lb) : fmtDec(lb);
@@ -681,7 +825,7 @@ function accRow(a) {
 function renderAccounts() {
   const el = document.getElementById('acc-list');
   if (!accountsList.length) {
-    el.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ic">💳</div>Імпортуй CSV з 1money — й тут з'являться рахунки з балансами.</div>`;
+    el.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><path d="M16 15h2"/></svg></div>Імпортуй CSV з 1money — й тут з'являться рахунки з балансами.</div>`;
     return;
   }
   const reg = accountsList.filter(a => !a.archived && !isSavings(a.name) && a.group !== 'savings');
@@ -700,7 +844,7 @@ function renderAccounts() {
 function openAccAction(accName) {
   accActionCurrent = accName;
   const a = accountsList.find(x => x.name === accName);
-  const st = catStyle(accName);
+  const st = a ? accStyle(a) : catStyle(accName);
   const lb = computeLiveBalance(accName) ?? (a?.balance ?? 0);
   const cur = a ? (CUR_SUFFIX[a.currency] || a.currency || 'UAH') : 'UAH';
   const v = a?.currency === 'UAH' ? fmt(lb) : fmtDec(lb);
@@ -723,6 +867,8 @@ function openAccForm(accName = null) {
     document.getElementById('acc-form-title').textContent = 'Редагувати рахунок';
     document.getElementById('acc-form-name').value = a.name;
     accFormCurrency = a.currency || 'UAH';
+    accFormIcon = a.icon || null;
+    accFormColor = a.color || null;
     document.getElementById('acc-form-balance').value = String(computeLiveBalance(a.name) ?? a.balance);
     document.getElementById('acc-form-include').checked = accIncluded(a);
     document.getElementById('acc-form-archived').checked = !!a.archived;
@@ -733,13 +879,27 @@ function openAccForm(accName = null) {
     document.getElementById('acc-form-title').textContent = 'Новий рахунок';
     document.getElementById('acc-form-name').value = '';
     accFormCurrency = 'UAH';
+    accFormIcon = null;
+    accFormColor = null;
     document.getElementById('acc-form-balance').value = '0';
     document.getElementById('acc-form-include').checked = true;
     document.getElementById('acc-form-archived').checked = false;
     editSection.style.display = 'none';
   }
   updateAccFormCurrency();
+  renderAccFormAppearance();
   document.getElementById('acc-form-view').classList.add('active');
+}
+function renderAccFormAppearance() {
+  const name = document.getElementById('acc-form-name').value.trim();
+  const base = catStyle(name);
+  const col = accFormColor || base.color;
+  const ib = document.getElementById('acc-form-icon');
+  ib.style.setProperty('--c', col);
+  ib.innerHTML = (accFormIcon && ICONS[accFormIcon]) ? ic(accFormIcon) : base.icon;
+  const pal = document.getElementById('acc-form-colors');
+  pal.innerHTML = PALETTE.map(c => `<button class="pal-sw${accFormColor === c ? ' sel' : ''}" data-c="${c}" style="background:${c}"></button>`).join('');
+  pal.querySelectorAll('.pal-sw').forEach(b => b.onclick = () => { accFormColor = b.dataset.c; renderAccFormAppearance(); });
 }
 function updateAccFormCurrency() {
   const c = CURRENCIES_LIST.find(x => x.code === accFormCurrency);
@@ -759,9 +919,9 @@ async function saveAccForm() {
   const newList = [...accountsList];
   if (accFormMode === 'edit' && accFormEditIdx >= 0) {
     const old = newList[accFormEditIdx];
-    newList[accFormEditIdx] = { ...old, name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived };
+    newList[accFormEditIdx] = { ...old, name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived, icon: accFormIcon || null, color: accFormColor || null };
   } else {
-    newList.push({ name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : 0, group: isSavings(name) ? 'savings' : 'regular', includeInTotal: include, archived: false });
+    newList.push({ name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : 0, group: isSavings(name) ? 'savings' : 'regular', includeInTotal: include, archived: false, icon: accFormIcon || null, color: accFormColor || null });
   }
   try {
     await set(ref(db, ACC_PATH), newList);
@@ -843,24 +1003,31 @@ async function payRecurring(id) {
 }
 
 // ── OVERVIEW ───────────────────────────────────────────────
+const WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
 function renderBarChart(txs, dir) {
   const dirTx = txs.filter(t => t.type === dir);
-  let buckets;
+  let buckets, labels;
   if (state.period === 'all') {
     const allYears = Object.values(txMap).map(t => new Date(t.date).getFullYear());
     if (!allYears.length) return '';
     const minY = Math.min(...allYears), maxY = new Date().getFullYear();
     const nY = Math.max(1, maxY - minY + 1);
     buckets = Array.from({ length: nY }, () => new Map());
+    labels = Array.from({ length: nY }, (_, i) => String(minY + i));
     dirTx.forEach(t => { const yi = new Date(t.date).getFullYear() - minY; if (yi < 0 || yi >= nY) return; const p = parentCat(t.category); buckets[yi].set(p, (buckets[yi].get(p) || 0) + Number(t.amount)); });
   } else if (state.period === 'year') {
     buckets = Array.from({ length: 12 }, () => new Map());
+    labels = Array.from({ length: 12 }, (_, i) => String(i + 1));
     dirTx.forEach(t => { const m = new Date(t.date).getMonth(); const p = parentCat(t.category); buckets[m].set(p, (buckets[m].get(p) || 0) + Number(t.amount)); });
   } else {
     const b = periodBounds();
     const start = new Date(b.start); start.setHours(0, 0, 0, 0);
     const nDays = Math.max(1, Math.round((b.end - start) / 86400000) + 1);
     buckets = Array.from({ length: nDays }, () => new Map());
+    labels = Array.from({ length: nDays }, (_, i) => {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      return state.period === 'week' ? WD_SHORT[(d.getDay() + 6) % 7] : String(d.getDate());
+    });
     dirTx.forEach(t => {
       const idx = Math.floor((new Date(t.date) - start) / 86400000);
       if (idx < 0 || idx >= nDays) return;
@@ -885,9 +1052,18 @@ function renderBarChart(txs, dir) {
   }).join('');
   const vw = Math.round(n * (bw + gap));
   const wide = n > 8;
-  const svgStyle = wide ? 'width:100%;height:110px;display:block' : `width:${vw}px;max-width:100%;height:110px;display:block;margin:0 auto`;
+  const barsStyle = wide ? 'width:100%' : `width:${vw}px;max-width:100%;margin:0 auto`;
   const par = wide ? 'none' : 'xMidYMid meet';
-  return `<div class="ov-barchart"><svg viewBox="0 0 ${vw} ${H}" preserveAspectRatio="${par}" style="${svgStyle}">${bars}</svg></div>`;
+  // x-axis labels: skip some so they never crowd ("через 1-2")
+  const step = n <= 12 ? 1 : Math.ceil(n / 8);
+  const labelHTML = labels.map((lb, i) =>
+    (i % step === 0 && lb)
+      ? `<span class="ov-xl" style="left:${((i * (bw + gap) + bw / 2) / vw * 100).toFixed(3)}%">${lb}</span>`
+      : '').join('');
+  return `<div class="ov-barchart"><div class="ov-bars" style="${barsStyle}">
+    <svg viewBox="0 0 ${vw} ${H}" preserveAspectRatio="${par}" style="width:100%;height:110px;display:block">${bars}</svg>
+    <div class="ov-xrow">${labelHTML}</div>
+  </div></div>`;
 }
 
 function renderOverview() {
@@ -1420,7 +1596,16 @@ function bindEvents() {
   document.getElementById('prev-month').onclick = () => shiftWithAnim(-1);
   document.getElementById('next-month').onclick = () => shiftWithAnim(1);
 
-  document.getElementById('fab').onclick = () => state.tab === 'accounts' ? openAccForm() : state.tab === 'recurring' ? openRecurringForm() : openForm();
+  document.getElementById('fab').onclick = () =>
+    state.tab === 'accounts' ? openAccForm()
+    : state.tab === 'recurring' ? openRecurringForm()
+    : state.tab === 'categories' ? openCatCreate(state.catDir)
+    : openForm();
+  document.getElementById('cat-arch').onclick = () => {
+    state.showArchived = !state.showArchived;
+    renderAll();
+  };
+  document.getElementById('acc-form-icon').onclick = () => openIconPick(n => { accFormIcon = n; renderAccFormAppearance(); });
   document.getElementById('add-close').onclick = closeForm;
   document.getElementById('form-del').onclick = async () => {
     if (formMode === 'recurring' && editingRec) {
@@ -1504,6 +1689,7 @@ function bindEvents() {
 
   // Account form
   document.getElementById('acc-form-close').onclick = closeAccForm;
+  document.getElementById('acc-form-name').oninput = renderAccFormAppearance;
   document.getElementById('acc-form-done').onclick = saveAccForm;
   document.getElementById('acc-form-delete').onclick = deleteAccForm;
   document.getElementById('acc-form-currency-row').onclick = async () => {
@@ -1573,7 +1759,7 @@ function openFilter() {
   document.getElementById('filter-overlay').classList.add('open');
 }
 function faCard(name, balText) {
-  const st = catStyle(name);
+  const st = accStyleName(name);
   const on = filterTemp.has(name);
   return `<div class="fa-card ${on ? 'on' : 'off'}" data-name="${escAttr(name)}">
     <button class="fa-ic" style="--c:${st.color}" data-acc="${escAttr(name)}">${st.icon}</button>

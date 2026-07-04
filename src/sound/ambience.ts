@@ -254,6 +254,14 @@ export function stopAmbience(): void {
 
 export function isAmbienceRunning(): boolean { return running; }
 
+// Запускає ембієнт лоббі на першому тапі сцени, якщо він ще не грає (політика
+// браузера: звук лише після взаємодії). Використовують і лоббі, і карта —
+// щоб звук лоббі тривав на глобальних картах без переривання.
+export function ensureAmbience(scene: { input: { once: (e: string, cb: () => void) => void } }): void {
+  if (running) return;
+  scene.input.once('pointerdown', () => { void loadLobbyMix().then((m) => startAmbience(m)); });
+}
+
 // Мікс лобі: локальний IDB (правки з Редактора Звуку) → published sound.json → дефолт.
 export async function loadLobbyMix(): Promise<AmbienceMix> {
   try {

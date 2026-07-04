@@ -6,7 +6,6 @@ import { WorldScene } from './scenes/WorldScene';
 import { LocationScene } from './scenes/LocationScene';
 import { QuestsScene } from './scenes/QuestsScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
-import { KhorugvaScene } from './scenes/KhorugvaScene';
 import { InventoryScene } from './scenes/InventoryScene';
 import { GameScene } from './scenes/GameScene';
 import { ColorGradePipeline } from './scenes/ColorGradePipeline';
@@ -41,7 +40,7 @@ const game = new Phaser.Game({
     height: LOGICAL_H * RENDER_SCALE,
   },
   pipeline: { ColorGrade: ColorGradePipeline } as unknown as Phaser.Types.Core.PipelineConfig,
-  scene: [BootScene, MenuScene, SectionScene, WorldScene, LocationScene, QuestsScene, AchievementsScene, KhorugvaScene, InventoryScene, GameScene],
+  scene: [BootScene, MenuScene, SectionScene, WorldScene, LocationScene, QuestsScene, AchievementsScene, InventoryScene, GameScene],
 });
 
 setupViewport(game);
@@ -52,7 +51,6 @@ setupViewport(game);
 const START_ROUTES: Record<string, { scene: string; data?: object }> = {
   zhytlo: { scene: 'Menu' },
   mandry: { scene: 'World', data: {} },
-  khorugva: { scene: 'Khorugva' },
   zavdannya: { scene: 'Quests' },
   dosyagnennya: { scene: 'Achievements' },
   inventar: { scene: 'Inventory' },
@@ -96,7 +94,9 @@ if (startParam) {
       if (startParam.startsWith('kh_')) {
         void joinKhorugva(startParam.slice(3))
           .catch(() => null)
-          .then(() => menu.scene.start('Khorugva'));
+          .then(() => menu.scene.start('Menu', { startPage: 'khorugva' }));
+      } else if (startParam === 'khorugva') {
+        menu.scene.start('Menu', { startPage: 'khorugva' });
       } else if (startParam === 'enc') {
         void openEncounter(menu).catch(() => menu.scene.start('World', {}));
       } else {
