@@ -1,21 +1,28 @@
 import Phaser from 'phaser';
 import { Actor } from './Actor';
 import { ENEMY } from '../config';
-import type { Player } from './Player';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
 import type { NodeGraph, GraphNode } from '../node-editor';
 import { isDialogActive } from '../dialogUI';
+import type { EnemyNet } from '../multiplayer/lobby';
 
 interface Band {
   top: number;
   bottom: number;
 }
 
+// Ціль ворога — лише підлогова позиція (гравець локальний АБО віддалений побратим).
+// Хост наводить ворога на НАЙБЛИЖЧУ ціль, тож потрібні тільки координати.
+interface Target { floorX: number; floorY: number }
+
 // Простий ворог: підходить до гравця по площині, у дистанції б'є по кулдауну.
 export class Enemy extends Actor {
+  netId = -1; // стабільний індекс у кооп-синхронізації (порядок спавну з doc.enemySpawns)
   private nextAttackAt = 0;
   private immuneUntil = 0;
   private character: CutoutCharacter | null = null;
+  private lastAnim = 'idle'; // остання програна анімація — для трансляції хостом
+  private hasNet = false;    // чи вже отримали мережевий стан (для першого снапу без лерпу)
 
   // Нодова поведінка (необовʼязкова). cellSize = розмір клітинки колайдера в px
   // («1 крок = 1 клітинка»). maxHp — для умови «здоровʼя нижче %».
@@ -40,13 +47,18 @@ export class Enemy extends Actor {
     if (!c) return;
     this.character = c;
     this.scene.add.existing(c);
+    // Одразу ставимо на місце спавну (інакше до першого think/мережевого стану
+    // персонаж висів би у (0,0) — помітно на не-хості, поки не прийшов знімок).
+    c.setAnim('idle');
+    c.setPosition(this.fx, this.fy - c.feetOffset() - this.hz);
+    c.setDepth(this.fy + 0.1);
     this.setVisible(false);
   }
 
   // Обирана цього кадру дія: DFS усіма гілками від кореня. Умови маршрутизують
   // (Так/Ні), дії/діалог — термінали. З-поміж усіх досягнутих обираємо НАЙГЛИБШУ
   // (щоб гілки «близько→атака» та «далеко→діалог» від одного кореня працювали обидві).
-  private pickAction(player: Player): GraphNode | null {
+  private pickAction(player: Target): GraphNode | null {
     const g = this.behavior!;
     const byId = (id: string): GraphNode | undefined => g.nodes.find((n) => n.id === id);
     const edgesFrom = (id: string, port: number) => g.edges.filter((e) => e.fromId === id && e.fromPort === port);
@@ -76,7 +88,7 @@ export class Enemy extends Actor {
   }
 
   // Повертає індекс вихідного порту, яким іти далі.
-  private evalCond(node: GraphNode, player: Player): number {
+  private evalCond(node: GraphNode, player: Target): number {
     const dx = player.floorX - this.fx, dy = player.floorY - this.fy;
     switch (node.type) {
       case 'player_distance': {
@@ -134,13 +146,14 @@ export class Enemy extends Actor {
   }
 
   // Повертає шкоду, завдану гравцеві цього кроку (0, якщо не вдарив).
-  think(player: Player, time: number, dt: number, band: Band): number {
+  think(player: Target, time: number, dt: number, band: Band): number {
     const dx = player.floorX - this.fx;
     const dy = player.floorY - this.fy;
     this.facing = dx >= 0 ? 1 : -1;
 
     // Домовились через діалог → ворог мирний: стоїть і не б'є.
     if (this.neutralized) {
+      this.lastAnim = 'idle';
       this.stepZ(dt); this.sync();
       if (this.character) {
         this.character.setAnim('idle');
@@ -192,6 +205,7 @@ export class Enemy extends Actor {
       anim = 'walk'; this.moveToward(dx, dy, ENEMY.speed, dt, band);
     }
 
+    this.lastAnim = anim;
     this.stepZ(dt);
     this.sync();
 
@@ -204,6 +218,33 @@ export class Enemy extends Actor {
 
     return damage;
   }
+
+  // ── Кооп-синхронізація ──────────────────────────────────────────────────────
+  // Хост: знімок стану для трансляції.
+  netSnapshot(): EnemyNet {
+    return { x: Math.round(this.fx), y: Math.round(this.fy), z: Math.round(this.hz), a: this.lastAnim, f: this.facing, hp: this.hp };
+  }
+
+  // Не-хост: дзеркалимо стан від хоста (плавна інтерполяція позиції + анім/поворот).
+  applyNet(s: EnemyNet, dt: number): void {
+    if (!this.hasNet) { this.fx = s.x; this.fy = s.y; this.hz = s.z; this.hasNet = true; }
+    this.hp = s.hp;
+    this.facing = s.f >= 0 ? 1 : -1;
+    this.fx += (s.x - this.fx) * Math.min(1, dt * 12);
+    this.fy += (s.y - this.fy) * Math.min(1, dt * 12);
+    this.hz += (s.z - this.hz) * Math.min(1, dt * 18);
+    this.sync();
+    if (this.character) {
+      this.character.setAnim(s.a);
+      this.character.tick(dt, this.facing);
+      this.character.setPosition(this.fx, this.fy - this.character.feetOffset() - this.hz);
+      this.character.setDepth(this.fy + 0.1);
+    }
+  }
+
+  // Не-хост: локальний i-frame після відправки удару хосту, щоб один змах не слав
+  // кілька запитів (справжня шкода застосується на хості й прилетить у знімку).
+  registerLocalHit(time: number): void { this.immuneUntil = time + 220; }
 
   vulnerable(time: number): boolean {
     return time >= this.immuneUntil;

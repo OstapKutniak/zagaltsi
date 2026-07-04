@@ -14,6 +14,8 @@ import { openDialog, isDialogActive } from '../dialogUI';
 import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
+  pushEnemies, watchEnemies, pushEnemyHit, watchEnemyHits, pushPlayerDamage, watchMyDamage,
+  type EnemyNet, type EnemyHit,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import { loadEquip } from '../inventory';
@@ -149,6 +151,14 @@ export class GameScene extends Phaser.Scene {
   private remotes: Record<string, Remote> = {};
   private unwatchState: (() => void) | null = null;
   private started = false;
+  // Host-authoritative вороги: хост рахує й транслює, решта дзеркалять.
+  private amHost = false;
+  private lastEnemyPush = 0;
+  private netEnemies: Record<string, EnemyNet> = {};
+  private seenEnemyIds = new Set<number>(); // netId, які хоч раз прийшли від хоста (щоб знати «загинув» vs «ще не синхр.»)
+  private unwatchEnemies: (() => void) | null = null;
+  private unwatchHits: (() => void) | null = null;
+  private unwatchDmg: (() => void) | null = null;
 
   constructor() {
     super('Game');
@@ -246,6 +256,7 @@ export class GameScene extends Phaser.Scene {
     this.levelAnims = []; this.lvlAnimTime = 0;
     this.remotes = {};
     this.netStates = {};
+    this.amHost = false; this.lastEnemyPush = 0; this.netEnemies = {}; this.seenEnemyIds.clear();
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
     this.cameras.main.setBackgroundColor('#2a2233');
@@ -332,6 +343,8 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
+      this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.();
+      this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = null;
     });
     // Якщо лобі немає (вхід з карти або прев'ю студії) — старт без екрана лобі.
     // Маркер zag_coop_lobby (ставить WorldScene при подорожі з хоругвою) → кооп
@@ -473,15 +486,18 @@ export class GameScene extends Phaser.Scene {
       const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
       const rnd = (a: number, b: number): number => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
       const toAttach: Array<{ enemy: Enemy; charId: string }> = [];
-      for (const z of doc.enemySpawns) {
+      // netId = порядковий індекс: спавн детермінований (однаковий на всіх клієнтах),
+      // тож цей індекс — стабільний ключ синхронізації ворога між гравцями.
+      doc.enemySpawns.forEach((z, idx) => {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
-        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) return;
         const rcx = acx + rnd(acx, acy) * 3, rcy = acy + rnd(acy, acx) * 3;
         const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
         const enemy = new Enemy(this, gx, gy);
+        enemy.netId = idx;
         this.enemies.push(enemy);
         if (p[2]) toAttach.push({ enemy, charId: p[2] });
-      }
+      });
       if (toAttach.length) {
         void (this.libReady ?? Promise.resolve()).then(async () => {
           // Опубліковані поведінки з репо (працюють на всіх пристроях/коопі), один раз.
@@ -710,6 +726,12 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isMulti) {
       this.unwatchState = watchGameState(code, (states) => { this.netStates = states; });
+      // Дзеркало ворогів від хоста (застосовуємо лише коли я НЕ хост).
+      this.unwatchEnemies = watchEnemies(code, (e) => { this.netEnemies = e; });
+      // Шкода від ворогів, яку хост маршрутизував саме мені.
+      this.unwatchDmg = watchMyDamage(code, this.myId, (ev) => {
+        if (this.playerSpawned) this.player.takeDamage(this.simTime, ev.dmg, ev.fromX);
+      });
     }
   }
 
@@ -800,6 +822,70 @@ export class GameScene extends Phaser.Scene {
     // прибрати тих, хто вийшов
     for (const id of Object.keys(this.remotes)) {
       if (!seen.has(id)) { this.remotes[id].container?.destroy(); delete this.remotes[id]; }
+    }
+  }
+
+  // ── Host-authoritative вороги ───────────────────────────────────────────────
+  // Хост — детермінований: найменший playerId серед присутніх (я + мережеві стани).
+  // Так усі клієнти згодні, хто рахує ворогів. Підписку на удари гравців тримає лише хост.
+  private electHost(): void {
+    let min = this.myId;
+    for (const id of Object.keys(this.netStates)) if (id < min) min = id;
+    const nowHost = min === this.myId;
+    if (nowHost === this.amHost) return;
+    this.amHost = nowHost;
+    if (nowHost) {
+      this.unwatchHits = watchEnemyHits(this.lobbyCode, (h) => this.applyRemoteHit(h));
+    } else {
+      this.unwatchHits?.(); this.unwatchHits = null;
+    }
+  }
+
+  // Найближчий гравець (локальний чи побратим) до ворога — його ціль/жертва.
+  private nearestTarget(e: Enemy): { floorX: number; floorY: number; victim: string } {
+    let bx = this.player.floorX, by = this.player.floorY, victim = 'local';
+    let best = (bx - e.floorX) ** 2 + (by - e.floorY) ** 2;
+    for (const [id, r] of Object.entries(this.remotes)) {
+      const d = (r.rx - e.floorX) ** 2 + (r.ry - e.floorY) ** 2;
+      if (d < best) { best = d; bx = r.rx; by = r.ry; victim = id; }
+    }
+    return { floorX: bx, floorY: by, victim };
+  }
+
+  // Шкода ворога → жертві: локальному гравцю напряму, побратиму — подією в його чергу.
+  private applyEnemyDamage(victim: string, dmg: number, fromX: number, time: number): void {
+    if (victim === 'local') this.player.takeDamage(time, dmg, fromX);
+    else pushPlayerDamage(this.lobbyCode, victim, { dmg, fromX });
+  }
+
+  // Хост отримав удар побратима по ворогу — застосовує авторитетно.
+  private applyRemoteHit(h: EnemyHit): void {
+    const e = this.enemies.find((x) => x.netId === h.netId);
+    if (e && e.vulnerable(this.simTime) && e.hurt(h.dmg, this.simTime, h.fromX)) this.removeEnemy(e);
+  }
+
+  private removeEnemy(e: Enemy): void {
+    e.destroy();
+    this.enemies = this.enemies.filter((x) => x !== e);
+  }
+
+  // Хост: транслюємо знімок живих ворогів (~11 разів/сек).
+  private broadcastEnemies(time: number): void {
+    if (time - this.lastEnemyPush < 90) return;
+    this.lastEnemyPush = time;
+    const payload: Record<string, EnemyNet> = {};
+    for (const e of this.enemies) if (e.netId >= 0) payload[e.netId] = e.netSnapshot();
+    pushEnemies(this.lobbyCode, payload);
+  }
+
+  // Не-хост: дзеркалимо ворогів. Відсутній netId, який РАНІШЕ бачили → загинув
+  // (прибираємо); якого ще не бачили → хост ще не почав слати (лишаємо як є).
+  private mirrorEnemies(dt: number): void {
+    for (const id of Object.keys(this.netEnemies)) this.seenEnemyIds.add(Number(id));
+    for (const e of [...this.enemies]) {
+      const s = e.netId >= 0 ? this.netEnemies[e.netId] : undefined;
+      if (s) e.applyNet(s, dt);
+      else if (this.seenEnemyIds.has(e.netId)) this.removeEnemy(e);
     }
   }
 
@@ -968,7 +1054,7 @@ export class GameScene extends Phaser.Scene {
       [1060, this.bandBottom - 10],
       [1120, mid],
     ];
-    for (const [x, y] of spots) this.enemies.push(new Enemy(this, x, y));
+    spots.forEach(([x, y], i) => { const e = new Enemy(this, x, y); e.netId = 900 + i; this.enemies.push(e); });
     this.banner.setPosition(this.logicalW / 2 + this.uiOffX, 84 + this.uiOffY).setText('БИЙСЯ! Зачисти ворогів');
   }
 
@@ -1091,32 +1177,43 @@ export class GameScene extends Phaser.Scene {
     const targetScrollX = this.player.x - cam.width * 0.5;
     cam.scrollX += (targetScrollX - cam.scrollX) * 0.08;
 
-    // Кооп: шлемо свою позицію й малюємо інших гравців
-    if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); }
+    // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
+    if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
+    else this.amHost = true; // соло = сам собі хост
 
     // Тригер хвилі (демо-арена; у режимі рівня вимкнено)
     if (!this.levelMode && !this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();
 
-    // Удар гравця: зона перед ним з урахуванням глибини
+    // Удар гравця по ворогу. Хост застосовує напряму; не-хост шле запит хосту
+    // (справжня шкода/смерть — на хості, звідти прилетить у знімку).
     if (this.player.isAttacking(time) && this.player.grounded) {
       for (const e of [...this.enemies]) {
         if (!e.vulnerable(time)) continue;
         const dx = (e.floorX - this.player.floorX) * this.player.facing;
         const dy = Math.abs(e.floorY - this.player.floorY);
         if (dx > 0 && dx <= PLAYER.attackReach && dy <= PLAYER.attackDepth) {
-          const dead = e.hurt(PLAYER.attackDamage, time, this.player.floorX);
-          if (dead) {
-            e.destroy();
-            this.enemies = this.enemies.filter((x) => x !== e);
+          if (this.amHost) {
+            if (e.hurt(PLAYER.attackDamage, time, this.player.floorX)) this.removeEnemy(e);
+          } else {
+            pushEnemyHit(this.lobbyCode, { netId: e.netId, dmg: PLAYER.attackDamage, fromX: this.player.floorX });
+            e.registerLocalHit(time);
           }
         }
       }
     }
 
-    // Вороги думають і б'ють
-    for (const e of this.enemies) {
-      const dmg = e.think(this.player, time, dt, band);
-      if (dmg > 0) this.player.takeDamage(time, dmg, e.floorX);
+    if (this.amHost) {
+      // Авторитетна симуляція: ворог наводиться на НАЙБЛИЖЧОГО гравця (локального
+      // чи побратима); шкода маршрутизується саме тій жертві.
+      for (const e of this.enemies) {
+        const t = this.nearestTarget(e);
+        const dmg = e.think(t, time, dt, band);
+        if (dmg > 0) this.applyEnemyDamage(t.victim, dmg, e.floorX, time);
+      }
+      if (this.isMulti) this.broadcastEnemies(time);
+    } else {
+      // Не-хост: дзеркалимо стан ворогів від хоста.
+      this.mirrorEnemies(dt);
     }
 
     // Арена зачищена — відкриваємо шлях

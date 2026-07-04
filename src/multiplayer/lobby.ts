@@ -4,7 +4,7 @@
 
 import { db } from '../firebase';
 import {
-  ref, set, get, onValue, remove, onDisconnect,
+  ref, set, get, onValue, remove, onDisconnect, push, onChildAdded,
   serverTimestamp, off, type Unsubscribe,
 } from 'firebase/database';
 
@@ -137,4 +137,45 @@ export function watchGameState(
   const r = ref(db, `lobbies/${code.toUpperCase()}/state`);
   onValue(r, (snap) => cb(snap.exists() ? (snap.val() as Record<string, PlayerState>) : {}));
   return () => off(r);
+}
+
+// ---- Host-authoritative вороги (кооп) ----
+// Проблема: кожен клієнт крутив СВОЮ симуляцію ворогів → позиції/кіли не збігались.
+// Рішення: один клієнт-господар (детерм. обраний — найменший id серед присутніх)
+// рахує ворогів і транслює їхній стан у lobbies/{code}/enemies; решта дзеркалять.
+// Удари гравців→ворогам і ворогів→гравцям — події (onChildAdded + видалення після
+// обробки), щоб маршрутизувати шкоду до правильного клієнта.
+
+export interface EnemyNet { x: number; y: number; z: number; a: string; f: number; hp: number }
+export interface EnemyHit { netId: number; dmg: number; fromX: number }
+export interface DmgEvent { dmg: number; fromX: number }
+
+// Хост пише повний знімок живих ворогів (netId → стан). Відсутній netId = загинув.
+export function pushEnemies(code: string, enemies: Record<string, EnemyNet>): void {
+  set(ref(db, `lobbies/${code.toUpperCase()}/enemies`), enemies).catch(() => {});
+}
+export function watchEnemies(code: string, cb: (e: Record<string, EnemyNet>) => void): Unsubscribe {
+  const r = ref(db, `lobbies/${code.toUpperCase()}/enemies`);
+  onValue(r, (snap) => cb(snap.exists() ? (snap.val() as Record<string, EnemyNet>) : {}));
+  return () => off(r);
+}
+
+// Удар гравця по ворогу (не-хост → хост): хост застосовує подію і видаляє її.
+export function pushEnemyHit(code: string, hit: EnemyHit): void {
+  push(ref(db, `lobbies/${code.toUpperCase()}/ehits`), hit).catch(() => {});
+}
+export function watchEnemyHits(code: string, cb: (h: EnemyHit) => void): Unsubscribe {
+  const r = ref(db, `lobbies/${code.toUpperCase()}/ehits`);
+  const h = onChildAdded(r, (snap) => { const v = snap.val() as EnemyHit | null; if (v) cb(v); void remove(snap.ref); });
+  return () => off(r, 'child_added', h);
+}
+
+// Удар ворога по гравцю (хост → жертва): подія в чергу конкретного гравця.
+export function pushPlayerDamage(code: string, victimId: string, ev: DmgEvent): void {
+  push(ref(db, `lobbies/${code.toUpperCase()}/pdmg/${victimId}`), ev).catch(() => {});
+}
+export function watchMyDamage(code: string, myId: string, cb: (ev: DmgEvent) => void): Unsubscribe {
+  const r = ref(db, `lobbies/${code.toUpperCase()}/pdmg/${myId}`);
+  const h = onChildAdded(r, (snap) => { const v = snap.val() as DmgEvent | null; if (v) cb(v); void remove(snap.ref); });
+  return () => off(r, 'child_added', h);
 }
