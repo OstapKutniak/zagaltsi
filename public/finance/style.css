@@ -23,6 +23,7 @@ html, body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 #app { height: 100%; display: flex; flex-direction: column; }
 
@@ -153,6 +154,8 @@ html, body {
 .cat-amt span { font-size: 10px; color: var(--text3); font-weight: 600; }
 .cat.zero .cat-circle { opacity: 0.22; }
 .cat.zero .cat-amt { color: var(--text3); font-weight: 600; }
+.cat.arch .cat-circle { filter: grayscale(1); opacity: 0.4; }
+.cat.arch .cat-name, .cat.arch .cat-amt { color: var(--text3); }
 
 /* ── RECORDS (Операції) ── */
 #records-screen { display: flex; flex-direction: column; overflow: hidden; }
@@ -191,6 +194,7 @@ html, body {
 .rec-del  { background: #fde7ef; color: var(--exp); }
 
 /* ── ACCOUNTS (Рахунки) ── */
+#acc-list { padding-bottom: calc(var(--bottom) + 100px); }
 .acc-section-title { font-size: 17px; font-weight: 700; color: var(--active-ink); padding: 16px 16px 4px; display: flex; justify-content: space-between; align-items: baseline; }
 .acc-section-sum { font-size: 15px; font-weight: 600; }
 .acc-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; cursor: pointer; }
@@ -265,7 +269,10 @@ html, body {
 .ov-tg.inc { background: #e6f6ec; } .ov-tg.inc .l { color: var(--inc); } .ov-tg.inc .v { color: var(--inc); }
 .ov-tg.dim { background: #f4f4f6; } .ov-tg.dim .l, .ov-tg.dim .v { color: var(--text3); }
 /* ── BAR CHART ── */
-.ov-barchart { border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.ov-barchart { margin-bottom: 12px; }
+.ov-bars { position: relative; }
+.ov-xrow { position: relative; height: 15px; margin-top: 3px; }
+.ov-xl { position: absolute; top: 0; transform: translateX(-50%); font-size: 10px; color: var(--text3); white-space: nowrap; }
 
 .ov-cat { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
 .ov-cat.clickable { cursor: pointer; }
@@ -554,6 +561,40 @@ input[type="file"] { display: none; }
 .tog-track:before { content: ''; position: absolute; width: 27px; height: 27px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
 .tog input:checked + .tog-track { background: var(--inc); }
 .tog input:checked + .tog-track:before { transform: translateX(20px); }
+
+/* ── COLOR PALETTE ── */
+.pal { display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; padding: 4px 18px 6px; }
+.pal-sw { aspect-ratio: 1; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.pal-sw.sel { border-color: var(--text); box-shadow: 0 0 0 2px #fff inset; }
+
+/* ── ARCHIVE TOGGLE (categories) ── */
+.fab-arch {
+  position: fixed; right: 84px; bottom: calc(var(--bottom) + 78px);
+  width: 56px; height: 56px; border-radius: 18px; border: none;
+  background: #f1f1f4; color: #6b6b70;
+  display: none; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.1); z-index: 50;
+}
+.fab-arch.show { display: flex; }
+.fab-arch.on { background: var(--active); color: var(--active-ink); }
+.fab-arch:active { transform: scale(0.93); }
+.fab-arch svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── CATEGORY EDITOR ACTIONS ── */
+.ce-actions { display: flex; flex-direction: column; gap: 10px; padding: 20px 16px 10px; margin-top: 12px; border-top: 8px solid #f6f6f8; }
+.ce-act { background: #f4f4f6; color: var(--text); border: none; border-radius: 14px; padding: 15px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.ce-act:active { background: #e9e9ee; }
+.ce-act-del { background: #fde7ef; color: var(--exp); }
+
+/* ── ACCOUNT FORM APPEARANCE ── */
+.afv-appear { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 8px 18px 4px; }
+.afv-icon { width: 56px; height: 56px; border-radius: 14px; background: var(--c, #999); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.afv-icon svg { width: 28px; height: 28px; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.afv-icon svg .fill { fill: #fff; stroke: none; }
+.afv-appear .pal { width: 100%; padding: 0; grid-template-columns: repeat(10, 1fr); gap: 8px; }
+
+/* ── SETTINGS ICONS ── */
+.settings-row .r-ic svg { width: 22px; height: 22px; fill: none; stroke: var(--text2); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 
 .empty { text-align: center; padding: 60px 20px; color: var(--text2); }
 .empty .ic { font-size: 44px; margin-bottom: 10px; }
