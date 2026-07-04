@@ -1,0 +1,11 @@
+name = "shopping-push"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Секрети (задаються через `wrangler secret put`, НЕ тут):
+#   VAPID_PRIVATE_JWK — приватний VAPID-ключ (JWK JSON)
+# Публічний ключ і адреса бази не секретні:
+[vars]
+VAPID_PUBLIC = "BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg"
+VAPID_SUBJECT = "mailto:ostap.kutniak@naoma.edu.ua"
+DB_URL = "https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app"

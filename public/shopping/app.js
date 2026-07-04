@@ -14,7 +14,12 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 4; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 5; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+// ── PUSH-сповіщення ─────────────────────────────────────────
+const WORKER_URL = ''; // адреса Cloudflare Worker (shopping-push); порожньо = вимкнено
+const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
+const PUSH_PATH = 'shopping/push';
+
 const CATS_PATH = 'shopping/categories';
 const PRODS_PATH = 'shopping/products';
 const LIST_PATH = 'shopping/list';
@@ -171,11 +176,12 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(r => { swReg = r; }).catch(() => {});
   // iOS тримає PWA замороженим — при поверненні у форграунд перевіряємо оновлення SW
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+    if (document.hidden) { flushNotify(); return; } // згорнули додаток — одразу шлемо накопичене
     if (swReg) swReg.update().catch(() => {});
     refreshListOrder(); // повернення в додаток = свіже пересортування
     renderList();
   });
+  window.addEventListener('pagehide', flushNotify);
   initSwipeLayout();
   bindEvents();
   seedIfEmpty().finally(subscribe);
@@ -241,6 +247,75 @@ function purgeOldDone() {
   if (Object.keys(upd).length) update(ref(db, LIST_PATH), upd).catch(() => {});
 }
 
+// ── PUSH: підписка і надсилання подій ──────────────────────
+function deviceId() {
+  let id = localStorage.getItem('shop-device');
+  if (!id) { id = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('shop-device', id); }
+  return id;
+}
+const b64uToU8 = s => {
+  const b = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(b, c => c.charCodeAt(0));
+};
+
+async function enableNotifications() {
+  if (!('Notification' in window) || !('PushManager' in window)) {
+    toast('Сповіщення працюють лише з іконки на екрані «Домів»'); return;
+  }
+  try {
+    const reg = swReg || await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Дозвіл на сповіщення не надано'); renderNotifyRow(); return; }
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(VAPID_PUBLIC) });
+    await set(ref(db, `${PUSH_PATH}/${deviceId()}`), {
+      sub: JSON.stringify(sub.toJSON()),
+      ua: navigator.userAgent.slice(0, 90),
+      ts: Date.now(),
+    });
+    toast('Сповіщення увімкнено');
+  } catch (e) {
+    toast('Не вдалося увімкнути сповіщення');
+    console.warn('push subscribe failed', e);
+  }
+  renderNotifyRow();
+}
+async function renderNotifyRow() {
+  const sub = $('notify-sub');
+  if (!sub) return;
+  if (!('Notification' in window) || !('PushManager' in window)) { sub.textContent = 'Доступно лише в додатку з екрана «Домів»'; return; }
+  if (Notification.permission === 'granted') {
+    const s = await (swReg || await navigator.serviceWorker.ready).pushManager.getSubscription().catch(() => null);
+    sub.textContent = s ? 'Увімкнено на цьому пристрої' : 'Натисни, щоб увімкнути';
+  } else if (Notification.permission === 'denied') {
+    sub.textContent = 'Заборонено в налаштуваннях iOS';
+  } else sub.textContent = 'Натисни, щоб увімкнути';
+}
+
+// черга подій: збираємо кілька дій в одне сповіщення (8с тиші або згортання)
+let notifyQueue = { added: [], bought: [] };
+let notifyTimer = null;
+function queueNotify(kind, name) {
+  if (!WORKER_URL) return;
+  notifyQueue[kind].push(name);
+  clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(flushNotify, 8000);
+}
+function unqueueNotify(kind, name) {
+  const i = notifyQueue[kind].indexOf(name);
+  if (i >= 0) notifyQueue[kind].splice(i, 1);
+}
+function flushNotify() {
+  clearTimeout(notifyTimer);
+  const q = notifyQueue;
+  notifyQueue = { added: [], bought: [] };
+  ['added', 'bought'].forEach(kind => {
+    if (!q[kind].length || !WORKER_URL) return;
+    const payload = JSON.stringify({ event: kind, names: q[kind], from: deviceId() });
+    if (navigator.sendBeacon) navigator.sendBeacon(WORKER_URL, payload);
+    else fetch(WORKER_URL, { method: 'POST', body: payload }).catch(() => {});
+  });
+}
+
 // ── LIST ACTIONS ───────────────────────────────────────────
 const listEntryFor = pid => Object.entries(listMap).find(([, it]) => it.pid === pid && !it.done);
 function addToList(pid, { silent } = {}) {
@@ -249,9 +324,13 @@ function addToList(pid, { silent } = {}) {
   if (listEntryFor(pid)) { if (!silent) toast(`«${p.name}» вже у списку`); return false; }
   const item = { pid, name: p.name, icon: p.icon, cat: p.cat, ts: Date.now(), done: false };
   set(push(ref(db, LIST_PATH)), item);
+  queueNotify('added', p.name);
   return true;
 }
-function removeFromList(id) { remove(ref(db, `${LIST_PATH}/${id}`)); }
+function removeFromList(id) {
+  if (listMap[id]) unqueueNotify('added', listMap[id].name);
+  remove(ref(db, `${LIST_PATH}/${id}`));
+}
 
 async function toggleDone(id) {
   const it = listMap[id];
@@ -262,9 +341,11 @@ async function toggleDone(id) {
     const archRef = push(ref(db, `${ARCH_PATH}/${day}`));
     await set(archRef, { name: it.name, icon: it.icon, catName: c.name, catColor: c.color, catIcon: c.icon, ts: Date.now() });
     await update(ref(db, `${LIST_PATH}/${id}`), { done: true, doneTs: Date.now(), day, archDay: day, archKey: archRef.key });
+    queueNotify('bought', it.name);
   } else {
     if (it.archDay && it.archKey) await remove(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`)).catch(() => {});
     await update(ref(db, `${LIST_PATH}/${id}`), { done: false, doneTs: null, day: null, archDay: null, archKey: null });
+    unqueueNotify('bought', it.name);
   }
 }
 
@@ -729,7 +810,8 @@ function bindEvents() {
   $('item-done').addEventListener('click', saveItemSheet);
 
   $('btn-cats').addEventListener('click', openCatsSheet);
-  $('btn-settings').addEventListener('click', () => $('settings-overlay').classList.add('open'));
+  $('btn-settings').addEventListener('click', () => { renderNotifyRow(); $('settings-overlay').classList.add('open'); });
+  $('btn-notify').addEventListener('click', enableNotifications);
   $('btn-clear-done').addEventListener('click', () => {
     const upd = {};
     Object.entries(listMap).forEach(([id, it]) => { if (it.done) upd[id] = null; });

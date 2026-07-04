@@ -1,4 +1,4 @@
-const CACHE = 'shop-v4';
+const CACHE = 'shop-v5';
 const BASE = '/zagaltsi/shopping';
 const ASSETS = [BASE+'/', BASE+'/index.html', BASE+'/style.css', BASE+'/app.js', BASE+'/manifest.json'];
 
@@ -19,4 +19,23 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );
+});
+
+// ── PUSH-сповіщення ─────────────────────────────────────────
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data.json(); } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Покупки', {
+    body: d.body || '',
+    icon: BASE + '/icons/icon-192.png',
+    data: { url: d.url || BASE + '/' },
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if (c.url.includes('/shopping/')) return c.focus();
+    return clients.openWindow((e.notification.data && e.notification.data.url) || BASE + '/');
+  }));
 });
