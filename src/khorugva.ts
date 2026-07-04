@@ -57,6 +57,9 @@ export const APP_SHORT = 'Horugva';
 export async function leaveKhorugva(id: string): Promise<void> {
   const myId = getPlayerId();
   setMyKhorugva(null);
+  // Одразу чистимо кеш паті — інакше «Побратимів: 2/5», портрети в Мандрах і збір
+  // біля вогнища лишались зі старим складом, поки щось не перезапише кеш.
+  cacheMembers([]); cacheLeader(null);
   await withTimeout(set(ref(db, `khorugvas/${id}/members/${myId}`), null));
 }
 

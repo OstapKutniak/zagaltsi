@@ -246,9 +246,17 @@ export function buildKhorugvaPanel(scene: Phaser.Scene, offX: number, offY: numb
       return;
     }
 
+    // Системний prompt на мобільному Телеграмі змикає viewport і не завжди повертає
+    // подію resize — тому після діалогу примусово перефітуємо канвас (кілька разів,
+    // поки viewport відновиться), інакше екран лишався маленьким угорі.
+    const refit = (): void => {
+      const f = (window as unknown as { __zagRefit?: () => void }).__zagRefit;
+      if (!f) return; f(); setTimeout(f, 120); setTimeout(f, 450);
+    };
     // «По центру оголосити збір» + запрошення + вихід.
     btn(250, 'Оголосити збір', () => {
       const nick = window.prompt('Телеграм-нік гравця (напр. @friend):', '@');
+      refit();
       if (!nick || nick.replace(/^@/, '').trim().length < 2) return;
       setStatus('Скликаємо…');
       void callToGather(nick, khId)
@@ -260,8 +268,8 @@ export function buildKhorugvaPanel(scene: Phaser.Scene, offX: number, offY: numb
     btn(300, 'Скопіювати запрошення', () => {
       const link = `https://t.me/${BOT_USERNAME}/${APP_SHORT}?startapp=kh_${khId}`;
       const done = (): void => { setStatus('Запрошення скопійовано — кинь другу в чат'); };
-      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(done, () => window.prompt('Скопіюй запрошення:', link));
-      else window.prompt('Скопіюй запрошення:', link);
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(done, () => { window.prompt('Скопіюй запрошення:', link); refit(); });
+      else { window.prompt('Скопіюй запрошення:', link); refit(); }
     }, 22);
     btn(346, 'Покинути', () => {
       if (busy) return; busy = true;

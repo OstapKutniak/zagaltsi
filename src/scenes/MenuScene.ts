@@ -7,7 +7,7 @@ import { buildInvPanel, applyEquipTo } from './invPanel';
 import { buildQuestsPanel, buildAchievementsPanel, buildKhorugvaPanel } from './pagePanels';
 import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
-import { publishMyChar, loadMemberCharDoc, loadMemberEquip } from '../multiplayer/sharedChars';
+import { publishMyChar, publishMyEquip, loadMemberCharDoc, loadMemberEquip } from '../multiplayer/sharedChars';
 import { cachedMembers, refreshMembers, type KhMember } from '../khorugva';
 
 // Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
@@ -89,8 +89,11 @@ export class MenuScene extends Phaser.Scene {
   private morphing = false;
   // Збір побратимів біля вогнища (сторінка Хоругва): персонажі всіх учасників паті
   // зі своїм спорядженням, розставлені по колу. Свій lobbyChar на цей час ховаємо.
-  private gather: Array<{ char: CutoutCharacter; holder: Phaser.GameObjects.Container; facing: number }> = [];
+  private gather: Array<{ id: string; char: CutoutCharacter; holder: Phaser.GameObjects.Container; facing: number; equipSig: string }> = [];
   private gatherGen = 0;
+  private regather: (() => void) | null = null; // переперевірка складу (вхід/вихід учасника)
+  private regatherAcc = 0;
+  private equipAcc = 0; // акумулятор для оновлення спорядження побратимів
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private startPage: PageKey | null = null; // deep-link: одразу зморфити в цей розділ
   private bgImg: Phaser.GameObjects.Image | null = null;
@@ -481,6 +484,7 @@ export class MenuScene extends Phaser.Scene {
 
   private clearGathering(): void {
     this.gatherGen++;
+    this.regather = null;
     for (const g of this.gather) g.holder.destroy(true);
     this.gather = [];
     this.charHolder?.setVisible(true); // повертаємо одинокого lobbyChar
@@ -517,13 +521,21 @@ export class MenuScene extends Phaser.Scene {
             const holder = this.add.container(slot.x + offX, (slot.y ?? 0) + offY, [char]);
             holder.setScrollFactor(0).setScale(this.fx.char.scale).setDepth(slot.depth);
             if (slot.feetY != null) { char.tick(0, slot.facing); holder.y = slot.feetY + offY - char.feetOffset() * this.fx.char.scale; }
-            this.gather.push({ char, holder, facing: slot.facing });
+            const entry = { id: m.id, char, holder, facing: slot.facing, equipSig: '' };
+            this.gather.push(entry);
             // Спорядження — окремо, коли приїде (не блокує появу персонажа).
-            void loadMemberEquip(m.id).then((equip) => { if (gen === this.gatherGen) char.setEquipment(equip); });
+            void loadMemberEquip(m.id).then((equip) => {
+              if (gen !== this.gatherGen) return;
+              entry.equipSig = JSON.stringify(equip);
+              char.setEquipment(equip);
+            });
           });
         });
       });
     };
+    // Переперевірка складу (update викликає throttled): вхід/вихід учасника →
+    // збір перебудується, а після «Покинути» (0-1) — повернеться одинокий персонаж.
+    this.regather = () => place(cachedMembers());
     place(cachedMembers());              // миттєво з кешу
     void refreshMembers().then(place);   // оновлення з мережі
   }
@@ -554,6 +566,23 @@ export class MenuScene extends Phaser.Scene {
   update(_time: number, deltaMs: number): void {
     this.lobbyChar?.tick(deltaMs / 1000, CHAR_FACING);
     for (const g of this.gather) g.char.tick(deltaMs / 1000, g.facing); // збір біля вогнища
+    // Раз на ~0.8с переперевіряємо склад збору (хтось приєднався/вийшов).
+    if (this.regather) { this.regatherAcc += deltaMs; if (this.regatherAcc > 800) { this.regatherAcc = 0; this.regather(); } }
+    // Раз на ~3с оновлюємо спорядження побратимів (я публікую своє, тягну їхнє) —
+    // щоб меч/броня, вдягнені під час збору, зʼявились у всіх без перебудови.
+    if (this.gather.length) {
+      this.equipAcc += deltaMs;
+      if (this.equipAcc > 3000) {
+        this.equipAcc = 0;
+        void publishMyEquip();
+        for (const g of this.gather) {
+          void loadMemberEquip(g.id).then((equip) => {
+            const sig = JSON.stringify(equip);
+            if (sig !== g.equipSig) { g.equipSig = sig; g.char.setEquipment(equip); }
+          });
+        }
+      }
+    }
     // Мерехтіння вогню: сума неспівмірних синусів = живий нерівний ритм.
     this.fireTime += deltaMs / 1000;
     const t = this.fireTime;

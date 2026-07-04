@@ -66,6 +66,15 @@ export function myEquipVis(): EquipVis {
   const e = loadEquip();
   return { pants: !!e.pants, armor: !!e.armor, helmet: !!e.helmet, weapon: !!e.weapon };
 }
+// Легка публікація ЛИШЕ спорядження (маленька, на відміну від повного доку ~1МБ) —
+// щоб побратими одразу бачили, що я вдягнув, без повторної заливки арту.
+let _equipSig: string | null = null;
+export async function publishMyEquip(): Promise<void> {
+  const eq = myEquipVis();
+  const sig = JSON.stringify(eq);
+  if (_equipSig === sig) return;
+  try { await set(ref(db, `shared_chars/${getPlayerId()}/equip`), eq); _equipSig = sig; } catch { /* офлайн */ }
+}
 export async function publishMyChar(): Promise<void> {
   const doc = await resolveMyCharDoc();
   if (!doc) return;

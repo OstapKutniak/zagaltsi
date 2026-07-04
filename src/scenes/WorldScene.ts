@@ -7,7 +7,7 @@ import {
 } from '../world/worldData';
 import { parchmentCanvas, drawInkDecor, locationIcon, regionSeal, compassRose, iconFromLabel, type MapIconKind } from '../world/mapArt';
 import { ensureAmbience } from '../sound/ambience';
-import { inPartyCached, iAmLeaderCached } from '../khorugva';
+import { iAmLeaderCached } from '../khorugva';
 import { broadcastNav } from '../multiplayer/partyNav';
 
 // Сцена мандрів — «стара мапа»: процедурний пергамент + чорнильні іконки локацій
@@ -335,8 +335,8 @@ export class WorldScene extends Phaser.Scene {
 
   private onNodeClick(n: WorldNode): void {
     if (this.travelling) return;
-    // У хоругві напрям обирає ГОЛОВНИЙ. Ведений лише слідує (екран веде лідер).
-    if (inPartyCached() && !iAmLeaderCached()) { this.toast('Веде осавул (головний хоругви)'); return; }
+    // М'який супровід: лідер веде (його переходи тягнуть екрани всіх), але ведений
+    // НЕ заблокований — може й сам ходити (щоб не застрягати, як було з жорстким гейтом).
     if (n.type === 'region') {
       if (!n.regionId) { this.toast('Регіон ще зачинено'); return; }
       if (iAmLeaderCached()) broadcastNav('World', { worldId: n.regionId });
