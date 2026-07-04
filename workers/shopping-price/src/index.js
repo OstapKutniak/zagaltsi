@@ -109,48 +109,57 @@ async function cachedLookup(chain, branch, q, lookup, ctx) {
   return val;
 }
 
-// Дефолтний пошук мереж сортує за популярністю, тож нерелевантне лізе вгору
-// («яйця» → молоко). Тому серед результатів беремо ті, у назві яких є корінь
-// шуканого слова, і з них — найдешевший у наявності («мінімальний кошик» для
-// чесного порівняння магазинів). Точний товар обирається окремо через
-// уточнення (variant) на боці додатка.
-function pick(items, q, getTitle, getPrice, inStock) {
-  const w = q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5); // корінь першого слова
-  const avail = items.filter(inStock);
-  const byName = avail.filter(i => getTitle(i).toLowerCase().includes(w));
-  const pool = byName.length ? byName : avail;
-  pool.sort((a, b) => getPrice(a) - getPrice(b));
-  return pool[0] || null;
+// Дефолтний пошук мереж дає крайнощі: Сільпо (сорт за популярністю) + вибір
+// найдешевшого чіпляв дрібні міні-упаковки (молоко за 21 ₴), а zakaz першим
+// віддає преміум/крафт (хліб за 119 ₴). Тому беремо МЕДІАНУ цін серед
+// релевантних товарів у наявності — типову ціну, стійку до обох викидів.
+// Точний товар обирається окремо через уточнення (variant) на боці додатка.
+function median(nums) {
+  const s = nums.filter(n => n != null).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+// cands: [{title, price(грн), oldPrice}] — релевантні й у наявності
+function represent(cands) {
+  const inb = cands.filter(c => c.price != null);
+  const med = median(inb.map(c => c.price));
+  if (med == null) return null;
+  let rep = inb[0], best = Infinity;                       // представник — найближчий до медіани (для назви)
+  for (const c of inb) { const d = Math.abs(c.price - med); if (d < best) { best = d; rep = c; } }
+  const price = Math.round(med * 100) / 100;
+  return { title: rep.title, price, oldPrice: rep.oldPrice && rep.oldPrice > price ? rep.oldPrice : null };
 }
 
-// Сільпо: ціна вже в гривнях, залишок у полі stock
+// Сільпо: ціна в гривнях, залишок у stock. Фільтруємо за назвою (пошук сортує
+// за популярністю → лізе нерелевантне), беремо медіану наявних.
 async function silpoPrice(branch, q) {
   const u = `https://sf-ecom-api.silpo.ua/v1/uk/branches/${branch}/products`
     + `?limit=30&offset=0&deliveryType=DeliveryHome&inStock=true&search=${encodeURIComponent(q)}`;
   const r = await fetch(u, { headers: { 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'uk' } });
   if (!r.ok) return null;
   const d = await r.json();
-  const it = pick(d.items || [], q, i => i.title || '', i => num(i.price) ?? Infinity, i => (i.stock ?? 0) > 0);
-  if (!it) return null;
-  const price = num(it.price);
-  const old = num(it.oldPrice);
-  return price == null ? null : { title: it.title, price, oldPrice: old && old > price ? old : null };
+  const w = q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5); // корінь першого слова
+  const cands = (d.items || [])
+    .filter(i => (i.stock ?? 0) > 0 && (i.title || '').toLowerCase().includes(w))
+    .map(i => ({ title: i.title, price: num(i.price), oldPrice: num(i.oldPrice) }));
+  return represent(cands);
 }
 
-// zakaz (Новус та ін.): пошук уже релевантний (сортує сам сервер), а назви
-// приходять англійською — тому фільтр за назвою тут не працює і не потрібен:
-// беремо перший результат. Ціни в копійках.
+// zakaz (Новус та ін.): пошук уже релевантний (сортує сервер), назви англійські
+// → фільтр за назвою не працює. Беремо медіану перших ~15 результатів (най-
+// релевантніших). Ціни в копійках.
 async function zakazPrice(branch, q) {
   const u = `https://stores-api.zakaz.ua/stores/${branch}/products/search/?q=${encodeURIComponent(q)}`;
   const r = await fetch(u, { headers: { 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'uk' } });
   if (!r.ok) return null;
   const d = await r.json();
-  const it = (d.results || [])[0];
-  if (!it) return null;
-  const price = num(it.price);
-  if (price == null) return null;
-  const disc = it.discount && it.discount.status ? num(it.discount.old_price) : null;
-  return { title: it.title, price: price / 100, oldPrice: disc && disc > price ? disc / 100 : null };
+  const cands = (d.results || []).slice(0, 15).map(i => {
+    const p = num(i.price);
+    const disc = i.discount && i.discount.status ? num(i.discount.old_price) : null;
+    return { title: i.title, price: p == null ? null : p / 100, oldPrice: disc == null ? null : disc / 100 };
+  });
+  return represent(cands);
 }
 
 const num = v => (v == null || v === '' || isNaN(+v)) ? null : +v;
