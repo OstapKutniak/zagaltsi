@@ -94,7 +94,25 @@ html, body {
 .litem {
   display: flex; align-items: center; gap: 12px;
   padding: 9px 16px 9px 24px;
+  position: relative; cursor: pointer;
 }
+.litem:active { background: #f6f6f8; }
+.litem-sub { font-size: 12.5px; color: var(--text2); margin-top: 2px; }
+.litem.done .litem-sub { color: var(--text3); }
+.litem-actions {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  display: none; gap: 8px;
+}
+.litem.open .litem-actions { display: flex; }
+.litem.open .litem-check { visibility: hidden; }
+.lact {
+  width: 38px; height: 38px; border-radius: 11px; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.lact svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.lact-edit { background: #e7eefc; color: #2f80ed; }
+.lact-swap { background: var(--active); color: var(--active-ink); }
+.lact-del  { background: #fde7ef; color: var(--danger); }
 .litem-ic {
   width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; background: var(--c);
@@ -134,7 +152,6 @@ html, body {
   font-size: 22px; font-weight: 700;
 }
 .arch-day:active .arch-circle { background: #d8d8e0; }
-.arch-sub { font-size: 12px; color: var(--text2); }
 .arch-cnt { font-size: 12px; font-weight: 700; color: var(--text3); }
 
 /* archive day sheet items */
@@ -215,6 +232,16 @@ html, body {
   margin: 0 14px 10px; background: #f1f1f4; border: none; border-radius: 10px;
   padding: 11px 14px; font-size: 15px; outline: none; font-family: inherit; flex-shrink: 0;
 }
+.add-commit { display: flex; gap: 8px; margin: 0 14px 10px; flex-shrink: 0; }
+.add-commit-btn {
+  flex: 1; background: var(--active-ink); color: #fff; border: none; border-radius: 12px;
+  padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.add-commit-btn:active { opacity: 0.85; }
+.add-commit-cancel {
+  width: 46px; background: #f1f1f4; color: var(--text2); border: none; border-radius: 12px;
+  font-size: 16px; cursor: pointer;
+}
 .add-grid-wrap { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; min-height: 0; }
 .add-grid {
   display: grid;
@@ -244,8 +271,8 @@ html, body {
   display: none; align-items: center; justify-content: center;
 }
 .ptile-badge svg { width: 11px; height: 11px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.ptile.inlist .ptile-badge { display: flex; }
-.ptile.inlist .ptile-name { color: var(--text); font-weight: 600; }
+.ptile.sel .ptile-badge { display: flex; }
+.ptile.sel .ptile-name { color: var(--text); font-weight: 600; }
 .ptile.new .ptile-circle { background: none; border: 2px dashed #cfcfd6; color: #b0b0b8; font-size: 26px; }
 .ptile-edit-dot {
   position: absolute; left: 0; top: -2px;

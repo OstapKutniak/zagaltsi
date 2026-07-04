@@ -68,6 +68,10 @@
     </div>
     <div class="add-chips" id="add-chips"></div>
     <input class="add-search" id="add-search" type="text" placeholder="Пошук продукту…">
+    <div class="add-commit" id="add-commit" style="display:none">
+      <button class="add-commit-btn" id="add-commit-btn">Додати до списку</button>
+      <button class="add-commit-cancel" id="add-commit-cancel">✕</button>
+    </div>
     <div class="add-grid-wrap"><div class="add-grid" id="add-grid"></div></div>
   </div>
 
@@ -111,6 +115,30 @@
         <button class="form-delete" id="prod-form-delete" style="display:none">Видалити</button>
         <button class="form-done" id="prod-form-done">Готово</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ITEM DETAIL SHEET (уточнення) -->
+  <div class="sheet-overlay" id="item-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="item-title">Продукт</div>
+      <div class="form-sub">Яке саме</div>
+      <input class="sheet-search" id="item-variant" type="text" placeholder="Напр.: Always Ultra Night, 12 шт…">
+      <div class="form-sub">Де купити</div>
+      <input class="sheet-search" id="item-place" type="text" placeholder="Напр.: АТБ, аптека біля дому…">
+      <div class="form-foot">
+        <button class="form-done" id="item-done">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPLACE SHEET (заміна продуктом з категорії) -->
+  <div class="sheet-overlay" id="replace-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="replace-title">Замінити</div>
+      <div class="sheet-list" id="replace-list"></div>
     </div>
   </div>
 

@@ -26,9 +26,12 @@ const ICONS = {
   cart:'<circle cx="9" cy="20" r="1.4" class="fill"/><circle cx="17" cy="20" r="1.4" class="fill"/><path d="M3 4h2l2.5 11h10L20 7H6.5"/>',
   bag:'<path d="M6 8h12l-1 12H7z"/><path d="M9 8a3 3 0 016 0"/>',
   box:'<path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
+  pencil:'<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  swap:'<path d="M4 9h13l-4-4M20 15H7l4 4"/>',
+  trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>',
   // їжа
   bowl:'<path d="M3 11h18a9 9 0 01-18 0z"/><path d="M8 11V8M12 11V6.5M16 11V8"/>',
-  pasta:'<path d="M8 3v6a4 4 0 008 0V3"/><path d="M10.7 3v5.5M13.3 3v5.5"/><path d="M12 13v8"/>',
+  pasta:'<path d="M4 7.5c2.5-2.2 5.5-2.2 8 0s5.5 2.2 8 0"/><path d="M4 12c2.5-2.2 5.5-2.2 8 0s5.5 2.2 8 0"/><path d="M4 16.5c2.5-2.2 5.5-2.2 8 0s5.5 2.2 8 0"/>',
   egg:'<path d="M12 3c3.5 0 6.5 5 6.5 10a6.5 6.5 0 01-13 0C5.5 8 8.5 3 12 3z"/>',
   milk:'<path d="M8 3h8v3l2 4v9a2 2 0 01-2 2H8a2 2 0 01-2-2v-9l2-4z"/><path d="M6 10h12"/><path d="M8 6h8"/>',
   cereal:'<path d="M3 12h18a9 9 0 01-18 0z"/><circle cx="9" cy="9" r="1" class="fill"/><circle cx="13" cy="8" r="1" class="fill"/><circle cx="16.5" cy="10" r="1" class="fill"/>',
@@ -53,7 +56,7 @@ const ICONS = {
   cucumber:'<rect x="2.5" y="9.7" width="19" height="5" rx="2.5" transform="rotate(-32 12 12)"/><circle cx="9" cy="14" r="0.6" class="fill"/><circle cx="13" cy="11.6" r="0.6" class="fill"/><circle cx="16.4" cy="9.4" r="0.6" class="fill"/>',
   apple:'<path d="M12 7c-4-2-8 1-8 6 0 4 3 8 5.5 8 1 0 1.7-.6 2.5-.6s1.5.6 2.5.6C17 21 20 17 20 13c0-5-4-8-8-6z"/><path d="M12 7c0-2 1-3.5 3-4"/>',
   banana:'<path d="M5.5 4.5l1.8 1C7.3 13 11.5 17.3 19 18l1.2 1.7c-1.2.8-2.7 1.3-4.7 1.3C9 21 4.5 15.5 4.5 8c0-1.4.4-2.6 1-3.5z"/>',
-  tea:'<rect x="8" y="9" width="8" height="11" rx="1.5"/><path d="M12 9V4M12 4h3.5"/><path d="M10.5 13h3M10.5 16h3"/>',
+  tea:'<path d="M5.5 10h13v5a5 5 0 01-5 5h-3a5 5 0 01-5-5z"/><path d="M8.5 7c0-1.2 1.2-1.4 1.2-2.6M12 7c0-1.2 1.2-1.4 1.2-2.6M15.5 7c0-1.2 1.2-1.4 1.2-2.6"/>',
   chocolate:'<rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M12 4v16M5 12h14"/>',
   cookie:'<circle cx="12" cy="12" r="8"/><circle cx="9" cy="10" r="1" class="fill"/><circle cx="14" cy="9" r="1" class="fill"/><circle cx="15" cy="14" r="1" class="fill"/><circle cx="10" cy="15" r="1" class="fill"/>',
   sauce:'<path d="M9.5 8h5l1.5 2.5V19a2 2 0 01-2 2h-4a2 2 0 01-2-2v-8.5z"/><path d="M10.5 8V5.5h3V8"/><path d="M12 3.2v2.3"/>',
@@ -143,6 +146,8 @@ let collapsedCats = new Set();
 let addCurCat = null;       // активна категорія в шторці додавання
 let addEditMode = false;
 let addSearch = '';
+let addSelect = null;       // null = звичайний режим; Set(pid) = мультивибір (затиск)
+let openActionsId = null;   // позиція списку з відкритими діями (затиск)
 let catFormId = null;       // null = нова
 let catFormSel = { color: COLORS[0], icon: 'tag' };
 let prodFormId = null;
@@ -201,14 +206,16 @@ function purgeOldDone() {
 }
 
 // ── LIST ACTIONS ───────────────────────────────────────────
-function addToList(pid) {
+const listEntryFor = pid => Object.entries(listMap).find(([, it]) => it.pid === pid && !it.done);
+function addToList(pid, { silent } = {}) {
   const p = prods[pid];
-  if (!p) return;
+  if (!p) return false;
+  if (listEntryFor(pid)) { if (!silent) toast(`«${p.name}» вже у списку`); return false; }
   const item = { pid, name: p.name, icon: p.icon, cat: p.cat, ts: Date.now(), done: false };
   set(push(ref(db, LIST_PATH)), item);
+  return true;
 }
 function removeFromList(id) { remove(ref(db, `${LIST_PATH}/${id}`)); }
-const listEntryFor = pid => Object.entries(listMap).find(([, it]) => it.pid === pid && !it.done);
 
 async function toggleDone(id) {
   const it = listMap[id];
@@ -280,12 +287,20 @@ function renderList() {
         <span class="lcat-chevron">▼</span>
       </div>
       <div class="lcat-items">` +
-      arr.map(it => `
-        <div class="litem ${it.done ? 'done' : ''}" data-id="${it.id}">
+      arr.map(it => {
+        const sub = [it.variant, it.place].filter(Boolean).join(' · ');
+        return `
+        <div class="litem ${it.done ? 'done' : ''} ${it.id === openActionsId ? 'open' : ''}" data-id="${it.id}">
           <div class="litem-ic" style="--c:${c.color}">${ic(it.icon)}</div>
-          <div class="litem-name">${esc(it.name)}</div>
+          <div class="litem-name">${esc(it.name)}${sub ? `<div class="litem-sub">${esc(sub)}</div>` : ''}</div>
+          <div class="litem-actions">
+            <button class="lact lact-edit" data-id="${it.id}" title="Уточнити">${ic('pencil')}</button>
+            <button class="lact lact-swap" data-id="${it.id}" title="Замінити">${ic('swap')}</button>
+            <button class="lact lact-del" data-id="${it.id}" title="Видалити">${ic('trash')}</button>
+          </div>
           <button class="litem-check" data-id="${it.id}"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></button>
-        </div>`).join('') +
+        </div>`;
+      }).join('') +
       `</div></div>`;
   });
   wrap.innerHTML = html;
@@ -302,6 +317,75 @@ function renderList() {
     svg.style.animation = 'popIn 0.3s ease-out both';
     toggleDone(el.dataset.id);
   }));
+  wrap.querySelectorAll('.litem').forEach(row => {
+    const id = row.dataset.id;
+    row.addEventListener('click', () => {
+      if (openActionsId) { openActionsId = null; renderList(); return; }
+      openItemSheet(id);
+    });
+    longPress(row, () => {
+      openActionsId = (openActionsId === id) ? null : id;
+      renderList();
+    });
+  });
+  wrap.querySelectorAll('.lact-edit').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); openActionsId = null; renderList(); openItemSheet(b.dataset.id);
+  }));
+  wrap.querySelectorAll('.lact-swap').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); openActionsId = null; renderList(); openReplaceSheet(b.dataset.id);
+  }));
+  wrap.querySelectorAll('.lact-del').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); openActionsId = null; removeFromList(b.dataset.id);
+  }));
+}
+
+// ── ITEM DETAIL (уточнення) ────────────────────────────────
+let itemSheetId = null;
+function openItemSheet(id) {
+  const it = listMap[id];
+  if (!it) return;
+  itemSheetId = id;
+  const c = catOf(it);
+  $('item-title').innerHTML = `<span class="sheet-item-ic" style="--c:${c.color};display:inline-flex;vertical-align:middle;margin-right:8px">${ic(it.icon)}</span>${esc(it.name)}`;
+  $('item-variant').value = it.variant || '';
+  $('item-place').value = it.place || '';
+  $('item-overlay').classList.add('open');
+}
+async function saveItemSheet() {
+  if (!itemSheetId) return;
+  await update(ref(db, `${LIST_PATH}/${itemSheetId}`), {
+    variant: $('item-variant').value.trim() || null,
+    place: $('item-place').value.trim() || null,
+  });
+  $('item-overlay').classList.remove('open');
+}
+
+// ── REPLACE (заміна іншим продуктом категорії) ─────────────
+let replaceItemId = null;
+function openReplaceSheet(id) {
+  const it = listMap[id];
+  if (!it) return;
+  replaceItemId = id;
+  const c = catOf(it);
+  const entries = Object.entries(prods)
+    .filter(([pid, p]) => p.cat === it.cat && pid !== it.pid && !listEntryFor(pid))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
+  $('replace-title').textContent = `Замінити «${it.name}»`;
+  $('replace-list').innerHTML = entries.length ? entries.map(([pid, p]) =>
+    `<div class="sheet-item" data-pid="${pid}">
+      <div class="sheet-item-ic" style="--c:${c.color}">${ic(p.icon)}</div>
+      <div class="si-name">${esc(p.name)}</div>
+    </div>`).join('') : '<div class="empty">У цій категорії більше нічого немає</div>';
+  $('replace-list').querySelectorAll('.sheet-item[data-pid]').forEach(row =>
+    row.addEventListener('click', async () => {
+      const p = prods[row.dataset.pid];
+      if (p && listMap[replaceItemId]) {
+        await update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: row.dataset.pid, name: p.name, icon: p.icon, cat: p.cat });
+        toast(`Замінено на «${p.name}»`);
+      }
+      $('replace-overlay').classList.remove('open');
+    }));
+  $('replace-overlay').classList.add('open');
 }
 
 function renderArchive() {
@@ -327,7 +411,6 @@ function renderArchive() {
         const dt = new Date(d + 'T12:00:00');
         return `<button class="arch-day" data-day="${d}">
           <div class="arch-circle">${dt.getDate()}</div>
-          <div class="arch-sub">${WEEKDAYS_SHORT[dt.getDay()]}, ${dt.getDate()} ${MONTHS_GEN[dt.getMonth()]}</div>
           <div class="arch-cnt">${cnt} ${plural(cnt, 'покупка', 'покупки', 'покупок')}</div>
         </button>`;
       }).join('') + `</div>`;
@@ -370,13 +453,30 @@ function openAdd() {
   addSearch = '';
   $('add-search').value = '';
   addEditMode = false;
+  addSelect = null;
   $('add-edit-toggle').classList.remove('on');
   if (!addCurCat || !cats[addCurCat]) addCurCat = sortedCats()[0]?.[0] || null;
   renderAddChips();
   renderAddGrid();
   $('add-view').classList.add('active');
 }
-function closeAdd() { $('add-view').classList.remove('active'); }
+function closeAdd() { addSelect = null; $('add-view').classList.remove('active'); }
+
+function renderAddCommit() {
+  const bar = $('add-commit');
+  if (!addSelect) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  $('add-commit-btn').textContent = `Додати до списку (${addSelect.size})`;
+}
+function commitAddSelect() {
+  if (!addSelect || !addSelect.size) return;
+  let n = 0;
+  addSelect.forEach(pid => { if (addToList(pid, { silent: true })) n++; });
+  toast(n ? `Додано: ${n} ${plural(n, 'позиція', 'позиції', 'позицій')}` : 'Все обране вже у списку');
+  addSelect = null;
+  renderAddCommit();
+  renderAddGrid();
+}
 
 function renderAddChips() {
   const el = $('add-chips');
@@ -404,12 +504,12 @@ function renderAddGrid() {
   let entries = Object.entries(prods);
   if (q) entries = entries.filter(([, p]) => p.name.toLowerCase().includes(q));
   else entries = entries.filter(([, p]) => p.cat === addCurCat);
-  entries.sort((a, b) => (a[1].order ?? 999) - (b[1].order ?? 999) || a[1].name.localeCompare(b[1].name, 'uk'));
+  entries.sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
 
   let html = entries.map(([pid, p]) => {
     const c = cats[p.cat] || { color: '#9E9E9E' };
-    const inList = !!listEntryFor(pid);
-    return `<button class="ptile ${inList ? 'inlist' : ''}" data-pid="${pid}">
+    const sel = addSelect?.has(pid);
+    return `<button class="ptile ${sel ? 'sel' : ''}" data-pid="${pid}">
       <div class="ptile-circle" style="--c:${c.color}">${ic(p.icon)}
         <span class="ptile-badge"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
         <span class="ptile-edit-dot"><svg viewBox="0 0 24 24"><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
@@ -419,24 +519,40 @@ function renderAddGrid() {
   }).join('');
   if (!q) html += `<button class="ptile new" id="ptile-new"><div class="ptile-circle">+</div><div class="ptile-name">Новий</div></button>`;
   grid.innerHTML = html;
+  renderAddCommit();
 
   grid.querySelectorAll('.ptile[data-pid]').forEach(tile => {
+    const pid = tile.dataset.pid;
     tile.addEventListener('click', () => {
-      const pid = tile.dataset.pid;
       if (addEditMode) { openProdForm(pid); return; }
-      const entry = listEntryFor(pid);
-      if (entry) {
-        removeFromList(entry[0]);
-        tile.classList.remove('inlist');
-      } else {
-        addToList(pid);
-        tile.classList.add('inlist');
+      if (addSelect) {
+        // мультивибір: тап перемикає позначку
+        addSelect.has(pid) ? addSelect.delete(pid) : addSelect.add(pid);
+        tile.classList.toggle('sel', addSelect.has(pid));
+        if (!addSelect.size) addSelect = null;
+        renderAddCommit();
+        return;
+      }
+      // звичайний режим: тап одразу додає до списку
+      if (addToList(pid)) {
         const badge = tile.querySelector('.ptile-badge');
+        tile.classList.add('sel');
         badge.style.animation = 'none'; badge.offsetWidth;
         badge.style.animation = 'popIn 0.3s ease-out both';
+        setTimeout(() => {
+          badge.style.animation = 'popOut 0.25s ease-in both';
+          setTimeout(() => tile.classList.remove('sel'), 250);
+        }, 650);
+        toast(`Додано: ${prods[pid]?.name || ''}`);
       }
     });
-    longPress(tile, () => openProdForm(tile.dataset.pid));
+    longPress(tile, () => {
+      if (addEditMode) { openProdForm(pid); return; }
+      if (!addSelect) addSelect = new Set();
+      addSelect.add(pid);
+      tile.classList.add('sel');
+      renderAddCommit();
+    });
   });
   const newTile = $('ptile-new');
   if (newTile) newTile.addEventListener('click', () => openProdForm(null));
@@ -561,6 +677,9 @@ function bindEvents() {
     toast(addEditMode ? 'Режим редагування: тапни продукт чи категорію' : 'Режим додавання');
   });
   $('add-search').addEventListener('input', e => { addSearch = e.target.value; renderAddChips(); renderAddGrid(); });
+  $('add-commit-btn').addEventListener('click', commitAddSelect);
+  $('add-commit-cancel').addEventListener('click', () => { addSelect = null; renderAddCommit(); renderAddGrid(); });
+  $('item-done').addEventListener('click', saveItemSheet);
 
   $('btn-cats').addEventListener('click', openCatsSheet);
   $('btn-settings').addEventListener('click', () => $('settings-overlay').classList.add('open'));
@@ -651,6 +770,10 @@ function longPress(el, fn, ms = 480) {
   el.addEventListener('touchstart', start, { passive: true });
   el.addEventListener('touchmove', cancel, { passive: true });
   el.addEventListener('touchend', e => { cancel(); if (fired) e.preventDefault(); }, { passive: false });
+  // мишка (десктоп/прев'ю)
+  el.addEventListener('mousedown', e => { if (e.button === 0) start(); });
+  el.addEventListener('mouseup', cancel);
+  el.addEventListener('mouseleave', cancel);
   el.addEventListener('contextmenu', e => e.preventDefault());
   // клік після спрацьованого лонгпреса гасимо
   el.addEventListener('click', e => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
