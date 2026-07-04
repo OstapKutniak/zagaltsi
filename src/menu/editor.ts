@@ -71,12 +71,15 @@ export function initMenuEditor(prefix: string): void {
     version: 1,
     pages: [{
       id: 'main', name: 'Головна', bg: '',
+      // Ті самі 6 пунктів, що й хардкод ITEMS у MenuScene (з «Житло»), тими ж
+      // координатами (startY=176, gap=68) — щоб дефолт редактора = справжнє меню гри.
       buttons: [
-        { id: uid(), label: 'Мандри', x: 92, y: 210, size: 34, target: 'world' },
-        { id: uid(), label: 'Хоругва', x: 92, y: 284, size: 34, target: 'khorugva' },
-        { id: uid(), label: 'Завдання', x: 92, y: 358, size: 34, target: 'quests' },
-        { id: uid(), label: 'Досягнення', x: 92, y: 432, size: 34, target: 'achievements' },
-        { id: uid(), label: 'Інвентар', x: 92, y: 506, size: 34, target: 'inventory' },
+        { id: uid(), label: 'Житло', x: 92, y: 176, size: 34, target: 'home' },
+        { id: uid(), label: 'Мандри', x: 92, y: 244, size: 34, target: 'world' },
+        { id: uid(), label: 'Хоругва', x: 92, y: 312, size: 34, target: 'khorugva' },
+        { id: uid(), label: 'Завдання', x: 92, y: 380, size: 34, target: 'quests' },
+        { id: uid(), label: 'Досягнення', x: 92, y: 448, size: 34, target: 'achievements' },
+        { id: uid(), label: 'Інвентар', x: 92, y: 516, size: 34, target: 'inventory' },
       ],
     }],
   });
@@ -86,6 +89,7 @@ export function initMenuEditor(prefix: string): void {
     cur: 0,
     sel: null as string | null,
     view: 'page' as 'page' | 'map',
+    preview: false, // чисте прев'ю 20:9 (без рамок/підписів/гізмо редактора) — як бачить гравець
     bgImgs: new Map<string, HTMLImageElement>(), // pageId → фон
     assets: [] as Array<{ id: string; name: string; url: string }>,
     drag: null as null | { id: string; ox: number; oy: number },
@@ -152,9 +156,10 @@ export function initMenuEditor(prefix: string): void {
       ctx.font = `${b.size * f.s}px ${MENU_FONT}`;
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.shadowColor = '#000'; ctx.shadowBlur = 5 * f.s; ctx.shadowOffsetY = 2 * f.s;
-      ctx.fillStyle = state.sel === b.id ? '#ffcf8f' : '#e5d8bc';
+      ctx.fillStyle = (state.sel === b.id && !state.preview) ? '#ffcf8f' : '#e5d8bc';
       ctx.fillText(b.label, bx, by);
       ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      if (state.preview) continue; // прев'ю: лише самі написи кнопок, без чрому
       if (state.sel === b.id) {
         const m = ctx.measureText(b.label);
         ctx.strokeStyle = '#ffcf8f'; ctx.setLineDash([4, 3]);
@@ -168,30 +173,33 @@ export function initMenuEditor(prefix: string): void {
       ctx.font = `${11 * f.s}px system-ui`; ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fillText(tgt, bx, by + b.size * f.s * 0.85);
     }
-    drawFxGizmos(f);
+    drawFxGizmos(f, state.preview);
+    if (state.preview) return; // прев'ю: без назви сторінки
     // назва сторінки
     ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('Сторінка: ' + p.name + ' (' + p.id + ')', f.x + 4, f.y - 6);
   }
 
   // ── Гізмо ефектів: вікно дощу (рамка), вогнище (пляма), персонаж (портрет) ──
-  function drawFxGizmos(f: { x: number; y: number; s: number }): void {
+  function drawFxGizmos(f: { x: number; y: number; s: number }, preview = false): void {
     const e = fx();
     const X = (v: number): number => f.x + v * f.s;
     const Y = (v: number): number => f.y + v * f.s;
     ctx.save();
-    // Вікно дощу
+    // Вікно дощу (у прев'ю — лише штрихи дощу, без рамки/куточка/підпису)
     if (e.rain.on) {
       const x0 = X(e.rain.x0), y0 = Y(e.rain.y0), w = (e.rain.x1 - e.rain.x0) * f.s, h = (e.rain.y1 - e.rain.y0) * f.s;
-      ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
-      ctx.strokeRect(x0, y0, w, h);
-      if (e.rain.panes) { // хрестовина 2×2
-        ctx.beginPath();
-        ctx.moveTo(x0 + w / 2, y0); ctx.lineTo(x0 + w / 2, y0 + h);
-        ctx.moveTo(x0, y0 + h / 2); ctx.lineTo(x0 + w, y0 + h / 2);
-        ctx.stroke();
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+        ctx.strokeRect(x0, y0, w, h);
+        if (e.rain.panes) { // хрестовина 2×2
+          ctx.beginPath();
+          ctx.moveTo(x0 + w / 2, y0); ctx.lineTo(x0 + w / 2, y0 + h);
+          ctx.moveTo(x0, y0 + h / 2); ctx.lineTo(x0 + w, y0 + h / 2);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
       }
-      ctx.setLineDash([]);
       // штрихи дощу-прев'ю
       ctx.strokeStyle = 'rgba(120,200,255,0.35)';
       const ang = Math.tan(e.rain.dir * Math.PI / 180);
@@ -199,45 +207,51 @@ export function initMenuEditor(prefix: string): void {
         const rx = x0 + w * (i + 0.5) / 6, ry = y0 + h * ((i * 0.37) % 1);
         ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx + 10 * ang, ry + 10); ctx.stroke();
       }
-      // куточок-ресайз
-      ctx.fillStyle = 'rgba(120,200,255,0.95)';
-      ctx.fillRect(x0 + w - 5, y0 + h - 5, 10, 10);
-      ctx.fillStyle = 'rgba(120,200,255,0.8)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText('дощ (вікно)', x0, y0 - 4);
+      if (!preview) {
+        // куточок-ресайз
+        ctx.fillStyle = 'rgba(120,200,255,0.95)';
+        ctx.fillRect(x0 + w - 5, y0 + h - 5, 10, 10);
+        ctx.fillStyle = 'rgba(120,200,255,0.8)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('дощ (вікно)', x0, y0 - 4);
+      }
     }
-    // Вогнище
+    // Вогнище (світлова пляма — реальний вигляд; у прев'ю без кільця/підпису)
     if (e.fire.on) {
       const cx0 = X(e.fire.x), cy0 = Y(e.fire.y), r = 26 * e.fire.scale * f.s;
       const g = ctx.createRadialGradient(cx0, cy0 - r * 0.4, 2, cx0, cy0 - r * 0.4, r * 1.6);
       g.addColorStop(0, 'rgba(255,190,90,0.75)'); g.addColorStop(1, 'rgba(255,120,30,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(cx0, cy0 - r * 0.4, r * 1.6, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,170,70,0.9)'; ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.arc(cx0, cy0, 8 * f.s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,170,70,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(255,170,70,0.9)'; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.arc(cx0, cy0, 8 * f.s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,170,70,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
+      }
     }
-    // Персонаж
+    // Персонаж (портрет — реальний вигляд; у прев'ю без рамки/підпису)
     if (e.char.on) {
       const cx0 = X(e.char.x), cy0 = Y(e.char.y);
       const H = 150 * e.char.scale * f.s;
       const th = state.charThumb;
       if (th?.complete && th.naturalWidth) {
         const W2 = H * th.naturalWidth / th.naturalHeight;
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = preview ? 1 : 0.85;
         ctx.drawImage(th, cx0 - W2 / 2, cy0 - H / 2, W2, H);
         ctx.globalAlpha = 1;
-      } else {
-        // силует: голова + тулуб
+      } else if (!preview) {
+        // силует: голова + тулуб (лише в режимі редагування — у прев'ю без арту нічого)
         ctx.fillStyle = 'rgba(220,205,170,0.35)';
         ctx.beginPath(); ctx.arc(cx0, cy0 - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.roundRect(cx0 - H * 0.14, cy0 - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
       }
-      ctx.strokeStyle = 'rgba(255,207,143,0.8)'; ctx.setLineDash([4, 3]);
-      ctx.strokeRect(cx0 - H * 0.3, cy0 - H / 2, H * 0.6, H);
-      ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('персонаж', cx0, cy0 + H / 2 + 12);
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(255,207,143,0.8)'; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(cx0 - H * 0.3, cy0 - H / 2, H * 0.6, H);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('персонаж', cx0, cy0 + H / 2 + 12);
+      }
     }
     ctx.restore();
   }
@@ -355,6 +369,7 @@ export function initMenuEditor(prefix: string): void {
       state.linkFrom = null; draw();
       return;
     }
+    if (state.preview) return; // прев'ю read-only: без вибору/перетягування
     const b = btnAt(sx, sy);
     if (b) {
       const now = Date.now();
@@ -525,6 +540,16 @@ export function initMenuEditor(prefix: string): void {
       ? 'клік по кнопці → клік по сторінці-цілі = гіперпосилання · подвійний клік — відкрити сторінку'
       : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
     draw();
+  });
+  $('previewBtn')?.addEventListener('click', () => {
+    state.preview = !state.preview;
+    if (state.preview) { state.view = 'page'; state.sel = null; } // прев'ю лише для сторінки
+    ($('previewBtn') as HTMLButtonElement).classList.toggle('on', state.preview);
+    const hint = $('stageHint');
+    if (hint) hint.textContent = state.preview
+      ? 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Прев\'ю 20:9» ще раз, щоб редагувати'
+      : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
+    renderProps(); draw();
   });
   $('bgBtn')?.addEventListener('click', () => ($('bgInput') as HTMLInputElement)?.click());
   ($('bgInput') as HTMLInputElement | null)?.addEventListener('change', function () {
