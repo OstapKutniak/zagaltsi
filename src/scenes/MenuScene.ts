@@ -96,6 +96,7 @@ export class MenuScene extends Phaser.Scene {
   private equipAcc = 0; // акумулятор для оновлення спорядження побратимів
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private startPage: PageKey | null = null; // deep-link: одразу зморфити в цей розділ
+  private buildGen = 0; // покоління буду сцени: async buildScene від СТАРОГО create має відпасти
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
   private fireTime = 0;
@@ -123,7 +124,9 @@ export class MenuScene extends Phaser.Scene {
     const C = this.fx.char;
     return { anim: 'sit', x: C.x, y: C.y, scale: C.scale };
   }
-  protected onCharReady(_char: CutoutCharacter): void { /* нащадки вдягають/чіпляють своє */ }
+  // За замовчуванням одягаємо на лобі-персонажа вдягнене в Інвентарі спорядження —
+  // щоб меч/броня були видні й у Житлі, і в Хоругві (коли сам, без збору 2+).
+  protected onCharReady(char: CutoutCharacter): void { applyEquipTo(char, loadEquip()); }
   protected afterBuild(_offX: number, _offY: number): void { /* додатковий UI нащадків */ }
 
   create(): void {
@@ -148,20 +151,32 @@ export class MenuScene extends Phaser.Scene {
 
     // Заголовок — зверху по центру.
     this.curPage = 'home'; this.sectionPanel = null; this.morphing = false;
+    // Phaser ПЕРЕВИКОРИСТОВУЄ інстанс сцени: після рестарту (scene.start('Menu'))
+    // поля лишаються від минулого життя, а GameObjects уже знищені. Скидаємо посилання
+    // на персонажа/збір — інакше seatCharacter бачив «живий» lobbyChar і не саджав
+    // нового (персонаж зникав / не перевдягався у свіже спорядження).
+    this.lobbyChar = null; this.charHolder = null; this.seatingChar = false; this.gather = [];
     this.titleObj = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
 
     // Все, що залежить від menu.json (fx + кнопки + персонаж) — після завантаження doc.
-    void this.buildScene(offX, offY);
+    void this.buildScene(offX, offY, ++this.buildGen);
+
+    // Лідер-кеш (zag_kh_leader) тримаємо свіжим ще в лоббі — щоб broadcastNav спрацював
+    // при виході на карту навіть якщо гравець не заходив на сторінку Хоругва.
+    void refreshMembers().catch(() => {});
 
     // Панель розділу тримає підписку (watchKhorugva) — знімаємо на виході зі сцени.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.sectionPanel?.destroy(); this.sectionPanel = null; this.clearGathering(); });
   }
 
-  private async buildScene(offX: number, offY: number): Promise<void> {
+  private async buildScene(offX: number, offY: number, gen: number): Promise<void> {
     const doc = await loadMenuDoc().catch(() => null);
-    if (!this.scene.isActive()) return;
+    // Сцену перезапустили, поки вантажився doc → цей build застарів: не дублюємо
+    // кнопки/вогонь/шторм у новий кадр (guard isActive НЕ ловить це — сцену
+    // переактивували під тим самим обʼєктом).
+    if (gen !== this.buildGen || !this.scene.isActive()) return;
     const pg = doc?.pages.find((p) => p.id === (this.pageId ?? 'main')) ?? doc?.pages[0] ?? null;
     this.fx = normFx(pg?.fx ?? null);
     // Кожен ефект — окремо в try: збій на конкретному пристрої не має з'їдати КНОПКИ.
