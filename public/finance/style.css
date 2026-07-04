@@ -569,7 +569,7 @@ input[type="file"] { display: none; }
 
 /* ── ARCHIVE TOGGLE (categories) ── */
 .fab-arch {
-  position: fixed; right: 84px; bottom: calc(var(--bottom) + 78px);
+  position: fixed; left: 18px; bottom: calc(var(--bottom) + 78px);
   width: 56px; height: 56px; border-radius: 18px; border: none;
   background: #f1f1f4; color: #6b6b70;
   display: none; align-items: center; justify-content: center; cursor: pointer;
