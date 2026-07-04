@@ -183,6 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   window.addEventListener('pagehide', flushNotify);
   initSwipeLayout();
+  initAddSwipe();
   bindEvents();
   seedIfEmpty().finally(subscribe);
   renderAll();
@@ -961,6 +962,53 @@ function initSwipeLayout() {
     else if (dx > threshold && cur > 0) next = cur - 1;
     if (next !== cur) { state.tab = SWIPE_TABS[next]; refreshListOrder(); renderList(); updateTabs(); }
     syncTabs();
+  }, { passive: true });
+}
+
+// ── SWIPE «назад» у шторці додавання ───────────────────────
+// Свайп зліва направо тягне шторку за пальцем (як системний back-жест):
+// відпустив далі чверті ширини — доїжджає вправо і закривається до списку,
+// інакше пружинить назад. Чіпси категорій і пошук не перехоплюємо (там свій
+// горизонтальний скрол); вертикальний рух лишається скролом сітки.
+function initAddSwipe() {
+  const view = $('add-view');
+  let x0 = 0, y0 = 0, active = false, locked = false, W = 0;
+  view.addEventListener('touchstart', e => {
+    if (e.target.closest('.add-chips') || e.target.closest('.add-search')) { active = false; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    active = true; locked = false; W = view.offsetWidth;
+  }, { passive: true });
+  view.addEventListener('touchmove', e => {
+    if (!active) return;
+    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
+    if (!locked) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      if (Math.abs(dy) >= Math.abs(dx) || dx < 0) { active = false; return; } // вертикаль чи вліво — не наш жест
+      locked = true;
+    }
+    e.preventDefault();
+    view.style.transition = 'none';
+    view.style.transform = `translateX(${Math.max(0, e.touches[0].clientX - x0)}px)`;
+  }, { passive: false });
+  view.addEventListener('touchend', e => {
+    if (!active || !locked) { active = false; return; }
+    active = false;
+    const dx = e.changedTouches[0].clientX - x0;
+    if (dx > W * 0.25) {
+      view.style.transition = 'transform 0.26s cubic-bezier(0.32, 0.72, 0, 1)';
+      view.style.transform = 'translateX(100%)';
+      setTimeout(() => {
+        view.style.transition = 'none'; // прибрати .active без діагонального прольоту через екран
+        addSelect = null;
+        view.classList.remove('active');
+        view.style.transform = '';
+        requestAnimationFrame(() => { view.style.transition = ''; });
+      }, 270);
+    } else {
+      view.style.transition = 'transform 0.26s ease';
+      view.style.transform = 'translateX(0)';
+      setTimeout(() => { view.style.transition = ''; view.style.transform = ''; }, 270);
+    }
   }, { passive: true });
 }
 
