@@ -329,9 +329,15 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
     });
-    // Якщо лобі немає (вбудований прев'ю студії) — одразу соло, щоб персонаж зʼявився.
+    // Якщо лобі немає (вхід з карти або прев'ю студії) — старт без екрана лобі.
+    // Маркер zag_coop_lobby (ставить WorldScene при подорожі з хоругвою) → кооп
+    // під спільним кодом = id хоругви, щоб побратими бачили одне одного; інакше соло.
     const lobbyEl = document.getElementById('lobby');
-    if (!lobbyEl || lobbyEl.classList.contains('hidden')) void this.beginPlay('');
+    if (!lobbyEl || lobbyEl.classList.contains('hidden')) {
+      let coop = '';
+      try { coop = sessionStorage.getItem('zag_coop_lobby') ?? ''; sessionStorage.removeItem('zag_coop_lobby'); } catch { /* ignore */ }
+      void this.beginPlay(coop);
+    }
 
     // Рівень із редактора (IndexedDB zag_level або public/level.json)
     this.levelMode = false;

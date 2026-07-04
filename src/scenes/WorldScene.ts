@@ -60,22 +60,24 @@ export class WorldScene extends Phaser.Scene {
     this.drawParty();
   }
 
-  // 5 портретів Хоругви (паті, не presence) — квадратики ліворуч, вертикально,
-  // щоб не заважати мапі й смузі завантаження.
+  // Портрети паті (Хоругва) — квадратики ліворуч, вертикально. Малюємо ТІЛЬКИ
+  // зайняті слоти (порожніх рамок не показуємо, щоб самотній мандрівник не бачив
+  // 5 пустих квадратів). Спершу з кешу (миттєво), тоді оновлюємо з Firebase.
+  private partyLayer: Phaser.GameObjects.Container | null = null;
   private drawParty(): void {
-    void import('../khorugva').then(({ myKhorugvaId, getKhorugva, memberList }) => {
-      const draw = (members: import('../khorugva').KhMember[]): void => {
+    void Promise.all([import('../khorugva'), import('./khPortraits')]).then(([kh, kp]) => {
+      const render = (members: import('../khorugva').KhMember[]): void => {
         if (!this.scene.isActive()) return;
-        void import('./khPortraits').then(({ drawKhSlot }) => {
-          if (!this.scene.isActive()) return;
-          const size = 64, gap = 12;
-          const x = 26 + this.offX, y0 = 128 + this.offY;
-          for (let i = 0; i < 5; i++) drawKhSlot(this, x, y0 + i * (size + gap), size, members[i] ?? null);
-        });
+        this.partyLayer?.destroy(true);
+        // Соло (0-1 учасник) — HUD не потрібен.
+        if (members.length < 2) { this.partyLayer = null; return; }
+        this.partyLayer = this.add.container(0, 0).setScrollFactor(0).setDepth(14);
+        const size = 60, gap = 10;
+        const x = 24 + this.offX, y0 = 122 + this.offY;
+        members.slice(0, 5).forEach((m, i) => kp.drawKhSlot(this, x, y0 + i * (size + gap), size, m, this.partyLayer!));
       };
-      const khId = myKhorugvaId();
-      if (!khId) { draw([]); return; }
-      getKhorugva(khId).then((kh) => draw(memberList(kh))).catch(() => draw([]));
+      render(kh.cachedMembers());          // миттєво з кешу
+      void kh.refreshMembers().then(render); // оновлення з мережі
     });
   }
 
@@ -443,8 +445,15 @@ export class WorldScene extends Phaser.Scene {
       targets: st, p: 1, duration: 1600, ease: 'Sine.easeIn',
       onUpdate: () => { fill.clear(); fill.fillStyle(0xb0721f, 1); fill.fillRect(x, y - 16, barW * st.p, 7); },
       onComplete: () => {
-        void import('../level/launch').then(({ stageLevelById }) =>
-          stageLevelById(levelId).finally(() => { if (this.scene.isActive()) this.scene.start('Game'); }));
+        // Кооп з побратимами: якщо є хоругва — заходимо в рівень під спільним лобі
+        // (= id хоругви), щоб бачити одне одного (GameScene читає цей маркер).
+        void import('../khorugva').then(({ myKhorugvaId }) => {
+          const kh = myKhorugvaId();
+          try { if (kh) sessionStorage.setItem('zag_coop_lobby', kh); else sessionStorage.removeItem('zag_coop_lobby'); } catch { /* ignore */ }
+        }).finally(() => {
+          void import('../level/launch').then(({ stageLevelById }) =>
+            stageLevelById(levelId).finally(() => { if (this.scene.isActive()) this.scene.start('Game'); }));
+        });
       },
     });
   }

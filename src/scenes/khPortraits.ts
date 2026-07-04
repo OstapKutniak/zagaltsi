@@ -47,7 +47,12 @@ export function drawKhSlot(scene: Phaser.Scene, x: number, y: number, size: numb
     const ok = await addBase64Texture(scene, key, it.thumb);
     if (!ok || !alive()) { if (alive()) letter(); return; }
     const im = own(scene.add.image(x + size / 2, y + size / 2, key).setScrollFactor(0).setDepth(51));
-    const sc = Math.min((size - 6) / im.width, (size - 6) / im.height);
-    im.setScale(sc);
+    // Масштаб рахуємо з РЕАЛЬНИХ розмірів джерела текстури: im.width/height інколи
+    // ще 1px (кадр не готовий) → виходив гігантський портрет на весь екран.
+    const src = scene.textures.get(key).getSourceImage() as { width: number; height: number } | null;
+    const iw = (src?.width && src.width > 1 ? src.width : im.width) || size;
+    const ih = (src?.height && src.height > 1 ? src.height : im.height) || size;
+    const sc = Math.min((size - 6) / iw, (size - 6) / ih);
+    im.setDisplaySize(iw * sc, ih * sc); // явний розмір — не залежить від стану im.width
   });
 }

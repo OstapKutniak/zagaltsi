@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { LOGICAL_H } from '../config';
 import { setupMenuCamera, addTitle, addBack, addMenuItem, MENU_FONT } from './menuTheme';
-import { myKhorugvaId, createKhorugva, watchKhorugva, memberList, callToGather, leaveKhorugva, BOT_USERNAME, APP_SHORT, type Khorugva } from '../khorugva';
+import { myKhorugvaId, createKhorugva, watchKhorugva, memberList, cacheMembers, callToGather, leaveKhorugva, BOT_USERNAME, APP_SHORT, type Khorugva } from '../khorugva';
 import { drawKhSlot } from './khPortraits';
 
 // «Хоругва» — збір загону до 5 гравців.
@@ -89,6 +89,7 @@ export class KhorugvaScene extends Phaser.Scene {
     this.slotLayer?.destroy(true);
     this.slotLayer = this.add.container(0, 0).setScrollFactor(0);
     const members = memberList(this.kh);
+    cacheMembers(members); // паті поїде з нами на Мандри/у Локацію (миттєвий HUD)
     const size = 132, gap = 28;
     const total = 5 * size + 4 * gap;
     const x0 = f.cx - total / 2, y = 210 + f.offY;

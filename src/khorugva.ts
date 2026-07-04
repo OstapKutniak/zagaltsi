@@ -73,6 +73,30 @@ export function memberList(kh: Khorugva | null): KhMember[] {
     (a.id === kh.leader ? -1 : b.id === kh.leader ? 1 : a.joinedAt - b.joinedAt));
 }
 
+// Локальний кеш паті — щоб портрети хоругви показувались МИТТЄВО на будь-якому
+// екрані (Мандри/Локація), не чекаючи відповіді Firebase (яка інколи повільна
+// й тоді портрети «зникали»). Оновлюється щоразу, коли ми бачимо свіжий стан.
+const MEMBERS_CACHE = 'zag_kh_members';
+export function cacheMembers(list: KhMember[]): void {
+  try { localStorage.setItem(MEMBERS_CACHE, JSON.stringify(list)); } catch { /* ignore */ }
+}
+export function cachedMembers(): KhMember[] {
+  if (!myKhorugvaId()) return []; // немає активної хоругви → нема паті
+  try { const s = localStorage.getItem(MEMBERS_CACHE); if (s) return JSON.parse(s) as KhMember[]; } catch { /* ignore */ }
+  return [];
+}
+// Свіжий список паті: спершу кеш (миттєво), тоді оновлення з Firebase (кешуємо).
+export async function refreshMembers(): Promise<KhMember[]> {
+  const id = myKhorugvaId();
+  if (!id) { cacheMembers([]); return []; }
+  try {
+    const kh = await getKhorugva(id);
+    const list = memberList(kh);
+    cacheMembers(list);
+    return list;
+  } catch { return cachedMembers(); }
+}
+
 // «Оголосити збір»: пише виклик у Firebase (calls/{nick}) і, якщо задеплоєний
 // бот-воркер (VITE_BOT_PROXY), шле сповіщення гравцю в Telegram.
 export async function callToGather(nick: string, khId: string): Promise<{ botSent: boolean }> {
