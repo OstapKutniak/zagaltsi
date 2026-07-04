@@ -28,16 +28,23 @@ function me(): KhMember {
 }
 
 export async function createKhorugva(): Promise<string> {
+  const prev = myKhorugvaId();
+  if (prev) await leaveKhorugva(prev).catch(() => { /* офлайн — все одно перезаходимо */ });
   const m = me();
   const id = 'kh' + Math.random().toString(36).slice(2, 8);
   const kh: Khorugva = { id, leader: m.id, createdAt: Date.now(), members: { [m.id]: m } };
   await withTimeout(set(ref(db, `khorugvas/${id}`), kh));
   setMyKhorugva(id);
+  cacheMembers([m]); cacheLeader(m.id); // я — лідер, склад свіжий одразу
   void publishMyChar(); // щоб побратими побачили мій справжній вигляд біля вогнища
   return id;
 }
 
 export async function joinKhorugva(id: string): Promise<Khorugva | null> {
+  // Приєднання = вийти з попередньої хоругви й зайти в нову (інакше лишались
+  // накладання: подвійний склад, зайві персонажі, стара паті в кеші).
+  const prev = myKhorugvaId();
+  if (prev && prev !== id) await leaveKhorugva(prev).catch(() => { /* офлайн */ });
   const snap = await withTimeout(get(ref(db, `khorugvas/${id}`)));
   const kh = snap.val() as Khorugva | null;
   if (!kh) return null;
@@ -45,8 +52,9 @@ export async function joinKhorugva(id: string): Promise<Khorugva | null> {
   if (!kh.members[m.id] && Object.keys(kh.members).length >= 5) throw new Error('Хоругва вже повна (5)');
   await withTimeout(set(ref(db, `khorugvas/${id}/members/${m.id}`), m));
   setMyKhorugva(id);
-  void publishMyChar(); // щоб побратими побачили мій справжній вигляд біля вогнища
   kh.members[m.id] = m;
+  cacheMembers(memberList(kh)); cacheLeader(kh.leader ?? null); // свіжий склад одразу
+  void publishMyChar(); // щоб побратими побачили мій справжній вигляд біля вогнища
   return kh;
 }
 
@@ -95,6 +103,9 @@ export function cachedMembers(): KhMember[] {
 // Хто веде: id лідера кешуємо, щоб СИНХРОННО знати, я головний чи ведений.
 export function cacheLeader(leaderId: string | null): void {
   try { if (leaderId) localStorage.setItem(LEADER_CACHE, leaderId); else localStorage.removeItem(LEADER_CACHE); } catch { /* ignore */ }
+}
+export function cachedLeaderId(): string | null {
+  try { return localStorage.getItem(LEADER_CACHE); } catch { return null; }
 }
 export function iAmLeaderCached(): boolean {
   if (!myKhorugvaId()) return false;

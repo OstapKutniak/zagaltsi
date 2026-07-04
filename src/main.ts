@@ -108,10 +108,12 @@ if (startParam) {
     const menu = game.scene.getScene('Menu');
     menu?.events.once(Phaser.Scenes.Events.CREATE, () => {
       if (startParam.startsWith('kh_')) {
+        try { sessionStorage.setItem('zag_start_page', 'khorugva'); } catch { /* ignore */ }
         void joinKhorugva(startParam.slice(3))
           .catch(() => null)
           .then(() => menu.scene.start('Menu', { startPage: 'khorugva' }));
       } else if (startParam === 'khorugva') {
+        try { sessionStorage.setItem('zag_start_page', 'khorugva'); } catch { /* ignore */ }
         menu.scene.start('Menu', { startPage: 'khorugva' });
       } else if (startParam === 'enc') {
         void openEncounter(menu).catch(() => menu.scene.start('World', {}));

@@ -114,7 +114,12 @@ export class MenuScene extends Phaser.Scene {
 
   init(data: { pageId?: string; startPage?: PageKey }): void {
     this.pageId = data?.pageId ?? null;
-    this.startPage = data?.startPage ?? null;
+    // startPage може загубитись, якщо інша навігація Menu перебила запуск (гонка) —
+    // тому дублюємо намір у sessionStorage і споживаємо його тут (один раз).
+    let sp = data?.startPage ?? null;
+    if (!sp) { try { const s = sessionStorage.getItem('zag_start_page'); if (s) sp = s as PageKey; } catch { /* ignore */ } }
+    if (sp) { try { sessionStorage.removeItem('zag_start_page'); } catch { /* ignore */ } }
+    this.startPage = sp;
   }
 
   // ── Хуки для сторінок-нащадків (Інвентар тощо) ──────────────────────────────

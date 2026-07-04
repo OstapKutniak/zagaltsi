@@ -19,6 +19,7 @@ import {
   type EnemyNet, type EnemyHit,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
+import { myKhorugvaId, cachedLeaderId } from '../khorugva';
 import { loadEquip } from '../inventory';
 import { stopAmbience } from '../sound/ambience';
 import type { NodeGraph } from '../node-editor';
@@ -856,12 +857,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── Host-authoritative вороги ───────────────────────────────────────────────
-  // Хост — детермінований: найменший playerId серед присутніх (я + мережеві стани).
-  // Так усі клієнти згодні, хто рахує ворогів. Підписку на удари гравців тримає лише хост.
+  // Хост рахує ворогів. У хоругві хост = ЛІДЕР (той, кого гравці й вважають
+  // головним — стабільно, без «перекидань»); поза хоругвою (лобі-код) — фолбек на
+  // найменший playerId серед присутніх. Підписку на удари гравців тримає лише хост.
   private electHost(): void {
-    let min = this.myId;
-    for (const id of Object.keys(this.netStates)) if (id < min) min = id;
-    const nowHost = min === this.myId;
+    const leader = cachedLeaderId();
+    let nowHost: boolean;
+    if (myKhorugvaId() && leader) {
+      nowHost = leader === this.myId;
+    } else {
+      let min = this.myId;
+      for (const id of Object.keys(this.netStates)) if (id < min) min = id;
+      nowHost = min === this.myId;
+    }
     if (nowHost === this.amHost) return;
     this.amHost = nowHost;
     if (nowHost) {
