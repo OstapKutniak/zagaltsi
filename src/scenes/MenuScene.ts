@@ -4,15 +4,15 @@ import { hideLoadScreen, setTouchUI } from './uiButton';
 import { triggerThunder, ensureAmbience } from '../sound/ambience';
 import { CutoutCharacter, TRANS_DUR, type CharDoc } from '../anim/CutoutCharacter';
 import { buildInvPanel, applyEquipTo } from './invPanel';
-import { buildQuestsPanel, buildAchievementsPanel } from './pagePanels';
+import { buildQuestsPanel, buildAchievementsPanel, buildKhorugvaPanel } from './pagePanels';
 import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
 
 // Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
-// лише напис + панель). Мандри/Хоругва — окремі сцени (реальний перехід).
-type PageKey = 'home' | 'inventory' | 'quests' | 'achievements';
+// лише напис + панель праворуч). Мандри — окрема сцена (реальний перехід на карту).
+type PageKey = 'home' | 'inventory' | 'quests' | 'achievements' | 'khorugva';
 const PAGE_TITLE: Record<PageKey, string> = {
-  home: 'ЖИТЛО', inventory: 'ІНВЕНТАР', quests: 'ЗАВДАННЯ', achievements: 'ДОСЯГНЕННЯ',
+  home: 'ЖИТЛО', inventory: 'ІНВЕНТАР', quests: 'ЗАВДАННЯ', achievements: 'ДОСЯГНЕННЯ', khorugva: 'ХОРУГВА',
 };
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
@@ -86,6 +86,7 @@ export class MenuScene extends Phaser.Scene {
   private sectionPanel: { destroy(): void } | null = null;
   private morphing = false;
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
+  private startPage: PageKey | null = null; // deep-link: одразу зморфити в цей розділ
   private bgImg: Phaser.GameObjects.Image | null = null;
   private fireGlow: Phaser.GameObjects.Image | null = null;
   private fireTime = 0;
@@ -101,7 +102,10 @@ export class MenuScene extends Phaser.Scene {
   // key параметризовано: сторінка «Інвентар» (InventoryScene) успадковує хатину.
   constructor(key = 'Menu') { super(key); }
 
-  init(data: { pageId?: string }): void { this.pageId = data?.pageId ?? null; }
+  init(data: { pageId?: string; startPage?: PageKey }): void {
+    this.pageId = data?.pageId ?? null;
+    this.startPage = data?.startPage ?? null;
+  }
 
   // ── Хуки для сторінок-нащадків (Інвентар тощо) ──────────────────────────────
   protected pageTitle(): string { return 'ЖИТЛО'; }
@@ -141,6 +145,9 @@ export class MenuScene extends Phaser.Scene {
 
     // Все, що залежить від menu.json (fx + кнопки + персонаж) — після завантаження doc.
     void this.buildScene(offX, offY);
+
+    // Панель розділу тримає підписку (watchKhorugva) — знімаємо на виході зі сцени.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.sectionPanel?.destroy(); this.sectionPanel = null; });
   }
 
   private async buildScene(offX: number, offY: number): Promise<void> {
@@ -154,6 +161,8 @@ export class MenuScene extends Phaser.Scene {
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
     try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
     try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
+    // Deep-link: одразу морфимо в потрібний розділ (напр. join хоругви з бота).
+    if (this.startPage && this.sys.settings.key === 'Menu') { const sp = this.startPage; this.startPage = null; this.morphTo(sp); }
   }
 
   // Шибки вікна: прямокутник дощу з редактора; panes — ділимо хрестовиною 2×2.
@@ -278,6 +287,8 @@ export class MenuScene extends Phaser.Scene {
       this.sectionPanel = buildQuestsPanel(this, offX, offY);
     } else if (page === 'achievements') {
       this.sectionPanel = buildAchievementsPanel(this, offX, offY);
+    } else if (page === 'khorugva') {
+      this.sectionPanel = buildKhorugvaPanel(this, offX, offY);
     }
 
     this.curPage = page;
@@ -299,17 +310,15 @@ export class MenuScene extends Phaser.Scene {
     const t = target === 'section:Інвентар' ? 'inventory' : target;
     if (t === 'world') { this.scene.start('World', {}); return; }
     if (t === 'game') { this.scene.start('Game'); return; }
-    if (t === 'khorugva') { this.scene.start('Khorugva'); return; }
     if (t.startsWith('page:')) { this.scene.start('Menu', { pageId: t.slice(5) }); return; }
     if (t.startsWith('section:')) { this.scene.start('Section', { title: t.slice(8), from: 'Menu' }); return; }
-    // Морф-розділи (Житло/Інвентар/Завдання/Досягнення).
-    const PAGE: Record<string, PageKey> = { home: 'home', zhytlo: 'home', inventory: 'inventory', quests: 'quests', achievements: 'achievements' };
+    // Морф-розділи (Житло/Інвентар/Завдання/Досягнення/Хоругва).
+    const PAGE: Record<string, PageKey> = { home: 'home', zhytlo: 'home', inventory: 'inventory', quests: 'quests', achievements: 'achievements', khorugva: 'khorugva' };
     const page = PAGE[t];
     if (!page) return;
     if (this.sys.settings.key === 'Menu') { this.morphTo(page); return; }
-    // Не лоббі (deep-link сцена) → відкриваємо повну сцену розділу.
-    const SCENE: Record<PageKey, string> = { home: 'Menu', inventory: 'Inventory', quests: 'Quests', achievements: 'Achievements' };
-    this.scene.start(SCENE[page]);
+    // Не лоббі (deep-link сцена) → відкриваємо лоббі з потрібним розділом.
+    this.scene.start('Menu', { startPage: page });
   }
 
   // ── Шторм за вікном: дощ (маскою по шибках) + блискавка зі світлом у кімнату ─

@@ -3,6 +3,12 @@ import { LOGICAL_W, LOGICAL_H } from '../config';
 import { loadQuests, type Quest } from '../story/quests';
 import { takenQuests } from '../story/questState';
 import { listPlayers } from '../players';
+import {
+  myKhorugvaId, createKhorugva, watchKhorugva, memberList, callToGather,
+  leaveKhorugva, BOT_USERNAME, APP_SHORT, type Khorugva,
+} from '../khorugva';
+import { loadMemberThumb } from '../multiplayer/sharedChars';
+import { getPlayerId } from '../multiplayer/lobby';
 
 // Прості «списки по центру» для ріалтайм-морфу розділів у лоббі (Житло↔Квести,
 // ↔Досягнення) — БЕЗ зміни сцени: фон/вогонь/персонаж лишаються, з'являється
@@ -11,9 +17,18 @@ import { listPlayers } from '../players';
 
 const FONT = 'Georgia, "Times New Roman", serif';
 const COL_TEXT = '#e5d8bc';
+const COL_HOVER = '#ffcf8f';
+const COL_GOLD = 0xcbb98a;
 const COL_DIM = '#8a8496';
 
 export interface PagePanel { destroy(): void }
+
+// Клітинки-портрети праворуч — тими самими координатами, що слоти спорядження
+// в Інвентарі (invPanel), щоб Хоругва була «як інвентар, тільки портрети».
+const CELL_X = 1185;
+const CELL_Y0 = 128;
+const CELL_SIZE = 68;
+const CELL_GAP = 22;
 
 function panel(scene: Phaser.Scene): { add: <T extends Phaser.GameObjects.GameObject>(o: T) => T; destroy: () => void } {
   let ui: Phaser.GameObjects.GameObject[] = [];
@@ -124,4 +139,126 @@ export function buildAchievementsPanel(scene: Phaser.Scene, offX: number, offY: 
   });
 
   return { destroy(): void { p.destroy(); } };
+}
+
+// ── Хоругва: 5 клітинок-портретів праворуч (як слоти інвентаря) + дії по центру ─
+// Морф-версія: ліве меню/фон/персонаж лишаються. Портрети побратимів — реальні
+// (зі спільного каналу shared_chars), живлення — watchKhorugva. Немає загону →
+// «Створити»; є → «Оголосити збір» / «Скопіювати запрошення» / «Покинути».
+export function buildKhorugvaPanel(scene: Phaser.Scene, offX: number, offY: number): PagePanel {
+  const cx = LOGICAL_W / 2 + offX;
+  let objs: Phaser.GameObjects.GameObject[] = [];
+  let gen = 0;
+  let watchedId: string | null = null;
+  let unwatch: (() => void) | null = null;
+  let currentKh: Khorugva | null = null;
+  let busy = false;
+
+  const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => { objs.push(o); return o; };
+  const clear = (): void => { for (const o of objs) o.destroy(); objs = []; };
+
+  const setStatus = (s: string): Phaser.GameObjects.Text => add(scene.add.text(cx, 470 + offY, s, {
+    fontFamily: FONT, fontSize: '18px', color: COL_DIM,
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(31));
+
+  const btn = (y: number, label: string, cb: () => void, size = 26): Phaser.GameObjects.Text => {
+    const t = add(scene.add.text(cx, y + offY, label, {
+      fontFamily: FONT, fontStyle: 'small-caps', fontSize: size + 'px', color: COL_TEXT,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(31).setShadow(1, 2, '#000', 5, false, true)
+      .setInteractive({ useHandCursor: true }));
+    t.on('pointerover', () => t.setColor(COL_HOVER));
+    t.on('pointerout', () => t.setColor(COL_TEXT));
+    t.on('pointerup', cb);
+    return t;
+  };
+
+  // Клітинка портрета i (0..4): рамка + портрет побратима (thumb) або ініціал.
+  const cell = (i: number, m: { id: string; name: string; charId?: string } | null): void => {
+    const x = CELL_X + offX;
+    const y = CELL_Y0 + i * (CELL_SIZE + CELL_GAP) + offY;
+    const g = add(scene.add.graphics().setScrollFactor(0).setDepth(30));
+    g.fillStyle(0x14101a, m ? 0.92 : 0.6);
+    g.fillRoundedRect(x - CELL_SIZE / 2, y - CELL_SIZE / 2, CELL_SIZE, CELL_SIZE, 9);
+    g.lineStyle(2, m ? COL_GOLD : 0x3a3346, 1);
+    g.strokeRoundedRect(x - CELL_SIZE / 2, y - CELL_SIZE / 2, CELL_SIZE, CELL_SIZE, 9);
+    if (!m) return;
+
+    const isMe = m.id === getPlayerId();
+    const init = add(scene.add.text(x, y - 4, (m.name || '?').slice(0, 1).toUpperCase(), {
+      fontFamily: FONT, fontSize: '30px', color: COL_TEXT,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(31));
+    add(scene.add.text(x, y + CELL_SIZE / 2 + 3, isMe ? 'ти' : m.name, {
+      fontFamily: FONT, fontStyle: 'small-caps', fontSize: '13px', color: isMe ? COL_HOVER : COL_TEXT,
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(31).setShadow(1, 1, '#000', 4, false, true));
+
+    const myGen = gen;
+    void loadMemberThumb(m.id, m.charId ?? '').then((thumb) => {
+      if (!thumb || myGen !== gen || !scene.scene.isActive()) return;
+      const key = 'khp_' + m.id;
+      const place = (): void => {
+        if (myGen !== gen || !scene.scene.isActive()) return;
+        init.destroy();
+        const im = add(scene.add.image(x, y, key).setScrollFactor(0).setDepth(31));
+        im.setScale(Math.min((CELL_SIZE - 8) / im.width, (CELL_SIZE - 8) / im.height));
+      };
+      if (scene.textures.exists(key)) place();
+      else { scene.textures.once('addtexture-' + key, place); scene.textures.addBase64(key, thumb); }
+    });
+  };
+
+  const render = (): void => {
+    clear();
+    gen++;
+    const khId = myKhorugvaId();
+
+    // Підписка на загін (перепідключаємось лише при зміні id).
+    if (khId && watchedId !== khId) {
+      unwatch?.(); watchedId = khId;
+      unwatch = watchKhorugva(khId, (kh) => { currentKh = kh; if (scene.scene.isActive()) render(); });
+    } else if (!khId && watchedId) {
+      unwatch?.(); unwatch = null; watchedId = null; currentKh = null;
+    }
+
+    const members = khId ? memberList(currentKh) : [];
+    add(scene.add.text(cx, 108 + offY, `Побратимів: ${members.length}/5`, {
+      fontFamily: FONT, fontStyle: 'small-caps', fontSize: '20px', color: '#8a8171',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(31));
+    for (let i = 0; i < 5; i++) cell(i, members[i] ?? null);
+
+    if (!khId) {
+      btn(280, 'Створити', () => {
+        if (busy) return; busy = true;
+        setStatus('Розгортаємо хоругву…');
+        void createKhorugva()
+          .then(() => { busy = false; render(); })
+          .catch((e) => { busy = false; render(); setStatus('Не вдалося: ' + String(e?.message ?? e)); });
+      });
+      return;
+    }
+
+    // «По центру оголосити збір» + запрошення + вихід.
+    btn(250, 'Оголосити збір', () => {
+      const nick = window.prompt('Телеграм-нік гравця (напр. @friend):', '@');
+      if (!nick || nick.replace(/^@/, '').trim().length < 2) return;
+      setStatus('Скликаємо…');
+      void callToGather(nick, khId)
+        .then((r) => setStatus(r.botSent
+          ? `Гонець побіг до ${nick} — сповіщення в боті`
+          : `${nick} ще не знайомий з ботом — кинь запрошення (нижче)`))
+        .catch((e) => setStatus('Не вдалося: ' + String(e?.message ?? e)));
+    });
+    btn(300, 'Скопіювати запрошення', () => {
+      const link = `https://t.me/${BOT_USERNAME}/${APP_SHORT}?startapp=kh_${khId}`;
+      const done = (): void => { setStatus('Запрошення скопійовано — кинь другу в чат'); };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(done, () => window.prompt('Скопіюй запрошення:', link));
+      else window.prompt('Скопіюй запрошення:', link);
+    }, 22);
+    btn(346, 'Покинути', () => {
+      if (busy) return; busy = true;
+      void leaveKhorugva(khId).catch(() => { /* офлайн — все одно забуваємо */ }).then(() => { busy = false; render(); });
+    }, 22);
+  };
+
+  render();
+  return { destroy(): void { unwatch?.(); unwatch = null; watchedId = null; clear(); } };
 }
