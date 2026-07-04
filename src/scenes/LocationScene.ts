@@ -14,7 +14,8 @@ import { CutoutCharacter } from '../anim/CutoutCharacter';
 import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
 import { playDialogDoc, closeDialogPlay } from '../dialogPlay';
 import { loadQuests, type Quest } from '../story/quests';
-import { acceptQuest } from '../story/questState';
+import { acceptQuest, reportProgress } from '../story/questState';
+import { rewardLabel } from '../story/profile';
 import { idbGet } from '../store';
 
 // Сцена локації (хаб): арт із Редактора Локацій (фон + розставлені будівлі), а поки
@@ -83,6 +84,9 @@ export class LocationScene extends Phaser.Scene {
     this.npc = null;
     if (this.encounterQuestId) void this.spawnEncounter(this.encounterQuestId);
 
+    // Ціль квесту «дійти до локації»: зайшли у вузол → прогрес.
+    if (this.nodeId) for (const q of reportProgress('reach', this.nodeId)) this.questDoneToast(q);
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unwatch?.(); this.unwatch = null;
       closeDialogPlay();
@@ -124,7 +128,11 @@ export class LocationScene extends Phaser.Scene {
       }
       playDialogDoc(doc, {
         onOutcome: (o) => {
-          if (o === 'positive') { acceptQuest(q); this.toastQuest(); }
+          if (o === 'positive') {
+            acceptQuest(q); this.toastQuest();
+            // Ціль «поговорити з НПС» в інших активних квестах.
+            if (q.giver) for (const done of reportProgress('talk', q.giver)) this.questDoneToast(done);
+          }
         },
       });
     });
@@ -154,6 +162,15 @@ export class LocationScene extends Phaser.Scene {
       fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(40).setShadow(1, 2, '#000000', 5, false, true);
     this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 600, onComplete: () => t.destroy() });
+  }
+
+  private questDoneToast(q: Quest): void {
+    const label = rewardLabel(q.reward);
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 66 + this.offY,
+      `Квест виконано: ${q.title}` + (label ? `  (${label})` : ''), {
+        fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(40).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2800, duration: 700, onComplete: () => t.destroy() });
   }
 
   // ── Арт локації (або куби) ─────────────────────────────────────────────────

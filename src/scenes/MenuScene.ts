@@ -58,7 +58,10 @@ const CHAR_FACING = -1; // обличчям до вогнища
 
 // Сторінки меню з Редактора Меню (menu.json / IDB zag_menu). Нема — хардкод ITEMS.
 interface MenuBtnDoc { id: string; label: string; x: number; y: number; size: number; target: string }
-interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; fx?: Partial<MenuFxData> }
+// Розміщений PNG-об'єкт (декор) із Редактора Меню: плановість depth 1..7 (5 —
+// рівень персонажа/вогню; кнопки завжди зверху). anim/deform — на майбутнє.
+interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; rot?: number; flip?: boolean; depth: number }
+interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; objects?: MenuObjDoc[]; fx?: Partial<MenuFxData> }
 interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
 
 async function loadMenuDoc(): Promise<MenuDocData | null> {
@@ -187,6 +190,7 @@ export class MenuScene extends Phaser.Scene {
     // Кожен ефект — окремо в try: збій на конкретному пристрої не має з'їдати КНОПКИ.
     try { if (this.fx.fire.on) this.buildFire(offX, offY); } catch { /* без вогню */ }
     try { this.buildStorm(offX, offY); } catch { /* без шторму */ }
+    try { this.buildObjects(pg, offX, offY, gen); } catch { /* без декору */ }
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
     try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
     try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
@@ -251,6 +255,26 @@ export class MenuScene extends Phaser.Scene {
     this.fireGlow = this.add.image(fx, fy - 30 * s, 'fire_soft')
       .setScrollFactor(0).setDepth(5).setScale(11 * s, 7.5 * s)
       .setTint(0xff9a3d).setAlpha(F.glow).setBlendMode(Phaser.BlendModes.ADD);
+  }
+
+  // Розміщені PNG-об'єкти (декор) із Редактора Меню. Плановість = depth (кнопки
+  // завжди зверху, depth 8). Текстури — з вбудованих dataURL (як фон), async.
+  private buildObjects(pg: MenuPageDoc | null, offX: number, offY: number, gen: number): void {
+    const list = pg?.objects;
+    if (!list?.length) return;
+    for (const o of list) {
+      if (!o.url) continue;
+      const key = 'menuobj_' + o.id;
+      const place = (): void => {
+        if (gen !== this.buildGen || !this.scene.isActive() || !this.textures.exists(key)) return;
+        const img = this.add.image(o.x + offX, o.y + offY, key)
+          .setScrollFactor(0).setScale(o.scale * (o.flip ? -1 : 1), o.scale)
+          .setDepth(Math.max(1, Math.min(7, o.depth)));
+        if (o.rot) img.setAngle(o.rot);
+      };
+      if (this.textures.exists(key)) place();
+      else { this.textures.once('addtexture-' + key, place); this.textures.addBase64(key, o.url); }
+    }
   }
 
   // Кнопки меню: сторінка з Редактора Меню або дефолтний хардкод.
@@ -628,7 +652,7 @@ export class MenuScene extends Phaser.Scene {
   protected makeMenuItem(x: number, y: number, label: string, onClick: () => void, size = 34): void {
     const t = this.add.text(x, y, label, {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: size + 'px', color: COL_IDLE,
-    }).setOrigin(0, 0.5).setScrollFactor(0)
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(8) // над декором (depth 1..7), під панелями (20+)
       .setShadow(2, 2, '#000000', 6, false, true)
       .setInteractive({ useHandCursor: true });
 

@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H } from '../config';
 import { setupMenuCamera, addTitle, addBack, MENU_FONT } from './menuTheme';
 import { loadQuests, type Quest } from '../story/quests';
-import { takenQuests } from '../story/questState';
+import { takenQuests, objectiveDone, type PlayerQuest } from '../story/questState';
+import { rewardLabel } from '../story/profile';
 
 // «Завдання» — дерев'яна дошка на стіні з пришпиленими нотатками-квестами
 // (з Редактора Історії → панель «Квести»). Головні квести — з ★. Тап по нотатці
@@ -49,11 +50,11 @@ export class QuestsScene extends Phaser.Scene {
       const quests = store.quests
         .filter((q) => !q.giver || taken[q.id])
         .sort((a, b) => (a.cat === 'main' ? -1 : 1) - (b.cat === 'main' ? -1 : 1));
-      NOTE_POS.forEach((n, i) => this.drawNote(bx, by, n, quests[i] ?? null));
+      NOTE_POS.forEach((n, i) => { const q = quests[i] ?? null; this.drawNote(bx, by, n, q, q ? taken[q.id] : undefined); });
     });
   }
 
-  private drawNote(bx: number, by: number, n: typeof NOTE_POS[number], q: Quest | null): void {
+  private drawNote(bx: number, by: number, n: typeof NOTE_POS[number], q: Quest | null, pq?: PlayerQuest): void {
     const cont = this.add.container(bx + n.x + n.w / 2, by + n.y + n.h / 2).setScrollFactor(0).setRotation(n.r);
     const ng = this.add.graphics();
     ng.fillStyle(0x0c0906, 0.5); ng.fillRect(-n.w / 2 + 4, -n.h / 2 + 5, n.w, n.h);
@@ -62,13 +63,21 @@ export class QuestsScene extends Phaser.Scene {
     cont.add(ng);
 
     if (q) {
-      const title = this.add.text(0, -n.h / 2 + 16, (q.cat === 'main' ? '★ ' : '') + q.title, {
-        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '15px', color: '#2b2115',
+      const done = pq?.status === 'done';
+      const title = this.add.text(0, -n.h / 2 + 16, (done ? '✓ ' : q.cat === 'main' ? '★ ' : '') + q.title, {
+        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '15px', color: done ? '#3f5a2a' : '#2b2115',
         wordWrap: { width: n.w - 20 }, align: 'center',
       }).setOrigin(0.5, 0);
       cont.add(title);
-      // коротка витримка з тексту
-      if (q.text) {
+      // Прогрес цілей (X/Y виконано) або витримка з тексту, якщо цілей нема.
+      const objs = q.objectives ?? [];
+      if (objs.length) {
+        const doneN = pq ? objs.filter((o) => objectiveDone(o, pq)).length : 0;
+        cont.add(this.add.text(0, 6, done ? 'ВИКОНАНО' : `Цілі: ${doneN}/${objs.length}`, {
+          fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '13px', color: done ? '#3f5a2a' : '#6a5638',
+          align: 'center',
+        }).setOrigin(0.5, 0));
+      } else if (q.text) {
         const teaser = this.add.text(0, 8, q.text.length > 60 ? q.text.slice(0, 60) + '…' : q.text, {
           fontFamily: MENU_FONT, fontSize: '11px', color: '#4a3b28',
           wordWrap: { width: n.w - 20 }, align: 'center',
@@ -78,7 +87,7 @@ export class QuestsScene extends Phaser.Scene {
       // Хіт-зона контейнера: явний прямокутник навколо центру (setSize сам по собі
       // дає зміщену зону в контейнерів)
       cont.setInteractive(new Phaser.Geom.Rectangle(-n.w / 2, -n.h / 2, n.w, n.h), Phaser.Geom.Rectangle.Contains);
-      cont.on('pointerup', () => this.openQuest(q));
+      cont.on('pointerup', () => this.openQuest(q, pq));
     } else {
       // порожні «рядки»
       ng.lineStyle(2, 0xb3a17c, 1);
@@ -95,11 +104,11 @@ export class QuestsScene extends Phaser.Scene {
     cont.add(pin);
   }
 
-  // Розгорнутий квест — велика нотатка поверх дошки.
-  private openQuest(q: Quest): void {
+  // Розгорнутий квест — велика нотатка поверх дошки (текст + чекліст цілей + нагорода).
+  private openQuest(q: Quest, pq?: PlayerQuest): void {
     this.overlay?.destroy(true);
     const cx = this.cameras.main.width / 2, cy = this.cameras.main.height / 2;
-    const w = 520, h = 340;
+    const w = 520, h = 380;
     const c = this.add.container(cx, cy).setScrollFactor(0).setDepth(100);
     const g = this.add.graphics();
     g.fillStyle(0x000000, 0.55); g.fillRect(-this.cameras.main.width / 2, -this.cameras.main.height / 2, this.cameras.main.width, this.cameras.main.height);
@@ -107,14 +116,32 @@ export class QuestsScene extends Phaser.Scene {
     g.fillStyle(0xe4d6b0, 1); g.fillRect(-w / 2, -h / 2, w, h);
     g.fillStyle(0xc4b28c, 1); g.fillRect(-w / 2, -h / 2, w, 10);
     c.add(g);
-    c.add(this.add.text(0, -h / 2 + 30, (q.cat === 'main' ? '★ ' : '') + q.title, {
-      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '26px', color: '#2b2115',
+    const done = pq?.status === 'done';
+    c.add(this.add.text(0, -h / 2 + 26, (done ? '✓ ' : q.cat === 'main' ? '★ ' : '') + q.title, {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '25px', color: done ? '#3f5a2a' : '#2b2115',
       wordWrap: { width: w - 60 }, align: 'center',
     }).setOrigin(0.5, 0));
-    c.add(this.add.text(0, -h / 2 + 76, q.text || '(без опису)', {
-      fontFamily: MENU_FONT, fontSize: '17px', color: '#3a2e1e', lineSpacing: 5,
+    c.add(this.add.text(0, -h / 2 + 66, q.text || '(без опису)', {
+      fontFamily: MENU_FONT, fontSize: '16px', color: '#3a2e1e', lineSpacing: 4,
       wordWrap: { width: w - 60 },
     }).setOrigin(0.5, 0));
+
+    // Чекліст цілей.
+    let y = -h / 2 + 66 + Math.min(120, 22 + (q.text?.length ?? 0) / 3);
+    for (const o of q.objectives ?? []) {
+      const ok = pq ? objectiveDone(o, pq) : false;
+      const cnt = (o.count ?? 1) > 1 ? `  (${Math.min(o.count!, pq?.progress[o.id] ?? 0)}/${o.count})` : '';
+      c.add(this.add.text(-w / 2 + 34, y, (ok ? '☑ ' : '☐ ') + (o.desc || o.kind) + cnt, {
+        fontFamily: MENU_FONT, fontSize: '15px', color: ok ? '#3f5a2a' : '#4a3b28', wordWrap: { width: w - 68 },
+      }).setOrigin(0, 0));
+      y += 24;
+    }
+    // Нагорода.
+    const rl = rewardLabel(q.reward);
+    if (rl) c.add(this.add.text(0, h / 2 - 34, 'Нагорода: ' + rl, {
+      fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '15px', color: '#5a4526', align: 'center',
+    }).setOrigin(0.5, 0));
+
     const closeZone = this.add.zone(0, 0, this.cameras.main.width, this.cameras.main.height).setInteractive();
     closeZone.on('pointerup', () => { c.destroy(true); this.overlay = null; });
     c.add(closeZone);

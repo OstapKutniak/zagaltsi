@@ -7,12 +7,28 @@
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { initStoryEditor } from '../story/editor';
+import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 
 export interface MenuButton {
   id: string; label: string;
   x: number; y: number;      // логічні координати кадру 1280×576
   size: number;              // px шрифту
   target: string;            // 'world' | 'game' | 'section:Назва' | 'page:<id>' | ''
+}
+// Розміщений на сторінці PNG-об'єкт (декор). Плановість = depth (менше — далі/ззаду,
+// за персонажем; більше — ближче). Анімація/деформація — як у редакторі рівнів
+// (типи спільні), додаються наступним етапом.
+export interface MenuObject {
+  id: string;
+  url: string;               // dataURL зображення (вбудований, як bg — щоб гра малювала без окремих ассетів)
+  name?: string;
+  x: number; y: number;      // центр, логічні координати 1280×576
+  scale: number;
+  rot?: number;              // градуси
+  flip?: boolean;            // дзеркалення по X
+  depth: number;             // плановість: 1..7 (5 = рівень персонажа/вогню)
+  anim?: PlacedAnim;         // майбутнє: обертання/дрейф
+  deform?: PlacedDeform;     // майбутнє: перспектива/FFD + кейфрейми
 }
 // Ефекти сцени меню — усе, що раніше було зашито в код MenuScene, тепер редаговане:
 // персонаж біля вогню, вогнище, вікно дощу (прямокутник + шибки), блискавка.
@@ -33,6 +49,7 @@ export interface MenuPage {
   id: string; name: string;
   bg: string;                // dataURL фону ('' = чорний)
   buttons: MenuButton[];
+  objects?: MenuObject[];    // розміщені PNG-об'єкти (декор) із плановістю
   fx?: MenuFx;               // ефекти сцени (нема — гра бере DEFAULT_FX)
 }
 export interface MenuDoc { version: 1; pages: MenuPage[]; updatedAt?: number }
@@ -71,12 +88,15 @@ export function initMenuEditor(prefix: string): void {
     version: 1,
     pages: [{
       id: 'main', name: 'Головна', bg: '',
+      // Ті самі 6 пунктів, що й хардкод ITEMS у MenuScene (з «Житло»), тими ж
+      // координатами (startY=176, gap=68) — щоб дефолт редактора = справжнє меню гри.
       buttons: [
-        { id: uid(), label: 'Мандри', x: 92, y: 210, size: 34, target: 'world' },
-        { id: uid(), label: 'Хоругва', x: 92, y: 284, size: 34, target: 'khorugva' },
-        { id: uid(), label: 'Завдання', x: 92, y: 358, size: 34, target: 'quests' },
-        { id: uid(), label: 'Досягнення', x: 92, y: 432, size: 34, target: 'achievements' },
-        { id: uid(), label: 'Інвентар', x: 92, y: 506, size: 34, target: 'inventory' },
+        { id: uid(), label: 'Житло', x: 92, y: 176, size: 34, target: 'home' },
+        { id: uid(), label: 'Мандри', x: 92, y: 244, size: 34, target: 'world' },
+        { id: uid(), label: 'Хоругва', x: 92, y: 312, size: 34, target: 'khorugva' },
+        { id: uid(), label: 'Завдання', x: 92, y: 380, size: 34, target: 'quests' },
+        { id: uid(), label: 'Досягнення', x: 92, y: 448, size: 34, target: 'achievements' },
+        { id: uid(), label: 'Інвентар', x: 92, y: 516, size: 34, target: 'inventory' },
       ],
     }],
   });
@@ -86,6 +106,7 @@ export function initMenuEditor(prefix: string): void {
     cur: 0,
     sel: null as string | null,
     view: 'page' as 'page' | 'map',
+    preview: false, // чисте прев'ю 20:9 (без рамок/підписів/гізмо редактора) — як бачить гравець
     bgImgs: new Map<string, HTMLImageElement>(), // pageId → фон
     assets: [] as Array<{ id: string; name: string; url: string }>,
     drag: null as null | { id: string; ox: number; oy: number },
@@ -94,8 +115,14 @@ export function initMenuEditor(prefix: string): void {
     lastClick: 0,
     linkFrom: null as null | { pageId: string; btnId: string }, // мапа: тягнемо лінк
     mapRects: [] as Array<{ pageId: string; x: number; y: number; w: number; h: number; btns: Array<{ id: string; y: number; h: number }> }>,
+    // Розміщені PNG-об'єкти сторінки
+    selObj: null as string | null,
+    dragObj: null as null | { id: string; ox: number; oy: number },
+    resizeObj: null as null | { id: string; cx: number; cy: number; startDist: number; startScale: number },
+    objImgs: new Map<string, HTMLImageElement>(), // objId → зображення
   };
   const page = (): MenuPage => state.doc.pages[state.cur];
+  const objs = (): MenuObject[] => (page().objects ??= []);
   // fx поточної сторінки (створюється з дефолтів при першому доступі)
   const fx = (): MenuFx => (page().fx ??= JSON.parse(JSON.stringify(DEFAULT_FX)) as MenuFx);
   const setStatus = (m: string): void => { const el = $('statusBar'); if (el) el.textContent = m; };
@@ -105,6 +132,43 @@ export function initMenuEditor(prefix: string): void {
     state.doc.updatedAt = Date.now();
     clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => { void idbSet('zag_menu', state.doc); }, 250);
+  }
+
+  // ── Контекстне меню (DOM-попап) ──────────────────────────────────────────────
+  let ctxEl: HTMLDivElement | null = null;
+  function closeCtx(): void { ctxEl?.remove(); ctxEl = null; }
+  function showCtxMenu(clientX: number, clientY: number, items: Array<{ label: string; on: () => void } | 'sep'>): void {
+    closeCtx();
+    const m = document.createElement('div');
+    m.style.cssText = 'position:fixed;z-index:9999;min-width:190px;background:#1d1d1f;border:1px solid #3a3a3a;border-radius:8px;padding:4px;box-shadow:0 8px 28px rgba(0,0,0,.55);font-size:13px;color:#e5d8bc';
+    for (const it of items) {
+      if (it === 'sep') { const s = document.createElement('div'); s.style.cssText = 'height:1px;background:#3a3a3a;margin:4px 2px'; m.appendChild(s); continue; }
+      const b = document.createElement('div');
+      b.textContent = it.label;
+      b.style.cssText = 'padding:6px 10px;border-radius:5px;cursor:pointer;white-space:nowrap';
+      b.onmouseenter = () => { b.style.background = 'var(--accent)'; b.style.color = '#1b1b1b'; };
+      b.onmouseleave = () => { b.style.background = ''; b.style.color = '#e5d8bc'; };
+      b.onclick = () => { closeCtx(); it.on(); };
+      m.appendChild(b);
+    }
+    document.body.appendChild(m);
+    // тримаємо в межах вікна
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(clientX, window.innerWidth - r.width - 6) + 'px';
+    m.style.top = Math.min(clientY, window.innerHeight - r.height - 6) + 'px';
+    ctxEl = m;
+  }
+  window.addEventListener('mousedown', (e) => { if (ctxEl && !ctxEl.contains(e.target as Node)) closeCtx(); }, true);
+  window.addEventListener('scroll', closeCtx, true);
+
+  // Розмістити ассет як об'єкт на поточній сторінці (по центру кадру).
+  function placeObject(asset: { name: string; url: string }, naturalH: number): void {
+    const targetH = 230; // бажана логічна висота за замовчуванням
+    const sc = naturalH ? Math.min(1.5, Math.round(targetH / naturalH * 1000) / 1000) : 0.5;
+    const o: MenuObject = { id: uid(), url: asset.url, name: asset.name, x: 640, y: 300, scale: sc, rot: 0, flip: false, depth: 3 };
+    objs().push(o); state.selObj = o.id; state.sel = null;
+    save(); renderProps(); draw();
+    setStatus(`Розміщено «${asset.name}» · тягни — рух, кут — масштаб, ПКМ — план/дзеркало/видалити`);
   }
 
   // ── Кадр 20:9 вписаний у канвас ─────────────────────────────────────────────
@@ -146,15 +210,20 @@ export function initMenuEditor(prefix: string): void {
     }
     ctx.strokeStyle = 'var(--line)'; ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 1;
     ctx.strokeRect(f.x, f.y, f.w, f.h);
+    // розміщені об'єкти (декор) — між фоном і кнопками, у порядку плановості
+    ctx.save(); ctx.beginPath(); ctx.rect(f.x, f.y, f.w, f.h); ctx.clip();
+    drawObjects(f, state.preview);
+    ctx.restore();
     // кнопки
     for (const b of p.buttons) {
       const bx = f.x + b.x * f.s, by = f.y + b.y * f.s;
       ctx.font = `${b.size * f.s}px ${MENU_FONT}`;
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.shadowColor = '#000'; ctx.shadowBlur = 5 * f.s; ctx.shadowOffsetY = 2 * f.s;
-      ctx.fillStyle = state.sel === b.id ? '#ffcf8f' : '#e5d8bc';
+      ctx.fillStyle = (state.sel === b.id && !state.preview) ? '#ffcf8f' : '#e5d8bc';
       ctx.fillText(b.label, bx, by);
       ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      if (state.preview) continue; // прев'ю: лише самі написи кнопок, без чрому
       if (state.sel === b.id) {
         const m = ctx.measureText(b.label);
         ctx.strokeStyle = '#ffcf8f'; ctx.setLineDash([4, 3]);
@@ -168,30 +237,33 @@ export function initMenuEditor(prefix: string): void {
       ctx.font = `${11 * f.s}px system-ui`; ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fillText(tgt, bx, by + b.size * f.s * 0.85);
     }
-    drawFxGizmos(f);
+    drawFxGizmos(f, state.preview);
+    if (state.preview) return; // прев'ю: без назви сторінки
     // назва сторінки
     ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('Сторінка: ' + p.name + ' (' + p.id + ')', f.x + 4, f.y - 6);
   }
 
   // ── Гізмо ефектів: вікно дощу (рамка), вогнище (пляма), персонаж (портрет) ──
-  function drawFxGizmos(f: { x: number; y: number; s: number }): void {
+  function drawFxGizmos(f: { x: number; y: number; s: number }, preview = false): void {
     const e = fx();
     const X = (v: number): number => f.x + v * f.s;
     const Y = (v: number): number => f.y + v * f.s;
     ctx.save();
-    // Вікно дощу
+    // Вікно дощу (у прев'ю — лише штрихи дощу, без рамки/куточка/підпису)
     if (e.rain.on) {
       const x0 = X(e.rain.x0), y0 = Y(e.rain.y0), w = (e.rain.x1 - e.rain.x0) * f.s, h = (e.rain.y1 - e.rain.y0) * f.s;
-      ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
-      ctx.strokeRect(x0, y0, w, h);
-      if (e.rain.panes) { // хрестовина 2×2
-        ctx.beginPath();
-        ctx.moveTo(x0 + w / 2, y0); ctx.lineTo(x0 + w / 2, y0 + h);
-        ctx.moveTo(x0, y0 + h / 2); ctx.lineTo(x0 + w, y0 + h / 2);
-        ctx.stroke();
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+        ctx.strokeRect(x0, y0, w, h);
+        if (e.rain.panes) { // хрестовина 2×2
+          ctx.beginPath();
+          ctx.moveTo(x0 + w / 2, y0); ctx.lineTo(x0 + w / 2, y0 + h);
+          ctx.moveTo(x0, y0 + h / 2); ctx.lineTo(x0 + w, y0 + h / 2);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
       }
-      ctx.setLineDash([]);
       // штрихи дощу-прев'ю
       ctx.strokeStyle = 'rgba(120,200,255,0.35)';
       const ang = Math.tan(e.rain.dir * Math.PI / 180);
@@ -199,45 +271,51 @@ export function initMenuEditor(prefix: string): void {
         const rx = x0 + w * (i + 0.5) / 6, ry = y0 + h * ((i * 0.37) % 1);
         ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx + 10 * ang, ry + 10); ctx.stroke();
       }
-      // куточок-ресайз
-      ctx.fillStyle = 'rgba(120,200,255,0.95)';
-      ctx.fillRect(x0 + w - 5, y0 + h - 5, 10, 10);
-      ctx.fillStyle = 'rgba(120,200,255,0.8)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText('дощ (вікно)', x0, y0 - 4);
+      if (!preview) {
+        // куточок-ресайз
+        ctx.fillStyle = 'rgba(120,200,255,0.95)';
+        ctx.fillRect(x0 + w - 5, y0 + h - 5, 10, 10);
+        ctx.fillStyle = 'rgba(120,200,255,0.8)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('дощ (вікно)', x0, y0 - 4);
+      }
     }
-    // Вогнище
+    // Вогнище (світлова пляма — реальний вигляд; у прев'ю без кільця/підпису)
     if (e.fire.on) {
       const cx0 = X(e.fire.x), cy0 = Y(e.fire.y), r = 26 * e.fire.scale * f.s;
       const g = ctx.createRadialGradient(cx0, cy0 - r * 0.4, 2, cx0, cy0 - r * 0.4, r * 1.6);
       g.addColorStop(0, 'rgba(255,190,90,0.75)'); g.addColorStop(1, 'rgba(255,120,30,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(cx0, cy0 - r * 0.4, r * 1.6, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,170,70,0.9)'; ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.arc(cx0, cy0, 8 * f.s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,170,70,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(255,170,70,0.9)'; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.arc(cx0, cy0, 8 * f.s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,170,70,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
+      }
     }
-    // Персонаж
+    // Персонаж (портрет — реальний вигляд; у прев'ю без рамки/підпису)
     if (e.char.on) {
       const cx0 = X(e.char.x), cy0 = Y(e.char.y);
       const H = 150 * e.char.scale * f.s;
       const th = state.charThumb;
       if (th?.complete && th.naturalWidth) {
         const W2 = H * th.naturalWidth / th.naturalHeight;
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = preview ? 1 : 0.85;
         ctx.drawImage(th, cx0 - W2 / 2, cy0 - H / 2, W2, H);
         ctx.globalAlpha = 1;
-      } else {
-        // силует: голова + тулуб
+      } else if (!preview) {
+        // силует: голова + тулуб (лише в режимі редагування — у прев'ю без арту нічого)
         ctx.fillStyle = 'rgba(220,205,170,0.35)';
         ctx.beginPath(); ctx.arc(cx0, cy0 - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.roundRect(cx0 - H * 0.14, cy0 - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
       }
-      ctx.strokeStyle = 'rgba(255,207,143,0.8)'; ctx.setLineDash([4, 3]);
-      ctx.strokeRect(cx0 - H * 0.3, cy0 - H / 2, H * 0.6, H);
-      ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('персонаж', cx0, cy0 + H / 2 + 12);
+      if (!preview) {
+        ctx.strokeStyle = 'rgba(255,207,143,0.8)'; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(cx0 - H * 0.3, cy0 - H / 2, H * 0.6, H);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('персонаж', cx0, cy0 + H / 2 + 12);
+      }
     }
     ctx.restore();
   }
@@ -264,6 +342,65 @@ export function initMenuEditor(prefix: string): void {
       const h = b.size * f.s * 1.3;
       if (sx >= bx - 6 && sx <= bx + w + 6 && sy >= by - h / 2 && sy <= by + h / 2) return b;
     }
+    return null;
+  }
+
+  // ── Розміщені PNG-об'єкти ────────────────────────────────────────────────────
+  function ensureObjImg(o: MenuObject): HTMLImageElement {
+    let im = state.objImgs.get(o.id);
+    if (!im) { im = new Image(); im.onload = () => draw(); im.src = o.url; state.objImgs.set(o.id, im); }
+    return im;
+  }
+  // Габарити об'єкта в координатах кадру (натуральний розмір × scale).
+  function objBox(o: MenuObject): { w: number; h: number } {
+    const im = ensureObjImg(o);
+    const iw = im.naturalWidth || 128, ih = im.naturalHeight || 128;
+    return { w: iw * o.scale, h: ih * o.scale };
+  }
+  // Об'єкт під курсором (координати кадру), зверху вниз за плановістю.
+  function objAt(px: number, py: number): MenuObject | null {
+    const list = [...objs()].sort((a, b) => b.depth - a.depth); // спершу передні
+    for (const o of list) {
+      const { w, h } = objBox(o);
+      if (Math.abs(px - o.x) <= w / 2 && Math.abs(py - o.y) <= h / 2) return o;
+    }
+    return null;
+  }
+  function selectedObj(): MenuObject | null { return objs().find((o) => o.id === state.selObj) ?? null; }
+  // Малюємо об'єкти сторінки (сортовані за плановістю). Виділений — рамка + кут-ресайз.
+  function drawObjects(f: { x: number; y: number; s: number }, preview: boolean): void {
+    const list = [...objs()].sort((a, b) => a.depth - b.depth); // ззаду наперед
+    for (const o of list) {
+      const im = ensureObjImg(o);
+      const { w, h } = objBox(o);
+      const cx = f.x + o.x * f.s, cy = f.y + o.y * f.s;
+      const dw = w * f.s, dh = h * f.s;
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
+      if (o.flip) ctx.scale(-1, 1);
+      if (im.complete && im.naturalWidth) ctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
+      else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
+      ctx.restore();
+      if (!preview && state.selObj === o.id) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
+        ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+        ctx.strokeRect(-dw / 2, -dh / 2, dw, dh); ctx.setLineDash([]);
+        ctx.fillStyle = '#7fd0ff'; ctx.fillRect(dw / 2 - 5, dh / 2 - 5, 10, 10); // кут-ресайз
+        ctx.restore();
+        ctx.fillStyle = 'rgba(127,208,255,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText(`${o.name ?? 'об\'єкт'} · план ${o.depth}`, cx, cy - dh / 2 - 6);
+      }
+    }
+  }
+  // Кут-ресайз виділеного об'єкта під курсором? (у координатах кадру)
+  function objResizeAt(px: number, py: number): MenuObject | null {
+    const o = selectedObj(); if (!o) return null;
+    const { w, h } = objBox(o);
+    // кут без урахування повороту (спрощено) — правий нижній
+    if (Math.abs(px - (o.x + w / 2)) < 8 && Math.abs(py - (o.y + h / 2)) < 8) return o;
     return null;
   }
 
@@ -355,6 +492,15 @@ export function initMenuEditor(prefix: string): void {
       state.linkFrom = null; draw();
       return;
     }
+    if (state.preview) return; // прев'ю read-only: без вибору/перетягування
+    const fp = toFrame(sx, sy);
+    // 1) кут-ресайз виділеного об'єкта
+    const ro = objResizeAt(fp.x, fp.y);
+    if (ro) {
+      state.resizeObj = { id: ro.id, cx: ro.x, cy: ro.y, startDist: Math.hypot(fp.x - ro.x, fp.y - ro.y) || 1, startScale: ro.scale };
+      setStatus('Масштаб об\'єкта'); return;
+    }
+    // 2) кнопки меню (пріоритет над об'єктами — це головний контент меню)
     const b = btnAt(sx, sy);
     if (b) {
       const now = Date.now();
@@ -363,23 +509,51 @@ export function initMenuEditor(prefix: string): void {
         if (nl) { b.label = nl; save(); }
       }
       state.lastClick = now;
-      state.sel = b.id;
-      const fp = toFrame(sx, sy);
+      state.sel = b.id; state.selObj = null;
       state.drag = { id: b.id, ox: fp.x - b.x, oy: fp.y - b.y };
     } else {
-      // гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
-      const fp = toFrame(sx, sy);
-      const kind = fxAt(fp.x, fp.y);
-      if (kind) {
-        const e = fx();
-        const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
-          : kind === 'rainSize' ? { x: e.rain.x1, y: e.rain.y1 } : { x: e.rain.x0, y: e.rain.y0 };
-        state.dragFx = { kind, ox: fp.x - ref.x, oy: fp.y - ref.y };
-        setStatus(kind === 'rainSize' ? 'Розмір вікна дощу' : kind === 'rain' ? 'Вікно дощу' : kind === 'fire' ? 'Вогнище' : 'Персонаж');
+      // 3) розміщений об'єкт
+      const o = objAt(fp.x, fp.y);
+      if (o) {
+        state.selObj = o.id; state.sel = null;
+        state.dragObj = { id: o.id, ox: fp.x - o.x, oy: fp.y - o.y };
+        setStatus(`Об'єкт: ${o.name ?? ''} · ПКМ — план/дзеркало/видалити`);
+      } else {
+        // 4) гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
+        const kind = fxAt(fp.x, fp.y);
+        if (kind) {
+          const e = fx();
+          const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
+            : kind === 'rainSize' ? { x: e.rain.x1, y: e.rain.y1 } : { x: e.rain.x0, y: e.rain.y0 };
+          state.dragFx = { kind, ox: fp.x - ref.x, oy: fp.y - ref.y };
+          setStatus(kind === 'rainSize' ? 'Розмір вікна дощу' : kind === 'rain' ? 'Вікно дощу' : kind === 'fire' ? 'Вогнище' : 'Персонаж');
+        }
+        state.sel = null; state.selObj = null;
       }
-      state.sel = null;
     }
     renderProps(); draw();
+  });
+  // ПКМ по полотну: якщо під курсором об'єкт — меню плановості/дзеркала/видалення.
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (state.view !== 'page' || state.preview) return;
+    const r = canvas!.getBoundingClientRect();
+    const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    const o = objAt(fp.x, fp.y) ?? selectedObj();
+    if (!o) return;
+    state.selObj = o.id; state.sel = null; renderProps(); draw();
+    showCtxMenu(e.clientX, e.clientY, [
+      { label: 'На передній план', on: () => { o.depth = 7; save(); draw(); setStatus('План: 7'); } },
+      { label: 'Вперед', on: () => { o.depth = Math.min(7, o.depth + 1); save(); draw(); setStatus(`План: ${o.depth}`); } },
+      { label: 'Назад', on: () => { o.depth = Math.max(1, o.depth - 1); save(); draw(); setStatus(`План: ${o.depth}`); } },
+      { label: 'На задній план', on: () => { o.depth = 1; save(); draw(); setStatus('План: 1'); } },
+      'sep',
+      { label: o.flip ? 'Скасувати дзеркало' : 'Дзеркалити', on: () => { o.flip = !o.flip; save(); draw(); } },
+      { label: 'Обертання…', on: () => { const v = prompt('Кут повороту (градуси):', String(o.rot ?? 0)); if (v !== null) { o.rot = Number(v) || 0; save(); draw(); } } },
+      { label: 'Масштаб…', on: () => { const v = prompt('Масштаб (1 = натуральний):', String(o.scale)); if (v !== null) { o.scale = Math.max(0.02, Number(v) || o.scale); save(); draw(); } } },
+      'sep',
+      { label: 'Видалити об\'єкт', on: () => { page().objects = objs().filter((x) => x.id !== o.id); state.objImgs.delete(o.id); if (state.selObj === o.id) state.selObj = null; save(); draw(); } },
+    ]);
   });
   canvas.addEventListener('mousemove', (e) => {
     if (state.view === 'map') return;
@@ -398,6 +572,20 @@ export function initMenuEditor(prefix: string): void {
       }
       draw(); return;
     }
+    if (state.resizeObj) {
+      const o = objs().find((x) => x.id === state.resizeObj!.id);
+      if (o) {
+        const d = Math.hypot(fp.x - state.resizeObj.cx, fp.y - state.resizeObj.cy) || 1;
+        o.scale = Math.max(0.02, Math.round(state.resizeObj.startScale * (d / state.resizeObj.startDist) * 1000) / 1000);
+        draw();
+      }
+      return;
+    }
+    if (state.dragObj) {
+      const o = objs().find((x) => x.id === state.dragObj!.id);
+      if (o) { o.x = Math.round(fp.x - state.dragObj.ox); o.y = Math.round(fp.y - state.dragObj.oy); draw(); }
+      return;
+    }
     if (!state.drag) return;
     const b = page().buttons.find((x) => x.id === state.drag!.id);
     if (b) { b.x = Math.round(fp.x - state.drag.ox); b.y = Math.round(fp.y - state.drag.oy); draw(); }
@@ -405,16 +593,28 @@ export function initMenuEditor(prefix: string): void {
   window.addEventListener('mouseup', () => {
     if (state.drag) { state.drag = null; save(); }
     if (state.dragFx) { state.dragFx = null; save(); setStatus(''); }
+    if (state.dragObj) { state.dragObj = null; save(); }
+    if (state.resizeObj) { state.resizeObj = null; save(); setStatus(''); }
   });
   window.addEventListener('keydown', (e) => {
     if (!document.getElementById('app')?.className.includes('mode-menu')) return;
     const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
     if (typing) return;
     if (e.key === 'Escape' && state.linkFrom) { state.linkFrom = null; draw(); }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel && state.view === 'page') {
-      const p = page();
-      p.buttons = p.buttons.filter((b) => b.id !== state.sel);
-      state.sel = null; save(); renderProps(); draw();
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.view === 'page') {
+      if (state.sel) {
+        const p = page();
+        p.buttons = p.buttons.filter((b) => b.id !== state.sel);
+        state.sel = null; save(); renderProps(); draw();
+      } else if (state.selObj) {
+        page().objects = objs().filter((o) => o.id !== state.selObj);
+        state.objImgs.delete(state.selObj); state.selObj = null; save(); draw();
+      }
+    }
+    // Плановість виділеного об'єкта: [ / ] — назад/вперед
+    if (state.selObj && state.view === 'page' && (e.key === '[' || e.key === ']')) {
+      const o = selectedObj();
+      if (o) { o.depth = Math.max(1, Math.min(7, o.depth + (e.key === ']' ? 1 : -1))); save(); draw(); setStatus(`План: ${o.depth}`); }
     }
   });
 
@@ -526,6 +726,16 @@ export function initMenuEditor(prefix: string): void {
       : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
     draw();
   });
+  $('previewBtn')?.addEventListener('click', () => {
+    state.preview = !state.preview;
+    if (state.preview) { state.view = 'page'; state.sel = null; } // прев'ю лише для сторінки
+    ($('previewBtn') as HTMLButtonElement).classList.toggle('on', state.preview);
+    const hint = $('stageHint');
+    if (hint) hint.textContent = state.preview
+      ? 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Прев\'ю 20:9» ще раз, щоб редагувати'
+      : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
+    renderProps(); draw();
+  });
   $('bgBtn')?.addEventListener('click', () => ($('bgInput') as HTMLInputElement)?.click());
   ($('bgInput') as HTMLInputElement | null)?.addEventListener('change', function () {
     const f = this.files?.[0]; if (!f) return;
@@ -546,7 +756,21 @@ export function initMenuEditor(prefix: string): void {
       im.src = a.url; im.style.cssText = 'width:100%;height:64px;object-fit:contain'; im.draggable = false;
       const nm = document.createElement('div'); nm.textContent = a.name;
       nm.style.cssText = 'font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center';
-      card.onclick = () => { page().bg = a.url; state.bgImgs.delete(page().id); save(); draw(); setStatus(`Фон сторінки: ${a.name}`); };
+      // ЛКМ — розмістити об'єктом на сторінці; ПКМ — меню (розмістити / фон / видалити).
+      card.onclick = () => placeObject(a, im.naturalHeight);
+      card.oncontextmenu = (ev) => {
+        ev.preventDefault();
+        showCtxMenu(ev.clientX, ev.clientY, [
+          { label: 'Розмістити на сторінці', on: () => placeObject(a, im.naturalHeight) },
+          { label: 'Зробити фоном сторінки', on: () => { page().bg = a.url; state.bgImgs.delete(page().id); save(); draw(); setStatus(`Фон сторінки: ${a.name}`); } },
+          'sep',
+          { label: 'Видалити ассет', on: () => {
+            state.assets = state.assets.filter((x) => x.id !== a.id);
+            void idbSet('zag_menu_assets', state.assets); renderAssets();
+          } },
+        ]);
+      };
+      card.title = 'ЛКМ — розмістити на сторінці · ПКМ — меню (фон/видалити)';
       card.appendChild(im); card.appendChild(nm);
       list.appendChild(card);
     }

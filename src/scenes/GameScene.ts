@@ -20,6 +20,9 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import { myKhorugvaId, cachedLeaderId } from '../khorugva';
+import { reportProgress } from '../story/questState';
+import { rewardLabel } from '../story/profile';
+import type { Quest } from '../story/quests';
 import { loadEquip } from '../inventory';
 import { stopAmbience } from '../sound/ambience';
 import type { NodeGraph } from '../node-editor';
@@ -524,6 +527,7 @@ export class GameScene extends Phaser.Scene {
         const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
         const enemy = new Enemy(this, gx, gy);
         enemy.netId = idx;
+        if (p[2]) enemy.charKey = p[2];
         this.enemies.push(enemy);
         if (p[2]) toAttach.push({ enemy, charId: p[2] });
       });
@@ -903,8 +907,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   private removeEnemy(e: Enemy): void {
+    const key = e.charKey;
     e.destroy();
     this.enemies = this.enemies.filter((x) => x !== e);
+    // Ціль квесту «здолати ворогів» (порожня ціль = будь-хто; або конкретний charKey).
+    for (const q of reportProgress('kill', key || undefined)) this.questToast(q);
+  }
+
+  // Тост «Квест виконано» + нагорода (короткочасно вгорі кадру).
+  private questToast(q: Quest): void {
+    const label = rewardLabel(q.reward);
+    const msg = `Квест виконано: ${q.title}` + (label ? `  (${label})` : '');
+    const t = this.add.text(this.logicalW / 2 + this.uiOffX, 118 + this.uiOffY, msg, {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontSize: '20px',
+      color: '#ffcf8f', backgroundColor: '#000000aa', padding: { x: 10, y: 6 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9000);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2600, duration: 700, onComplete: () => t.destroy() });
   }
 
   // Хост: транслюємо знімок живих ворогів (~11 разів/сек).
