@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 5; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 6; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = ''; // адреса Cloudflare Worker (shopping-push); порожньо = вимкнено
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -328,7 +328,13 @@ function addToList(pid, { silent } = {}) {
   return true;
 }
 function removeFromList(id) {
-  if (listMap[id]) unqueueNotify('added', listMap[id].name);
+  const it = listMap[id];
+  if (it) {
+    unqueueNotify('added', it.name);
+    // явне видалення прибирає і слід в архіві (на відміну від опівнічного очищення)
+    if (it.done && it.archDay && it.archKey)
+      remove(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`)).catch(() => {});
+  }
   remove(ref(db, `${LIST_PATH}/${id}`));
 }
 
@@ -493,32 +499,44 @@ async function saveItemSheet() {
   $('item-overlay').classList.remove('open');
 }
 
-// ── REPLACE (заміна іншим продуктом категорії) ─────────────
+// ── REPLACE (заміна іншим продуктом) ───────────────────────
+// Сітка як у додаванні: алфавіт + пошук. Без пошуку — своя категорія,
+// з пошуком — по всіх продуктах.
 let replaceItemId = null;
 function openReplaceSheet(id) {
   const it = listMap[id];
   if (!it) return;
   replaceItemId = id;
-  const c = catOf(it);
-  const entries = Object.entries(prods)
-    .filter(([pid, p]) => p.cat === it.cat && pid !== it.pid && !listEntryFor(pid))
-    .sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
   $('replace-title').textContent = `Замінити «${it.name}»`;
-  $('replace-list').innerHTML = entries.length ? entries.map(([pid, p]) =>
-    `<div class="sheet-item" data-pid="${pid}">
-      <div class="sheet-item-ic" style="--c:${c.color}">${ic(p.icon)}</div>
-      <div class="si-name">${esc(p.name)}</div>
-    </div>`).join('') : '<div class="empty">У цій категорії більше нічого немає</div>';
-  $('replace-list').querySelectorAll('.sheet-item[data-pid]').forEach(row =>
-    row.addEventListener('click', async () => {
-      const p = prods[row.dataset.pid];
+  $('replace-search').value = '';
+  renderReplaceGrid();
+  $('replace-overlay').classList.add('open');
+}
+function renderReplaceGrid() {
+  const it = listMap[replaceItemId];
+  if (!it) return;
+  const q = $('replace-search').value.trim().toLowerCase();
+  let entries = Object.entries(prods).filter(([pid]) => pid !== it.pid && !listEntryFor(pid));
+  entries = q
+    ? entries.filter(([, p]) => p.name.toLowerCase().includes(q))
+    : entries.filter(([, p]) => p.cat === it.cat);
+  entries.sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
+  $('replace-grid').innerHTML = entries.map(([pid, p]) => {
+    const c = cats[p.cat] || { color: '#9E9E9E' };
+    return `<button class="ptile" data-pid="${pid}">
+      <div class="ptile-circle" style="--c:${c.color}">${ic(p.icon)}</div>
+      <div class="ptile-name">${esc(p.name)}</div>
+    </button>`;
+  }).join('') || '<div class="empty" style="grid-column:1/-1">Нічого не знайдено</div>';
+  $('replace-grid').querySelectorAll('.ptile[data-pid]').forEach(tile =>
+    tile.addEventListener('click', async () => {
+      const p = prods[tile.dataset.pid];
       if (p && listMap[replaceItemId]) {
-        await update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: row.dataset.pid, name: p.name, icon: p.icon, cat: p.cat });
+        await update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: tile.dataset.pid, name: p.name, icon: p.icon, cat: p.cat });
         toast(`Замінено на «${p.name}»`);
       }
       $('replace-overlay').classList.remove('open');
     }));
-  $('replace-overlay').classList.add('open');
 }
 
 function renderArchive() {
@@ -808,6 +826,7 @@ function bindEvents() {
   $('add-commit-btn').addEventListener('click', commitAddSelect);
   $('add-commit-cancel').addEventListener('click', () => { addSelect = null; renderAddCommit(); renderAddGrid(); });
   $('item-done').addEventListener('click', saveItemSheet);
+  $('replace-search').addEventListener('input', renderReplaceGrid);
 
   $('btn-cats').addEventListener('click', openCatsSheet);
   $('btn-settings').addEventListener('click', () => { renderNotifyRow(); $('settings-overlay').classList.add('open'); });
