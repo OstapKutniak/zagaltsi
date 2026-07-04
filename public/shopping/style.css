@@ -167,13 +167,6 @@ html, body {
 .arch-day:active .arch-circle { background: #d8d8e0; }
 .arch-cnt { font-size: 12px; font-weight: 700; color: var(--text3); }
 
-/* активний фільтр архіву (місяць/рік) */
-.arch-filter-note {
-  display: block; width: calc(100% - 20px); margin: 6px 10px 0;
-  background: var(--active); color: var(--active-ink); border: none; cursor: pointer;
-  border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; text-align: center;
-}
-
 /* archive day sheet items */
 .day-cat { display: flex; align-items: center; gap: 10px; padding: 12px 20px 6px; cursor: pointer; }
 .day-cat .lcat-chevron { margin-left: auto; }
@@ -363,15 +356,38 @@ html, body {
 .form-delete { flex: 1; background: #fde7ef; color: var(--danger); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .form-done { flex: 2; background: var(--active-ink); border: none; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; color: #fff; }
 
-/* календар архіву: скрол місяців */
-.cal-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 20px; font-size: 15px; font-weight: 600;
-  border-bottom: 1px solid var(--line); cursor: pointer;
+/* календар архіву: барабан місяців («Липень 2026», сусідні проглядають) */
+#cal-drum-overlay { position: fixed; inset: 0; z-index: 150; display: none; }
+#cal-drum-overlay.open { display: block; }
+.cal-drum {
+  position: absolute; top: calc(var(--top) + 66px); left: 50%;
+  width: 230px; height: 132px; /* 3 рядки по 44px */
+  background: rgba(255,255,255,0.94);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  overflow: hidden;
+  transform: translateX(-50%);
+  animation: drumIn 0.22s ease;
 }
-.cal-item:active { background: #f6f6f8; }
-.cal-item.sel { color: var(--active-ink); }
-.cal-cnt { font-size: 12.5px; color: var(--text3); font-weight: 600; }
+@keyframes drumIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.cal-drum-scroll {
+  height: 100%; overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  padding: 44px 0; /* крайні місяці теж стають у центр */
+  -webkit-mask-image: linear-gradient(transparent, #000 34%, #000 66%, transparent);
+  mask-image: linear-gradient(transparent, #000 34%, #000 66%, transparent);
+}
+.cal-drum-scroll::-webkit-scrollbar { display: none; }
+.drum-item {
+  height: 44px; display: flex; align-items: center; justify-content: center;
+  scroll-snap-align: center; cursor: pointer;
+  font-size: 16.5px; font-weight: 700; color: var(--text3);
+  transition: color 0.15s;
+}
+.drum-item.sel { color: var(--text); }
 
 /* settings rows */
 .settings-row { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--line); cursor: pointer; }

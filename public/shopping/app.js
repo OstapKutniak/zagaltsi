@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 12; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 13; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -609,54 +609,63 @@ function renderReplaceGrid() {
     }));
 }
 
-// ── КАЛЕНДАР АРХІВУ (скрол місяців: «Липень 2026», …) ──────
-let archFilter = null; // 'YYYY-MM' або null = всі місяці
-function openCalSheet() {
-  const now = new Date();
-  const nowMk = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const have = Object.keys(archMap).map(d => d.slice(0, 7)).sort();
-  // суцільний ряд місяців від найранішого в архіві до поточного, новіші згори
-  const list = [];
-  let [y, m] = (have[0] && have[0] < nowMk ? have[0] : nowMk).split('-').map(Number);
-  const [ny, nm] = nowMk.split('-').map(Number);
-  while (y < ny || (y === ny && m <= nm)) {
-    list.push(`${y}-${String(m).padStart(2, '0')}`);
-    if (++m > 12) { m = 1; y++; }
-  }
-  list.reverse();
-  $('cal-list').innerHTML =
-    `<div class="cal-item ${archFilter ? '' : 'sel'}" data-mk="">Всі місяці</div>` +
-    list.map(mk => {
-      const [yy, mm] = mk.split('-').map(Number);
-      const cnt = Object.keys(archMap).filter(d => d.startsWith(mk)).length;
-      return `<div class="cal-item ${archFilter === mk ? 'sel' : ''}" data-mk="${mk}">
-        ${MONTHS[mm - 1]} ${yy}
-        <span class="cal-cnt">${cnt ? `${cnt} ${plural(cnt, 'день', 'дні', 'днів')}` : ''}</span>
-      </div>`;
-    }).join('');
-  $('cal-list').querySelectorAll('.cal-item').forEach(row =>
-    row.addEventListener('click', () => {
-      archFilter = row.dataset.mk || null;
-      renderArchive();
-      $('cal-overlay').classList.remove('open');
-    }));
-  $('cal-overlay').classList.add('open');
+// ── КАЛЕНДАР АРХІВУ (барабан: скролиш «Липень 2026» — архів їде сам) ──
+const DRUM_ROW = 44; // висота рядка барабана, синхронно зі style.css
+let drumMonths = [];          // 'YYYY-MM', новіші згори
+let drumScrollTimer = null;
+let drumIgnoreScroll = false; // програмна установка скролу не сіпає архів
+
+function toggleCalDrum() {
+  const ov = $('cal-drum-overlay');
+  if (ov.classList.contains('open')) { closeCalDrum(); return; }
+  drumMonths = [...new Set(Object.keys(archMap).map(d => d.slice(0, 7)))].sort().reverse();
+  if (!drumMonths.length) { toast('Архів порожній'); return; }
+  const sc = $('cal-drum-scroll');
+  sc.innerHTML = drumMonths.map(mk => {
+    const [y, m] = mk.split('-').map(Number);
+    return `<div class="drum-item" data-mk="${mk}">${MONTHS[m - 1]} ${y}</div>`;
+  }).join('');
+  // тап по сусідньому місяцю докручує барабан до нього
+  sc.querySelectorAll('.drum-item').forEach((el, i) =>
+    el.addEventListener('click', () => sc.scrollTo({ top: i * DRUM_ROW, behavior: 'smooth' })));
+  ov.classList.add('open');
+  // стартуємо з місяця, який зараз видно вгорі архіву
+  const idx = Math.max(0, drumMonths.indexOf(topVisibleMonth()));
+  drumIgnoreScroll = true;
+  sc.scrollTop = idx * DRUM_ROW;
+  markDrumSel(idx);
+  requestAnimationFrame(() => { drumIgnoreScroll = false; });
 }
-function clearArchFilter() { archFilter = null; renderArchive(); }
+function closeCalDrum() { $('cal-drum-overlay').classList.remove('open'); }
+
+function topVisibleMonth() {
+  const scr = $('archive-screen');
+  let cur = null;
+  document.querySelectorAll('#arch-wrap .arch-month').forEach(h => {
+    if (cur === null || h.offsetTop <= scr.scrollTop + 60) cur = h.dataset.mk;
+  });
+  return cur;
+}
+function markDrumSel(idx) {
+  $('cal-drum-scroll').querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('sel', i === idx));
+}
+function onDrumScroll() {
+  if (drumIgnoreScroll) return;
+  const sc = $('cal-drum-scroll');
+  const idx = Math.max(0, Math.min(drumMonths.length - 1, Math.round(sc.scrollTop / DRUM_ROW)));
+  markDrumSel(idx);
+  clearTimeout(drumScrollTimer);
+  drumScrollTimer = setTimeout(() => {
+    const head = document.querySelector(`#arch-wrap .arch-month[data-mk="${drumMonths[idx]}"]`);
+    if (head) $('archive-screen').scrollTo({ top: Math.max(0, head.offsetTop - 6), behavior: 'smooth' });
+  }, 120);
+}
 
 function renderArchive() {
   const wrap = $('arch-wrap');
-  $('btn-calendar').classList.toggle('on', !!archFilter);
-  let days = Object.keys(archMap).sort().reverse();
-  if (archFilter) days = days.filter(d => d.startsWith(archFilter));
-  const note = archFilter
-    ? `<button class="arch-filter-note" id="arch-clear">Показано: ${MONTHS[+archFilter.slice(5, 7) - 1]} ${archFilter.slice(0, 4)} · показати все</button>`
-    : '';
+  const days = Object.keys(archMap).sort().reverse();
   if (!days.length) {
-    wrap.innerHTML = note + `<div class="empty">${ic('box')}<div>${archFilter
-      ? 'За цей місяць нічого не куплено.'
-      : `Архів порожній.<br>Куплене з галочкою з'являтиметься тут по днях.`}</div></div>`;
-    $('arch-clear')?.addEventListener('click', clearArchFilter);
+    wrap.innerHTML = `<div class="empty">${ic('box')}<div>Архів порожній.<br>Куплене з галочкою з'являтиметься тут по днях.</div></div>`;
     return;
   }
   // групуємо по місяцях
@@ -666,10 +675,10 @@ function renderArchive() {
     if (!byMonth.has(mk)) byMonth.set(mk, []);
     byMonth.get(mk).push(d);
   });
-  let html = note;
+  let html = '';
   byMonth.forEach((ds, mk) => {
     const [y, m] = mk.split('-').map(Number);
-    html += `<div class="arch-month">${MONTHS[m-1]} ${y}</div><div class="arch-grid">` +
+    html += `<div class="arch-month" data-mk="${mk}">${MONTHS[m-1]} ${y}</div><div class="arch-grid">` +
       ds.map(d => {
         const cnt = Object.keys(archMap[d] || {}).length;
         const dt = new Date(d + 'T12:00:00');
@@ -680,7 +689,6 @@ function renderArchive() {
       }).join('') + `</div>`;
   });
   wrap.innerHTML = html;
-  $('arch-clear')?.addEventListener('click', clearArchFilter);
   wrap.querySelectorAll('.arch-day').forEach(el => el.addEventListener('click', () => openDaySheet(el.dataset.day)));
 }
 
@@ -939,7 +947,9 @@ function bindEvents() {
     renderAddGrid();
     toast(addEditMode ? 'Режим редагування: тапни продукт чи категорію' : 'Режим додавання');
   });
-  $('btn-calendar').addEventListener('click', openCalSheet);
+  $('btn-calendar').addEventListener('click', toggleCalDrum);
+  $('cal-drum-scroll').addEventListener('scroll', onDrumScroll);
+  $('cal-drum-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeCalDrum(); });
   $('add-search').addEventListener('input', e => { addSearch = e.target.value; renderAddChips(); renderAddGrid(); });
   $('add-commit-btn').addEventListener('click', commitAddSelect);
   $('add-commit-cancel').addEventListener('click', () => { addSelect = null; renderAddCommit(); renderAddGrid(); });
@@ -981,6 +991,7 @@ function setTab(t) {
 
 function updateTabs() {
   document.querySelectorAll('.tabbar [data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
+  if (state.tab !== 'archive') closeCalDrum();
   // права кнопка шапки — своя на кожній сторінці
   $('btn-cats').style.display = state.tab === 'list' ? '' : 'none';
   $('btn-edit-prods').style.display = state.tab === 'add' ? '' : 'none';
