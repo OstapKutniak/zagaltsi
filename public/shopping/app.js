@@ -14,6 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
+const APP_VERSION = 3; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 const CATS_PATH = 'shopping/categories';
 const PRODS_PATH = 'shopping/products';
 const LIST_PATH = 'shopping/list';
@@ -163,9 +164,15 @@ const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).
 const catOf = item => cats[item.cat] || { name: 'Інше', color: '#9E9E9E', icon: 'tag' };
 
 // ── INIT ───────────────────────────────────────────────────
+let swReg = null;
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
-    navigator.serviceWorker.register('/zagaltsi/shopping/sw.js', { scope: '/zagaltsi/shopping/' }).catch(() => {});
+    navigator.serviceWorker.register('/zagaltsi/shopping/sw.js', { scope: '/zagaltsi/shopping/' })
+      .then(r => { swReg = r; }).catch(() => {});
+  // iOS тримає PWA замороженим — при поверненні у форграунд перевіряємо оновлення SW
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && swReg) swReg.update().catch(() => {});
+  });
   initSwipeLayout();
   bindEvents();
   seedIfEmpty().finally(subscribe);
@@ -188,6 +195,20 @@ async function seedIfEmpty() {
 
 // ── SYNC ───────────────────────────────────────────────────
 function subscribe() {
+  // автооновлення: хтось із новішою версією підняв shopping/meta/version → старі клієнти перезавантажуються
+  onValue(ref(db, 'shopping/meta/version'), s => {
+    const v = s.val() || 0;
+    if (v > APP_VERSION) {
+      const last = +sessionStorage.getItem('verReload') || 0;
+      if (Date.now() - last > 60000) {
+        sessionStorage.setItem('verReload', String(Date.now()));
+        swReg?.update().catch(() => {});
+        setTimeout(() => location.reload(), 400);
+      }
+    } else if (v < APP_VERSION) {
+      set(ref(db, 'shopping/meta/version'), APP_VERSION).catch(() => {});
+    }
+  });
   onValue(ref(db, CATS_PATH), s => { cats = s.val() || {}; scheduleRender(); });
   onValue(ref(db, PRODS_PATH), s => { prods = s.val() || {}; scheduleRender(); });
   onValue(ref(db, LIST_PATH), s => { listMap = s.val() || {}; purgeOldDone(); scheduleRender(); });
