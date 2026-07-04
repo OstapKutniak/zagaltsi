@@ -1,22 +1,31 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen, setTouchUI } from './uiButton';
-import { startAmbience, stopAmbience, triggerThunder, loadLobbyMix } from '../sound/ambience';
+import { triggerThunder, ensureAmbience } from '../sound/ambience';
 import { CutoutCharacter, TRANS_DUR, type CharDoc } from '../anim/CutoutCharacter';
-import { buildInvPanel, applyEquipTo, type InvPanel } from './invPanel';
+import { buildInvPanel, applyEquipTo } from './invPanel';
+import { buildQuestsPanel, buildAchievementsPanel } from './pagePanels';
 import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
+
+// Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
+// лише напис + панель). Мандри/Хоругва — окремі сцени (реальний перехід).
+type PageKey = 'home' | 'inventory' | 'quests' | 'achievements';
+const PAGE_TITLE: Record<PageKey, string> = {
+  home: 'ЖИТЛО', inventory: 'ІНВЕНТАР', quests: 'ЗАВДАННЯ', achievements: 'ДОСЯГНЕННЯ',
+};
 
 // Головне меню = «лоббі» (хатина з багаттям). Згодом анімуємо/зробимо інтерактивним.
 // Заголовок ХОРУГВА зверху по центру; кнопки-розділи зліва, серифом у small-caps,
 // без обводок, з підсвіткою. «Мандри» = подорожі (згодом глобальна карта; поки просто
 // запускає гру); Завдання/Прогрес/Інвентар — поки сцена-заглушка 'Section'.
 const ITEMS: { label: string; target: string }[] = [
-  { label: 'Мандри',     target: 'World' },
-  { label: 'Хоругва',    target: 'Khorugva' },
-  { label: 'Завдання',   target: 'Quests' },
-  { label: 'Досягнення', target: 'Achievements' },
-  { label: 'Інвентар',   target: 'Inventory' },
+  { label: 'Житло',      target: 'home' },
+  { label: 'Мандри',     target: 'world' },
+  { label: 'Хоругва',    target: 'khorugva' },
+  { label: 'Завдання',   target: 'quests' },
+  { label: 'Досягнення', target: 'achievements' },
+  { label: 'Інвентар',   target: 'inventory' },
 ];
 
 const MENU_FONT = 'Georgia, "Times New Roman", serif';
@@ -70,10 +79,11 @@ export class MenuScene extends Phaser.Scene {
   protected lobbyChar: CutoutCharacter | null = null;
   protected charHolder: Phaser.GameObjects.Container | null = null;
   private titleObj: Phaser.GameObjects.Text | null = null;
-  // Ріалтайм-морф розділів БЕЗ зміни сцени: Житло↔Інвентар (персонаж встає/сідає,
-  // напис плавно перетворюється, фон/кнопки/шторм лишаються як були).
-  private curPage: 'home' | 'inventory' = 'home';
-  private invPanel: InvPanel | null = null;
+  // Ріалтайм-морф розділів БЕЗ зміни сцени (персонаж лишається на місці, напис
+  // плавно перетворюється, фон/кнопки/шторм ті самі). Стоїть лише в Інвентарі —
+  // решта розділів «персонаж просто сидить».
+  private curPage: PageKey = 'home';
+  private sectionPanel: { destroy(): void } | null = null;
   private morphing = false;
   private pageId: string | null = null; // яка сторінка MenuDoc відкрита ('page:' переходи)
   private bgImg: Phaser.GameObjects.Image | null = null;
@@ -119,11 +129,12 @@ export class MenuScene extends Phaser.Scene {
     this.bgImg = bg;
 
     // Звук стартує лише після взаємодії (політика браузера) — перший клік/тап.
-    this.input.once('pointerdown', () => { void loadLobbyMix().then((m) => startAmbience(m)); });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopAmbience());
+    // НЕ зупиняємо на виході: ембієнт лоббі тягнеться далі на глобальну карту
+    // (World/Location); замовкає лише в бою (GameScene.stopAmbience).
+    ensureAmbience(this);
 
     // Заголовок — зверху по центру.
-    this.curPage = 'home'; this.invPanel = null; this.morphing = false;
+    this.curPage = 'home'; this.sectionPanel = null; this.morphing = false;
     this.titleObj = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
@@ -217,20 +228,16 @@ export class MenuScene extends Phaser.Scene {
       return;
     }
     const x = 92 + offX;
-    const startY = 210, gap = 74;
+    const startY = 176, gap = 68; // 6 пунктів (з «Житло») вміщаємо вище/щільніше
     ITEMS.forEach((it, i) => {
-      this.makeMenuItem(x, startY + i * gap + offY, it.label, () => {
-        if (it.target === 'World') this.scene.start('World', {});
-        else if (it.target === 'Inventory') this.followTarget('inventory');
-        else this.scene.start(it.target);
-      });
+      this.makeMenuItem(x, startY + i * gap + offY, it.label, () => this.followTarget(it.target));
     });
   }
 
-  // Ріалтайм-перехід Житло↔Інвентар: сцена НЕ перезапускається — персонаж встає
-  // (stand_up) чи сідає (sit_down), заголовок плавно перетікає, панель інвентаря
-  // з'являється/зникає. Фон, вогонь, шторм і кнопки лишаються недоторкані.
-  private morphTo(page: 'home' | 'inventory'): void {
+  // Ріалтайм-перехід між розділами: сцена НЕ перезапускається. Заголовок плавно
+  // перетікає, панель розділу з'являється/зникає, фон/вогонь/шторм/кнопки — ті
+  // самі. Персонаж встає лише для Інвентаря (stand_up); в інші розділи — сидить.
+  private morphTo(page: PageKey): void {
     if (this.curPage === page || this.morphing) return;
     this.morphing = true;
     const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
@@ -238,59 +245,71 @@ export class MenuScene extends Phaser.Scene {
     const durMs = TRANS_DUR * 1000;
 
     // Заголовок: розтанути → замінити → проявитись.
-    const newTitle = page === 'inventory' ? 'ІНВЕНТАР' : 'ЖИТЛО';
     if (this.titleObj) {
       const t = this.titleObj;
       this.tweens.add({ targets: t, alpha: 0, duration: 240, ease: 'Sine.easeIn',
-        onComplete: () => { t.setText(newTitle); this.tweens.add({ targets: t, alpha: 1, duration: 300, ease: 'Sine.easeOut' }); } });
+        onComplete: () => { t.setText(PAGE_TITLE[page]); this.tweens.add({ targets: t, alpha: 1, duration: 300, ease: 'Sine.easeOut' }); } });
     }
 
-    // Персонаж: встає/сідає + пливе на своє місце.
+    // Персонаж: стоїть лише в Інвентарі. Граємо перехід, лише коли МІНЯЄТЬСЯ стан.
     const char = this.lobbyChar, holder = this.charHolder;
     const C = this.fx.char;
-    if (char && holder) {
-      if (page === 'inventory') {
-        // виміряти висоту ступень у СТОЯЧІЙ позі, тоді грати перехід
+    const wantStand = page === 'inventory';
+    const isStand = this.curPage === 'inventory';
+    const charChanged = !!(char && holder && wantStand !== isStand);
+    if (char && holder && charChanged) {
+      if (wantStand) {
         char.setAnim('idle'); char.tick(0, CHAR_FACING);
         const standY = 522 + offY - char.feetOffset() * C.scale;
         char.setAnim('stand_up');
         this.tweens.add({ targets: holder, x: C.x + 55 + offX, y: standY, duration: durMs, ease: 'Sine.easeInOut' });
-        this.time.delayedCall(durMs, () => { if (this.lobbyChar === char) char.setAnim('idle'); });
       } else {
         char.setAnim('sit_down');
         this.tweens.add({ targets: holder, x: C.x + offX, y: C.y + offY, duration: durMs, ease: 'Sine.easeInOut' });
-        this.time.delayedCall(durMs, () => { if (this.lobbyChar === char) char.setAnim('sit'); });
       }
     }
 
-    // Панель інвентаря.
+    // Панель розділу.
+    this.sectionPanel?.destroy(); this.sectionPanel = null;
     if (page === 'inventory') {
-      this.invPanel?.destroy();
-      this.invPanel = buildInvPanel(this, offX, offY, () => this.lobbyChar);
+      this.sectionPanel = buildInvPanel(this, offX, offY, () => this.lobbyChar);
       applyEquipTo(char, loadEquip());
-    } else {
-      this.invPanel?.destroy(); this.invPanel = null;
+    } else if (page === 'quests') {
+      this.sectionPanel = buildQuestsPanel(this, offX, offY);
+    } else if (page === 'achievements') {
+      this.sectionPanel = buildAchievementsPanel(this, offX, offY);
     }
 
     this.curPage = page;
-    this.time.delayedCall(durMs, () => { this.morphing = false; });
+    // Таймер-подія (time.delayedCall) у цій сцені не спрацьовує надійно — тому
+    // завершення морфу веземо на твіні (він точно тікає): скидаємо блок і
+    // фіксуємо фінальну позу персонажа (stand_up/sit_down у спокої = idle/sit).
+    this.tweens.add({
+      targets: { p: 0 }, p: 1, duration: durMs,
+      onComplete: () => {
+        this.morphing = false;
+        if (charChanged && this.lobbyChar === char) char?.setAnim(wantStand ? 'idle' : 'sit');
+      },
+    });
   }
 
-  // Гіперпосилання кнопки меню: сцени гри або інша сторінка меню.
+  // Гіперпосилання кнопки меню: морф-розділ у лоббі, окрема сцена або сторінка меню.
   private followTarget(target: string): void {
     if (!target) return;
-    if (target === 'world') { this.scene.start('World', {}); return; }
-    if (target === 'game') { this.scene.start('Game'); return; }
-    if (target === 'khorugva') { this.scene.start('Khorugva'); return; }
-    if (target === 'quests') { this.scene.start('Quests'); return; }
-    if (target === 'achievements') { this.scene.start('Achievements'); return; }
-    if (target === 'inventory' || target === 'section:Інвентар') {
-      if (this.sys.settings.key === 'Menu') this.morphTo(this.curPage === 'inventory' ? 'home' : 'inventory');
-      else this.scene.start('Inventory');
-      return;
-    }
-    if (target.startsWith('section:')) { this.scene.start('Section', { title: target.slice(8), from: 'Menu' }); return; }
-    if (target.startsWith('page:')) { this.scene.start('Menu', { pageId: target.slice(5) }); return; }
+    const t = target === 'section:Інвентар' ? 'inventory' : target;
+    if (t === 'world') { this.scene.start('World', {}); return; }
+    if (t === 'game') { this.scene.start('Game'); return; }
+    if (t === 'khorugva') { this.scene.start('Khorugva'); return; }
+    if (t.startsWith('page:')) { this.scene.start('Menu', { pageId: t.slice(5) }); return; }
+    if (t.startsWith('section:')) { this.scene.start('Section', { title: t.slice(8), from: 'Menu' }); return; }
+    // Морф-розділи (Житло/Інвентар/Завдання/Досягнення).
+    const PAGE: Record<string, PageKey> = { home: 'home', zhytlo: 'home', inventory: 'inventory', quests: 'quests', achievements: 'achievements' };
+    const page = PAGE[t];
+    if (!page) return;
+    if (this.sys.settings.key === 'Menu') { this.morphTo(page); return; }
+    // Не лоббі (deep-link сцена) → відкриваємо повну сцену розділу.
+    const SCENE: Record<PageKey, string> = { home: 'Menu', inventory: 'Inventory', quests: 'Quests', achievements: 'Achievements' };
+    this.scene.start(SCENE[page]);
   }
 
   // ── Шторм за вікном: дощ (маскою по шибках) + блискавка зі світлом у кімнату ─
