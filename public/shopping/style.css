@@ -95,14 +95,14 @@ html, body {
 
 .litem {
   display: flex; align-items: center; gap: 12px;
-  padding: 9px 16px 9px 24px;
+  padding: 9px 24px; /* симетрія: відступ галочки справа = відступ піктограми зліва */
   position: relative; cursor: pointer;
 }
 .litem:active { background: #f6f6f8; }
 .litem-sub { font-size: 12.5px; color: var(--text2); margin-top: 2px; }
 .litem.done .litem-sub { color: var(--text3); }
 .litem-actions {
-  position: absolute; right: 12px; top: 50%;
+  position: absolute; right: 24px; top: 50%;
   display: flex; gap: 10px;
   opacity: 0; pointer-events: none;
   transform: translateY(-50%) translateX(20px);
