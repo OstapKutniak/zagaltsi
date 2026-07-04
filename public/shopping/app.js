@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 7; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 8; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -173,7 +173,7 @@ let swReg = null;
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
     navigator.serviceWorker.register('/zagaltsi/shopping/sw.js', { scope: '/zagaltsi/shopping/' })
-      .then(r => { swReg = r; }).catch(() => {});
+      .then(r => { swReg = r; refreshPushSub(); }).catch(() => {});
   // iOS тримає PWA замороженим — при поверненні у форграунд перевіряємо оновлення SW
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { flushNotify(); return; } // згорнули додаток — одразу шлемо накопичене
@@ -285,10 +285,53 @@ async function renderNotifyRow() {
   if (!('Notification' in window) || !('PushManager' in window)) { sub.textContent = 'Доступно лише в додатку з екрана «Домів»'; return; }
   if (Notification.permission === 'granted') {
     const s = await (swReg || await navigator.serviceWorker.ready).pushManager.getSubscription().catch(() => null);
-    sub.textContent = s ? 'Увімкнено на цьому пристрої' : 'Натисни, щоб увімкнути';
+    let devices = '';
+    try {
+      const snap = await get(ref(db, PUSH_PATH));
+      const n = snap.exists() ? Object.keys(snap.val()).length : 0;
+      devices = ` · у базі ${n} ${plural(n, 'пристрій', 'пристрої', 'пристроїв')}`;
+    } catch {}
+    sub.textContent = (s ? 'Увімкнено на цьому пристрої' : 'Натисни, щоб увімкнути') + devices;
   } else if (Notification.permission === 'denied') {
     sub.textContent = 'Заборонено в налаштуваннях iOS';
   } else sub.textContent = 'Натисни, щоб увімкнути';
+}
+
+// iOS може мовчки «загубити»/ротувати підписку між запусками — тоді в базі
+// лишається мертвий endpoint, воркер його чистить, і слати стає нікому.
+// Тому на кожному запуску (якщо дозвіл уже є) пересубскрибаємось і
+// перезаписуємо свіжу підписку в базу. Без дозволу — нічого не робимо.
+async function refreshPushSub() {
+  if (!('Notification' in window) || !('PushManager' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  try {
+    const reg = swReg || await navigator.serviceWorker.ready;
+    let s = await reg.pushManager.getSubscription();
+    if (!s) s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(VAPID_PUBLIC) });
+    await set(ref(db, `${PUSH_PATH}/${deviceId()}`), {
+      sub: JSON.stringify(s.toJSON()),
+      ua: navigator.userAgent.slice(0, 90),
+      ts: Date.now(),
+    });
+  } catch (e) { console.warn('push refresh failed', e); }
+}
+
+// тестовий пуш: воркер шле на всі пристрої, крім цього — результат у підпис рядка
+async function testPush() {
+  const sub = $('testpush-sub');
+  sub.textContent = 'Надсилаю…';
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      body: JSON.stringify({ event: 'test', names: ['Перевірка зв’язку — все працює'], from: deviceId() }),
+    });
+    const j = await res.json();
+    if (j.errors?.length) sub.textContent = ('Помилка: ' + j.errors[0]).slice(0, 140);
+    else if (!j.sent) sub.textContent = `Надіслано 0 — інший телефон не підписаний${j.dead ? ` (мертвих підписок прибрано: ${j.dead})` : ''}`;
+    else sub.textContent = `Надіслано на ${j.sent} ${plural(j.sent, 'пристрій', 'пристрої', 'пристроїв')} — глянь інший телефон`;
+  } catch (e) {
+    sub.textContent = 'Воркер недоступний: ' + e.message;
+  }
 }
 
 // черга подій: збираємо кілька дій в одне сповіщення (8с тиші або згортання)
@@ -338,19 +381,21 @@ function removeFromList(id) {
   remove(ref(db, `${LIST_PATH}/${id}`));
 }
 
-async function toggleDone(id) {
+// Без await: локальна луна Firebase застосовується синхронно, тож список
+// оновлюється миттєво; підтвердження сервера не чекаємо (воно доганяє само).
+function toggleDone(id) {
   const it = listMap[id];
   if (!it) return;
   if (!it.done) {
     const c = catOf(it);
     const day = dayKey();
     const archRef = push(ref(db, `${ARCH_PATH}/${day}`));
-    await set(archRef, { name: it.name, icon: it.icon, catName: c.name, catColor: c.color, catIcon: c.icon, ts: Date.now() });
-    await update(ref(db, `${LIST_PATH}/${id}`), { done: true, doneTs: Date.now(), day, archDay: day, archKey: archRef.key });
+    set(archRef, { name: it.name, icon: it.icon, catName: c.name, catColor: c.color, catIcon: c.icon, ts: Date.now() }).catch(() => {});
+    update(ref(db, `${LIST_PATH}/${id}`), { done: true, doneTs: Date.now(), day, archDay: day, archKey: archRef.key }).catch(() => {});
     queueNotify('bought', it.name);
   } else {
-    if (it.archDay && it.archKey) await remove(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`)).catch(() => {});
-    await update(ref(db, `${LIST_PATH}/${id}`), { done: false, doneTs: null, day: null, archDay: null, archKey: null });
+    if (it.archDay && it.archKey) remove(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`)).catch(() => {});
+    update(ref(db, `${LIST_PATH}/${id}`), { done: false, doneTs: null, day: null, archDay: null, archKey: null }).catch(() => {});
     unqueueNotify('bought', it.name);
   }
 }
@@ -381,7 +426,9 @@ function sortedCats() {
 
 // «Заморожений» порядок списку: галочка не кидає продукт одразу вниз —
 // пересортування (куплене в кінець) відбувається лише при refreshListOrder():
-// відкриття додатка, перемикання вкладки, згортання/розгортання категорії.
+// відкриття додатка, перемикання вкладки; при згортанні категорії порядок
+// оновлюється, але застосується при наступному перемальовуванні (щоб не
+// обривати CSS-анімацію згортання).
 let listOrder = null; // Map id → ранг
 function refreshListOrder() {
   const items = Object.entries(listMap).map(([id, it]) => ({ id, ...it }));
@@ -423,7 +470,7 @@ function renderList() {
         <div class="lcat-count ${remaining ? '' : 'alldone'}" style="--c:${c.color}">${remaining || '✓'}</div>
         <span class="lcat-chevron">▼</span>
       </div>
-      <div class="lcat-items">` +
+      <div class="lcat-items"><div class="lcat-items-in">` +
       arr.map(it => {
         const sub = [it.variant, it.place].filter(Boolean).join(' · ');
         return `
@@ -438,18 +485,26 @@ function renderList() {
           <button class="litem-check" data-id="${it.id}"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></button>
         </div>`;
       }).join('') +
-      `</div></div>`;
+      `</div></div></div>`;
   });
   wrap.innerHTML = html;
 
+  // закрити кнопки дій без перемальовування — інакше CSS-анімація виїзду обривається
+  const closeActions = () => {
+    wrap.querySelectorAll('.litem.open').forEach(r => r.classList.remove('open'));
+    openActionsId = null;
+  };
   wrap.querySelectorAll('.lcat-head').forEach(el => el.addEventListener('click', () => {
     const cid = el.dataset.cid;
     collapsedCats.has(cid) ? collapsedCats.delete(cid) : collapsedCats.add(cid);
-    refreshListOrder(); // при згортанні/розгортанні куплене осідає вниз
-    renderList();
+    refreshListOrder(); // куплене осяде вниз при наступному перемальовуванні
+    // без renderList: клас перемикається на живому DOM, щоб CSS плавно згорнув висоту
+    el.parentElement.classList.toggle('collapsed', collapsedCats.has(cid));
   }));
   wrap.querySelectorAll('.litem-check').forEach(el => el.addEventListener('click', e => {
     e.stopPropagation();
+    // оптимістичний відгук: рядок сіріє/зеленіє миттєво, база доганяє
+    el.closest('.litem').classList.toggle('done');
     const svg = el.querySelector('svg');
     svg.style.animation = 'none'; svg.offsetWidth;
     svg.style.animation = 'popIn 0.3s ease-out both';
@@ -458,22 +513,23 @@ function renderList() {
   wrap.querySelectorAll('.litem').forEach(row => {
     const id = row.dataset.id;
     row.addEventListener('click', () => {
-      if (openActionsId) { openActionsId = null; renderList(); return; }
+      if (openActionsId) { closeActions(); return; }
       openItemSheet(id);
     });
     longPress(row, () => {
-      openActionsId = (openActionsId === id) ? null : id;
-      renderList();
+      const wasOpen = openActionsId === id;
+      closeActions();
+      if (!wasOpen) { openActionsId = id; row.classList.add('open'); }
     });
   });
   wrap.querySelectorAll('.lact-edit').forEach(b => b.addEventListener('click', e => {
-    e.stopPropagation(); openActionsId = null; renderList(); openItemSheet(b.dataset.id);
+    e.stopPropagation(); closeActions(); openItemSheet(b.dataset.id);
   }));
   wrap.querySelectorAll('.lact-swap').forEach(b => b.addEventListener('click', e => {
-    e.stopPropagation(); openActionsId = null; renderList(); openReplaceSheet(b.dataset.id);
+    e.stopPropagation(); closeActions(); openReplaceSheet(b.dataset.id);
   }));
   wrap.querySelectorAll('.lact-del').forEach(b => b.addEventListener('click', e => {
-    e.stopPropagation(); openActionsId = null; removeFromList(b.dataset.id);
+    e.stopPropagation(); closeActions(); removeFromList(b.dataset.id);
   }));
 }
 
@@ -490,12 +546,13 @@ function openItemSheet(id) {
   $('item-place').value = it.place || '';
   $('item-overlay').classList.add('open');
 }
-async function saveItemSheet() {
+function saveItemSheet() {
   if (!itemSheetId) return;
-  await update(ref(db, `${LIST_PATH}/${itemSheetId}`), {
+  // шторка їде вниз одразу, запис у базу доганяє у фоні
+  update(ref(db, `${LIST_PATH}/${itemSheetId}`), {
     variant: $('item-variant').value.trim() || null,
     place: $('item-place').value.trim() || null,
-  });
+  }).catch(() => {});
   $('item-overlay').classList.remove('open');
 }
 
@@ -529,10 +586,10 @@ function renderReplaceGrid() {
     </button>`;
   }).join('') || '<div class="empty" style="grid-column:1/-1">Нічого не знайдено</div>';
   $('replace-grid').querySelectorAll('.ptile[data-pid]').forEach(tile =>
-    tile.addEventListener('click', async () => {
+    tile.addEventListener('click', () => {
       const p = prods[tile.dataset.pid];
       if (p && listMap[replaceItemId]) {
-        await update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: tile.dataset.pid, name: p.name, icon: p.icon, cat: p.cat });
+        update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: tile.dataset.pid, name: p.name, icon: p.icon, cat: p.cat }).catch(() => {});
         toast(`Замінено на «${p.name}»`);
       }
       $('replace-overlay').classList.remove('open');
@@ -682,14 +739,11 @@ function renderAddGrid() {
         renderAddCommit();
         return;
       }
-      // звичайний режим: тап одразу додає і шторка плавно закривається
+      // звичайний режим: тап одразу додає, шторка без пауз плавно їде вниз,
+      // а предмет уже в списку під нею (локальна луна Firebase — синхронна)
       if (addToList(pid)) {
-        const badge = tile.querySelector('.ptile-badge');
-        tile.classList.add('sel');
-        badge.style.animation = 'none'; badge.offsetWidth;
-        badge.style.animation = 'popIn 0.3s ease-out both';
         toast(`Додано: ${prods[pid]?.name || ''}`);
-        setTimeout(closeAdd, 380);
+        closeAdd();
       }
     });
     longPress(tile, () => {
@@ -742,14 +796,14 @@ function renderCatFormPickers() {
   $('cat-form-icons').querySelectorAll('.icon-cell').forEach(cell =>
     cell.addEventListener('click', () => { catFormSel.icon = cell.dataset.ic; renderCatFormPickers(); }));
 }
-async function saveCatForm() {
+function saveCatForm() {
   const name = $('cat-form-name').value.trim();
   if (!name) { toast('Введи назву категорії'); return; }
   if (catFormId) {
-    await update(ref(db, `${CATS_PATH}/${catFormId}`), { name, color: catFormSel.color, icon: catFormSel.icon });
+    update(ref(db, `${CATS_PATH}/${catFormId}`), { name, color: catFormSel.color, icon: catFormSel.icon }).catch(() => {});
   } else {
     const order = Math.max(-1, ...Object.values(cats).map(c => c.order ?? 0)) + 1;
-    await set(push(ref(db, CATS_PATH)), { name, color: catFormSel.color, icon: catFormSel.icon, order });
+    set(push(ref(db, CATS_PATH)), { name, color: catFormSel.color, icon: catFormSel.icon, order }).catch(() => {});
   }
   $('cat-form-overlay').classList.remove('open');
 }
@@ -788,27 +842,27 @@ function renderProdFormPickers() {
   $('prod-form-icons').querySelectorAll('.icon-cell').forEach(cell =>
     cell.addEventListener('click', () => { prodFormSel.icon = cell.dataset.ic; renderProdFormPickers(); }));
 }
-async function saveProdForm() {
+function saveProdForm() {
   const name = $('prod-form-name').value.trim();
   if (!name) { toast('Введи назву продукту'); return; }
   if (!prodFormSel.cat) { toast('Обери категорію'); return; }
   if (prodFormId) {
-    await update(ref(db, `${PRODS_PATH}/${prodFormId}`), { name, icon: prodFormSel.icon, cat: prodFormSel.cat });
+    update(ref(db, `${PRODS_PATH}/${prodFormId}`), { name, icon: prodFormSel.icon, cat: prodFormSel.cat }).catch(() => {});
     // оновити назву/іконку в активному списку
     const upd = {};
     Object.entries(listMap).forEach(([id, it]) => {
       if (it.pid === prodFormId) { upd[`${id}/name`] = name; upd[`${id}/icon`] = prodFormSel.icon; upd[`${id}/cat`] = prodFormSel.cat; }
     });
-    if (Object.keys(upd).length) await update(ref(db, LIST_PATH), upd);
+    if (Object.keys(upd).length) update(ref(db, LIST_PATH), upd).catch(() => {});
   } else {
     const order = Math.max(0, ...Object.values(prods).map(p => p.order ?? 0)) + 1;
-    await set(push(ref(db, PRODS_PATH)), { name, icon: prodFormSel.icon, cat: prodFormSel.cat, order });
+    set(push(ref(db, PRODS_PATH)), { name, icon: prodFormSel.icon, cat: prodFormSel.cat, order }).catch(() => {});
   }
   $('prod-form-overlay').classList.remove('open');
 }
-async function deleteProdForm() {
+function deleteProdForm() {
   if (!prodFormId) return;
-  await remove(ref(db, `${PRODS_PATH}/${prodFormId}`));
+  remove(ref(db, `${PRODS_PATH}/${prodFormId}`)).catch(() => {});
   $('prod-form-overlay').classList.remove('open');
 }
 
@@ -831,6 +885,7 @@ function bindEvents() {
   $('btn-cats').addEventListener('click', openCatsSheet);
   $('btn-settings').addEventListener('click', () => { renderNotifyRow(); $('settings-overlay').classList.add('open'); });
   $('btn-notify').addEventListener('click', enableNotifications);
+  $('btn-test-push').addEventListener('click', testPush);
   $('btn-clear-done').addEventListener('click', () => {
     const upd = {};
     Object.entries(listMap).forEach(([id, it]) => { if (it.done) upd[id] = null; });
