@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 14; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 15; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -188,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
   seedIfEmpty().finally(subscribe);
   renderAll();
+  updateTabs(); // показати цінову панель на стартовій вкладці «Список»
   // перевірка зміни дня раз на хвилину — опівночі куплене йде зі списку
   setInterval(purgeOldDone, 60000);
 });
@@ -749,24 +750,50 @@ let ppData = {};       // storeKey → { nameLower → {price,title,oldPrice} | 
 let ppFetchKey = '';   // хеш назв, для яких уже тягнули ціни
 let ppScrollTimer = null;
 
+// Зациклений барабан: список магазинів рендериться PP_REP копій поспіль,
+// стартує в середній копії; докрутившись до краю — безшовно телепортується
+// на ту саму позицію в середині (та сама картинка, тож стрибок непомітний).
+const PP_REP = 7;
+let ppPositioned = false;
 function initPricePanel() {
   const track = $('pp-track');
-  track.innerHTML = PRICE_STORES.map(s =>
+  const one = PRICE_STORES.map(s =>
     `<div class="pp-item" data-key="${s.key}"><span class="pp-dot" style="--c:${s.color}"></span>${s.name}</div>`).join('');
+  track.innerHTML = one.repeat(PP_REP);
   track.querySelectorAll('.pp-item').forEach((el, i) =>
     el.addEventListener('click', () => track.scrollTo({ left: i * PP_ITEM, behavior: 'smooth' })));
-  track.addEventListener('scroll', () => {
-    markPpSel(Math.round(track.scrollLeft / PP_ITEM));
-    clearTimeout(ppScrollTimer);
-    ppScrollTimer = setTimeout(() => {
-      const i = Math.max(0, Math.min(PRICE_STORES.length - 1, Math.round(track.scrollLeft / PP_ITEM)));
-      if (PRICE_STORES[i].key !== ppSel) { ppSel = PRICE_STORES[i].key; renderPriceTotals(); }
-    }, 90);
-  });
-  markPpSel(0);
+  track.addEventListener('scroll', onPpScroll);
 }
-function markPpSel(i) {
-  $('pp-track').querySelectorAll('.pp-item').forEach((el, j) => el.classList.toggle('sel', j === i));
+// поставити барабан у центральну копію (виклик, коли панель уже видима)
+function ppStart() {
+  const track = $('pp-track'), N = PRICE_STORES.length;
+  track.scrollLeft = N * ((PP_REP - 1) >> 1) * PP_ITEM;
+  markPpSel(track.scrollLeft / PP_ITEM);
+}
+// підсвітити центральний магазин (і його копії — вони поза видимою зоною)
+function markPpSel(rawIdx) {
+  const N = PRICE_STORES.length, sel = ((Math.round(rawIdx) % N) + N) % N;
+  $('pp-track').querySelectorAll('.pp-item').forEach((el, j) => el.classList.toggle('sel', (j % N) === sel));
+}
+function onPpScroll() {
+  const track = $('pp-track');
+  markPpSel(track.scrollLeft / PP_ITEM);
+  clearTimeout(ppScrollTimer);
+  ppScrollTimer = setTimeout(() => {
+    const N = PRICE_STORES.length;
+    const raw = Math.round(track.scrollLeft / PP_ITEM);
+    const sel = ((raw % N) + N) % N;
+    if (PRICE_STORES[sel].key !== ppSel) { ppSel = PRICE_STORES[sel].key; renderPriceTotals(); }
+    // повернути в середню копію, якщо відкотилися на цілий список від центру
+    const target = N * ((PP_REP - 1) >> 1) + sel;
+    if (Math.abs(raw - target) >= N) {
+      const prev = track.style.scrollBehavior;
+      track.style.scrollBehavior = 'auto';
+      track.scrollLeft = target * PP_ITEM;
+      track.style.scrollBehavior = prev;
+      markPpSel(target);
+    }
+  }, 90);
 }
 // назви активних (не куплених) позицій — унікальні
 function activeNames() { return [...new Set(Object.values(listMap).filter(it => !it.done).map(it => it.name))]; }
@@ -1097,7 +1124,7 @@ function updateTabs() {
   $('btn-calendar').style.display = state.tab === 'archive' ? '' : 'none';
   // цінова панель — лише на «Списку»
   $('price-panel').style.display = state.tab === 'list' ? '' : 'none';
-  if (state.tab === 'list') refreshPrices();
+  if (state.tab === 'list') { if (!ppPositioned) { ppStart(); ppPositioned = true; } refreshPrices(); }
 }
 
 // ── SWIPE між екранами ─────────────────────────────────────
