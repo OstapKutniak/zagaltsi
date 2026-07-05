@@ -5,7 +5,7 @@
       "id": "w_karpaty",
       "name": "Карпатський край",
       "bg": "",
-      "updatedAt": 1783013976958,
+      "updatedAt": 1783253352389,
       "nodes": [
         {
           "id": "r_tykhoplav",
@@ -76,7 +76,7 @@
       "id": "w_tykhoplav",
       "name": "Тихоплав",
       "bg": "",
-      "updatedAt": 1782950400000,
+      "updatedAt": 1783253473200,
       "nodes": [
         {
           "id": "n_peresolykha",
@@ -116,12 +116,13 @@
         },
         {
           "id": "n_krynytsia",
-          "label": "Криниця-Повторюшка",
+          "label": "Таверна Спадкоємця",
           "x": -180,
           "y": 130,
           "type": "location",
-          "icon": "well",
-          "desc": "Віддає не воду, а слова. Уночі відповідає сама."
+          "icon": "tavern",
+          "desc": "Хлопак що тримає її, кажуть неофіційний син Хмельницького\n",
+          "locationId": "mqs4pnr9"
         },
         {
           "id": "n_korchma",
