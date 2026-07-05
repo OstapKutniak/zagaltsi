@@ -7,10 +7,9 @@ import type { NodeGraph } from '../node-editor';
 import { type Atmosphere, type WeatherPhase, type LayerKey, evalTod, weatherToggles, DEFAULT_WEATHER_PHASE } from '../level/atmosphere';
 import { buildAtmospherePanel } from '../level/atmospherePanel';
 import { drawFogLayerCanvas, drawRainCanvas, drawVignetteCanvas, applyColorBalanceCanvas, drawLayerTinted } from '../level/atmoPreview';
-import { locationFit } from '../world/worldData';
 import {
   fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
-  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, type DeformView,
+  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, PLAN_NAMES, type DeformView,
   type PlacedAnim, type PlacedDeform,
 } from '../level/placedFx';
 
@@ -116,9 +115,14 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     moveLine: null as null | { id: string; x0?: number; y0?: number; x1?: number; y1?: number },
     showZones: true,
     showGrid: true,
-    showCamView: true, // 20:9 УВІМК за замовчуванням — рамка показує фактичний кадр гри
+    showCamView: true, // 20:9 УВІМК за замовчуванням — фіксоване вікно кадру гри
+    showAtm: true,     // тумблер прев'ю атмосфери (як у Мандрах)
+    showAnim: true,    // тумблер програвання анімацій у вьюпорті
     hoverPlaced: null as string | null,
     hoverScale: new Map<string, number>(),
+    // Розміщення з бібліотеки як у Мандрах: клік по картці → білий силует за
+    // курсором → клік у вьюпорті ставить. ПКМ/Esc — скасувати.
+    pendingPlace: null as null | { url: string; name: string; transparent: boolean; img: HTMLImageElement; ghost: HTMLCanvasElement | null },
   };
 
   const loc = (): LocationDoc => state.locs[state.cur];
@@ -135,6 +139,52 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   const placedById = (id: string) => loc().placed.find(p => p.id === id);
   const zoneById   = (id: string) => loc().zones.find(z => z.id === id);
+
+  // ── Розміщення кліком (як у Мандрах): білий силует за курсором ─────────────
+  function whiteSilhouette(img: HTMLImageElement): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, img.naturalWidth); c.height = Math.max(1, img.naturalHeight);
+    const x = c.getContext('2d')!;
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-atop';
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    x.fillRect(0, 0, c.width, c.height);
+    return c;
+  }
+  function startPending(url: string, name: string, transparent: boolean): void {
+    const img = new Image(); img.src = url;
+    state.pendingPlace = { url, name, transparent, img, ghost: null };
+    setStatus(`«${name}»: клік у вьюпорті — поставити · ПКМ/Esc — скасувати`);
+  }
+  function cancelPending(): void {
+    if (!state.pendingPlace) return;
+    state.pendingPlace = null; setStatus('');
+  }
+
+  // Просте контекстне меню (для карток бібліотек).
+  let _qmEl: HTMLDivElement | null = null;
+  function showQuickMenu(clientX: number, clientY: number, items: Array<{ label: string; on: () => void }>): void {
+    _qmEl?.remove();
+    const m = document.createElement('div'); _qmEl = m;
+    m.style.cssText = 'position:fixed;z-index:9999;min-width:190px;background:#1d1d1f;border:1px solid #3a3a3a;border-radius:8px;padding:4px;box-shadow:0 8px 28px rgba(0,0,0,.55);font-size:13px;color:#e5d8bc';
+    for (const it of items) {
+      const b = document.createElement('div');
+      b.textContent = it.label;
+      b.style.cssText = 'padding:6px 10px;border-radius:5px;cursor:pointer;white-space:nowrap';
+      b.onmouseenter = () => { b.style.background = 'var(--accent)'; b.style.color = '#1b1b1b'; };
+      b.onmouseleave = () => { b.style.background = ''; b.style.color = '#e5d8bc'; };
+      b.onclick = () => { _qmEl?.remove(); _qmEl = null; it.on(); };
+      m.appendChild(b);
+    }
+    document.body.appendChild(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(clientX, window.innerWidth - r.width - 6) + 'px';
+    m.style.top = Math.min(clientY, window.innerHeight - r.height - 6) + 'px';
+    const outside = (ev: MouseEvent): void => {
+      if (_qmEl && !_qmEl.contains(ev.target as Node)) { _qmEl.remove(); _qmEl = null; document.removeEventListener('mousedown', outside, true); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+  }
 
   function ensureImages() {
     for (const p of loc().placed) {
@@ -175,9 +225,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
-  // Анімації об'єктів грають, поки нічого не тягнемо й не редагуємо хендли.
+  // Анімації об'єктів грають, поки нічого не тягнемо й не редагуємо хендли (+ тумблер).
   const fxPlaying = (): boolean =>
-    !state.mode && !state.dragPlaced && state.deformEdit == null && !state.moveLine && !state.zoneDraw;
+    state.showAnim && !state.mode && !state.dragPlaced && state.deformEdit == null && !state.moveLine && !state.zoneDraw;
   const animClock = (): number => performance.now() / 1000;
   // Дисплейний трансформ (з анімаційним зсувом/кейфреймами).
   const placedDisp = (p: PlacedAsset): { x: number; y: number; rot: number; scale: number } =>
@@ -201,10 +251,11 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     };
   }
 
-  // includeTransparent=true — для ПКМ (інакше фон-ассети не вибираються зовсім).
-  function placedAt(sx: number, sy: number, includeTransparent = false): PlacedAsset | null {
+  // Фон-ассети (transparent) теж вибираються ЛКМ; skipTransparent=true — лише для
+  // hover-підсвітки (фон-ассети не підсвічуються при наведенні).
+  function placedAt(sx: number, sy: number, skipTransparent = false): PlacedAsset | null {
     for (const p of placedSorted().reverse()) {
-      if (p.transparent && !includeTransparent) continue;
+      if (p.transparent && skipTransparent) continue;
       const img = state.images.get(p.id);
       if (!img?.complete || !img.naturalWidth) continue;
       const d = placedDisp(p);
@@ -236,11 +287,10 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     return (wx.phases[0] as WeatherPhase) ?? null;
   }
 
-  // Рамка фактичного кадру гри (той самий фіт, що LocationScene): у СВІТОВИХ координатах.
+  // ФІКСОВАНЕ вікно кадру гри: світовий прямокутник 1280×576 з центром у (0,0).
+  // Сцену розставляють ПІД рамку — вона нікуди не їздить (гра рендерить саме цей кроп).
   function gameFrameWorld(): { x: number; y: number; w: number; h: number } {
-    const bgW = state.bgImg?.naturalWidth ?? 0, bgH = state.bgImg?.naturalHeight ?? 0;
-    const f = locationFit(loc(), bgW, bgH, 1280, 576);
-    return { x: (0 - f.ox) / f.s, y: (0 - f.oy) / f.s, w: 1280 / f.s, h: 576 / f.s };
+    return { x: -640, y: -288, w: 1280, h: 576 };
   }
 
   function draw() {
@@ -252,16 +302,17 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (!loc()) { requestAnimationFrame(draw); return; }
 
-    const atm = loc().atmosphere;
+    const atm = state.showAtm ? loc().atmosphere : undefined;
     const todLayers = atm?.tod?.enabled ? evalTod(atm.tod, 0).layers : {};
-    const ph = wxPhase();
+    const ph = state.showAtm ? wxPhase() : null;
     const fogOn = ph ? weatherToggles(ph).fog && !!ph.fogLayers : false;
     const tNow = performance.now() / 1000;
 
     if (state.bgImg) {
       const bgImg = state.bgImg;
       drawLayerTinted(ctx, w, h, todLayers.bg, (c) => {
-        const p = toScreen(0, 0);
+        // Фон центрований у світовій (0,0) — під фіксовану рамку кадру
+        const p = toScreen(-bgImg.naturalWidth / 2, -bgImg.naturalHeight / 2);
         c.drawImage(bgImg, p.x, p.y, bgImg.naturalWidth * sc(), bgImg.naturalHeight * sc());
       });
     } else {
@@ -342,12 +393,16 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         c.translate(ps.x, ps.y);
         c.rotate(d.rot * Math.PI / 180);
         c.scale(p.flip, 1);
-        if (isSel) { c.shadowColor = '#ffcc00'; c.shadowBlur = 14; }
-        else if (hs > 1.005) { c.shadowColor = 'rgba(255,255,255,0.6)'; c.shadowBlur = 12; }
+        // Фон-ассети (transparent): без жовтого сяйва/білої підсвітки — лише тонка пунктирна рамка при виборі
+        if (isSel && !p.transparent) { c.shadowColor = '#ffcc00'; c.shadowBlur = 14; }
+        else if (hs > 1.005 && !p.transparent) { c.shadowColor = 'rgba(255,255,255,0.6)'; c.shadowBlur = 12; }
         c.drawImage(img, -iw / 2, -ih / 2, iw, ih);
         c.shadowBlur = 0;
-        if (isSel) { c.strokeStyle = '#ffcc00'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
-        else if (hs > 1.005) { c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+        if (isSel && p.transparent) {
+          c.strokeStyle = 'rgba(255,204,0,0.55)'; c.lineWidth = 1; c.setLineDash([4, 4]);
+          c.strokeRect(-iw / 2, -ih / 2, iw, ih); c.setLineDash([]);
+        } else if (isSel) { c.strokeStyle = '#ffcc00'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+        else if (hs > 1.005 && !p.transparent) { c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
         c.restore();
       }
     });
@@ -394,6 +449,16 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     // Кольоровий баланс — грейдиться вся сцена (як у грі), до рамок редактора
     if (atm?.colorBalance?.enabled) applyColorBalanceCanvas(ctx, canvas, atm.colorBalance);
+
+    // Білий силует розміщуваного ассета за курсором (клік — поставити)
+    const pp = state.pendingPlace;
+    if (pp?.img.complete && pp.img.naturalWidth) {
+      if (!pp.ghost) pp.ghost = whiteSilhouette(pp.img);
+      const gw = pp.ghost.width * 0.5 * sc(), gh = pp.ghost.height * 0.5 * sc();
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(pp.ghost, state.mouse.x - gw / 2, state.mouse.y - gh / 2, gw, gh);
+      ctx.globalAlpha = 1;
+    }
 
     if (state.showCamView) {
       const { x: vx, y: vy, w: vw, h: vh } = frame;
@@ -462,9 +527,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       if (p) { const d = Math.hypot(state.mouse.x - state.modeStartX, state.mouse.y - state.modeStartY); p.scale = Math.max(0.02, state.modeOrig.scale * (d / 120)); }
     }
 
-    // Hover-підсвітка будівель (тільки у режимі вибору, без перетягування/трансформації)
-    if (state.tool === 'select' && !state.mode && !state.dragPlaced && !state.panning) {
-      const h = placedAt(state.mouse.x, state.mouse.y);
+    // Hover-підсвітка будівель (фон-ассети не підсвічуються — skipTransparent)
+    if (state.tool === 'select' && !state.mode && !state.dragPlaced && !state.panning && !state.pendingPlace) {
+      const h = placedAt(state.mouse.x, state.mouse.y, true);
       state.hoverPlaced = h?.id ?? null;
       canvas.style.cursor = h ? 'pointer' : 'default';
     } else if (state.tool === 'select') {
@@ -482,6 +547,15 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     if (e.button !== 0) return;
 
     if (state.mode) { save(); state.mode = null; state.modeOrig = null; return; }
+
+    // Розміщення з бібліотеки: клік ставить ассет у точку курсора
+    if (state.pendingPlace) {
+      const wp = toWorld(mx, my);
+      const pp = state.pendingPlace;
+      dropAsset(pp.url, pp.name, wp.x, wp.y, pp.transparent ? { transparent: true } : undefined);
+      state.pendingPlace = null;
+      return;
+    }
 
     // Режим «Задати лінію напряму» анімації переміщення — старт лінії
     if (state.moveLine) {
@@ -559,8 +633,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   // деформація (з кейфреймами) + дзеркало/видалити.
   canvas.addEventListener('contextmenu', e => {
     e.preventDefault();
+    if (state.pendingPlace) { cancelPending(); return; } // ПКМ скасовує розміщення
     const mx = e.clientX - rect().left, my = e.clientY - rect().top;
-    const p = placedAt(mx, my, true); // включно з фон-ассетами (transparent)
+    const p = placedAt(mx, my); // включно з фон-ассетами (transparent)
     if (!p) return;
     select(p.id, 'placed');
     openFxObjMenu(e.clientX, e.clientY, {
@@ -569,7 +644,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       obj: p,
       plan: {
         get: () => p.plan ?? 3, set: (v) => { p.plan = v; },
-        min: 1, max: 7, hint: 'більше = ближче',
+        min: 1, max: 7, names: PLAN_NAMES,
       },
       getBase: () => ({ x: p.x, y: p.y, rot: p.rot, scale: p.scale }),
       isEditingHandles: () => state.deformEdit === p.id,
@@ -624,6 +699,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (e.code === 'Escape') {
       if (previewBig) { setPreviewBig(false); return; }
+      if (state.pendingPlace) { cancelPending(); return; }
       if (state.deformEdit || state.moveLine) { state.deformEdit = null; state.moveLine = null; return; }
       if (state.mode && state.modeOrig && state.sel) {
         const p = placedById(state.sel);
@@ -696,6 +772,20 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     camViewBtn.classList.toggle('on', state.showCamView);
   });
 
+  // Тумблери прев'ю: атмосфера й анімації (як у Редакторі Мандр)
+  const showAtmBtn = $('showAtmBtn');
+  showAtmBtn?.classList.toggle('on', state.showAtm);
+  showAtmBtn?.addEventListener('click', () => {
+    state.showAtm = !state.showAtm;
+    showAtmBtn.classList.toggle('on', state.showAtm);
+  });
+  const showAnimBtn = $('showAnimBtn');
+  showAnimBtn?.classList.toggle('on', state.showAnim);
+  showAnimBtn?.addEventListener('click', () => {
+    state.showAnim = !state.showAnim;
+    showAnimBtn.classList.toggle('on', state.showAnim);
+  });
+
   $('fitBtn')?.addEventListener('click', () => { state.zoom = 1; state.pan = { x: 0, y: 0 }; });
 
   // ── Background + assets ───────────────────────────────────────────────────
@@ -710,8 +800,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const id = uid();
     loc().placed.push({
       id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1,
-      // Фон-ассет: невибираний і за замовчуванням позаду будівель (план 2).
-      ...(opts?.transparent ? { transparent: true, plan: 2 } : {}),
+      // Будівлі — план 5 (Середній); фон-ассети — план 3 (Найдальший), без підсвітки.
+      ...(opts?.transparent ? { transparent: true, plan: 3 } : { plan: 5 }),
     });
     const img = new Image(); img.src = url; state.images.set(id, img);
     if (!opts?.transparent) select(id, 'placed');
@@ -726,30 +816,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   document.getElementById(prefix + 'keyBgBtn')
     ?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
 
-  $<HTMLInputElement>('bgInput').addEventListener('change', function () {
-    const file = this.files?.[0]; if (!file) return;
-    const r = new FileReader(); r.onload = () => loadBg(r.result as string); r.readAsDataURL(file); this.value = '';
-  });
-  $('bgBtn')?.addEventListener('click', () => $<HTMLInputElement>('bgInput').click());
-  $('bgClearBtn')?.addEventListener('click', () => { pushUndo(); loc().bg = ''; state.bgImg = null; save(); });
-
-  $<HTMLInputElement>('assetInput').addEventListener('change', function () {
-    const files = this.files; if (!files) return;
-    for (const file of Array.from(files)) { const r = new FileReader(), f = file; r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => dropAsset(u, f.name)); r.readAsDataURL(file); }
-    this.value = '';
-  });
-  $('assetBtn')?.addEventListener('click', () => $<HTMLInputElement>('assetInput').click());
-
-  $('nodesBtn')?.addEventListener('click', () => {
-    if (!onOpenNodes) return;
-    const l = loc();
-    onOpenNodes(
-      l.nodeGraph ?? { nodes: [], edges: [] },
-      ['condition', 'behavior', 'function'],
-      (g) => { l.nodeGraph = g; void save(); },
-      'Ноди: ' + l.name,
-    );
-  });
+  // (Кнопки Фон/+Будівля/Ноди прибрано з тулбара: фон локації — через ПКМ по картці
+  //  «Бібліотеки фону»; будівлі/фон-ассети розміщуються кліком з бібліотек.)
 
   canvas.addEventListener('dragover', e => e.preventDefault());
   canvas.addEventListener('drop', e => {
@@ -795,19 +863,29 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     state.locs.forEach((l, i) => {
       const card = document.createElement('div');
       card.className = 'libCard' + (i === state.cur ? ' on' : '');
-      card.style.cssText = 'padding:6px 8px;cursor:pointer;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:6px';
+      // Дві колонки: список у flex-wrap, картки по половині ширини
+      card.style.cssText = 'width:calc(50% - 3px);box-sizing:border-box;padding:6px 8px;cursor:pointer;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:6px';
+      card.title = 'ЛКМ — вибрати · середня кнопка — перейменувати';
 
       const name = document.createElement('span');
       name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      name.textContent = l.name; name.contentEditable = 'true';
-      name.addEventListener('blur', () => { l.name = name.textContent || l.name; save(); });
+      name.textContent = l.name;
+      name.addEventListener('blur', () => { name.contentEditable = 'false'; l.name = name.textContent || l.name; save(); renderList(); });
       name.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); name.blur(); } });
-      name.addEventListener('click', ev => { if (i === state.cur) ev.stopPropagation(); });
 
+      // ЛКМ — просто вибрати локацію; ренейм — середньою кнопкою (колесо).
       card.addEventListener('click', () => {
         if (document.activeElement === name) return;
         state.cur = i; state.images.clear(); ensureImages(); loadBgFromDoc(); deselect(); renderList();
       });
+      card.addEventListener('mousedown', ev => {
+        if (ev.button !== 1) return;
+        ev.preventDefault(); ev.stopPropagation();
+        name.contentEditable = 'true'; name.focus();
+        const sel = window.getSelection(); const rng = document.createRange();
+        rng.selectNodeContents(name); sel?.removeAllRanges(); sel?.addRange(rng);
+      });
+      card.addEventListener('auxclick', ev => { if (ev.button === 1) ev.preventDefault(); });
 
       const del = document.createElement('button');
       del.textContent = '×'; del.title = 'Видалити';
@@ -1014,8 +1092,15 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       });
       card.appendChild(del);
 
-      // Клік — нодове дерево цього типу будівлі (спільне для всіх копій).
+      card.title = b.name + ' · ЛКМ — розмістити (силует за курсором) · ПКМ — нодове дерево · кинь PNG — візуал';
+      // ЛКМ — розміщення як у Мандрах: силует за курсором, клік у вьюпорті ставить.
       card.addEventListener('click', () => {
+        if (b.png) startPending(b.png, b.name, false);
+        else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
+      });
+      // ПКМ — нодове дерево цього типу будівлі (спільне для всіх копій).
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
         if (!onOpenNodes) return;
         onOpenNodes(
           b.nodeGraph ?? { nodes: [], edges: [] },
@@ -1092,7 +1177,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     for (const g of bgAssets) {
       const card = document.createElement('div');
       card.className = 'libCard';
-      card.title = g.name + ' · тягни у вьюпорт · кинь PNG — замінити · середня — ренейм';
+      card.title = g.name + ' · ЛКМ — розмістити · ПКМ — меню (фон локації) · кинь PNG — замінити · середня — ренейм';
       card.draggable = true;
 
       const im = document.createElement('img');
@@ -1108,6 +1193,19 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         bgAssets = bgAssets.filter(x => x.id !== g.id); void saveBgAssets(); renderBgAssetLib();
       });
       card.appendChild(del);
+
+      // ЛКМ — розміщення силуетом (фон-ассет, без виділення)
+      card.addEventListener('click', () => startPending(g.png, g.name, true));
+      // ПКМ — меню: фон локації / видалити
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showQuickMenu(e.clientX, e.clientY, [
+          { label: 'Розмістити на сцені', on: () => startPending(g.png, g.name, true) },
+          { label: 'Зробити фоном локації', on: () => { loadBg(g.png); } },
+          ...(loc().bg ? [{ label: 'Прибрати фон локації', on: () => { pushUndo(); loc().bg = ''; state.bgImg = null; void save(); } }] : []),
+          { label: 'Видалити ассет', on: () => { bgAssets = bgAssets.filter(x => x.id !== g.id); void saveBgAssets(); renderBgAssetLib(); } },
+        ]);
+      });
 
       // Середня кнопка — ренейм
       card.addEventListener('mousedown', (e) => {

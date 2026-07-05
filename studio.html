@@ -533,7 +533,7 @@
       <!-- ЛІВА БІБЛІОТЕКА — редактор локацій -->
       <aside id="loc-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px">
         <button id="loc-addLoc" class="btn-accent" style="width:100%;padding:10px;flex:0 0 auto">＋ Нова локація</button>
-        <div id="loc-locList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:8px"></div>
+        <div id="loc-locList" style="flex:1;overflow-y:auto;display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;margin-top:8px"></div>
       </aside>
 
       <!-- ЛІВА ПАНЕЛЬ режиму Меню: бібліотека ассетів (PNG) зі скролом -->
@@ -679,17 +679,6 @@
           <button id="loc-tool-select" class="on" title="Вибір та переміщення (V)">Вибір</button>
           <button id="loc-tool-zone" title="Намалювати активну зону (Z)">＋ Зона</button>
           <button id="loc-deleteBtn" title="Видалити вибране (Del)">Видалити</button>
-          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
-          <button id="loc-bgBtn" title="Завантажити фон локації (PNG)">Фон</button>
-          <input type="file" id="loc-bgInput" accept="image/*" style="display:none">
-          <button id="loc-bgClearBtn" title="Прибрати фон">Прибрати фон</button>
-          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
-          <button id="loc-assetBtn" title="Додати будівлю або декор (PNG)">＋ Будівлю</button>
-          <input type="file" id="loc-assetInput" accept="image/*" multiple style="display:none">
-          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
-          <button id="loc-nodesBtn" title="Нодове дерево локації">Ноди</button>
-          <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
-          <button id="loc-keyBgBtn" class="on" title="Вирізати рівний фон у завантажених PNG (будівлі/декор)">✂ Фон</button>
         </div>
 
         <!-- НИЖНІЙ ТУЛБАР режиму Меню -->
@@ -920,6 +909,9 @@
           <button class="iconToggle on" id="loc-zonesBtn" title="Показати зони дій"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg></button>
           <button class="iconToggle on" id="loc-gridBtn" title="Показати сітку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
           <button class="iconToggle" id="loc-fitBtn" title="Вписати в екран"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+          <button class="iconToggle on" id="loc-showAtmBtn" title="Показати/сховати атмосферу (погода, віньєтка, баланс)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.3 2A4 4 0 0 0 6 19z"/></svg></button>
+          <button class="iconToggle on" id="loc-showAnimBtn" title="Показати/сховати анімації об'єктів"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+          <button class="iconToggle on" id="loc-keyBgBtn" title="Вирізати рівний фон у завантажуваних PNG (будівлі/декор)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.5 15.5M14.5 10.5 20 16"/></svg></button>
         </div>
         <div class="pane" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
           <button class="header secToggle open">Властивості</button>
@@ -937,22 +929,19 @@
               <input id="loc-zoneLabel" type="text" placeholder="підпис зони" style="background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box">
             </div>
           </div>
-          <button class="header secToggle open" style="margin-top:6px">Атмосфера</button>
+          <button class="header secToggle open" style="margin-top:6px" title="Плановість, погода, віньєтка й баланс кольору — як у Редакторі Мандр. Діє на поточну локацію.">Атмосфера</button>
           <div class="secBody" style="display:flex;flex-direction:column;gap:8px">
-            <div style="font-size:11px;color:var(--muted)">Плановість, погода (дощ/туман/блискавка), віньєтка й баланс кольору — як у Редакторі Мандр. Діє на поточну локацію.</div>
             <div id="loc-atmPanel" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
-          <button class="header secToggle open" style="margin-top:6px">Бібліотека споруд</button>
+          <button class="header secToggle open" style="margin-top:6px" title="ЛКМ по картці — розмістити (силует за курсором) · ПКМ — нодове дерево · кинь PNG на картку — візуал">Бібліотека споруд</button>
           <div class="secBody">
             <button id="loc-addBuilding" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Створити будівлю</button>
-            <div style="font-size:11px;color:var(--muted);margin:6px 0">Клік — нодове дерево · тягни у вьюпорт · кинь PNG на картку</div>
             <div id="loc-buildingGrid"></div>
           </div>
-          <button class="header secToggle open" style="margin-top:6px">Бібліотека фону</button>
+          <button class="header secToggle open" style="margin-top:6px" title="Декор без підсвітки: ЛКМ по картці — розмістити · ПКМ по картці — фон локації · ПКМ по ассету на сцені — план/анімація">Бібліотека фону</button>
           <div class="secBody">
             <button id="loc-addBgAsset" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Додати фон-ассет</button>
             <input type="file" id="loc-bgAssetInput" accept="image/*" multiple style="display:none">
-            <div style="font-size:11px;color:var(--muted);margin:6px 0">Декор без виділення: тягни картку у вьюпорт — розміщений ассет не підсвічується і не вибирається кліком. ПКМ по ньому на сцені — план/анімація/«зробити вибираним».</div>
             <div id="loc-bgAssetGrid"></div>
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
@@ -1165,6 +1154,18 @@
         });
       }
       setupDock('mob-dock', 'mobPanel');
+
+      // ── Згортання секцій: клік по заголовку .secToggle ховає/показує .secBody ──
+      // (lv-sec* мають власну логіку перемикання в редакторі рівнів — не чіпаємо)
+      document.querySelectorAll('.secToggle').forEach(function (btn) {
+        if (btn.id && btn.id.indexOf('lv-sec') === 0) return;
+        btn.addEventListener('click', function () {
+          var body = btn.nextElementSibling;
+          if (!body || !body.classList.contains('secBody')) return;
+          var open = btn.classList.toggle('open');
+          body.style.display = open ? '' : 'none';
+        });
+      });
 
       // ── Keydown dispatch — спільний для обох докерів ──
       document.querySelectorAll('[data-mob-key]').forEach(function (btn) {
