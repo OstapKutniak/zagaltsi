@@ -20,6 +20,7 @@ interface PlacedAsset {
   plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
   anim?: PlacedAnim;     // обертання/дрейф — як у Редакторі Мандр
   deform?: PlacedDeform; // перспектива/FFD + кейфрейми
+  transparent?: boolean; // фон-ассет: не виділяється/не підсвічується (ПКМ — можна)
 }
 
 interface ActionZone {
@@ -200,8 +201,10 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     };
   }
 
-  function placedAt(sx: number, sy: number): PlacedAsset | null {
+  // includeTransparent=true — для ПКМ (інакше фон-ассети не вибираються зовсім).
+  function placedAt(sx: number, sy: number, includeTransparent = false): PlacedAsset | null {
     for (const p of placedSorted().reverse()) {
+      if (p.transparent && !includeTransparent) continue;
       const img = state.images.get(p.id);
       if (!img?.complete || !img.naturalWidth) continue;
       const d = placedDisp(p);
@@ -557,7 +560,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   canvas.addEventListener('contextmenu', e => {
     e.preventDefault();
     const mx = e.clientX - rect().left, my = e.clientY - rect().top;
-    const p = placedAt(mx, my);
+    const p = placedAt(mx, my, true); // включно з фон-ассетами (transparent)
     if (!p) return;
     select(p.id, 'placed');
     openFxObjMenu(e.clientX, e.clientY, {
@@ -574,6 +577,10 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       onSetMoveLine: () => { state.moveLine = { id: p.id }; setStatus('Проведи лінію напряму руху на канвасі'); },
       extras: [
         { label: 'Дзеркалити (M)', on: () => { pushUndo(); p.flip *= -1; save(); } },
+        { label: p.transparent ? 'Зробити вибираним' : 'Зробити фоновим (невибираним)', on: () => {
+          pushUndo(); p.transparent = p.transparent ? undefined : true; save();
+          setStatus(p.transparent ? 'Ассет фоновий: клік/ховер його не бачать, ПКМ — бачить' : 'Ассет знову вибирається кліком');
+        } },
         'sep',
         { label: 'Видалити (Del)', danger: true, on: () => {
           pushUndo();
@@ -698,12 +705,17 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const img = new Image(); img.onload = () => { state.bgImg = img; save(); setStatus('Фон завантажено'); }; img.src = url;
   }
 
-  function dropAsset(url: string, name: string, wx = 0, wy = 0) {
+  function dropAsset(url: string, name: string, wx = 0, wy = 0, opts?: { transparent?: boolean }) {
     pushUndo();
     const id = uid();
-    loc().placed.push({ id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1 });
+    loc().placed.push({
+      id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1,
+      // Фон-ассет: невибираний і за замовчуванням позаду будівель (план 2).
+      ...(opts?.transparent ? { transparent: true, plan: 2 } : {}),
+    });
     const img = new Image(); img.src = url; state.images.set(id, img);
-    select(id, 'placed'); save(); setStatus(`«${name}» додано`);
+    if (!opts?.transparent) select(id, 'placed');
+    save(); setStatus(`«${name}» додано${opts?.transparent ? ' (фоновий, невибираний)' : ''}`);
   }
 
   // Тогл «Вирізати фон» (loc-keyBgBtn) — кеїти рівний фон у завантажених PNG (пропси/будівлі, не фон локації).
@@ -749,6 +761,13 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       const b = buildings.find(x => x.id === bid);
       if (b?.png) { const wp0 = toWorld(mx, my); dropAsset(b.png, b.name, wp0.x, wp0.y); }
       else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
+      return;
+    }
+    // Картка з бібліотеки фону → невибираний декор
+    const gid = e.dataTransfer?.getData('text/bgasset-id');
+    if (gid) {
+      const g = bgAssets.find(x => x.id === gid);
+      if (g?.png) { const wp0 = toWorld(mx, my); dropAsset(g.png, g.name, wp0.x, wp0.y, { transparent: true }); }
       return;
     }
     const file = e.dataTransfer?.files[0]; if (!file?.type.startsWith('image/')) return;
@@ -928,6 +947,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   registerPublisher(() => ({
     'public/studio-data/locations.json': JSON.stringify({ version: 1, locations: state.locs }, null, 2),
     'public/studio-data/buildings.json': JSON.stringify({ version: 1, buildings }, null, 2),
+    'public/studio-data/loc-bg-assets.json': JSON.stringify({ version: 1, assets: bgAssets }, null, 2),
   }));
   const exportBtn = $<HTMLButtonElement>('exportBtn');
   if (exportBtn) wirePublishButton(exportBtn, setStatus, () => {
@@ -1059,6 +1079,125 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     }
   }
 
+  // ── Бібліотека фону ────────────────────────────────────────────────────────
+  // Ассети без виділення: тягни картку у вьюпорт — розміщений декор НЕ підсвічується
+  // і не вибирається кліком (ПКМ по ньому на сцені працює). Той самий механізм
+  // карток: ✕, кинь PNG на картку — заміна візуалу, середня кнопка — ренейм.
+  interface BgAsset { id: string; name: string; png: string; updatedAt?: number }
+  let bgAssets: BgAsset[] = [];
+
+  function renderBgAssetLib(): void {
+    const grid = $('bgAssetGrid'); if (!grid) return;
+    grid.innerHTML = '';
+    for (const g of bgAssets) {
+      const card = document.createElement('div');
+      card.className = 'libCard';
+      card.title = g.name + ' · тягни у вьюпорт · кинь PNG — замінити · середня — ренейм';
+      card.draggable = true;
+
+      const im = document.createElement('img');
+      im.src = g.png; im.draggable = false;
+      card.appendChild(im);
+
+      const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = g.name;
+      card.appendChild(nm);
+
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕'; del.title = 'Видалити';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        bgAssets = bgAssets.filter(x => x.id !== g.id); void saveBgAssets(); renderBgAssetLib();
+      });
+      card.appendChild(del);
+
+      // Середня кнопка — ренейм
+      card.addEventListener('mousedown', (e) => {
+        if (e.button !== 1) return;
+        e.preventDefault(); e.stopPropagation();
+        const v = prompt('Назва ассета:', g.name);
+        if (v?.trim()) { g.name = v.trim(); g.updatedAt = Date.now(); void saveBgAssets(); renderBgAssetLib(); }
+      });
+      card.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+      // Drag → біла альфа-силует drag-image, несемо id ассета.
+      card.addEventListener('dragstart', (e) => {
+        const dt = (e as DragEvent).dataTransfer; if (!dt) return;
+        dt.setData('text/bgasset-id', g.id);
+        const ghost = makeDragGhost(im);
+        ghost.style.cssText = 'position:fixed;top:-1000px;left:-1000px;pointer-events:none';
+        document.body.appendChild(ghost);
+        dt.setDragImage(ghost, ghost.width / 2, ghost.height / 2);
+        setTimeout(() => ghost.remove(), 0);
+      });
+
+      // Кинути PNG на картку → замінити візуал.
+      card.addEventListener('dragover', (e) => {
+        if ((e as DragEvent).dataTransfer?.types.includes('Files')) { e.preventDefault(); card.classList.add('dropping'); }
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('dropping'));
+      card.addEventListener('drop', (e) => {
+        card.classList.remove('dropping');
+        const file = (e as DragEvent).dataTransfer?.files[0];
+        if (!file?.type.startsWith('image/')) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = new FileReader();
+        r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => { g.png = u; g.updatedAt = Date.now(); void saveBgAssets(); renderBgAssetLib(); setStatus(`«${g.name}»: візуал оновлено`); });
+        r.readAsDataURL(file);
+      });
+
+      grid.appendChild(card);
+    }
+    // Порожня картка: клік — вибрати файли, дроп PNG — додати.
+    const empty = document.createElement('div');
+    empty.className = 'libCard empty';
+    empty.title = 'Клік — додати PNG · або кинь файли сюди';
+    empty.addEventListener('click', () => $<HTMLInputElement>('bgAssetInput')?.click());
+    empty.addEventListener('dragover', (e) => {
+      if ((e as DragEvent).dataTransfer?.types.includes('Files')) { e.preventDefault(); empty.classList.add('dropping'); }
+    });
+    empty.addEventListener('dragleave', () => empty.classList.remove('dropping'));
+    empty.addEventListener('drop', (e) => {
+      empty.classList.remove('dropping');
+      e.preventDefault(); e.stopPropagation();
+      addBgAssetFiles(Array.from((e as DragEvent).dataTransfer?.files ?? []));
+    });
+    grid.appendChild(empty);
+  }
+
+  function addBgAssetFiles(files: File[]): void {
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      const r = new FileReader(), f = file;
+      r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => {
+        bgAssets.push({ id: 'bga' + uid(), name: f.name.replace(/\.\w+$/, ''), png: u, updatedAt: Date.now() });
+        void saveBgAssets(); renderBgAssetLib();
+      });
+      r.readAsDataURL(file);
+    }
+  }
+  $('addBgAsset')?.addEventListener('click', () => $<HTMLInputElement>('bgAssetInput')?.click());
+  $<HTMLInputElement>('bgAssetInput')?.addEventListener('change', function () {
+    addBgAssetFiles(Array.from(this.files ?? []));
+    this.value = '';
+  });
+
+  async function saveBgAssets(): Promise<void> { await idbSet('zag_loc_bg_assets', bgAssets); }
+  async function loadBgAssets(): Promise<void> {
+    const saved = await idbGet<BgAsset[]>('zag_loc_bg_assets');
+    bgAssets = Array.isArray(saved) ? saved : [];
+    renderBgAssetLib();
+    // Підтягнути опубліковану бібліотеку і злити LWW.
+    const remote = await pullArray<BgAsset>('loc-bg-assets.json', 'assets');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(bgAssets, remote);
+      if (changed > 0) {
+        bgAssets = merged as BgAsset[];
+        await idbSet('zag_loc_bg_assets', bgAssets);
+        renderBgAssetLib();
+        setStatus(`Синхронізовано: ${changed} фон-ассетів з GitHub`);
+      }
+    }
+  }
+
   // ── Status + persistence ──────────────────────────────────────────────────
 
   function setStatus(msg: string) { const el = $('statusBar'); if (el) el.textContent = msg; }
@@ -1098,5 +1237,6 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   });
 
   void loadBuildings();
+  void loadBgAssets();
   load(); draw(); setTool('select');
 }

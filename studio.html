@@ -154,9 +154,9 @@
       #centerMid.nodes-open #lv-stageWrap,
       #centerMid.nodes-open #wld-stageWrap,
       #centerMid.nodes-open #loc-stageWrap { bottom: 50% !important; }
-      #loc-buildingGrid { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; max-height: 340px; overflow-y: auto; }
-      #loc-buildingGrid .libCard { width: calc(33.333% - 6px); }
-      #loc-buildingGrid .libCard.dropping { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+      #loc-buildingGrid, #loc-bgAssetGrid { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; max-height: 340px; overflow-y: auto; }
+      #loc-buildingGrid .libCard, #loc-bgAssetGrid .libCard { width: calc(33.333% - 6px); }
+      #loc-buildingGrid .libCard.dropping, #loc-bgAssetGrid .libCard.dropping { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
       #tlCollapseBtn { margin-left: auto; width: 28px; height: 28px; padding: 0; font-size: 13px; background: transparent; border: 0; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; flex-shrink: 0; }
       #tlCollapseBtn:hover { background: #3a3a3a; color: var(--ink); }
       .tlrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
@@ -540,8 +540,8 @@
       <aside id="mn-library" class="col pane" style="width:280px;flex:0 0 auto;padding:8px;flex-direction:column">
         <button id="mn-addAsset" class="btn-accent" style="width:100%;padding:10px;flex:0 0 auto">＋ PNG-ассет</button>
         <input type="file" id="mn-assetInput" accept="image/*" multiple style="display:none">
-        <div style="font-size:11px;color:var(--muted);margin:6px 0;flex:0 0 auto">Клік по картці — зробити фоном сторінки</div>
-        <div id="mn-assetList" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start"></div>
+        <div style="font-size:11px;color:var(--muted);margin:6px 0;flex:0 0 auto">Клік — розмістити на сторінці · тягни у кадр · ПКМ — меню (фон/видалити) · кинь PNG на порожню картку</div>
+        <div id="mn-assetList" style="flex:1;overflow-y:auto;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start"></div>
       </aside>
 
       <!-- ЛІВА ПАНЕЛЬ режиму Звуку: бібліотека звуків -->
@@ -947,6 +947,13 @@
             <button id="loc-addBuilding" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Створити будівлю</button>
             <div style="font-size:11px;color:var(--muted);margin:6px 0">Клік — нодове дерево · тягни у вьюпорт · кинь PNG на картку</div>
             <div id="loc-buildingGrid"></div>
+          </div>
+          <button class="header secToggle open" style="margin-top:6px">Бібліотека фону</button>
+          <div class="secBody">
+            <button id="loc-addBgAsset" class="btn-accent" style="width:100%;padding:8px;flex:0 0 auto">＋ Додати фон-ассет</button>
+            <input type="file" id="loc-bgAssetInput" accept="image/*" multiple style="display:none">
+            <div style="font-size:11px;color:var(--muted);margin:6px 0">Декор без виділення: тягни картку у вьюпорт — розміщений ассет не підсвічується і не вибирається кліком. ПКМ по ньому на сцені — план/анімація/«зробити вибираним».</div>
+            <div id="loc-bgAssetGrid"></div>
           </div>
           <div style="padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:auto">
             <hr style="border:0;border-top:1px solid var(--line)">

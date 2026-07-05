@@ -55,6 +55,7 @@ export interface PlacedAsset {
   plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
   anim?: PlacedAnim;     // обертання/дрейф (Редактор Локацій, як у Мандрах)
   deform?: PlacedDeform; // перспектива/FFD + кейфрейми
+  transparent?: boolean; // фон-ассет редактора (у грі рендериться як звичайний)
 }
 export interface ActionZone {
   id: string; x: number; y: number; w: number; h: number;

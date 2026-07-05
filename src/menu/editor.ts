@@ -190,14 +190,14 @@ export function initMenuEditor(prefix: string): void {
   window.addEventListener('mousedown', (e) => { if (ctxEl && !ctxEl.contains(e.target as Node)) closeCtx(); }, true);
   window.addEventListener('scroll', closeCtx, true);
 
-  // Розмістити ассет як об'єкт на поточній сторінці (по центру кадру).
-  function placeObject(asset: { name: string; url: string }, naturalH: number): void {
+  // Розмістити ассет як об'єкт на поточній сторінці (дефолт — центр кадру).
+  function placeObject(asset: { name: string; url: string }, naturalH: number, fx = 640, fy = 300): void {
     const targetH = 230; // бажана логічна висота за замовчуванням
     const sc = naturalH ? Math.min(1.5, Math.round(targetH / naturalH * 1000) / 1000) : 0.5;
-    const o: MenuObject = { id: uid(), url: asset.url, name: asset.name, x: 640, y: 300, scale: sc, rot: 0, flip: false, depth: 3 };
+    const o: MenuObject = { id: uid(), url: asset.url, name: asset.name, x: Math.round(fx), y: Math.round(fy), scale: sc, rot: 0, flip: false, depth: 3 };
     objs().push(o); state.selObj = o.id; state.sel = null;
     save(); renderProps(); draw();
-    setStatus(`Розміщено «${asset.name}» · тягни — рух, кут — масштаб, ПКМ — план/дзеркало/видалити`);
+    setStatus(`Розміщено «${asset.name}» · тягни — рух, кут — масштаб, ПКМ — план/анімація/деформація`);
   }
 
   // ── Кадр 20:9 вписаний у канвас ─────────────────────────────────────────────
@@ -890,49 +890,110 @@ export function initMenuEditor(prefix: string): void {
     this.value = '';
   });
 
-  // ── Бібліотека PNG-ассетів (ліва панель, скрол) ────────────────────────────
+  // ── Бібліотека PNG-ассетів — той самий механізм карток, що в інших редакторах:
+  // .libCard-грід, ✕ на картці, тягни картку у кадр, кинь PNG на порожню картку,
+  // середня кнопка — ренейм, ПКМ — меню (розмістити / фон сторінки / видалити).
+  function saveAssets(): void { void idbSet('zag_menu_assets', state.assets); }
+  function addAssetFiles(files: File[], atX?: number, atY?: number): void {
+    for (const f of files) {
+      if (!f.type.startsWith('image/')) continue;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const a = { id: uid(), name: f.name.replace(/\.\w+$/, ''), url: String(rd.result) };
+        state.assets.push(a);
+        saveAssets(); renderAssets();
+        if (atX !== undefined) {
+          const im = new Image();
+          im.onload = () => placeObject(a, im.naturalHeight, atX, atY);
+          im.src = a.url;
+        }
+      };
+      rd.readAsDataURL(f);
+    }
+  }
+  function startAssetRename(a: typeof state.assets[0]): void {
+    const v = prompt('Назва ассета:', a.name);
+    if (v?.trim()) { a.name = v.trim(); saveAssets(); renderAssets(); }
+  }
   function renderAssets(): void {
     const list = $('assetList'); if (!list) return;
     list.innerHTML = '';
     for (const a of state.assets) {
-      const card = document.createElement('div');
-      card.style.cssText = 'background:var(--rail);border:1px solid var(--line);border-radius:8px;padding:4px;cursor:pointer;display:flex;flex-direction:column;gap:2px';
-      const im = document.createElement('img');
-      im.src = a.url; im.style.cssText = 'width:100%;height:64px;object-fit:contain'; im.draggable = false;
-      const nm = document.createElement('div'); nm.textContent = a.name;
-      nm.style.cssText = 'font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center';
+      const card = document.createElement('div'); card.className = 'libCard';
+      card.title = 'ЛКМ — розмістити · тягни у кадр · ПКМ — меню · середня — ренейм';
+      const im = document.createElement('img'); im.src = a.url; im.draggable = false;
+      const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '×'; del.title = 'Видалити';
+      del.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.assets = state.assets.filter((x) => x.id !== a.id);
+        saveAssets(); renderAssets();
+      });
+      card.append(im, nm, del);
       // ЛКМ — розмістити об'єктом на сторінці; ПКМ — меню (розмістити / фон / видалити).
-      card.onclick = () => placeObject(a, im.naturalHeight);
-      card.oncontextmenu = (ev) => {
+      card.addEventListener('click', () => placeObject(a, im.naturalHeight));
+      card.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         showCtxMenu(ev.clientX, ev.clientY, [
           { label: 'Розмістити на сторінці', on: () => placeObject(a, im.naturalHeight) },
           { label: 'Зробити фоном сторінки', on: () => { page().bg = a.url; state.bgImgs.delete(page().id); save(); draw(); setStatus(`Фон сторінки: ${a.name}`); } },
+          { label: 'Перейменувати', on: () => startAssetRename(a) },
           'sep',
           { label: 'Видалити ассет', on: () => {
             state.assets = state.assets.filter((x) => x.id !== a.id);
-            void idbSet('zag_menu_assets', state.assets); renderAssets();
+            saveAssets(); renderAssets();
           } },
         ]);
-      };
-      card.title = 'ЛКМ — розмістити на сторінці · ПКМ — меню (фон/видалити)';
-      card.appendChild(im); card.appendChild(nm);
+      });
+      // Середня кнопка — ренейм (як у Редакторі Мандр)
+      card.addEventListener('mousedown', (ev) => { if (ev.button === 1) { ev.preventDefault(); ev.stopPropagation(); startAssetRename(a); } });
+      card.addEventListener('auxclick', (ev) => { if (ev.button === 1) ev.preventDefault(); });
+      // Тягни картку у кадр — розмістити у точці дропу
+      card.draggable = true;
+      card.addEventListener('dragstart', (ev) => {
+        (ev as DragEvent).dataTransfer?.setData('text/menu-asset-id', a.id);
+      });
       list.appendChild(card);
+    }
+    // Порожні картки: клік — вибрати файли, дроп PNG — додати в бібліотеку.
+    const empties = Math.max(4, 12 - state.assets.length);
+    for (let i = 0; i < empties; i++) {
+      const e = document.createElement('div'); e.className = 'libCard empty';
+      e.title = 'Клік — додати PNG · або кинь файли сюди';
+      e.addEventListener('click', () => ($('assetInput') as HTMLInputElement)?.click());
+      e.addEventListener('dragover', (ev) => { ev.preventDefault(); (ev as DragEvent).dataTransfer!.dropEffect = 'copy'; e.style.borderColor = 'var(--accent)'; });
+      e.addEventListener('dragleave', () => { e.style.borderColor = ''; });
+      e.addEventListener('drop', (ev) => {
+        ev.preventDefault(); e.style.borderColor = '';
+        addAssetFiles(Array.from((ev as DragEvent).dataTransfer?.files ?? []));
+      });
+      list.appendChild(e);
     }
   }
   $('addAsset')?.addEventListener('click', () => ($('assetInput') as HTMLInputElement)?.click());
   ($('assetInput') as HTMLInputElement | null)?.addEventListener('change', function () {
-    const files = Array.from(this.files ?? []);
-    for (const f of files) {
-      const rd = new FileReader();
-      rd.onload = () => {
-        state.assets.push({ id: uid(), name: f.name.replace(/\.\w+$/, ''), url: String(rd.result) });
-        void idbSet('zag_menu_assets', state.assets);
-        renderAssets();
-      };
-      rd.readAsDataURL(f);
-    }
+    addAssetFiles(Array.from(this.files ?? []));
     this.value = '';
+  });
+  // Дроп на канвас: картка з бібліотеки → розмістити у точці; PNG-файл → додати і розмістити.
+  canvas.addEventListener('dragover', (e) => e.preventDefault());
+  canvas.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (state.view !== 'page' || state.preview) return;
+    const r = canvas!.getBoundingClientRect();
+    const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    const aid = e.dataTransfer?.getData('text/menu-asset-id');
+    if (aid) {
+      const a = state.assets.find((x) => x.id === aid);
+      if (a) {
+        const im = new Image();
+        im.onload = () => placeObject(a, im.naturalHeight, fp.x, fp.y);
+        im.src = a.url;
+      }
+      return;
+    }
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length) addAssetFiles(files, fp.x, fp.y);
   });
 
   // ── Публікація ──────────────────────────────────────────────────────────────
@@ -958,8 +1019,10 @@ export function initMenuEditor(prefix: string): void {
     }
     renderPages(); renderProps(); renderFx(); draw();
   }).catch(() => { renderPages(); renderFx(); draw(); });
+  renderAssets(); // одразу порожні картки-плейсхолдери (клік/дроп — додати PNG)
   void idbGet<typeof state.assets>('zag_menu_assets').then((a) => {
-    if (Array.isArray(a)) { state.assets = a; renderAssets(); }
+    if (Array.isArray(a)) { state.assets = a; }
+    renderAssets();
   }).catch(() => {});
 
   window.addEventListener('menuTabActivated', () => draw());
