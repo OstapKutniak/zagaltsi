@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { setTouchUI } from './uiButton';
 import {
-  type LocationDoc, loadLocationsForGame, locationForNode, type WorldNode,
+  type LocationDoc, loadLocationsForGame, loadBuildingsForGame, locationForNode,
+  type WorldNode, type BuildingDoc, type PlacedAsset,
 } from '../world/worldData';
 import {
   type Atmosphere, type LayerTint, type WeatherState, type LayerKey, type FogLayer as AtmFogLayer,
@@ -23,6 +24,8 @@ import { loadQuests, type Quest } from '../story/quests';
 import { acceptQuest, reportProgress, questsForAcq, turnInWithGiver } from '../story/questState';
 import { rewardLabel } from '../story/profile';
 import { idbGet } from '../store';
+import { runBuildingGraph, type ShopItem } from '../story/buildingRun';
+import { adjustStat, grantReward, loadProfile } from '../story/profile';
 
 // Сцена локації (хаб): арт із Редактора Локацій (фон + розставлені будівлі), а поки
 // його нема — білі куби-заглушки. Внизу — 5 слотів Хоругви (як герої в HoMM):
@@ -60,6 +63,8 @@ export class LocationScene extends Phaser.Scene {
   private lightningDur = 0.35;
   private colorGradePipe: ColorGradePipeline | null = null;
   private placedFx = new FxSprites(); // анімація/деформація будівель з редактора
+  private buildings: BuildingDoc[] = []; // типи будівель (нодові графи) з бібліотеки споруд
+  private uiBusy = false; // відкритий сувій/лавка — блокуємо повторні кліки
 
   init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string; icon?: string; encounterQuestId?: string }): void {
     this.nodeId = data?.nodeId ?? '';
@@ -469,7 +474,8 @@ export class LocationScene extends Phaser.Scene {
 
   // ── Арт локації (або куби) ─────────────────────────────────────────────────
   private async renderLocation(): Promise<void> {
-    const locs = await loadLocationsForGame();
+    const [locs, blds] = await Promise.all([loadLocationsForGame(), loadBuildingsForGame()]);
+    this.buildings = blds;
     const fakeNode: WorldNode = { id: this.nodeId, label: this.label, x: 0, y: 0, type: 'location', locationId: this.locationId };
     const doc = locationForNode(fakeNode, locs);
     if (!this.scene.isActive()) return;
@@ -541,7 +547,11 @@ export class LocationScene extends Phaser.Scene {
         animScale: s, // dx/dy анімації руху — у світових одиницях локації
         anim: p.anim, deform: p.deform,
       });
-      if (go instanceof Phaser.GameObjects.Image) placedImgs.push(go);
+      if (go instanceof Phaser.GameObjects.Image) {
+        placedImgs.push(go);
+        // Споруда з нодовим графом: hover — жовта підсвітка + збільшення, клік — граф.
+        if (p.buildingId) this.makeBuildingInteractive(go, p);
+      }
     }
     // Legacy смуги туману (старі, не мігровані доки) — лише поки нема атмосфери.
     if (doc.fogs?.length && !doc.atmosphere) {
@@ -581,6 +591,148 @@ export class LocationScene extends Phaser.Scene {
     this.add.text(LOGICAL_W / 2 + this.offX, groundY - 165, 'Локацію ще не зібрано — Редактор Локацій у studio', {
       fontFamily: MENU_FONT, fontSize: '16px', color: '#8a8171',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2);
+  }
+
+  // ── Живі споруди: hover-підсвітка + клік → нодовий граф будівлі ─────────────
+  private makeBuildingInteractive(im: Phaser.GameObjects.Image, p: PlacedAsset): void {
+    im.setInteractive({ useHandCursor: true });
+    const bx = im.scaleX, by = im.scaleY;
+    im.on('pointerover', () => {
+      if (this.uiBusy) return;
+      im.setData('baseTint', im.tintTopLeft);
+      im.setTint(0xffdd66);
+      this.tweens.add({ targets: im, scaleX: bx * 1.08, scaleY: by * 1.08, duration: 120 });
+    });
+    im.on('pointerout', () => {
+      const t = im.getData('baseTint') as number | undefined;
+      if (t != null && t !== 0xffffff) im.setTint(t); else im.clearTint();
+      this.tweens.add({ targets: im, scaleX: bx, scaleY: by, duration: 120 });
+    });
+    im.on('pointerup', () => { void this.interactBuilding(p.buildingId!); });
+  }
+
+  private async interactBuilding(buildingId: string): Promise<void> {
+    if (this.uiBusy) return;
+    const b = this.buildings.find((x) => x.id === buildingId);
+    const graph = b?.nodeGraph;
+    if (!graph?.nodes?.length) { this.uiToast('Тут поки тихо…'); return; }
+    this.uiBusy = true;
+    try { await runBuildingGraph(graph, this.buildingUi()); }
+    finally { this.uiBusy = false; }
+  }
+
+  private uiToast(text: string): void {
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 40 + this.offY, text, {
+      fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(140).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 600, onComplete: () => t.destroy() });
+  }
+
+  // Сувій: панель з описом і списком варіантів (клік поза панеллю = закрити/null).
+  private scrollPanel(desc: string, options: string[], onPick: (i: number | null) => void): void {
+    const W = this.cameras.main.width, H = this.cameras.main.height;
+    const c = this.add.container(W / 2, H / 2).setScrollFactor(0).setDepth(130);
+    const backdrop = this.add.zone(0, 0, W, H).setInteractive();
+    backdrop.on('pointerup', () => { c.destroy(true); onPick(null); });
+    c.add(backdrop);
+    const bw = 620;
+    const descText = desc ? this.add.text(0, 0, desc, {
+      fontFamily: MENU_FONT, fontSize: '22px', color: '#3b2c17', wordWrap: { width: bw - 90 }, lineSpacing: 5,
+    }).setOrigin(0.5, 0) : null;
+    const descH = descText ? descText.height + 22 : 0;
+    const bh = 70 + descH + options.length * 46 + 26;
+    const g = this.add.graphics();
+    g.fillStyle(0x000000, 0.45); g.fillRect(-W / 2, -H / 2, W, H);
+    // «Сувій»: пергамент з темними роликами зверху/знизу
+    g.fillStyle(0x2b2014, 1); g.fillRoundedRect(-bw / 2 - 14, -bh / 2 - 16, bw + 28, 26, 12);
+    g.fillRoundedRect(-bw / 2 - 14, bh / 2 - 10, bw + 28, 26, 12);
+    g.fillStyle(0xe8d9b5, 1); g.fillRect(-bw / 2, -bh / 2, bw, bh);
+    g.lineStyle(2, 0xb49a6a, 1); g.strokeRect(-bw / 2, -bh / 2, bw, bh);
+    c.add(g);
+    if (descText) { descText.setPosition(0, -bh / 2 + 28); c.add(descText); }
+    options.forEach((opt, i) => {
+      const y = -bh / 2 + 28 + descH + 18 + i * 46;
+      const row = this.add.text(0, y, '• ' + opt, {
+        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '24px', color: '#4a3010',
+      }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
+      row.on('pointerover', () => row.setColor('#8a5200'));
+      row.on('pointerout', () => row.setColor('#4a3010'));
+      row.on('pointerup', () => { c.destroy(true); onPick(i); });
+      c.add(row);
+    });
+  }
+
+  // UI-колбеки для виконувача нодового графа споруди.
+  private buildingUi(): import('../story/buildingRun').BuildingUi {
+    return {
+      showMenu: (desc, options) => new Promise((res) => this.scrollPanel(desc, options, res)),
+      showLines: (lines) => new Promise((res) => {
+        const show = (i: number): void => {
+          if (i >= lines.length) { res(); return; }
+          this.scrollPanel(lines[i], [i + 1 < lines.length ? 'Далі' : 'Завершити'], (pick) => {
+            if (pick == null) { res(); return; }
+            show(i + 1);
+          });
+        };
+        show(0);
+      }),
+      toast: (t) => this.uiToast(t),
+      openBoard: () => this.openBoard(),
+      openShop: (goods) => new Promise((res) => this.openShop(goods, res)),
+    };
+  }
+
+  // Лавка: маленьке вікно купівлі квадратами (як інвентар). Клік по товару — купити.
+  private openShop(goods: ShopItem[], onClose: () => void): void {
+    const W = this.cameras.main.width, H = this.cameras.main.height;
+    const c = this.add.container(W / 2, H / 2).setScrollFactor(0).setDepth(130);
+    const backdrop = this.add.zone(0, 0, W, H).setInteractive();
+    backdrop.on('pointerup', () => { c.destroy(true); onClose(); });
+    c.add(backdrop);
+    const CELL = 92, GAP = 12, perRow = Math.min(5, Math.max(1, goods.length));
+    const rows = Math.max(1, Math.ceil(goods.length / perRow));
+    const bw = Math.max(300, perRow * (CELL + GAP) + 40);
+    const bh = 96 + rows * (CELL + GAP) + 30;
+    const g = this.add.graphics();
+    g.fillStyle(0x000000, 0.45); g.fillRect(-W / 2, -H / 2, W, H);
+    g.fillStyle(0x1d1826, 0.97); g.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 10);
+    g.lineStyle(2, 0xcbb98a, 1); g.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 10);
+    c.add(g);
+    const title = this.add.text(0, -bh / 2 + 20, 'ЛАВКА', {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '26px', color: '#efe3c8',
+    }).setOrigin(0.5, 0);
+    c.add(title);
+    const goldText = this.add.text(0, -bh / 2 + 54, `Золото: ${loadProfile().gold}`, {
+      fontFamily: MENU_FONT, fontSize: '17px', color: '#cbb98a',
+    }).setOrigin(0.5, 0);
+    c.add(goldText);
+    goods.forEach((item, i) => {
+      const col = i % perRow, row = Math.floor(i / perRow);
+      const x = -((perRow - 1) * (CELL + GAP)) / 2 + col * (CELL + GAP);
+      const y = -bh / 2 + 96 + row * (CELL + GAP) + CELL / 2;
+      const cell = this.add.graphics();
+      cell.fillStyle(0x2b2436, 1); cell.fillRoundedRect(x - CELL / 2, y - CELL / 2, CELL, CELL, 8);
+      cell.lineStyle(2, 0x4a3f5e, 1); cell.strokeRoundedRect(x - CELL / 2, y - CELL / 2, CELL, CELL, 8);
+      c.add(cell);
+      const nm = this.add.text(x, y - 12, item.name, {
+        fontFamily: MENU_FONT, fontSize: '15px', color: COL_TEXT, wordWrap: { width: CELL - 10 }, align: 'center',
+      }).setOrigin(0.5);
+      c.add(nm);
+      const pr = this.add.text(x, y + CELL / 2 - 14, `${item.price} зол.`, {
+        fontFamily: MENU_FONT, fontSize: '14px', color: '#ffcf8f',
+      }).setOrigin(0.5);
+      c.add(pr);
+      const hit = this.add.zone(x, y, CELL, CELL).setInteractive({ useHandCursor: true });
+      hit.on('pointerup', () => {
+        const gold = loadProfile().gold;
+        if (gold < item.price) { this.uiToast('Не вистачає золота'); return; }
+        adjustStat('gold', -item.price);
+        grantReward({ itemId: item.name });
+        goldText.setText(`Золото: ${loadProfile().gold}`);
+        this.uiToast(`Куплено: ${item.name}`);
+      });
+      c.add(hit);
+    });
   }
 
   // ── Слоти Хоругви (5) ──────────────────────────────────────────────────────

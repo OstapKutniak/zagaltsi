@@ -7,6 +7,7 @@ import { idbGet } from '../store';
 import { mergeByIdLWW } from '../sync';
 import type { Atmosphere } from '../level/atmosphere';
 import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
+import type { NodeGraph } from '../node-editor';
 
 // Опубліковане читаємо з ВЛАСНОГО деплою (BASE_URL), а не raw.githubusercontent:
 // у dev це локальний public/ (бачиш сид одразу), на Pages — файли цього ж деплою.
@@ -56,7 +57,12 @@ export interface PlacedAsset {
   anim?: PlacedAnim;     // обертання/дрейф (Редактор Локацій, як у Мандрах)
   deform?: PlacedDeform; // перспектива/FFD + кейфрейми
   transparent?: boolean; // фон-ассет редактора (у грі рендериться як звичайний)
+  buildingId?: string;   // тип будівлі з бібліотеки споруд → її нодовий граф у грі
 }
+
+// Тип будівлі з «Бібліотеки споруд» (нодовий граф — логіка кліку в грі).
+export interface BuildingDoc { id: string; name: string; png: string; nodeGraph?: NodeGraph; updatedAt?: number }
+
 export interface ActionZone {
   id: string; x: number; y: number; w: number; h: number;
   action: string; label: string;
@@ -89,6 +95,13 @@ export async function loadLocationsForGame(): Promise<LocationDoc[]> {
   let local: LocationDoc[] = [];
   try { const l = await idbGet<LocationDoc[]>('zag_locations'); if (Array.isArray(l)) local = l; } catch { /* ignore */ }
   const remote = await fetchPublished<LocationDoc>('locations.json', 'locations');
+  return mergeByIdLWW(local, remote).merged;
+}
+
+export async function loadBuildingsForGame(): Promise<BuildingDoc[]> {
+  let local: BuildingDoc[] = [];
+  try { const l = await idbGet<BuildingDoc[]>('zag_buildings'); if (Array.isArray(l)) local = l; } catch { /* ignore */ }
+  const remote = await fetchPublished<BuildingDoc>('buildings.json', 'buildings');
   return mergeByIdLWW(local, remote).merged;
 }
 

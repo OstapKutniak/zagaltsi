@@ -113,11 +113,39 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вихід' }],
     config: { sec: { type: 'number', label: 'Сек', default: 1 } },
   },
+  // «Діалогове меню» — клік по споруді в грі: сувій з описом сцени і варіантами
+  // дій. Виходи = варіанти (динамічні, з поля «Варіанти» через «|»).
   dialog_menu: {
     cat: 'function', label: 'Діалогове меню', color: '#1a6e3a',
-    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Варіант 1' }, { label: 'Варіант 2' }],
-    config: { buttons: { type: 'number', label: 'Варіантів', default: 2 } },
+    inPorts: [{ label: '▶' }], outPorts: [],
+    config: {
+      desc: { type: 'text', label: 'Опис', default: 'Корчмар протирає кухоль і дивиться на тебе.' },
+      options: { type: 'list', label: 'Варіанти', default: 'Підійти до корчмаря|Роззирнутися|Піти' },
+    },
   },
+  // «Діалоговий сувій» — ланцюг реплік в ОДНІЙ ноді (фрази через «|»),
+  // показуються послідовно, як розмова з НПС.
+  dialog_scroll: {
+    cat: 'function', label: 'Діалоговий сувій', color: '#8a5a00',
+    inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }],
+    config: { lines: { type: 'list', label: 'Репліки', default: 'Здоров був!|Чого тобі?' } },
+  },
+  // ── Нагороди / ефекти (виконуються миттєво, ланцюжком через «Далі») ──
+  quest_give:    { cat: 'function', label: 'Отримати завдання', color: '#6b4fa0', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { quest: { type: 'text', label: 'Квест', default: '' } } },
+  quest_done:    { cat: 'function', label: 'Завдання виконано', color: '#6b4fa0', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { quest: { type: 'text', label: 'Квест', default: '' } } },
+  quest_fail:    { cat: 'function', label: 'Завдання провалено', color: '#6b4fa0', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { quest: { type: 'text', label: 'Квест', default: '' } } },
+  quest_hint:    { cat: 'function', label: 'Зачіпка щодо завдання', color: '#6b4fa0', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { quest: { type: 'text', label: 'Квест', default: '' }, hint: { type: 'text', label: 'Зачіпка', default: 'Сліди ведуть на болота…' } } },
+  give_money:    { cat: 'function', label: 'Отримати гроші', color: '#8a6d00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  take_money:    { cat: 'function', label: 'Витратити гроші', color: '#8a6d00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Вистачило' }, { label: 'Нема стільки' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  give_xp:       { cat: 'function', label: 'Отримати досвід', color: '#8a6d00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 25 } } },
+  back_pain_add: { cat: 'function', label: 'Отримати біль у спині', color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  back_pain_sub: { cat: 'function', label: 'Позбутись болю в спині', color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  anxiety_add:   { cat: 'function', label: 'Отримати тривожність', color: '#7a2e00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  anxiety_sub:   { cat: 'function', label: 'Втратити тривожність', color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 10 } } },
+  heal:          { cat: 'function', label: 'Відновити здоровʼя', color: '#1a6e3a', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { amount: { type: 'number', label: 'Скільки', default: 25 } } },
+  give_item:     { cat: 'function', label: 'Отримати предмет', color: '#8a6d00', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { item: { type: 'text', label: 'Предмет', default: '' } } },
+  open_board:    { cat: 'function', label: 'Відкрити дошку замовлень', color: '#1e5a9e', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }] },
+  open_shop:     { cat: 'function', label: 'Відкрити лавку', color: '#1e5a9e', inPorts: [{ label: '▶' }], outPorts: [{ label: 'Далі' }], config: { goods: { type: 'list', label: 'Товари', default: 'Пиво:5|Хліб:2' } } },
   // «Почати діалог» — ворог каже фразу; виходи = варіанти відповіді (кожен веде до
   // наступної діалог-ноди). Кількість виходів динамічна — з поля «Відповіді» («a|b|c»).
   dialog: {
@@ -144,12 +172,20 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
 export function dialogAnswers(n: GraphNode): string[] {
   return String(n.config.answers ?? '').split('|').map((s) => s.trim()).filter(Boolean);
 }
+// Варіанти діалогового меню споруди (динамічні виходи). Легасі: поле buttons=N.
+export function menuOptions(n: GraphNode): string[] {
+  const opts = String(n.config.options ?? '').split('|').map((s) => s.trim()).filter(Boolean);
+  if (opts.length) return opts;
+  const k = Math.max(1, Math.min(8, Number(n.config.buttons) || 2));
+  return Array.from({ length: k }, (_, i) => `Варіант ${i + 1}`);
+}
 
 export const NODE_CATEGORIES: { id: string; label: string; types: string[] }[] = [
   { id: 'condition', label: 'Умови',     types: ['player_distance', 'health_below', 'sees_player', 'time_of_day', 'then_next', 'and_cond', 'dialog_done', 'dialog_positive', 'dialog_negative', 'dialog_active', 'stat_check'] },
   { id: 'behavior',  label: 'Поведінка', types: ['run_to_player', 'walk_to_player', 'wait', 'range_attack', 'melee_attack', 'become_neutral', 'player_stop', 'player_resume'] },
-  { id: 'dialog',    label: 'Діалог',    types: ['dialog'] },
-  { id: 'function',  label: 'Функції',   types: ['dialog_menu'] },
+  { id: 'dialog',    label: 'Діалог',    types: ['dialog', 'dialog_scroll'] },
+  { id: 'function',  label: 'Функції',   types: ['dialog_menu', 'open_board', 'open_shop'] },
+  { id: 'reward',    label: 'Нагороди',  types: ['quest_give', 'quest_done', 'quest_fail', 'quest_hint', 'give_money', 'take_money', 'give_xp', 'heal', 'give_item', 'back_pain_add', 'back_pain_sub', 'anxiety_add', 'anxiety_sub'] },
 ];
 
 export interface GraphNode {
@@ -177,6 +213,8 @@ function outLabels(n: GraphNode): string[] {
   if (n.cat === 'reroute') return ['▶'];
   // Діалог: виходи = варіанти відповіді (динамічні). Без відповідей — один вихід «Далі».
   if (n.type === 'dialog') { const a = dialogAnswers(n); return a.length ? a : ['Далі']; }
+  // Діалогове меню споруди: виходи = варіанти дій (динамічні).
+  if (n.type === 'dialog_menu') return menuOptions(n);
   return NODE_TYPES[n.type]?.outPorts.map(p => p.label) ?? [];
 }
 function inLabels(n: GraphNode): string[] {

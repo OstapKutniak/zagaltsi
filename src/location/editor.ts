@@ -20,6 +20,7 @@ interface PlacedAsset {
   anim?: PlacedAnim;     // обертання/дрейф — як у Редакторі Мандр
   deform?: PlacedDeform; // перспектива/FFD + кейфрейми
   transparent?: boolean; // фон-ассет: не виділяється/не підсвічується (ПКМ — можна)
+  buildingId?: string;   // тип будівлі з бібліотеки споруд (його нодовий граф у грі)
 }
 
 interface ActionZone {
@@ -122,7 +123,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     hoverScale: new Map<string, number>(),
     // Розміщення з бібліотеки як у Мандрах: клік по картці → білий силует за
     // курсором → клік у вьюпорті ставить. ПКМ/Esc — скасувати.
-    pendingPlace: null as null | { url: string; name: string; transparent: boolean; img: HTMLImageElement; ghost: HTMLCanvasElement | null },
+    pendingPlace: null as null | { url: string; name: string; transparent: boolean; buildingId?: string; img: HTMLImageElement; ghost: HTMLCanvasElement | null },
   };
 
   const loc = (): LocationDoc => state.locs[state.cur];
@@ -151,9 +152,9 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     x.fillRect(0, 0, c.width, c.height);
     return c;
   }
-  function startPending(url: string, name: string, transparent: boolean): void {
+  function startPending(url: string, name: string, transparent: boolean, buildingId?: string): void {
     const img = new Image(); img.src = url;
-    state.pendingPlace = { url, name, transparent, img, ghost: null };
+    state.pendingPlace = { url, name, transparent, buildingId, img, ghost: null };
     setStatus(`«${name}»: клік у вьюпорті — поставити · ПКМ/Esc — скасувати`);
   }
   function cancelPending(): void {
@@ -552,7 +553,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     if (state.pendingPlace) {
       const wp = toWorld(mx, my);
       const pp = state.pendingPlace;
-      dropAsset(pp.url, pp.name, wp.x, wp.y, pp.transparent ? { transparent: true } : undefined);
+      dropAsset(pp.url, pp.name, wp.x, wp.y, { transparent: pp.transparent || undefined, buildingId: pp.buildingId });
       state.pendingPlace = null;
       return;
     }
@@ -795,11 +796,12 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const img = new Image(); img.onload = () => { state.bgImg = img; save(); setStatus('Фон завантажено'); }; img.src = url;
   }
 
-  function dropAsset(url: string, name: string, wx = 0, wy = 0, opts?: { transparent?: boolean }) {
+  function dropAsset(url: string, name: string, wx = 0, wy = 0, opts?: { transparent?: boolean; buildingId?: string }) {
     pushUndo();
     const id = uid();
     loc().placed.push({
       id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1,
+      ...(opts?.buildingId ? { buildingId: opts.buildingId } : {}),
       // Будівлі — план 5 (Середній); фон-ассети — план 3 (Найдальший), без підсвітки.
       ...(opts?.transparent ? { transparent: true, plan: 3 } : { plan: 5 }),
     });
@@ -827,7 +829,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const bid = e.dataTransfer?.getData('text/building-id');
     if (bid) {
       const b = buildings.find(x => x.id === bid);
-      if (b?.png) { const wp0 = toWorld(mx, my); dropAsset(b.png, b.name, wp0.x, wp0.y); }
+      if (b?.png) { const wp0 = toWorld(mx, my); dropAsset(b.png, b.name, wp0.x, wp0.y, { buildingId: b.id }); }
       else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
       return;
     }
@@ -1095,7 +1097,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       card.title = b.name + ' · ЛКМ — розмістити (силует за курсором) · ПКМ — нодове дерево · кинь PNG — візуал';
       // ЛКМ — розміщення як у Мандрах: силует за курсором, клік у вьюпорті ставить.
       card.addEventListener('click', () => {
-        if (b.png) startPending(b.png, b.name, false);
+        if (b.png) startPending(b.png, b.name, false, b.id);
         else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
       });
       // ПКМ — нодове дерево цього типу будівлі (спільне для всіх копій).
@@ -1104,7 +1106,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         if (!onOpenNodes) return;
         onOpenNodes(
           b.nodeGraph ?? { nodes: [], edges: [] },
-          ['condition', 'behavior', 'function'],
+          ['condition', 'behavior', 'dialog', 'function', 'reward'],
           (g) => { b.nodeGraph = g; b.updatedAt = Date.now(); void saveBuildings(); },
           'Будівля: ' + b.name,
         );
