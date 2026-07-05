@@ -4,10 +4,23 @@ import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { keyDataUrl } from '../rig/keyer';
 import type { NodeGraph } from '../node-editor';
+import { type Atmosphere, type WeatherPhase, type LayerKey, evalTod, weatherToggles, DEFAULT_WEATHER_PHASE } from '../level/atmosphere';
+import { buildAtmospherePanel } from '../level/atmospherePanel';
+import { drawFogLayerCanvas, drawRainCanvas, drawVignetteCanvas, applyColorBalanceCanvas, drawLayerTinted } from '../level/atmoPreview';
+import { locationFit } from '../world/worldData';
+import {
+  fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
+  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, type DeformView,
+  type PlacedAnim, type PlacedDeform,
+} from '../level/placedFx';
 
 interface PlacedAsset {
   id: string; url: string; name: string;
   x: number; y: number; rot: number; scale: number; flip: number;
+  plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
+  anim?: PlacedAnim;     // обертання/дрейф — як у Редакторі Мандр
+  deform?: PlacedDeform; // перспектива/FFD + кейфрейми
+  transparent?: boolean; // фон-ассет: не виділяється/не підсвічується (ПКМ — можна)
 }
 
 interface ActionZone {
@@ -16,8 +29,8 @@ interface ActionZone {
   action: string; label: string;
 }
 
-// Шар туману (дзеркало FogLayer у worldData): смуга шуму, що повзе у грі.
-interface FogLayer {
+// Legacy смуга туману (старий підменю «Туман» під Дуб) — мігрується в atmosphere.
+interface LegacyFogBand {
   id: string; y: number; h: number;
   alpha: number; tint: string; speed: number; front: boolean;
 }
@@ -26,10 +39,17 @@ interface LocationDoc {
   id: string; name: string; bg: string;
   placed: PlacedAsset[];
   zones: ActionZone[];
-  fogs?: FogLayer[];
+  fogs?: LegacyFogBand[];   // legacy — конвертується в atmosphere.weather.fogLayers
+  atmosphere?: Atmosphere;  // плановість/погода/віньєтка/баланс — як у Редакторі Мандр
   nodeGraph?: NodeGraph;
   updatedAt?: number; // мітка останньої правки — для синхронізації між компами (LWW)
 }
+
+// Шари атмосфери в локації: bg = фон, map = будівлі/декор, foreground = перед усім.
+const LOC_ATM_LAYERS: LayerKey[] = ['bg', 'map', 'foreground'];
+const LOC_ATM_LABELS: Partial<Record<LayerKey, string>> = {
+  bg: 'Фон (позаду)', map: 'Будівлі (перед ними)', foreground: 'Передній план',
+};
 
 const ZONE_COLORS: Record<string, string> = {
   shop:    'rgba(255,200,50,0.32)',
@@ -87,9 +107,16 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     pan: { x: 0, y: 0 },
     mouse: { x: 0, y: 0 },
     undoStack: [] as string[],
+    // Деформація: редагування хендлів (як у Редакторі Мандр)
+    deformEdit: null as string | null,
+    deformHandleIdx: -1,
+    deformDragSx0: 0, deformDragSy0: 0,
+    deformDragOrigVals: [] as number[],
+    // «Задати лінію напряму» анімації переміщення (світові координати)
+    moveLine: null as null | { id: string; x0?: number; y0?: number; x1?: number; y1?: number },
     showZones: true,
     showGrid: true,
-    showCamView: false,
+    showCamView: true, // 20:9 УВІМК за замовчуванням — рамка показує фактичний кадр гри
     hoverPlaced: null as string | null,
     hoverScale: new Map<string, number>(),
   };
@@ -132,7 +159,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   function undo() {
     const snap = state.undoStack.pop(); if (!snap) return;
     state.locs[state.cur] = JSON.parse(snap);
-    state.images.clear(); ensureImages(); loadBgFromDoc(); deselect(); save();
+    state.images.clear(); ensureImages(); loadBgFromDoc(); deselect(); renderAtmPanel(); save();
   }
 
   function deselect() { state.sel = null; state.selType = null; updateProps(); }
@@ -148,15 +175,44 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
-  function placedAt(sx: number, sy: number): PlacedAsset | null {
-    for (const p of [...loc().placed].reverse()) {
+  // Анімації об'єктів грають, поки нічого не тягнемо й не редагуємо хендли.
+  const fxPlaying = (): boolean =>
+    !state.mode && !state.dragPlaced && state.deformEdit == null && !state.moveLine && !state.zoneDraw;
+  const animClock = (): number => performance.now() / 1000;
+  // Дисплейний трансформ (з анімаційним зсувом/кейфреймами).
+  const placedDisp = (p: PlacedAsset): { x: number; y: number; rot: number; scale: number } =>
+    fxDisp({ x: p.x, y: p.y, rot: p.rot, scale: p.scale, anim: p.anim, deform: p.deform }, animClock(), fxPlaying());
+  // Порядок малювання: плановість (1..7, дефолт 3), у межах плану — порядок додавання.
+  const placedSorted = (): PlacedAsset[] =>
+    [...loc().placed].sort((a, b) => (a.plan ?? 3) - (b.plan ?? 3));
+
+  function placedDeformView(p: PlacedAsset, playing: boolean): DeformView | null {
+    if (!p.deform) return null;
+    const img = state.images.get(p.id);
+    if (!img?.complete || !img.naturalWidth) return null;
+    const d = fxDisp({ x: p.x, y: p.y, rot: p.rot, scale: p.scale, anim: p.anim, deform: p.deform }, animClock(), playing);
+    const ps = toScreen(d.x, d.y);
+    return {
+      W: img.naturalWidth, H: img.naturalHeight,
+      deform: fxDeformAt(p.deform, animClock(), playing),
+      x: ps.x, y: ps.y, rot: d.rot,
+      kx: d.scale * sc(), ky: d.scale * sc(),
+      flip: p.flip, baked: p.deform.baked,
+    };
+  }
+
+  // includeTransparent=true — для ПКМ (інакше фон-ассети не вибираються зовсім).
+  function placedAt(sx: number, sy: number, includeTransparent = false): PlacedAsset | null {
+    for (const p of placedSorted().reverse()) {
+      if (p.transparent && !includeTransparent) continue;
       const img = state.images.get(p.id);
       if (!img?.complete || !img.naturalWidth) continue;
-      const ps = toScreen(p.x, p.y);
-      const iw = img.naturalWidth * p.scale * sc();
-      const ih = img.naturalHeight * p.scale * sc();
+      const d = placedDisp(p);
+      const ps = toScreen(d.x, d.y);
+      const iw = img.naturalWidth * d.scale * sc();
+      const ih = img.naturalHeight * d.scale * sc();
       const dx = sx - ps.x, dy = sy - ps.y;
-      const ang = -p.rot * Math.PI / 180;
+      const ang = -d.rot * Math.PI / 180;
       const lx = dx * Math.cos(ang) - dy * Math.sin(ang);
       const ly = dx * Math.sin(ang) + dy * Math.cos(ang);
       if (Math.abs(lx) <= iw / 2 && Math.abs(ly) <= ih / 2) return p;
@@ -173,6 +229,20 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   // ── Draw ──────────────────────────────────────────────────────────────────
 
+  // Активна погодна фаза (для прев'ю дощу/туману/блискавки) або null.
+  function wxPhase(): WeatherPhase | null {
+    const wx = loc().atmosphere?.weather;
+    if (!wx?.enabled) return null;
+    return (wx.phases[0] as WeatherPhase) ?? null;
+  }
+
+  // Рамка фактичного кадру гри (той самий фіт, що LocationScene): у СВІТОВИХ координатах.
+  function gameFrameWorld(): { x: number; y: number; w: number; h: number } {
+    const bgW = state.bgImg?.naturalWidth ?? 0, bgH = state.bgImg?.naturalHeight ?? 0;
+    const f = locationFit(loc(), bgW, bgH, 1280, 576);
+    return { x: (0 - f.ox) / f.s, y: (0 - f.oy) / f.s, w: 1280 / f.s, h: 576 / f.s };
+  }
+
   function draw() {
     const w = canvas.width = canvas.clientWidth;
     const h = canvas.height = canvas.clientHeight;
@@ -182,9 +252,18 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (!loc()) { requestAnimationFrame(draw); return; }
 
+    const atm = loc().atmosphere;
+    const todLayers = atm?.tod?.enabled ? evalTod(atm.tod, 0).layers : {};
+    const ph = wxPhase();
+    const fogOn = ph ? weatherToggles(ph).fog && !!ph.fogLayers : false;
+    const tNow = performance.now() / 1000;
+
     if (state.bgImg) {
-      const p = toScreen(0, 0);
-      ctx.drawImage(state.bgImg, p.x, p.y, state.bgImg.naturalWidth * sc(), state.bgImg.naturalHeight * sc());
+      const bgImg = state.bgImg;
+      drawLayerTinted(ctx, w, h, todLayers.bg, (c) => {
+        const p = toScreen(0, 0);
+        c.drawImage(bgImg, p.x, p.y, bgImg.naturalWidth * sc(), bgImg.naturalHeight * sc());
+      });
     } else {
       ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('Тягни PNG будівель/фону сюди', w / 2, h / 2);
@@ -227,42 +306,97 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       ctx.setLineDash([4, 3]); ctx.strokeRect(tl2.x, tl2.y, zw * sc(), zh * sc()); ctx.setLineDash([]);
     }
 
-    // Задні шари туману — між фоном і будівлями (як у грі)
-    drawFogBands(false, w);
+    // Туман за будівлями (шар bg) — між фоном і будівлями, як у грі
+    if (fogOn && ph!.fogLayers!.bg) drawFogLayerCanvas(ctx, w, h, ph!.fogLayers!.bg, sc(), tNow);
 
     // Placed assets (будівлі) — hover: білий контур + плавний масштаб (як у Гамлеті DD1)
-    for (const p of loc().placed) {
-      const img = state.images.get(p.id);
-      if (!img?.complete || !img.naturalWidth) continue;
-      const isSel = state.sel === p.id;
-      const hv = state.tool === 'select' && state.hoverPlaced === p.id && !state.dragPlaced && !state.mode;
-      const cur = state.hoverScale.get(p.id) ?? 1;
-      const target = hv ? 1.08 : 1;
-      let hs = cur + (target - cur) * 0.18;
-      if (Math.abs(hs - target) < 0.002) hs = target;
-      state.hoverScale.set(p.id, hs);
-      const ps = toScreen(p.x, p.y);
-      const iw = img.naturalWidth * p.scale * sc() * hs;
-      const ih = img.naturalHeight * p.scale * sc() * hs;
-      ctx.save();
-      ctx.translate(ps.x, ps.y);
-      ctx.rotate(p.rot * Math.PI / 180);
-      ctx.scale(p.flip, 1);
-      if (isSel) { ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 14; }
-      else if (hs > 1.005) { ctx.shadowColor = 'rgba(255,255,255,0.6)'; ctx.shadowBlur = 12; }
-      ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);
-      ctx.shadowBlur = 0;
-      if (isSel) { ctx.strokeStyle = '#ffcc00'; ctx.lineWidth = 2; ctx.strokeRect(-iw / 2, -ih / 2, iw, ih); }
-      else if (hs > 1.005) { ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.strokeRect(-iw / 2, -ih / 2, iw, ih); }
-      ctx.restore();
+    const playing = fxPlaying();
+    drawLayerTinted(ctx, w, h, todLayers.map, (c) => {
+      for (const p of placedSorted()) {
+        const img = state.images.get(p.id);
+        if (!img?.complete || !img.naturalWidth) continue;
+        const isSel = state.sel === p.id;
+        if (p.deform) {
+          // Деформований — квадосітка (без hover-масштабу; виділення — рамка нижче)
+          const v = placedDeformView(p, playing && state.deformEdit !== p.id)!;
+          drawDeformedImage(c, img, v);
+          if (isSel && state.deformEdit !== p.id) {
+            const bw = img.naturalWidth * p.scale * sc(), bh = img.naturalHeight * p.scale * sc();
+            c.save(); c.translate(v.x, v.y); c.rotate(v.rot * Math.PI / 180);
+            c.strokeStyle = '#ffcc00'; c.lineWidth = 2; c.setLineDash([5, 3]);
+            c.strokeRect(-bw / 2, -bh / 2, bw, bh); c.setLineDash([]); c.restore();
+          }
+          continue;
+        }
+        const d = placedDisp(p);
+        const hv = state.tool === 'select' && state.hoverPlaced === p.id && !state.dragPlaced && !state.mode;
+        const cur = state.hoverScale.get(p.id) ?? 1;
+        const target = hv ? 1.08 : 1;
+        let hs = cur + (target - cur) * 0.18;
+        if (Math.abs(hs - target) < 0.002) hs = target;
+        state.hoverScale.set(p.id, hs);
+        const ps = toScreen(d.x, d.y);
+        const iw = img.naturalWidth * d.scale * sc() * hs;
+        const ih = img.naturalHeight * d.scale * sc() * hs;
+        c.save();
+        c.translate(ps.x, ps.y);
+        c.rotate(d.rot * Math.PI / 180);
+        c.scale(p.flip, 1);
+        if (isSel) { c.shadowColor = '#ffcc00'; c.shadowBlur = 14; }
+        else if (hs > 1.005) { c.shadowColor = 'rgba(255,255,255,0.6)'; c.shadowBlur = 12; }
+        c.drawImage(img, -iw / 2, -ih / 2, iw, ih);
+        c.shadowBlur = 0;
+        if (isSel) { c.strokeStyle = '#ffcc00'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+        else if (hs > 1.005) { c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 2; c.strokeRect(-iw / 2, -ih / 2, iw, ih); }
+        c.restore();
+      }
+    });
+
+    // Хендли деформації обраного об'єкта — поверх тінту
+    if (state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        const v = placedDeformView(pd, false);
+        if (v) drawDeformHandles(ctx, v, state.deformHandleIdx);
+      }
     }
 
-    // Передні шари туману — поверх будівель (як у грі)
-    drawFogBands(true, w);
+    // Лінія напряму руху (режим «Задати лінію»)
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const a = toScreen(L.x0!, L.y0!);
+      const b = toScreen(L.x1 ?? L.x0!, L.y1 ?? L.y0!);
+      ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const ang = Math.atan2(b.y - a.y, b.x - a.x);
+      ctx.beginPath(); ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - 12 * Math.cos(ang - 0.4), b.y - 12 * Math.sin(ang - 0.4));
+      ctx.lineTo(b.x - 12 * Math.cos(ang + 0.4), b.y - 12 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+
+    // Туман перед будівлями (шар map)
+    if (fogOn && ph!.fogLayers!.map) drawFogLayerCanvas(ctx, w, h, ph!.fogLayers!.map, sc(), tNow);
+
+    // Рамка фактичного кадру гри (той самий фіт, що LocationScene) — у світових координатах
+    const fw = gameFrameWorld();
+    const tl = toScreen(fw.x, fw.y);
+    const frame = { x: tl.x, y: tl.y, w: fw.w * sc(), h: fw.h * sc() };
+
+    // Віньєтка — у межах ігрового кадру (як у грі)
+    if (atm?.vignette?.enabled) drawVignetteCanvas(ctx, frame.x, frame.y, frame.w, frame.h, atm.vignette);
+
+    // Найближчий туман (шар foreground) — поверх усього
+    if (fogOn && ph!.fogLayers!.foreground) drawFogLayerCanvas(ctx, w, h, ph!.fogLayers!.foreground, sc(), tNow);
+
+    // Дощ — поверх сцени
+    if (ph) drawRainCanvas(ctx, w, h, ph, sc(), tNow);
+
+    // Кольоровий баланс — грейдиться вся сцена (як у грі), до рамок редактора
+    if (atm?.colorBalance?.enabled) applyColorBalanceCanvas(ctx, canvas, atm.colorBalance);
 
     if (state.showCamView) {
-      const vw = 1280 * sc(); const vh = 576 * sc();
-      const vx = (w - vw) / 2; const vy = (h - vh) / 2;
+      const { x: vx, y: vy, w: vw, h: vh } = frame;
       const cx0 = Math.max(0, vx), cy0 = Math.max(0, vy);
       const cx1 = Math.min(w, vx + vw), cy1 = Math.min(h, vy + vh);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -278,37 +412,6 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     requestAnimationFrame(draw);
   }
 
-  // Смуги туману у вьюпорті: м'яка вертикальна градієнтна стрічка на всю ширину.
-  function drawFogBands(front: boolean, w: number): void {
-    const fogs = loc().fogs;
-    if (!fogs?.length) return;
-    const t = performance.now() / 1000;
-    for (const fg of fogs) {
-      if (fg.front !== front) continue;
-      const yTop = toScreen(0, fg.y - fg.h / 2).y;
-      const hPx = Math.max(6, fg.h * sc());
-      const grad = ctx.createLinearGradient(0, yTop, 0, yTop + hPx);
-      const c = fg.tint || '#aaa1bd';
-      grad.addColorStop(0, c + '00');
-      grad.addColorStop(0.5, c + Math.round(Math.min(0.9, fg.alpha) * 255).toString(16).padStart(2, '0'));
-      grad.addColorStop(1, c + '00');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, yTop, w, hPx);
-      // хвилясті прозорі пасма, що повзуть — видно рух і напрямок
-      const drift = (t * fg.speed * sc()) % 220;
-      ctx.strokeStyle = c + '30'; ctx.lineWidth = Math.max(6, hPx * 0.16); ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let x = -220 + drift; x < w + 220; x += 6) {
-        const yy = yTop + hPx / 2 + Math.sin((x - drift) / 46) * hPx * 0.16;
-        if (x <= -220 + drift + 6) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
-      }
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
-      const arrow = fg.speed === 0 ? '' : fg.speed > 0 ? ' →' : ' ←';
-      ctx.fillText('туман' + (fg.front ? ' (попереду)' : '') + arrow, 6, yTop + 11);
-    }
-  }
-
   // ── Mouse ─────────────────────────────────────────────────────────────────
 
   canvas.addEventListener('mousemove', e => {
@@ -318,6 +421,23 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     if (state.panning) {
       state.pan.x = state.panStart.px + e.clientX - state.panStart.mx;
       state.pan.y = state.panStart.py + e.clientY - state.panStart.my;
+    }
+
+    if (state.moveLine?.x0 !== undefined) {
+      const wp = toWorld(state.mouse.x, state.mouse.y);
+      state.moveLine.x1 = wp.x; state.moveLine.y1 = wp.y;
+      return;
+    }
+    if (state.deformHandleIdx >= 0 && state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        applyHandleDrag(
+          pd.deform, state.deformHandleIdx, state.deformDragOrigVals,
+          state.mouse.x - state.deformDragSx0, state.mouse.y - state.deformDragSy0,
+          pd.rot, pd.scale * sc(), pd.scale * sc(), pd.flip,
+        );
+        return;
+      }
     }
 
     if (state.dragPlaced && !state.mode) {
@@ -363,6 +483,29 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (state.mode) { save(); state.mode = null; state.modeOrig = null; return; }
 
+    // Режим «Задати лінію напряму» анімації переміщення — старт лінії
+    if (state.moveLine) {
+      const wp = toWorld(mx, my);
+      state.moveLine.x0 = wp.x; state.moveLine.y0 = wp.y;
+      state.moveLine.x1 = wp.x; state.moveLine.y1 = wp.y;
+      return;
+    }
+    // Редагування хендлів деформації — клік по хендлу починає його дрег
+    if (state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        const v = placedDeformView(pd, false);
+        const hi = v ? hitDeformHandle(v, mx, my) : -1;
+        if (hi >= 0) {
+          pushUndo();
+          state.deformHandleIdx = hi;
+          state.deformDragSx0 = mx; state.deformDragSy0 = my;
+          state.deformDragOrigVals = [...(pd.deform.type === 'persp' ? (pd.deform.corners ?? new Array(8).fill(0)) : (pd.deform.pts ?? []))];
+          return;
+        }
+      }
+    }
+
     if (state.tool === 'select') {
       const p = placedAt(mx, my);
       if (p) {
@@ -380,6 +523,21 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   canvas.addEventListener('mouseup', e => {
     state.panning = false;
+    // Завершення лінії напряму руху → пишемо anim.move у виділений об'єкт
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const p = placedById(L.id);
+      const ddx = (L.x1 ?? L.x0!) - L.x0!, ddy = (L.y1 ?? L.y0!) - L.y0!;
+      const len = Math.hypot(ddx, ddy);
+      if (p && len > 2) {
+        pushUndo();
+        p.anim = { type: 'move', dx: ddx / len, dy: ddy / len, dist: Math.round(len), speed: p.anim?.speed ?? 40, constant: p.anim?.constant ?? false };
+        save(); setStatus('Напрям руху задано');
+      }
+      state.moveLine = null;
+      return;
+    }
+    if (state.deformHandleIdx >= 0) { save(); state.deformHandleIdx = -1; return; }
     if (state.dragPlaced) { if (state.wasDrag) save(); state.dragPlaced = null; }
 
     if (state.tool === 'zone' && state.zoneDraw) {
@@ -395,6 +553,48 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       }
       state.zoneDraw = null;
     }
+  });
+
+  // ПКМ по будівлі — повне меню як у Редакторі Мандр: плановість + анімація +
+  // деформація (з кейфреймами) + дзеркало/видалити.
+  canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const mx = e.clientX - rect().left, my = e.clientY - rect().top;
+    const p = placedAt(mx, my, true); // включно з фон-ассетами (transparent)
+    if (!p) return;
+    select(p.id, 'placed');
+    openFxObjMenu(e.clientX, e.clientY, {
+      title: p.name || 'Будівля',
+      objId: p.id,
+      obj: p,
+      plan: {
+        get: () => p.plan ?? 3, set: (v) => { p.plan = v; },
+        min: 1, max: 7, hint: 'більше = ближче',
+      },
+      getBase: () => ({ x: p.x, y: p.y, rot: p.rot, scale: p.scale }),
+      isEditingHandles: () => state.deformEdit === p.id,
+      toggleEditHandles: () => { state.deformEdit = state.deformEdit === p.id ? null : p.id; },
+      onSetMoveLine: () => { state.moveLine = { id: p.id }; setStatus('Проведи лінію напряму руху на канвасі'); },
+      extras: [
+        { label: 'Дзеркалити (M)', on: () => { pushUndo(); p.flip *= -1; save(); } },
+        { label: p.transparent ? 'Зробити вибираним' : 'Зробити фоновим (невибираним)', on: () => {
+          pushUndo(); p.transparent = p.transparent ? undefined : true; save();
+          setStatus(p.transparent ? 'Ассет фоновий: клік/ховер його не бачать, ПКМ — бачить' : 'Ассет знову вибирається кліком');
+        } },
+        'sep',
+        { label: 'Видалити (Del)', danger: true, on: () => {
+          pushUndo();
+          loc().placed = loc().placed.filter((x) => x.id !== p.id);
+          if (state.sel === p.id) deselect();
+          if (state.deformEdit === p.id) state.deformEdit = null;
+          save();
+        } },
+      ],
+      pushUndo,
+      save: () => void save(),
+      draw: () => {},
+      setStatus,
+    });
   });
 
   canvas.addEventListener('wheel', e => {
@@ -424,12 +624,23 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (e.code === 'Escape') {
       if (previewBig) { setPreviewBig(false); return; }
+      if (state.deformEdit || state.moveLine) { state.deformEdit = null; state.moveLine = null; return; }
       if (state.mode && state.modeOrig && state.sel) {
         const p = placedById(state.sel);
         if (p) Object.assign(p, state.modeOrig);
       }
       state.mode = null; state.modeOrig = null; state.zoneDraw = null;
       setTool('select'); return;
+    }
+    // K — записати кейфрейм деформації виділеної будівлі
+    if (e.code === 'KeyK' && state.sel && state.selType === 'placed') {
+      const p = placedById(state.sel);
+      if (p?.deform) {
+        pushUndo();
+        const n = recordDeformKeyframe(p.deform, { x: p.x, y: p.y, rot: p.rot, scale: p.scale });
+        save(); setStatus(`Кейфрейм ${n} записано · K — додати ще`);
+      } else setStatus('Спочатку додай деформацію (ПКМ по будівлі)');
+      return;
     }
     if (state.sel && state.selType === 'placed' && !state.mode) {
       const p = placedById(state.sel)!;
@@ -440,6 +651,12 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       }
       if (e.code === 'KeyS') { state.mode = 'S'; state.modeOrig = { ...p }; state.modeStartX = state.mouse.x; state.modeStartY = state.mouse.y; }
       if (e.code === 'KeyM') { pushUndo(); p.flip *= -1; save(); }
+      // Плановість: [ / ] — далі/ближче (як у редакторі меню)
+      if (e.key === '[' || e.key === ']') {
+        pushUndo();
+        p.plan = Math.max(1, Math.min(7, (p.plan ?? 3) + (e.key === ']' ? 1 : -1)));
+        save(); setStatus(`План: ${p.plan}`);
+      }
     }
     if (e.code === 'KeyV') setTool('select');
     if (e.code === 'KeyZ') setTool('zone');
@@ -473,6 +690,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   });
 
   const camViewBtn = $('camViewBtn');
+  camViewBtn?.classList.toggle('on', state.showCamView);
   camViewBtn?.addEventListener('click', () => {
     state.showCamView = !state.showCamView;
     camViewBtn.classList.toggle('on', state.showCamView);
@@ -487,12 +705,17 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const img = new Image(); img.onload = () => { state.bgImg = img; save(); setStatus('Фон завантажено'); }; img.src = url;
   }
 
-  function dropAsset(url: string, name: string, wx = 0, wy = 0) {
+  function dropAsset(url: string, name: string, wx = 0, wy = 0, opts?: { transparent?: boolean }) {
     pushUndo();
     const id = uid();
-    loc().placed.push({ id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1 });
+    loc().placed.push({
+      id, url, name, x: wx, y: wy, rot: 0, scale: 0.5, flip: 1,
+      // Фон-ассет: невибираний і за замовчуванням позаду будівель (план 2).
+      ...(opts?.transparent ? { transparent: true, plan: 2 } : {}),
+    });
     const img = new Image(); img.src = url; state.images.set(id, img);
-    select(id, 'placed'); save(); setStatus(`«${name}» додано`);
+    if (!opts?.transparent) select(id, 'placed');
+    save(); setStatus(`«${name}» додано${opts?.transparent ? ' (фоновий, невибираний)' : ''}`);
   }
 
   // Тогл «Вирізати фон» (loc-keyBgBtn) — кеїти рівний фон у завантажених PNG (пропси/будівлі, не фон локації).
@@ -540,6 +763,13 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       else setStatus('Будівля без візуалу — спершу кинь PNG на її картку');
       return;
     }
+    // Картка з бібліотеки фону → невибираний декор
+    const gid = e.dataTransfer?.getData('text/bgasset-id');
+    if (gid) {
+      const g = bgAssets.find(x => x.id === gid);
+      if (g?.png) { const wp0 = toWorld(mx, my); dropAsset(g.png, g.name, wp0.x, wp0.y, { transparent: true }); }
+      return;
+    }
     const file = e.dataTransfer?.files[0]; if (!file?.type.startsWith('image/')) return;
     const wp = toWorld(mx, my);
     const r = new FileReader();
@@ -559,7 +789,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   });
 
   function renderList() {
-    renderFogs(); // панель туману завжди показує шари ПОТОЧНОЇ локації
+    renderAtmPanel(); // панель атмосфери завжди показує ПОТОЧНУ локацію
     const el = $('locList'); if (!el) return;
     el.innerHTML = '';
     state.locs.forEach((l, i) => {
@@ -636,56 +866,37 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     const z = zoneById(state.sel!); if (z) { z.label = this.value; save(); }
   });
 
-  // ── Туман: список шарів з повзунками ───────────────────────────────────────
-  function renderFogs(): void {
-    const box = $('fogList'); if (!box) return;
-    box.innerHTML = '';
-    const fogs = (loc().fogs ??= []);
-    fogs.forEach((fg, i) => {
-      const card = document.createElement('div');
-      card.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:5px;font-size:12px';
-      const row = (label: string, input: HTMLElement): HTMLElement => {
-        const l = document.createElement('label');
-        l.style.cssText = 'display:flex;align-items:center;gap:6px';
-        const sp = document.createElement('span'); sp.textContent = label; sp.style.cssText = 'flex:0 0 64px;color:var(--muted)';
-        l.append(sp, input); return l;
-      };
-      const rng = (min: number, max: number, step: number, val: number, on: (v: number) => void): HTMLInputElement => {
-        const r = document.createElement('input'); r.type = 'range';
-        r.min = String(min); r.max = String(max); r.step = String(step); r.value = String(val);
-        r.style.cssText = 'flex:1';
-        r.addEventListener('input', () => { on(Number(r.value)); save(); });
-        return r;
-      };
-      const head = document.createElement('div');
-      head.style.cssText = 'display:flex;align-items:center;gap:8px';
-      const frontChk = document.createElement('input'); frontChk.type = 'checkbox'; frontChk.checked = fg.front;
-      frontChk.addEventListener('change', () => { fg.front = frontChk.checked; save(); });
-      const frontLbl = document.createElement('label');
-      frontLbl.style.cssText = 'display:flex;align-items:center;gap:5px;flex:1;cursor:pointer';
-      frontLbl.append(frontChk, document.createTextNode(`Шар ${i + 1} · попереду`));
-      const color = document.createElement('input'); color.type = 'color'; color.value = fg.tint || '#aaa1bd';
-      color.style.cssText = 'width:34px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:none';
-      color.addEventListener('input', () => { fg.tint = color.value; save(); });
-      const del = document.createElement('button'); del.textContent = '✕'; del.title = 'Видалити шар';
-      del.style.cssText = 'flex:0 0 auto;padding:2px 8px;font-size:12px';
-      del.addEventListener('click', () => { loc().fogs = fogs.filter((x) => x.id !== fg.id); save(); renderFogs(); });
-      head.append(frontLbl, color, del);
-      card.append(
-        head,
-        row('Щільність', rng(0, 0.85, 0.02, fg.alpha, (v) => { fg.alpha = v; })),
-        row('Висота, px', rng(30, 450, 5, fg.h, (v) => { fg.h = v; })),
-        row('Рівень (y)', rng(-300, 700, 5, fg.y, (v) => { fg.y = v; })),
-        row('Швидкість', rng(-60, 60, 1, fg.speed, (v) => { fg.speed = v; })),
-      );
-      box.appendChild(card);
-    });
+  // ── Атмосфера: спільна панель (плановість/погода/віньєтка/баланс кольору) ──
+  function renderAtmPanel(): void {
+    const box = $('atmPanel'); if (!box) return;
+    buildAtmospherePanel(box, () => {
+      const l = loc();
+      if (!l.atmosphere) l.atmosphere = {};
+      return l.atmosphere;
+    }, () => void save(), { layers: LOC_ATM_LAYERS, labels: LOC_ATM_LABELS });
   }
-  $('addFog')?.addEventListener('click', () => {
-    const fogs = (loc().fogs ??= []);
-    fogs.push({ id: uid(), y: 160, h: 180, alpha: 0.3, tint: '#9a92ad', speed: 11, front: fogs.length % 2 === 1 });
-    save(); renderFogs();
-  });
+
+  // Одноразова міграція legacy-смуг туману («Дуб») → atmosphere.weather.fogLayers.
+  function migrateLegacyFogs(l: LocationDoc): boolean {
+    if (!l.fogs?.length) { if (l.fogs) delete l.fogs; return false; }
+    const atm = (l.atmosphere ??= {});
+    if (!atm.weather) atm.weather = { enabled: true, phases: [{ ...DEFAULT_WEATHER_PHASE }] };
+    if (!atm.weather.phases.length) atm.weather.phases.push({ ...DEFAULT_WEATHER_PHASE });
+    const ph = atm.weather.phases[0];
+    atm.weather.enabled = true;
+    ph.fog = true;
+    if (!ph.fogLayers) ph.fogLayers = {};
+    const toFl = (fg: LegacyFogBand) => ({
+      color: fg.tint || '#aaa1bd', alpha: Math.min(1, fg.alpha * 1.2),
+      speed: Math.abs(fg.speed) || 12, dir: fg.speed < 0 ? 180 : 0,
+      seed: Math.floor(Math.random() * 1000), scale: 1,
+    });
+    const back = l.fogs.find((f) => !f.front), front = l.fogs.find((f) => f.front);
+    if (back && !ph.fogLayers.bg) ph.fogLayers.bg = toFl(back);
+    if (front && !ph.fogLayers.map) ph.fogLayers.map = toFl(front);
+    delete l.fogs;
+    return true;
+  }
 
   // ── Preview expand/collapse ───────────────────────────────────────────────
 
@@ -736,6 +947,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   registerPublisher(() => ({
     'public/studio-data/locations.json': JSON.stringify({ version: 1, locations: state.locs }, null, 2),
     'public/studio-data/buildings.json': JSON.stringify({ version: 1, buildings }, null, 2),
+    'public/studio-data/loc-bg-assets.json': JSON.stringify({ version: 1, assets: bgAssets }, null, 2),
   }));
   const exportBtn = $<HTMLButtonElement>('exportBtn');
   if (exportBtn) wirePublishButton(exportBtn, setStatus, () => {
@@ -867,6 +1079,125 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     }
   }
 
+  // ── Бібліотека фону ────────────────────────────────────────────────────────
+  // Ассети без виділення: тягни картку у вьюпорт — розміщений декор НЕ підсвічується
+  // і не вибирається кліком (ПКМ по ньому на сцені працює). Той самий механізм
+  // карток: ✕, кинь PNG на картку — заміна візуалу, середня кнопка — ренейм.
+  interface BgAsset { id: string; name: string; png: string; updatedAt?: number }
+  let bgAssets: BgAsset[] = [];
+
+  function renderBgAssetLib(): void {
+    const grid = $('bgAssetGrid'); if (!grid) return;
+    grid.innerHTML = '';
+    for (const g of bgAssets) {
+      const card = document.createElement('div');
+      card.className = 'libCard';
+      card.title = g.name + ' · тягни у вьюпорт · кинь PNG — замінити · середня — ренейм';
+      card.draggable = true;
+
+      const im = document.createElement('img');
+      im.src = g.png; im.draggable = false;
+      card.appendChild(im);
+
+      const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = g.name;
+      card.appendChild(nm);
+
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '✕'; del.title = 'Видалити';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        bgAssets = bgAssets.filter(x => x.id !== g.id); void saveBgAssets(); renderBgAssetLib();
+      });
+      card.appendChild(del);
+
+      // Середня кнопка — ренейм
+      card.addEventListener('mousedown', (e) => {
+        if (e.button !== 1) return;
+        e.preventDefault(); e.stopPropagation();
+        const v = prompt('Назва ассета:', g.name);
+        if (v?.trim()) { g.name = v.trim(); g.updatedAt = Date.now(); void saveBgAssets(); renderBgAssetLib(); }
+      });
+      card.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+      // Drag → біла альфа-силует drag-image, несемо id ассета.
+      card.addEventListener('dragstart', (e) => {
+        const dt = (e as DragEvent).dataTransfer; if (!dt) return;
+        dt.setData('text/bgasset-id', g.id);
+        const ghost = makeDragGhost(im);
+        ghost.style.cssText = 'position:fixed;top:-1000px;left:-1000px;pointer-events:none';
+        document.body.appendChild(ghost);
+        dt.setDragImage(ghost, ghost.width / 2, ghost.height / 2);
+        setTimeout(() => ghost.remove(), 0);
+      });
+
+      // Кинути PNG на картку → замінити візуал.
+      card.addEventListener('dragover', (e) => {
+        if ((e as DragEvent).dataTransfer?.types.includes('Files')) { e.preventDefault(); card.classList.add('dropping'); }
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('dropping'));
+      card.addEventListener('drop', (e) => {
+        card.classList.remove('dropping');
+        const file = (e as DragEvent).dataTransfer?.files[0];
+        if (!file?.type.startsWith('image/')) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = new FileReader();
+        r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => { g.png = u; g.updatedAt = Date.now(); void saveBgAssets(); renderBgAssetLib(); setStatus(`«${g.name}»: візуал оновлено`); });
+        r.readAsDataURL(file);
+      });
+
+      grid.appendChild(card);
+    }
+    // Порожня картка: клік — вибрати файли, дроп PNG — додати.
+    const empty = document.createElement('div');
+    empty.className = 'libCard empty';
+    empty.title = 'Клік — додати PNG · або кинь файли сюди';
+    empty.addEventListener('click', () => $<HTMLInputElement>('bgAssetInput')?.click());
+    empty.addEventListener('dragover', (e) => {
+      if ((e as DragEvent).dataTransfer?.types.includes('Files')) { e.preventDefault(); empty.classList.add('dropping'); }
+    });
+    empty.addEventListener('dragleave', () => empty.classList.remove('dropping'));
+    empty.addEventListener('drop', (e) => {
+      empty.classList.remove('dropping');
+      e.preventDefault(); e.stopPropagation();
+      addBgAssetFiles(Array.from((e as DragEvent).dataTransfer?.files ?? []));
+    });
+    grid.appendChild(empty);
+  }
+
+  function addBgAssetFiles(files: File[]): void {
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      const r = new FileReader(), f = file;
+      r.onload = () => void keyDataUrl(r.result as string, keyBgOn()).then((u) => {
+        bgAssets.push({ id: 'bga' + uid(), name: f.name.replace(/\.\w+$/, ''), png: u, updatedAt: Date.now() });
+        void saveBgAssets(); renderBgAssetLib();
+      });
+      r.readAsDataURL(file);
+    }
+  }
+  $('addBgAsset')?.addEventListener('click', () => $<HTMLInputElement>('bgAssetInput')?.click());
+  $<HTMLInputElement>('bgAssetInput')?.addEventListener('change', function () {
+    addBgAssetFiles(Array.from(this.files ?? []));
+    this.value = '';
+  });
+
+  async function saveBgAssets(): Promise<void> { await idbSet('zag_loc_bg_assets', bgAssets); }
+  async function loadBgAssets(): Promise<void> {
+    const saved = await idbGet<BgAsset[]>('zag_loc_bg_assets');
+    bgAssets = Array.isArray(saved) ? saved : [];
+    renderBgAssetLib();
+    // Підтягнути опубліковану бібліотеку і злити LWW.
+    const remote = await pullArray<BgAsset>('loc-bg-assets.json', 'assets');
+    if (remote && remote.length) {
+      const { merged, changed } = mergeByIdLWW(bgAssets, remote);
+      if (changed > 0) {
+        bgAssets = merged as BgAsset[];
+        await idbSet('zag_loc_bg_assets', bgAssets);
+        renderBgAssetLib();
+        setStatus(`Синхронізовано: ${changed} фон-ассетів з GitHub`);
+      }
+    }
+  }
+
   // ── Status + persistence ──────────────────────────────────────────────────
 
   function setStatus(msg: string) { const el = $('statusBar'); if (el) el.textContent = msg; }
@@ -878,6 +1209,8 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   async function load() {
     const saved = await idbGet<LocationDoc[]>('zag_locations');
     if (saved?.length) { state.locs = saved; state.cur = 0; }
+    // Legacy-смуги туману → атмосфера (одноразово, без зміни updatedAt).
+    if (state.locs.some((l) => migrateLegacyFogs(l))) await idbSet('zag_locations', state.locs);
     // Локальне — одразу на екран; синхронізацію з репо тягнемо фоном (нижче).
     if (state.locs.length) { ensureImages(); loadBgFromDoc(); }
     renderList(); updateProps(); draw();
@@ -888,6 +1221,7 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       const { merged, changed } = mergeByIdLWW(state.locs, remote);
       if (changed > 0) {
         state.locs = merged;
+        state.locs.forEach((l) => migrateLegacyFogs(l));
         const i = curId ? merged.findIndex((l) => l.id === curId) : 0;
         state.cur = i >= 0 ? i : 0;
         await idbSet('zag_locations', state.locs);
@@ -903,5 +1237,6 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
   });
 
   void loadBuildings();
+  void loadBgAssets();
   load(); draw(); setTool('select');
 }

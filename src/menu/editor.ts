@@ -8,6 +8,10 @@ import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { initStoryEditor } from '../story/editor';
 import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
+import {
+  fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
+  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, type DeformView,
+} from '../level/placedFx';
 
 export interface MenuButton {
   id: string; label: string;
@@ -120,9 +124,34 @@ export function initMenuEditor(prefix: string): void {
     dragObj: null as null | { id: string; ox: number; oy: number },
     resizeObj: null as null | { id: string; cx: number; cy: number; startDist: number; startScale: number },
     objImgs: new Map<string, HTMLImageElement>(), // objId → зображення
+    // Деформація: редагування хендлів обраного об'єкта (як у Редакторі Мандр)
+    deformEdit: null as string | null,
+    deformHandleIdx: -1,
+    deformDragSx0: 0, deformDragSy0: 0,
+    deformDragOrigVals: [] as number[],
+    // «Задати лінію напряму» анімації переміщення (координати кадру)
+    moveLine: null as null | { id: string; x0?: number; y0?: number; x1?: number; y1?: number },
   };
   const page = (): MenuPage => state.doc.pages[state.cur];
   const objs = (): MenuObject[] => (page().objects ??= []);
+
+  // ── Годинник анімацій об'єктів (грає, поки не тягнемо/не редагуємо хендли) ──
+  let animClock = 0; let animRaf = 0; let animLast = 0;
+  const hasFx = (): boolean => objs().some((o) => o.anim || ((o.deform?.keyframes?.length ?? 0) >= 2));
+  const fxPlaying = (): boolean =>
+    hasFx() && canvas!.offsetWidth > 0 && !state.dragObj && !state.resizeObj
+    && state.deformEdit == null && !state.moveLine && state.view === 'page';
+  function tickAnim(ts: number): void {
+    animRaf = 0;
+    if (!fxPlaying()) { animLast = 0; return; }
+    if (animLast) animClock += Math.min((ts - animLast) / 1000, 0.1);
+    animLast = ts;
+    draw();
+    animRaf = requestAnimationFrame(tickAnim);
+  }
+  function ensureAnimLoop(): void {
+    if (fxPlaying() && !animRaf) { animLast = 0; animRaf = requestAnimationFrame(tickAnim); }
+  }
   // fx поточної сторінки (створюється з дефолтів при першому доступі)
   const fx = (): MenuFx => (page().fx ??= JSON.parse(JSON.stringify(DEFAULT_FX)) as MenuFx);
   const setStatus = (m: string): void => { const el = $('statusBar'); if (el) el.textContent = m; };
@@ -161,14 +190,14 @@ export function initMenuEditor(prefix: string): void {
   window.addEventListener('mousedown', (e) => { if (ctxEl && !ctxEl.contains(e.target as Node)) closeCtx(); }, true);
   window.addEventListener('scroll', closeCtx, true);
 
-  // Розмістити ассет як об'єкт на поточній сторінці (по центру кадру).
-  function placeObject(asset: { name: string; url: string }, naturalH: number): void {
+  // Розмістити ассет як об'єкт на поточній сторінці (дефолт — центр кадру).
+  function placeObject(asset: { name: string; url: string }, naturalH: number, fx = 640, fy = 300): void {
     const targetH = 230; // бажана логічна висота за замовчуванням
     const sc = naturalH ? Math.min(1.5, Math.round(targetH / naturalH * 1000) / 1000) : 0.5;
-    const o: MenuObject = { id: uid(), url: asset.url, name: asset.name, x: 640, y: 300, scale: sc, rot: 0, flip: false, depth: 3 };
+    const o: MenuObject = { id: uid(), url: asset.url, name: asset.name, x: Math.round(fx), y: Math.round(fy), scale: sc, rot: 0, flip: false, depth: 3 };
     objs().push(o); state.selObj = o.id; state.sel = null;
     save(); renderProps(); draw();
-    setStatus(`Розміщено «${asset.name}» · тягни — рух, кут — масштаб, ПКМ — план/дзеркало/видалити`);
+    setStatus(`Розміщено «${asset.name}» · тягни — рух, кут — масштаб, ПКМ — план/анімація/деформація`);
   }
 
   // ── Кадр 20:9 вписаний у канвас ─────────────────────────────────────────────
@@ -367,33 +396,74 @@ export function initMenuEditor(prefix: string): void {
     return null;
   }
   function selectedObj(): MenuObject | null { return objs().find((o) => o.id === state.selObj) ?? null; }
+  // Дисплейна DeformView об'єкта (для рендера/хендлів/хіт-тесту хендлів).
+  function objDeformView(o: MenuObject, f: { x: number; y: number; s: number }, playing: boolean): DeformView | null {
+    if (!o.deform) return null;
+    const im = ensureObjImg(o);
+    const iw = im.naturalWidth || 128, ih = im.naturalHeight || 128;
+    const d = fxDisp({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale, anim: o.anim, deform: o.deform }, animClock, playing);
+    return {
+      W: iw, H: ih,
+      deform: fxDeformAt(o.deform, animClock, playing),
+      x: f.x + d.x * f.s, y: f.y + d.y * f.s,
+      rot: d.rot, kx: d.scale * f.s, ky: d.scale * f.s,
+      flip: o.flip ? -1 : 1, baked: o.deform.baked,
+    };
+  }
+
   // Малюємо об'єкти сторінки (сортовані за плановістю). Виділений — рамка + кут-ресайз.
   function drawObjects(f: { x: number; y: number; s: number }, preview: boolean): void {
     const list = [...objs()].sort((a, b) => a.depth - b.depth); // ззаду наперед
+    const playing = fxPlaying();
     for (const o of list) {
       const im = ensureObjImg(o);
       const { w, h } = objBox(o);
-      const cx = f.x + o.x * f.s, cy = f.y + o.y * f.s;
-      const dw = w * f.s, dh = h * f.s;
-      ctx.save();
-      ctx.translate(cx, cy);
-      if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
-      if (o.flip) ctx.scale(-1, 1);
-      if (im.complete && im.naturalWidth) ctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
-      else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
-      ctx.restore();
-      if (!preview && state.selObj === o.id) {
+      const d = fxDisp({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale, anim: o.anim, deform: o.deform }, animClock, playing);
+      const cx = f.x + d.x * f.s, cy = f.y + d.y * f.s;
+      const dw = (im.naturalWidth || 128) * d.scale * f.s, dh = (im.naturalHeight || 128) * d.scale * f.s;
+      if (o.deform && im.complete && im.naturalWidth) {
+        // Деформація (перспектива/FFD, кейфрейми) — квадосітка як у Редакторі Мандр
+        const v = objDeformView(o, f, playing && state.deformEdit !== o.id)!;
+        drawDeformedImage(ctx, im, v);
+        if (!preview && state.deformEdit === o.id) drawDeformHandles(ctx, v, state.deformHandleIdx);
+      } else {
         ctx.save();
         ctx.translate(cx, cy);
+        if (d.rot) ctx.rotate(d.rot * Math.PI / 180);
+        if (o.flip) ctx.scale(-1, 1);
+        if (im.complete && im.naturalWidth) ctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
+        else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
+        ctx.restore();
+      }
+      if (!preview && state.selObj === o.id && state.deformEdit !== o.id) {
+        const bx = f.x + o.x * f.s, by = f.y + o.y * f.s;
+        const bw = w * f.s, bh = h * f.s;
+        ctx.save();
+        ctx.translate(bx, by);
         if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
         ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
-        ctx.strokeRect(-dw / 2, -dh / 2, dw, dh); ctx.setLineDash([]);
-        ctx.fillStyle = '#7fd0ff'; ctx.fillRect(dw / 2 - 5, dh / 2 - 5, 10, 10); // кут-ресайз
+        ctx.strokeRect(-bw / 2, -bh / 2, bw, bh); ctx.setLineDash([]);
+        ctx.fillStyle = '#7fd0ff'; ctx.fillRect(bw / 2 - 5, bh / 2 - 5, 10, 10); // кут-ресайз
         ctx.restore();
         ctx.fillStyle = 'rgba(127,208,255,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-        ctx.fillText(`${o.name ?? 'об\'єкт'} · план ${o.depth}`, cx, cy - dh / 2 - 6);
+        const fxMark = o.anim ? ' · анім' : o.deform?.keyframes?.length ? ' · кф' : '';
+        ctx.fillText(`${o.name ?? 'об\'єкт'} · план ${o.depth}${fxMark}`, bx, by - bh / 2 - 6);
       }
     }
+    // Лінія напряму руху (режим «Задати лінію»)
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const x0 = f.x + L.x0! * f.s, y0 = f.y + L.y0! * f.s;
+      const x1 = f.x + (L.x1 ?? L.x0!) * f.s, y1 = f.y + (L.y1 ?? L.y0!) * f.s;
+      ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - 12 * Math.cos(ang - 0.4), y1 - 12 * Math.sin(ang - 0.4));
+      ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+    ensureAnimLoop();
   }
   // Кут-ресайз виділеного об'єкта під курсором? (у координатах кадру)
   function objResizeAt(px: number, py: number): MenuObject | null {
@@ -494,6 +564,26 @@ export function initMenuEditor(prefix: string): void {
     }
     if (state.preview) return; // прев'ю read-only: без вибору/перетягування
     const fp = toFrame(sx, sy);
+    // 0) режим «Задати лінію напряму» анімації переміщення — старт лінії
+    if (state.moveLine) {
+      state.moveLine.x0 = fp.x; state.moveLine.y0 = fp.y;
+      state.moveLine.x1 = fp.x; state.moveLine.y1 = fp.y;
+      draw(); return;
+    }
+    // 0б) редагування хендлів деформації — клік по хендлу починає його дрег
+    if (state.deformEdit) {
+      const od = objs().find((x) => x.id === state.deformEdit);
+      if (od?.deform) {
+        const v = objDeformView(od, frameRect(), false)!;
+        const hi = hitDeformHandle(v, sx, sy);
+        if (hi >= 0) {
+          state.deformHandleIdx = hi;
+          state.deformDragSx0 = sx; state.deformDragSy0 = sy;
+          state.deformDragOrigVals = [...(od.deform.type === 'persp' ? (od.deform.corners ?? new Array(8).fill(0)) : (od.deform.pts ?? []))];
+          return;
+        }
+      }
+    }
     // 1) кут-ресайз виділеного об'єкта
     const ro = objResizeAt(fp.x, fp.y);
     if (ro) {
@@ -533,7 +623,8 @@ export function initMenuEditor(prefix: string): void {
     }
     renderProps(); draw();
   });
-  // ПКМ по полотну: якщо під курсором об'єкт — меню плановості/дзеркала/видалення.
+  // ПКМ по полотну: якщо під курсором об'єкт — повне меню як у Редакторі Мандр
+  // (плановість + анімація + деформація з кейфреймами) + пункти меню-редактора.
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (state.view !== 'page' || state.preview) return;
@@ -542,23 +633,50 @@ export function initMenuEditor(prefix: string): void {
     const o = objAt(fp.x, fp.y) ?? selectedObj();
     if (!o) return;
     state.selObj = o.id; state.sel = null; renderProps(); draw();
-    showCtxMenu(e.clientX, e.clientY, [
-      { label: 'На передній план', on: () => { o.depth = 7; save(); draw(); setStatus('План: 7'); } },
-      { label: 'Вперед', on: () => { o.depth = Math.min(7, o.depth + 1); save(); draw(); setStatus(`План: ${o.depth}`); } },
-      { label: 'Назад', on: () => { o.depth = Math.max(1, o.depth - 1); save(); draw(); setStatus(`План: ${o.depth}`); } },
-      { label: 'На задній план', on: () => { o.depth = 1; save(); draw(); setStatus('План: 1'); } },
-      'sep',
-      { label: o.flip ? 'Скасувати дзеркало' : 'Дзеркалити', on: () => { o.flip = !o.flip; save(); draw(); } },
-      { label: 'Обертання…', on: () => { const v = prompt('Кут повороту (градуси):', String(o.rot ?? 0)); if (v !== null) { o.rot = Number(v) || 0; save(); draw(); } } },
-      { label: 'Масштаб…', on: () => { const v = prompt('Масштаб (1 = натуральний):', String(o.scale)); if (v !== null) { o.scale = Math.max(0.02, Number(v) || o.scale); save(); draw(); } } },
-      'sep',
-      { label: 'Видалити об\'єкт', on: () => { page().objects = objs().filter((x) => x.id !== o.id); state.objImgs.delete(o.id); if (state.selObj === o.id) state.selObj = null; save(); draw(); } },
-    ]);
+    openFxObjMenu(e.clientX, e.clientY, {
+      title: o.name ?? 'Об\'єкт',
+      objId: o.id,
+      obj: o,
+      plan: {
+        get: () => o.depth, set: (v) => { o.depth = v; },
+        min: 1, max: 7, hint: '5 = рівень персонажа/вогню',
+      },
+      getBase: () => ({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale }),
+      isEditingHandles: () => state.deformEdit === o.id,
+      toggleEditHandles: () => { state.deformEdit = state.deformEdit === o.id ? null : o.id; },
+      onSetMoveLine: () => { state.moveLine = { id: o.id }; setStatus('Проведи лінію напряму руху на кадрі'); draw(); },
+      extras: [
+        { label: o.flip ? 'Скасувати дзеркало' : 'Дзеркалити', on: () => { o.flip = !o.flip; save(); draw(); } },
+        { label: 'Обертання…', on: () => { const v = prompt('Кут повороту (градуси):', String(o.rot ?? 0)); if (v !== null) { o.rot = Number(v) || 0; save(); draw(); } } },
+        { label: 'Масштаб…', on: () => { const v = prompt('Масштаб (1 = натуральний):', String(o.scale)); if (v !== null) { o.scale = Math.max(0.02, Number(v) || o.scale); save(); draw(); } } },
+        'sep',
+        { label: 'Видалити об\'єкт', danger: true, on: () => { page().objects = objs().filter((x) => x.id !== o.id); state.objImgs.delete(o.id); if (state.selObj === o.id) state.selObj = null; if (state.deformEdit === o.id) state.deformEdit = null; save(); draw(); } },
+      ],
+      pushUndo: () => {},
+      save, draw,
+      setStatus,
+    });
   });
   canvas.addEventListener('mousemove', (e) => {
     if (state.view === 'map') return;
     const r = canvas!.getBoundingClientRect();
-    const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    const fp = toFrame(sx, sy);
+    if (state.moveLine?.x0 !== undefined) {
+      state.moveLine.x1 = fp.x; state.moveLine.y1 = fp.y; draw(); return;
+    }
+    if (state.deformHandleIdx >= 0 && state.deformEdit) {
+      const od = objs().find((x) => x.id === state.deformEdit);
+      if (od?.deform) {
+        const f = frameRect();
+        applyHandleDrag(
+          od.deform, state.deformHandleIdx, state.deformDragOrigVals,
+          sx - state.deformDragSx0, sy - state.deformDragSy0,
+          od.rot ?? 0, od.scale * f.s, od.scale * f.s, od.flip ? -1 : 1,
+        );
+        draw(); return;
+      }
+    }
     if (state.dragFx) {
       const ef = fx();
       const nx = Math.round(fp.x - state.dragFx.ox), ny = Math.round(fp.y - state.dragFx.oy);
@@ -591,6 +709,18 @@ export function initMenuEditor(prefix: string): void {
     if (b) { b.x = Math.round(fp.x - state.drag.ox); b.y = Math.round(fp.y - state.drag.oy); draw(); }
   });
   window.addEventListener('mouseup', () => {
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const o = objs().find((x) => x.id === L.id);
+      const ddx = (L.x1 ?? L.x0!) - L.x0!, ddy = (L.y1 ?? L.y0!) - L.y0!;
+      const len = Math.hypot(ddx, ddy);
+      if (o && len > 2) {
+        o.anim = { type: 'move', dx: ddx / len, dy: ddy / len, dist: Math.round(len), speed: o.anim?.speed ?? 40, constant: o.anim?.constant ?? false };
+        save(); setStatus('Напрям руху задано');
+      }
+      state.moveLine = null; draw(); return;
+    }
+    if (state.deformHandleIdx >= 0) { save(); state.deformHandleIdx = -1; draw(); return; }
     if (state.drag) { state.drag = null; save(); }
     if (state.dragFx) { state.dragFx = null; save(); setStatus(''); }
     if (state.dragObj) { state.dragObj = null; save(); }
@@ -615,6 +745,18 @@ export function initMenuEditor(prefix: string): void {
     if (state.selObj && state.view === 'page' && (e.key === '[' || e.key === ']')) {
       const o = selectedObj();
       if (o) { o.depth = Math.max(1, Math.min(7, o.depth + (e.key === ']' ? 1 : -1))); save(); draw(); setStatus(`План: ${o.depth}`); }
+    }
+    // K — записати кейфрейм деформації виділеного об'єкта
+    if (e.code === 'KeyK' && state.selObj && state.view === 'page') {
+      const o = selectedObj();
+      if (o?.deform) {
+        const n = recordDeformKeyframe(o.deform, { x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale });
+        save(); draw(); setStatus(`Кейфрейм ${n} записано · K — додати ще`);
+      } else setStatus('Спочатку додай деформацію (ПКМ по об\'єкту)');
+    }
+    // Esc — вийти з редагування хендлів / скасувати лінію напряму
+    if (e.key === 'Escape' && (state.deformEdit || state.moveLine)) {
+      state.deformEdit = null; state.moveLine = null; draw();
     }
   });
 
@@ -748,49 +890,110 @@ export function initMenuEditor(prefix: string): void {
     this.value = '';
   });
 
-  // ── Бібліотека PNG-ассетів (ліва панель, скрол) ────────────────────────────
+  // ── Бібліотека PNG-ассетів — той самий механізм карток, що в інших редакторах:
+  // .libCard-грід, ✕ на картці, тягни картку у кадр, кинь PNG на порожню картку,
+  // середня кнопка — ренейм, ПКМ — меню (розмістити / фон сторінки / видалити).
+  function saveAssets(): void { void idbSet('zag_menu_assets', state.assets); }
+  function addAssetFiles(files: File[], atX?: number, atY?: number): void {
+    for (const f of files) {
+      if (!f.type.startsWith('image/')) continue;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const a = { id: uid(), name: f.name.replace(/\.\w+$/, ''), url: String(rd.result) };
+        state.assets.push(a);
+        saveAssets(); renderAssets();
+        if (atX !== undefined) {
+          const im = new Image();
+          im.onload = () => placeObject(a, im.naturalHeight, atX, atY);
+          im.src = a.url;
+        }
+      };
+      rd.readAsDataURL(f);
+    }
+  }
+  function startAssetRename(a: typeof state.assets[0]): void {
+    const v = prompt('Назва ассета:', a.name);
+    if (v?.trim()) { a.name = v.trim(); saveAssets(); renderAssets(); }
+  }
   function renderAssets(): void {
     const list = $('assetList'); if (!list) return;
     list.innerHTML = '';
     for (const a of state.assets) {
-      const card = document.createElement('div');
-      card.style.cssText = 'background:var(--rail);border:1px solid var(--line);border-radius:8px;padding:4px;cursor:pointer;display:flex;flex-direction:column;gap:2px';
-      const im = document.createElement('img');
-      im.src = a.url; im.style.cssText = 'width:100%;height:64px;object-fit:contain'; im.draggable = false;
-      const nm = document.createElement('div'); nm.textContent = a.name;
-      nm.style.cssText = 'font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center';
+      const card = document.createElement('div'); card.className = 'libCard';
+      card.title = 'ЛКМ — розмістити · тягни у кадр · ПКМ — меню · середня — ренейм';
+      const im = document.createElement('img'); im.src = a.url; im.draggable = false;
+      const nm = document.createElement('div'); nm.className = 'libName'; nm.textContent = a.name;
+      const del = document.createElement('button'); del.className = 'libDel'; del.textContent = '×'; del.title = 'Видалити';
+      del.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.assets = state.assets.filter((x) => x.id !== a.id);
+        saveAssets(); renderAssets();
+      });
+      card.append(im, nm, del);
       // ЛКМ — розмістити об'єктом на сторінці; ПКМ — меню (розмістити / фон / видалити).
-      card.onclick = () => placeObject(a, im.naturalHeight);
-      card.oncontextmenu = (ev) => {
+      card.addEventListener('click', () => placeObject(a, im.naturalHeight));
+      card.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         showCtxMenu(ev.clientX, ev.clientY, [
           { label: 'Розмістити на сторінці', on: () => placeObject(a, im.naturalHeight) },
           { label: 'Зробити фоном сторінки', on: () => { page().bg = a.url; state.bgImgs.delete(page().id); save(); draw(); setStatus(`Фон сторінки: ${a.name}`); } },
+          { label: 'Перейменувати', on: () => startAssetRename(a) },
           'sep',
           { label: 'Видалити ассет', on: () => {
             state.assets = state.assets.filter((x) => x.id !== a.id);
-            void idbSet('zag_menu_assets', state.assets); renderAssets();
+            saveAssets(); renderAssets();
           } },
         ]);
-      };
-      card.title = 'ЛКМ — розмістити на сторінці · ПКМ — меню (фон/видалити)';
-      card.appendChild(im); card.appendChild(nm);
+      });
+      // Середня кнопка — ренейм (як у Редакторі Мандр)
+      card.addEventListener('mousedown', (ev) => { if (ev.button === 1) { ev.preventDefault(); ev.stopPropagation(); startAssetRename(a); } });
+      card.addEventListener('auxclick', (ev) => { if (ev.button === 1) ev.preventDefault(); });
+      // Тягни картку у кадр — розмістити у точці дропу
+      card.draggable = true;
+      card.addEventListener('dragstart', (ev) => {
+        (ev as DragEvent).dataTransfer?.setData('text/menu-asset-id', a.id);
+      });
       list.appendChild(card);
+    }
+    // Порожні картки: клік — вибрати файли, дроп PNG — додати в бібліотеку.
+    const empties = Math.max(4, 12 - state.assets.length);
+    for (let i = 0; i < empties; i++) {
+      const e = document.createElement('div'); e.className = 'libCard empty';
+      e.title = 'Клік — додати PNG · або кинь файли сюди';
+      e.addEventListener('click', () => ($('assetInput') as HTMLInputElement)?.click());
+      e.addEventListener('dragover', (ev) => { ev.preventDefault(); (ev as DragEvent).dataTransfer!.dropEffect = 'copy'; e.style.borderColor = 'var(--accent)'; });
+      e.addEventListener('dragleave', () => { e.style.borderColor = ''; });
+      e.addEventListener('drop', (ev) => {
+        ev.preventDefault(); e.style.borderColor = '';
+        addAssetFiles(Array.from((ev as DragEvent).dataTransfer?.files ?? []));
+      });
+      list.appendChild(e);
     }
   }
   $('addAsset')?.addEventListener('click', () => ($('assetInput') as HTMLInputElement)?.click());
   ($('assetInput') as HTMLInputElement | null)?.addEventListener('change', function () {
-    const files = Array.from(this.files ?? []);
-    for (const f of files) {
-      const rd = new FileReader();
-      rd.onload = () => {
-        state.assets.push({ id: uid(), name: f.name.replace(/\.\w+$/, ''), url: String(rd.result) });
-        void idbSet('zag_menu_assets', state.assets);
-        renderAssets();
-      };
-      rd.readAsDataURL(f);
-    }
+    addAssetFiles(Array.from(this.files ?? []));
     this.value = '';
+  });
+  // Дроп на канвас: картка з бібліотеки → розмістити у точці; PNG-файл → додати і розмістити.
+  canvas.addEventListener('dragover', (e) => e.preventDefault());
+  canvas.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (state.view !== 'page' || state.preview) return;
+    const r = canvas!.getBoundingClientRect();
+    const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    const aid = e.dataTransfer?.getData('text/menu-asset-id');
+    if (aid) {
+      const a = state.assets.find((x) => x.id === aid);
+      if (a) {
+        const im = new Image();
+        im.onload = () => placeObject(a, im.naturalHeight, fp.x, fp.y);
+        im.src = a.url;
+      }
+      return;
+    }
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length) addAssetFiles(files, fp.x, fp.y);
   });
 
   // ── Публікація ──────────────────────────────────────────────────────────────
@@ -816,8 +1019,10 @@ export function initMenuEditor(prefix: string): void {
     }
     renderPages(); renderProps(); renderFx(); draw();
   }).catch(() => { renderPages(); renderFx(); draw(); });
+  renderAssets(); // одразу порожні картки-плейсхолдери (клік/дроп — додати PNG)
   void idbGet<typeof state.assets>('zag_menu_assets').then((a) => {
-    if (Array.isArray(a)) { state.assets = a; renderAssets(); }
+    if (Array.isArray(a)) { state.assets = a; }
+    renderAssets();
   }).catch(() => {});
 
   window.addEventListener('menuTabActivated', () => draw());

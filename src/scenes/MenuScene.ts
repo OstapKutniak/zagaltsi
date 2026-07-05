@@ -9,6 +9,8 @@ import { loadEquip } from '../inventory';
 import { loadCharLibrary } from '../charlib';
 import { publishMyChar, publishMyEquip, loadMemberCharDoc, loadMemberEquip } from '../multiplayer/sharedChars';
 import { cachedMembers, refreshMembers, type KhMember } from '../khorugva';
+import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
+import { FxSprites } from '../level/fxSprites';
 
 // Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
 // лише напис + панель праворуч). Мандри — окрема сцена (реальний перехід на карту).
@@ -60,7 +62,7 @@ const CHAR_FACING = -1; // обличчям до вогнища
 interface MenuBtnDoc { id: string; label: string; x: number; y: number; size: number; target: string }
 // Розміщений PNG-об'єкт (декор) із Редактора Меню: плановість depth 1..7 (5 —
 // рівень персонажа/вогню; кнопки завжди зверху). anim/deform — на майбутнє.
-interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; rot?: number; flip?: boolean; depth: number }
+interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; rot?: number; flip?: boolean; depth: number; anim?: PlacedAnim; deform?: PlacedDeform }
 interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; objects?: MenuObjDoc[]; fx?: Partial<MenuFxData> }
 interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
 
@@ -111,6 +113,7 @@ export class MenuScene extends Phaser.Scene {
   private boltOn = 0;     // залишок поточного спалаху
   private boltDur = 0.4;
   protected fx: MenuFxData = normFx(null); // ефекти сцени (перекриваються pg.fx з menu.json)
+  private objFx = new FxSprites(); // анімація/деформація розміщених об'єктів (декору)
 
   // key параметризовано: сторінка «Інвентар» (InventoryScene) успадковує хатину.
   constructor(key = 'Menu') { super(key); }
@@ -164,6 +167,7 @@ export class MenuScene extends Phaser.Scene {
     // на персонажа/збір — інакше seatCharacter бачив «живий» lobbyChar і не саджав
     // нового (персонаж зникав / не перевдягався у свіже спорядження).
     this.lobbyChar = null; this.charHolder = null; this.seatingChar = false; this.gather = [];
+    this.objFx.clear(); // старі GameObjects знищені рестартом — скидаємо реєстр анімацій
     this.titleObj = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
@@ -267,10 +271,13 @@ export class MenuScene extends Phaser.Scene {
       const key = 'menuobj_' + o.id;
       const place = (): void => {
         if (gen !== this.buildGen || !this.scene.isActive() || !this.textures.exists(key)) return;
-        const img = this.add.image(o.x + offX, o.y + offY, key)
-          .setScrollFactor(0).setScale(o.scale * (o.flip ? -1 : 1), o.scale)
-          .setDepth(Math.max(1, Math.min(7, o.depth)));
-        if (o.rot) img.setAngle(o.rot);
+        // Image або deform-mesh + реєстрація анімацій — спільний хелпер FxSprites.
+        this.objFx.add(this, key, {
+          x: o.x + offX, y: o.y + offY, rot: o.rot ?? 0,
+          scaleX: o.scale, scaleY: o.scale, flip: o.flip ? -1 : 1,
+          depth: Math.max(1, Math.min(7, o.depth)),
+          anim: o.anim, deform: o.deform,
+        });
       };
       if (this.textures.exists(key)) place();
       else { this.textures.once('addtexture-' + key, place); this.textures.addBase64(key, o.url); }
@@ -608,6 +615,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   update(_time: number, deltaMs: number): void {
+    this.objFx.tick(deltaMs / 1000); // анімація/деформація декору з Редактора Меню
     this.lobbyChar?.tick(deltaMs / 1000, CHAR_FACING);
     for (const g of this.gather) g.char.tick(deltaMs / 1000, g.facing); // збір біля вогнища
     // Раз на ~0.8с переперевіряємо склад збору (хтось приєднався/вийшов).

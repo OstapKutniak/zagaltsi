@@ -5,6 +5,8 @@
 
 import { idbGet } from '../store';
 import { mergeByIdLWW } from '../sync';
+import type { Atmosphere } from '../level/atmosphere';
+import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 
 // Опубліковане читаємо з ВЛАСНОГО деплою (BASE_URL), а не raw.githubusercontent:
 // у dev це локальний public/ (бачиш сид одразу), на Pages — файли цього ж деплою.
@@ -50,6 +52,10 @@ export interface WorldDoc {
 export interface PlacedAsset {
   id: string; url: string; name: string;
   x: number; y: number; rot: number; scale: number; flip: number;
+  plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
+  anim?: PlacedAnim;     // обертання/дрейф (Редактор Локацій, як у Мандрах)
+  deform?: PlacedDeform; // перспектива/FFD + кейфрейми
+  transparent?: boolean; // фон-ассет редактора (у грі рендериться як звичайний)
 }
 export interface ActionZone {
   id: string; x: number; y: number; w: number; h: number;
@@ -66,8 +72,30 @@ export interface LocationDoc {
   id: string; name: string; bg: string;
   placed: PlacedAsset[];
   zones: ActionZone[];
-  fogs?: FogLayer[];
+  fogs?: FogLayer[];        // legacy смуги туману (мігруються в atmosphere.weather.fogLayers)
+  atmosphere?: Atmosphere;  // плановість/погода/віньєтка/баланс кольору — як у Редакторі Мандр
   updatedAt?: number;
+}
+
+// Вписування арту локації в логічний кадр гри 1280×576 — ЄДИНА математика для
+// LocationScene (рендер) і Редактора Локацій (рамка 20:9 показує саме цей кроп).
+// Повертає масштаб s і зсув (ox,oy) у логічних координатах кадру: screen = world·s + o.
+export function locationFit(doc: LocationDoc, bgW: number, bgH: number, logicalW: number, logicalH: number): { s: number; ox: number; oy: number } {
+  let minX = -400, minY = -220, maxX = 400, maxY = 220;
+  if (doc.bg && bgW > 0) { minX = 0; minY = 0; maxX = bgW; maxY = bgH; }
+  else if (doc.placed.length) {
+    minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+    for (const p of doc.placed) {
+      minX = Math.min(minX, p.x - 150); maxX = Math.max(maxX, p.x + 150);
+      minY = Math.min(minY, p.y - 150); maxY = Math.max(maxY, p.y + 150);
+    }
+  }
+  const availW = logicalW - 80, availH = logicalH - 210; // низ — під слоти Хоругви
+  const s = Math.min(availW / (maxX - minX), availH / (maxY - minY));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const ox = logicalW / 2 - cx * s;
+  const oy = (logicalH / 2 - 30) - cy * s;
+  return { s, ox, oy };
 }
 
 // ── Завантаження (гра): IDB-локальне + опубліковане, LWW по id ────────────────
