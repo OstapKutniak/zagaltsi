@@ -9,6 +9,7 @@ import {
   parseHex, hexToInt, evalTod, evalWeather,
 } from '../level/atmosphere';
 import { ColorGradePipeline } from './ColorGradePipeline';
+import { FxSprites } from '../level/fxSprites';
 import { enterLocation, leaveLocation, watchLocationPresence, type PresenceEntry } from '../multiplayer/presence';
 import { getPlayerId } from '../multiplayer/lobby';
 import { loadMemberThumb } from '../multiplayer/sharedChars';
@@ -57,6 +58,7 @@ export class LocationScene extends Phaser.Scene {
   private lightningOn = 0;
   private lightningDur = 0.35;
   private colorGradePipe: ColorGradePipeline | null = null;
+  private placedFx = new FxSprites(); // анімація/деформація будівель з редактора
 
   init(data: { nodeId?: string; label?: string; locationId?: string; worldId?: string; icon?: string; encounterQuestId?: string }): void {
     this.nodeId = data?.nodeId ?? '';
@@ -100,6 +102,7 @@ export class LocationScene extends Phaser.Scene {
     this.rainGfx = null; this.fogSprites.clear();
     this.lightningRect = null; this.lightningOn = 0; this.lightningNext = 4 + Math.random() * 8;
     this.colorGradePipe = null;
+    this.placedFx.clear();
 
     void this.renderLocation();
     this.setupPresence();
@@ -118,6 +121,7 @@ export class LocationScene extends Phaser.Scene {
 
   update(_t: number, dtMs: number): void {
     this.npc?.tick(dtMs / 1000, -1); // гість дивиться ліворуч (до гравця/центру)
+    this.placedFx.tick(Math.min(dtMs / 1000, 0.1)); // анімація/деформація будівель
     if (this.atm) {
       const dt = Math.min(dtMs / 1000, 0.1);
       this.atmTime += dt;
@@ -444,11 +448,17 @@ export class LocationScene extends Phaser.Scene {
         });
       }
       if (!this.scene.isActive()) return;
-      const im = this.add.image(ox + p.x * s, oy + p.y * s, key)
-        .setScale(p.scale * s * (p.flip < 0 ? -1 : 1), p.scale * s)
-        .setAngle(p.rot)
-        .setScrollFactor(0).setDepth(2);
-      placedImgs.push(im);
+      // Плановість 1..7 (3 = дефолт) → глибина 1.6..2.8 (між фоном 1 і туманом 3).
+      const depth = 2 + ((p.plan ?? 3) - 3) * 0.2;
+      const go = this.placedFx.add(this, key, {
+        x: ox + p.x * s, y: oy + p.y * s, rot: p.rot,
+        scaleX: p.scale * s, scaleY: p.scale * s,
+        flip: p.flip < 0 ? -1 : 1,
+        depth,
+        animScale: s, // dx/dy анімації руху — у світових одиницях локації
+        anim: p.anim, deform: p.deform,
+      });
+      if (go instanceof Phaser.GameObjects.Image) placedImgs.push(go);
     }
     // Legacy смуги туману (старі, не мігровані доки) — лише поки нема атмосфери.
     if (doc.fogs?.length && !doc.atmosphere) {

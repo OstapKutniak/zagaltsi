@@ -6,6 +6,7 @@
 import { idbGet } from '../store';
 import { mergeByIdLWW } from '../sync';
 import type { Atmosphere } from '../level/atmosphere';
+import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 
 // Опубліковане читаємо з ВЛАСНОГО деплою (BASE_URL), а не raw.githubusercontent:
 // у dev це локальний public/ (бачиш сид одразу), на Pages — файли цього ж деплою.
@@ -51,6 +52,9 @@ export interface WorldDoc {
 export interface PlacedAsset {
   id: string; url: string; name: string;
   x: number; y: number; rot: number; scale: number; flip: number;
+  plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
+  anim?: PlacedAnim;     // обертання/дрейф (Редактор Локацій, як у Мандрах)
+  deform?: PlacedDeform; // перспектива/FFD + кейфрейми
 }
 export interface ActionZone {
   id: string; x: number; y: number; w: number; h: number;

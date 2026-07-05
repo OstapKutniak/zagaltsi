@@ -8,10 +8,18 @@ import { type Atmosphere, type WeatherPhase, type LayerKey, evalTod, weatherTogg
 import { buildAtmospherePanel } from '../level/atmospherePanel';
 import { drawFogLayerCanvas, drawRainCanvas, drawVignetteCanvas, applyColorBalanceCanvas, drawLayerTinted } from '../level/atmoPreview';
 import { locationFit } from '../world/worldData';
+import {
+  fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
+  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, type DeformView,
+  type PlacedAnim, type PlacedDeform,
+} from '../level/placedFx';
 
 interface PlacedAsset {
   id: string; url: string; name: string;
   x: number; y: number; rot: number; scale: number; flip: number;
+  plan?: number;         // плановість 1..7 (3 = дефолт); більше — ближче
+  anim?: PlacedAnim;     // обертання/дрейф — як у Редакторі Мандр
+  deform?: PlacedDeform; // перспектива/FFD + кейфрейми
 }
 
 interface ActionZone {
@@ -98,6 +106,13 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     pan: { x: 0, y: 0 },
     mouse: { x: 0, y: 0 },
     undoStack: [] as string[],
+    // Деформація: редагування хендлів (як у Редакторі Мандр)
+    deformEdit: null as string | null,
+    deformHandleIdx: -1,
+    deformDragSx0: 0, deformDragSy0: 0,
+    deformDragOrigVals: [] as number[],
+    // «Задати лінію напряму» анімації переміщення (світові координати)
+    moveLine: null as null | { id: string; x0?: number; y0?: number; x1?: number; y1?: number },
     showZones: true,
     showGrid: true,
     showCamView: true, // 20:9 УВІМК за замовчуванням — рамка показує фактичний кадр гри
@@ -159,15 +174,42 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
+  // Анімації об'єктів грають, поки нічого не тягнемо й не редагуємо хендли.
+  const fxPlaying = (): boolean =>
+    !state.mode && !state.dragPlaced && state.deformEdit == null && !state.moveLine && !state.zoneDraw;
+  const animClock = (): number => performance.now() / 1000;
+  // Дисплейний трансформ (з анімаційним зсувом/кейфреймами).
+  const placedDisp = (p: PlacedAsset): { x: number; y: number; rot: number; scale: number } =>
+    fxDisp({ x: p.x, y: p.y, rot: p.rot, scale: p.scale, anim: p.anim, deform: p.deform }, animClock(), fxPlaying());
+  // Порядок малювання: плановість (1..7, дефолт 3), у межах плану — порядок додавання.
+  const placedSorted = (): PlacedAsset[] =>
+    [...loc().placed].sort((a, b) => (a.plan ?? 3) - (b.plan ?? 3));
+
+  function placedDeformView(p: PlacedAsset, playing: boolean): DeformView | null {
+    if (!p.deform) return null;
+    const img = state.images.get(p.id);
+    if (!img?.complete || !img.naturalWidth) return null;
+    const d = fxDisp({ x: p.x, y: p.y, rot: p.rot, scale: p.scale, anim: p.anim, deform: p.deform }, animClock(), playing);
+    const ps = toScreen(d.x, d.y);
+    return {
+      W: img.naturalWidth, H: img.naturalHeight,
+      deform: fxDeformAt(p.deform, animClock(), playing),
+      x: ps.x, y: ps.y, rot: d.rot,
+      kx: d.scale * sc(), ky: d.scale * sc(),
+      flip: p.flip, baked: p.deform.baked,
+    };
+  }
+
   function placedAt(sx: number, sy: number): PlacedAsset | null {
-    for (const p of [...loc().placed].reverse()) {
+    for (const p of placedSorted().reverse()) {
       const img = state.images.get(p.id);
       if (!img?.complete || !img.naturalWidth) continue;
-      const ps = toScreen(p.x, p.y);
-      const iw = img.naturalWidth * p.scale * sc();
-      const ih = img.naturalHeight * p.scale * sc();
+      const d = placedDisp(p);
+      const ps = toScreen(d.x, d.y);
+      const iw = img.naturalWidth * d.scale * sc();
+      const ih = img.naturalHeight * d.scale * sc();
       const dx = sx - ps.x, dy = sy - ps.y;
-      const ang = -p.rot * Math.PI / 180;
+      const ang = -d.rot * Math.PI / 180;
       const lx = dx * Math.cos(ang) - dy * Math.sin(ang);
       const ly = dx * Math.sin(ang) + dy * Math.cos(ang);
       if (Math.abs(lx) <= iw / 2 && Math.abs(ly) <= ih / 2) return p;
@@ -265,23 +307,37 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
     if (fogOn && ph!.fogLayers!.bg) drawFogLayerCanvas(ctx, w, h, ph!.fogLayers!.bg, sc(), tNow);
 
     // Placed assets (будівлі) — hover: білий контур + плавний масштаб (як у Гамлеті DD1)
+    const playing = fxPlaying();
     drawLayerTinted(ctx, w, h, todLayers.map, (c) => {
-      for (const p of loc().placed) {
+      for (const p of placedSorted()) {
         const img = state.images.get(p.id);
         if (!img?.complete || !img.naturalWidth) continue;
         const isSel = state.sel === p.id;
+        if (p.deform) {
+          // Деформований — квадосітка (без hover-масштабу; виділення — рамка нижче)
+          const v = placedDeformView(p, playing && state.deformEdit !== p.id)!;
+          drawDeformedImage(c, img, v);
+          if (isSel && state.deformEdit !== p.id) {
+            const bw = img.naturalWidth * p.scale * sc(), bh = img.naturalHeight * p.scale * sc();
+            c.save(); c.translate(v.x, v.y); c.rotate(v.rot * Math.PI / 180);
+            c.strokeStyle = '#ffcc00'; c.lineWidth = 2; c.setLineDash([5, 3]);
+            c.strokeRect(-bw / 2, -bh / 2, bw, bh); c.setLineDash([]); c.restore();
+          }
+          continue;
+        }
+        const d = placedDisp(p);
         const hv = state.tool === 'select' && state.hoverPlaced === p.id && !state.dragPlaced && !state.mode;
         const cur = state.hoverScale.get(p.id) ?? 1;
         const target = hv ? 1.08 : 1;
         let hs = cur + (target - cur) * 0.18;
         if (Math.abs(hs - target) < 0.002) hs = target;
         state.hoverScale.set(p.id, hs);
-        const ps = toScreen(p.x, p.y);
-        const iw = img.naturalWidth * p.scale * sc() * hs;
-        const ih = img.naturalHeight * p.scale * sc() * hs;
+        const ps = toScreen(d.x, d.y);
+        const iw = img.naturalWidth * d.scale * sc() * hs;
+        const ih = img.naturalHeight * d.scale * sc() * hs;
         c.save();
         c.translate(ps.x, ps.y);
-        c.rotate(p.rot * Math.PI / 180);
+        c.rotate(d.rot * Math.PI / 180);
         c.scale(p.flip, 1);
         if (isSel) { c.shadowColor = '#ffcc00'; c.shadowBlur = 14; }
         else if (hs > 1.005) { c.shadowColor = 'rgba(255,255,255,0.6)'; c.shadowBlur = 12; }
@@ -292,6 +348,29 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
         c.restore();
       }
     });
+
+    // Хендли деформації обраного об'єкта — поверх тінту
+    if (state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        const v = placedDeformView(pd, false);
+        if (v) drawDeformHandles(ctx, v, state.deformHandleIdx);
+      }
+    }
+
+    // Лінія напряму руху (режим «Задати лінію»)
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const a = toScreen(L.x0!, L.y0!);
+      const b = toScreen(L.x1 ?? L.x0!, L.y1 ?? L.y0!);
+      ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const ang = Math.atan2(b.y - a.y, b.x - a.x);
+      ctx.beginPath(); ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - 12 * Math.cos(ang - 0.4), b.y - 12 * Math.sin(ang - 0.4));
+      ctx.lineTo(b.x - 12 * Math.cos(ang + 0.4), b.y - 12 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
 
     // Туман перед будівлями (шар map)
     if (fogOn && ph!.fogLayers!.map) drawFogLayerCanvas(ctx, w, h, ph!.fogLayers!.map, sc(), tNow);
@@ -341,6 +420,23 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       state.pan.y = state.panStart.py + e.clientY - state.panStart.my;
     }
 
+    if (state.moveLine?.x0 !== undefined) {
+      const wp = toWorld(state.mouse.x, state.mouse.y);
+      state.moveLine.x1 = wp.x; state.moveLine.y1 = wp.y;
+      return;
+    }
+    if (state.deformHandleIdx >= 0 && state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        applyHandleDrag(
+          pd.deform, state.deformHandleIdx, state.deformDragOrigVals,
+          state.mouse.x - state.deformDragSx0, state.mouse.y - state.deformDragSy0,
+          pd.rot, pd.scale * sc(), pd.scale * sc(), pd.flip,
+        );
+        return;
+      }
+    }
+
     if (state.dragPlaced && !state.mode) {
       const dx = state.mouse.x - state.dragStart.sx, dy = state.mouse.y - state.dragStart.sy;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) state.wasDrag = true;
@@ -384,6 +480,29 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (state.mode) { save(); state.mode = null; state.modeOrig = null; return; }
 
+    // Режим «Задати лінію напряму» анімації переміщення — старт лінії
+    if (state.moveLine) {
+      const wp = toWorld(mx, my);
+      state.moveLine.x0 = wp.x; state.moveLine.y0 = wp.y;
+      state.moveLine.x1 = wp.x; state.moveLine.y1 = wp.y;
+      return;
+    }
+    // Редагування хендлів деформації — клік по хендлу починає його дрег
+    if (state.deformEdit) {
+      const pd = placedById(state.deformEdit);
+      if (pd?.deform) {
+        const v = placedDeformView(pd, false);
+        const hi = v ? hitDeformHandle(v, mx, my) : -1;
+        if (hi >= 0) {
+          pushUndo();
+          state.deformHandleIdx = hi;
+          state.deformDragSx0 = mx; state.deformDragSy0 = my;
+          state.deformDragOrigVals = [...(pd.deform.type === 'persp' ? (pd.deform.corners ?? new Array(8).fill(0)) : (pd.deform.pts ?? []))];
+          return;
+        }
+      }
+    }
+
     if (state.tool === 'select') {
       const p = placedAt(mx, my);
       if (p) {
@@ -401,6 +520,21 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   canvas.addEventListener('mouseup', e => {
     state.panning = false;
+    // Завершення лінії напряму руху → пишемо anim.move у виділений об'єкт
+    if (state.moveLine?.x0 !== undefined) {
+      const L = state.moveLine;
+      const p = placedById(L.id);
+      const ddx = (L.x1 ?? L.x0!) - L.x0!, ddy = (L.y1 ?? L.y0!) - L.y0!;
+      const len = Math.hypot(ddx, ddy);
+      if (p && len > 2) {
+        pushUndo();
+        p.anim = { type: 'move', dx: ddx / len, dy: ddy / len, dist: Math.round(len), speed: p.anim?.speed ?? 40, constant: p.anim?.constant ?? false };
+        save(); setStatus('Напрям руху задано');
+      }
+      state.moveLine = null;
+      return;
+    }
+    if (state.deformHandleIdx >= 0) { save(); state.deformHandleIdx = -1; return; }
     if (state.dragPlaced) { if (state.wasDrag) save(); state.dragPlaced = null; }
 
     if (state.tool === 'zone' && state.zoneDraw) {
@@ -416,6 +550,44 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       }
       state.zoneDraw = null;
     }
+  });
+
+  // ПКМ по будівлі — повне меню як у Редакторі Мандр: плановість + анімація +
+  // деформація (з кейфреймами) + дзеркало/видалити.
+  canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const mx = e.clientX - rect().left, my = e.clientY - rect().top;
+    const p = placedAt(mx, my);
+    if (!p) return;
+    select(p.id, 'placed');
+    openFxObjMenu(e.clientX, e.clientY, {
+      title: p.name || 'Будівля',
+      objId: p.id,
+      obj: p,
+      plan: {
+        get: () => p.plan ?? 3, set: (v) => { p.plan = v; },
+        min: 1, max: 7, hint: 'більше = ближче',
+      },
+      getBase: () => ({ x: p.x, y: p.y, rot: p.rot, scale: p.scale }),
+      isEditingHandles: () => state.deformEdit === p.id,
+      toggleEditHandles: () => { state.deformEdit = state.deformEdit === p.id ? null : p.id; },
+      onSetMoveLine: () => { state.moveLine = { id: p.id }; setStatus('Проведи лінію напряму руху на канвасі'); },
+      extras: [
+        { label: 'Дзеркалити (M)', on: () => { pushUndo(); p.flip *= -1; save(); } },
+        'sep',
+        { label: 'Видалити (Del)', danger: true, on: () => {
+          pushUndo();
+          loc().placed = loc().placed.filter((x) => x.id !== p.id);
+          if (state.sel === p.id) deselect();
+          if (state.deformEdit === p.id) state.deformEdit = null;
+          save();
+        } },
+      ],
+      pushUndo,
+      save: () => void save(),
+      draw: () => {},
+      setStatus,
+    });
   });
 
   canvas.addEventListener('wheel', e => {
@@ -445,12 +617,23 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
     if (e.code === 'Escape') {
       if (previewBig) { setPreviewBig(false); return; }
+      if (state.deformEdit || state.moveLine) { state.deformEdit = null; state.moveLine = null; return; }
       if (state.mode && state.modeOrig && state.sel) {
         const p = placedById(state.sel);
         if (p) Object.assign(p, state.modeOrig);
       }
       state.mode = null; state.modeOrig = null; state.zoneDraw = null;
       setTool('select'); return;
+    }
+    // K — записати кейфрейм деформації виділеної будівлі
+    if (e.code === 'KeyK' && state.sel && state.selType === 'placed') {
+      const p = placedById(state.sel);
+      if (p?.deform) {
+        pushUndo();
+        const n = recordDeformKeyframe(p.deform, { x: p.x, y: p.y, rot: p.rot, scale: p.scale });
+        save(); setStatus(`Кейфрейм ${n} записано · K — додати ще`);
+      } else setStatus('Спочатку додай деформацію (ПКМ по будівлі)');
+      return;
     }
     if (state.sel && state.selType === 'placed' && !state.mode) {
       const p = placedById(state.sel)!;
@@ -461,6 +644,12 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       }
       if (e.code === 'KeyS') { state.mode = 'S'; state.modeOrig = { ...p }; state.modeStartX = state.mouse.x; state.modeStartY = state.mouse.y; }
       if (e.code === 'KeyM') { pushUndo(); p.flip *= -1; save(); }
+      // Плановість: [ / ] — далі/ближче (як у редакторі меню)
+      if (e.key === '[' || e.key === ']') {
+        pushUndo();
+        p.plan = Math.max(1, Math.min(7, (p.plan ?? 3) + (e.key === ']' ? 1 : -1)));
+        save(); setStatus(`План: ${p.plan}`);
+      }
     }
     if (e.code === 'KeyV') setTool('select');
     if (e.code === 'KeyZ') setTool('zone');
