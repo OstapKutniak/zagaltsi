@@ -7,11 +7,15 @@
 import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { initStoryEditor } from '../story/editor';
+import { keyDataUrl } from '../rig/keyer';
 import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 import {
   fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
-  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, type DeformView,
+  applyHandleDrag, recordDeformKeyframe, openFxObjMenu, PLAN_NAMES, type DeformView,
 } from '../level/placedFx';
+import { type Atmosphere, type LayerKey, weatherToggles, type WeatherPhase } from '../level/atmosphere';
+import { buildAtmospherePanel } from '../level/atmospherePanel';
+import { drawFogLayerCanvas, drawRainCanvas, drawVignetteCanvas, applyColorBalanceCanvas } from '../level/atmoPreview';
 
 export interface MenuButton {
   id: string; label: string;
@@ -49,12 +53,20 @@ export const DEFAULT_FX: MenuFx = {
   rain: { on: true, x0: 595, y0: 140, x1: 682, y1: 285, panes: true, dir: -25, alpha: 0.5, speed: 1600 },
   bolt: { on: true, every: 11, vary: 0.77, bright: 1 },
 };
+// Персонаж сторінки: позиція/масштаб/анімація (до 5 на сторінку; ПКМ — анімація).
+export interface MenuChar {
+  id: string; x: number; y: number; scale: number;
+  anim: string;              // 'sit' | 'idle' | 'walk' | 'run' ...
+  flip?: boolean;
+}
 export interface MenuPage {
   id: string; name: string;
   bg: string;                // dataURL фону ('' = чорний)
   buttons: MenuButton[];
   objects?: MenuObject[];    // розміщені PNG-об'єкти (декор) із плановістю
   fx?: MenuFx;               // ефекти сцени (нема — гра бере DEFAULT_FX)
+  chars?: MenuChar[];        // персонажі сторінки (нема — легасі fx.char)
+  atmosphere?: Atmosphere;   // плановість/погода/віньєтка/баланс — як у Мандрах
 }
 export interface MenuDoc { version: 1; pages: MenuPage[]; updatedAt?: number }
 
@@ -86,24 +98,48 @@ export function initMenuEditor(prefix: string): void {
   let _uid = Date.now();
   const uid = (): string => (++_uid).toString(36);
 
+  // Усі 6 розділів гри — окремі сторінки редактора (декор/атмосфера/персонажі
+  // сторінки застосовуються у грі при морфі в цей розділ). 'main' = Житло (лобі).
+  const SECTION_PAGES: Array<{ id: string; name: string }> = [
+    { id: 'main', name: 'Житло' },
+    { id: 'world', name: 'Мандри' },
+    { id: 'khorugva', name: 'Хоругва' },
+    { id: 'quests', name: 'Завдання' },
+    { id: 'achievements', name: 'Досягнення' },
+    { id: 'inventory', name: 'Інвентар' },
+  ];
   // Дефолт = СПРАВЖНЄ меню гри (як хардкод ITEMS у MenuScene) — інакше публікація
   // дефолтної сторінки «з'їдала» кнопки Хоругва/Досягнення.
-  const defaultDoc = (): MenuDoc => ({
-    version: 1,
-    pages: [{
-      id: 'main', name: 'Головна', bg: '',
-      // Ті самі 6 пунктів, що й хардкод ITEMS у MenuScene (з «Житло»), тими ж
-      // координатами (startY=176, gap=68) — щоб дефолт редактора = справжнє меню гри.
-      buttons: [
-        { id: uid(), label: 'Житло', x: 92, y: 176, size: 34, target: 'home' },
-        { id: uid(), label: 'Мандри', x: 92, y: 244, size: 34, target: 'world' },
-        { id: uid(), label: 'Хоругва', x: 92, y: 312, size: 34, target: 'khorugva' },
-        { id: uid(), label: 'Завдання', x: 92, y: 380, size: 34, target: 'quests' },
-        { id: uid(), label: 'Досягнення', x: 92, y: 448, size: 34, target: 'achievements' },
-        { id: uid(), label: 'Інвентар', x: 92, y: 516, size: 34, target: 'inventory' },
-      ],
-    }],
-  });
+  const defaultDoc = (): MenuDoc => {
+    const doc: MenuDoc = { version: 1, pages: [] };
+    ensurePages(doc);
+    return doc;
+  };
+  // Доводить документ до повного набору розділів (додає відсутні сторінки).
+  function ensurePages(doc: MenuDoc): boolean {
+    let changed = false;
+    // Легасі-назва головної сторінки: «Головна» → «Житло» (це і є розділ Житло).
+    const main = doc.pages.find((p) => p.id === 'main');
+    if (main && main.name === 'Головна') { main.name = 'Житло'; changed = true; }
+    for (const sp of SECTION_PAGES) {
+      if (doc.pages.some((p) => p.id === sp.id)) continue;
+      const page: MenuPage = { id: sp.id, name: sp.name, bg: '', buttons: [] };
+      if (sp.id === 'main') {
+        // Ті самі 6 пунктів, що й хардкод ITEMS у MenuScene, тими ж координатами.
+        page.buttons = [
+          { id: uid(), label: 'Житло', x: 92, y: 176, size: 34, target: 'home' },
+          { id: uid(), label: 'Мандри', x: 92, y: 244, size: 34, target: 'world' },
+          { id: uid(), label: 'Хоругва', x: 92, y: 312, size: 34, target: 'khorugva' },
+          { id: uid(), label: 'Завдання', x: 92, y: 380, size: 34, target: 'quests' },
+          { id: uid(), label: 'Досягнення', x: 92, y: 448, size: 34, target: 'achievements' },
+          { id: uid(), label: 'Інвентар', x: 92, y: 516, size: 34, target: 'inventory' },
+        ];
+        doc.pages.unshift(page);
+      } else doc.pages.push(page);
+      changed = true;
+    }
+    return changed;
+  }
 
   const state = {
     doc: defaultDoc(),
@@ -131,16 +167,41 @@ export function initMenuEditor(prefix: string): void {
     deformDragOrigVals: [] as number[],
     // «Задати лінію напряму» анімації переміщення (координати кадру)
     moveLine: null as null | { id: string; x0?: number; y0?: number; x1?: number; y1?: number },
+    // Персонажі сторінки
+    selChar: null as string | null,
+    dragChar: null as null | { id: string; ox: number; oy: number },
+    // Клавіатурні трансформації G/R/S (об'єкт/кнопка/персонаж) + вісь X/Z
+    kbMode: null as null | 'G' | 'R' | 'S',
+    kbAxis: null as null | 'x' | 'z',
+    kbStart: { mx: 0, my: 0, ang: 0, dist: 1 },
+    kbOrig: null as null | { x: number; y: number; rot: number; scale: number; size: number },
+    // Прев'ю атмосфери (кнопкою можна вимкнути)
+    showAtm: true,
   };
   const page = (): MenuPage => state.doc.pages[state.cur];
   const objs = (): MenuObject[] => (page().objects ??= []);
+  const chars = (): MenuChar[] => (page().chars ??= []);
+  const lastMouse = { x: 0, y: 0 }; // остання позиція миші на канвасі (для G/R/S)
+  const selectedChar = (): MenuChar | null => chars().find((c) => c.id === state.selChar) ?? null;
+
+  // Ціль клавіатурної трансформації: виділений об'єкт / персонаж / кнопка.
+  type KbTarget = { kind: 'obj'; o: MenuObject } | { kind: 'char'; c: MenuChar } | { kind: 'btn'; b: MenuButton };
+  function kbTarget(): KbTarget | null {
+    const o = objs().find((x) => x.id === state.selObj);
+    if (o) return { kind: 'obj', o };
+    const c = selectedChar();
+    if (c) return { kind: 'char', c };
+    const b = page().buttons.find((x) => x.id === state.sel);
+    if (b) return { kind: 'btn', b };
+    return null;
+  }
 
   // ── Годинник анімацій об'єктів (грає, поки не тягнемо/не редагуємо хендли) ──
   let animClock = 0; let animRaf = 0; let animLast = 0;
   const hasFx = (): boolean => objs().some((o) => o.anim || ((o.deform?.keyframes?.length ?? 0) >= 2));
   const fxPlaying = (): boolean =>
-    hasFx() && canvas!.offsetWidth > 0 && !state.dragObj && !state.resizeObj
-    && state.deformEdit == null && !state.moveLine && state.view === 'page';
+    hasFx() && canvas!.offsetWidth > 0 && !state.dragObj && !state.resizeObj && !state.dragChar
+    && state.deformEdit == null && !state.moveLine && !state.kbMode && state.view === 'page';
   function tickAnim(ts: number): void {
     animRaf = 0;
     if (!fxPlaying()) { animLast = 0; return; }
@@ -242,6 +303,8 @@ export function initMenuEditor(prefix: string): void {
     // розміщені об'єкти (декор) — між фоном і кнопками, у порядку плановості
     ctx.save(); ctx.beginPath(); ctx.rect(f.x, f.y, f.w, f.h); ctx.clip();
     drawObjects(f, state.preview);
+    drawChars(f, state.preview);
+    drawAtmPreview(f);
     ctx.restore();
     // кнопки
     for (const b of p.buttons) {
@@ -271,6 +334,27 @@ export function initMenuEditor(prefix: string): void {
     // назва сторінки
     ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('Сторінка: ' + p.name + ' (' + p.id + ')', f.x + 4, f.y - 6);
+  }
+
+  // ── Прев'ю атмосфери сторінки: туман/дощ/віньєтка/баланс у межах кадру ──────
+  function drawAtmPreview(f: { x: number; y: number; w: number; h: number }): void {
+    if (!state.showAtm) return;
+    const atm = page().atmosphere;
+    if (!atm) return;
+    const tNow = performance.now() / 1000;
+    const wx = atm.weather?.enabled ? (atm.weather.phases[0] as WeatherPhase | undefined) : undefined;
+    const fogOn = wx ? weatherToggles(wx).fog && !!wx.fogLayers : false;
+    if (fogOn) {
+      for (const lk of ['sky', 'clouds', 'bg', 'frontbg', 'map', 'foreground'] as LayerKey[]) {
+        const fl = wx!.fogLayers![lk];
+        if (fl) drawFogLayerCanvas(ctx, canvas!.width, canvas!.height, fl, 1, tNow);
+      }
+    }
+    if (atm.vignette?.enabled) drawVignetteCanvas(ctx, f.x, f.y, f.w, f.h, atm.vignette);
+    if (wx) drawRainCanvas(ctx, canvas!.width, canvas!.height, wx, 1, tNow);
+    if (atm.colorBalance?.enabled) applyColorBalanceCanvas(ctx, canvas!, atm.colorBalance);
+    // погода/туман анімовані — тримаємо RAF-перемальовування
+    if (wx || fogOn) requestAnimationFrame(() => { if (state.view === 'page') draw(); });
   }
 
   // ── Гізмо ефектів: вікно дощу (рамка), вогнище (пляма), персонаж (портрет) ──
@@ -322,8 +406,8 @@ export function initMenuEditor(prefix: string): void {
         ctx.fillText('вогнище', cx0, cy0 + 8 * f.s + 12);
       }
     }
-    // Персонаж (портрет — реальний вигляд; у прев'ю без рамки/підпису)
-    if (e.char.on) {
+    // Легасі-персонаж fx.char — лише коли сторінка не має власних chars[]
+    if (e.char.on && !chars().length) {
       const cx0 = X(e.char.x), cy0 = Y(e.char.y);
       const H = 150 * e.char.scale * f.s;
       const th = state.charThumb;
@@ -354,7 +438,7 @@ export function initMenuEditor(prefix: string): void {
     const e = fx();
     if (e.rain.on && Math.abs(px - e.rain.x1) < 9 && Math.abs(py - e.rain.y1) < 9) return 'rainSize';
     if (e.fire.on && Math.hypot(px - e.fire.x, py - e.fire.y) < 26) return 'fire';
-    if (e.char.on) {
+    if (e.char.on && !chars().length) {
       const H = 150 * e.char.scale;
       if (Math.abs(px - e.char.x) < H * 0.3 && Math.abs(py - e.char.y) < H / 2) return 'char';
     }
@@ -564,6 +648,8 @@ export function initMenuEditor(prefix: string): void {
     }
     if (state.preview) return; // прев'ю read-only: без вибору/перетягування
     const fp = toFrame(sx, sy);
+    // 0а) активна клавіатурна трансформація (G/R/S) — клік підтверджує
+    if (state.kbMode) { state.kbMode = null; state.kbAxis = null; state.kbOrig = null; save(); draw(); return; }
     // 0) режим «Задати лінію напряму» анімації переміщення — старт лінії
     if (state.moveLine) {
       state.moveLine.x0 = fp.x; state.moveLine.y0 = fp.y;
@@ -602,23 +688,31 @@ export function initMenuEditor(prefix: string): void {
       state.sel = b.id; state.selObj = null;
       state.drag = { id: b.id, ox: fp.x - b.x, oy: fp.y - b.y };
     } else {
-      // 3) розміщений об'єкт
-      const o = objAt(fp.x, fp.y);
-      if (o) {
-        state.selObj = o.id; state.sel = null;
-        state.dragObj = { id: o.id, ox: fp.x - o.x, oy: fp.y - o.y };
-        setStatus(`Об'єкт: ${o.name ?? ''} · ПКМ — план/дзеркало/видалити`);
+      // 3) персонаж сторінки
+      const ch = charAt(fp.x, fp.y);
+      if (ch) {
+        state.selChar = ch.id; state.sel = null; state.selObj = null;
+        state.dragChar = { id: ch.id, ox: fp.x - ch.x, oy: fp.y - ch.y };
+        setStatus('Персонаж · тягни / G / S / M · ПКМ — анімація');
       } else {
-        // 4) гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
-        const kind = fxAt(fp.x, fp.y);
-        if (kind) {
-          const e = fx();
-          const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
-            : kind === 'rainSize' ? { x: e.rain.x1, y: e.rain.y1 } : { x: e.rain.x0, y: e.rain.y0 };
-          state.dragFx = { kind, ox: fp.x - ref.x, oy: fp.y - ref.y };
-          setStatus(kind === 'rainSize' ? 'Розмір вікна дощу' : kind === 'rain' ? 'Вікно дощу' : kind === 'fire' ? 'Вогнище' : 'Персонаж');
+        // 4) розміщений об'єкт
+        const o = objAt(fp.x, fp.y);
+        if (o) {
+          state.selObj = o.id; state.sel = null; state.selChar = null;
+          state.dragObj = { id: o.id, ox: fp.x - o.x, oy: fp.y - o.y };
+          setStatus(`Об'єкт: ${o.name ?? ''} · ПКМ — план/анімація/деформація`);
+        } else {
+          // 5) гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
+          const kind = fxAt(fp.x, fp.y);
+          if (kind) {
+            const e = fx();
+            const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
+              : kind === 'rainSize' ? { x: e.rain.x1, y: e.rain.y1 } : { x: e.rain.x0, y: e.rain.y0 };
+            state.dragFx = { kind, ox: fp.x - ref.x, oy: fp.y - ref.y };
+            setStatus(kind === 'rainSize' ? 'Розмір вікна дощу' : kind === 'rain' ? 'Вікно дощу' : kind === 'fire' ? 'Вогнище' : 'Персонаж');
+          }
+          state.sel = null; state.selObj = null; state.selChar = null;
         }
-        state.sel = null; state.selObj = null;
       }
     }
     renderProps(); draw();
@@ -630,6 +724,22 @@ export function initMenuEditor(prefix: string): void {
     if (state.view !== 'page' || state.preview) return;
     const r = canvas!.getBoundingClientRect();
     const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
+    // ПКМ по персонажу — вибір анімації/дзеркало/видалити
+    const ch = charAt(fp.x, fp.y);
+    if (ch) {
+      state.selChar = ch.id; state.sel = null; state.selObj = null; draw();
+      showCtxMenu(e.clientX, e.clientY, [
+        ...CHAR_ANIMS.map((a) => ({
+          label: (ch.anim === a.v ? '✓ ' : '') + a.l,
+          on: () => { ch.anim = a.v; save(); renderCharsPanel(); draw(); },
+        })),
+        'sep' as const,
+        { label: ch.flip ? 'Скасувати дзеркало' : 'Дзеркалити', on: () => { ch.flip = !ch.flip; save(); draw(); } },
+        { label: 'Масштаб…', on: () => { const v = prompt('Масштаб персонажа:', String(ch.scale)); if (v !== null) { ch.scale = Math.max(0.2, Number(v) || ch.scale); save(); draw(); } } },
+        { label: 'Видалити персонажа', on: () => { page().chars = chars().filter((c) => c.id !== ch.id); if (state.selChar === ch.id) state.selChar = null; save(); renderCharsPanel(); draw(); } },
+      ]);
+      return;
+    }
     const o = objAt(fp.x, fp.y) ?? selectedObj();
     if (!o) return;
     state.selObj = o.id; state.sel = null; renderProps(); draw();
@@ -639,7 +749,7 @@ export function initMenuEditor(prefix: string): void {
       obj: o,
       plan: {
         get: () => o.depth, set: (v) => { o.depth = v; },
-        min: 1, max: 7, hint: '5 = рівень персонажа/вогню',
+        min: 1, max: 7, names: PLAN_NAMES,
       },
       getBase: () => ({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale }),
       isEditingHandles: () => state.deformEdit === o.id,
@@ -661,6 +771,7 @@ export function initMenuEditor(prefix: string): void {
     if (state.view === 'map') return;
     const r = canvas!.getBoundingClientRect();
     const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    lastMouse.x = sx; lastMouse.y = sy;
     const fp = toFrame(sx, sy);
     if (state.moveLine?.x0 !== undefined) {
       state.moveLine.x1 = fp.x; state.moveLine.y1 = fp.y; draw(); return;
@@ -704,6 +815,39 @@ export function initMenuEditor(prefix: string): void {
       if (o) { o.x = Math.round(fp.x - state.dragObj.ox); o.y = Math.round(fp.y - state.dragObj.oy); draw(); }
       return;
     }
+    if (state.dragChar) {
+      const c = chars().find((x) => x.id === state.dragChar!.id);
+      if (c) { c.x = Math.round(fp.x - state.dragChar.ox); c.y = Math.round(fp.y - state.dragChar.oy); draw(); }
+      return;
+    }
+    // Клавіатурна трансформація G/R/S: рух миші застосовує до цілі (з віссю X/Z)
+    if (state.kbMode && state.kbOrig) {
+      const t = kbTarget();
+      if (t) {
+        const f = frameRect();
+        const dx = (sx - state.kbStart.mx) / f.s, dy = (sy - state.kbStart.my) / f.s;
+        if (state.kbMode === 'G') {
+          const nx = state.kbOrig.x + (state.kbAxis === 'z' ? 0 : dx);
+          const ny = state.kbOrig.y + (state.kbAxis === 'x' ? 0 : dy);
+          if (t.kind === 'obj') { t.o.x = Math.round(nx); t.o.y = Math.round(ny); }
+          else if (t.kind === 'char') { t.c.x = Math.round(nx); t.c.y = Math.round(ny); }
+          else { t.b.x = Math.round(nx); t.b.y = Math.round(ny); }
+        } else if (state.kbMode === 'R' && t.kind === 'obj') {
+          const cx = f.x + t.o.x * f.s, cy = f.y + t.o.y * f.s;
+          const a = Math.atan2(sy - cy, sx - cx) * 180 / Math.PI;
+          t.o.rot = Math.round(state.kbOrig.rot + a - state.kbStart.ang);
+        } else if (state.kbMode === 'S') {
+          const cx = t.kind === 'obj' ? t.o.x : t.kind === 'char' ? t.c.x : t.b.x;
+          const cy = t.kind === 'obj' ? t.o.y : t.kind === 'char' ? t.c.y : t.b.y;
+          const scx = f.x + cx * f.s, scy = f.y + cy * f.s;
+          const ratio = Math.max(0.05, Math.hypot(sx - scx, sy - scy) / state.kbStart.dist);
+          if (t.kind === 'obj') t.o.scale = Math.max(0.02, Math.round(state.kbOrig.scale * ratio * 1000) / 1000);
+          else if (t.kind === 'char') t.c.scale = Math.max(0.2, Math.round(state.kbOrig.scale * ratio * 100) / 100);
+          else t.b.size = Math.max(10, Math.min(96, Math.round(state.kbOrig.size * ratio)));
+        }
+        draw(); return;
+      }
+    }
     if (!state.drag) return;
     const b = page().buttons.find((x) => x.id === state.drag!.id);
     if (b) { b.x = Math.round(fp.x - state.drag.ox); b.y = Math.round(fp.y - state.drag.oy); draw(); }
@@ -724,6 +868,7 @@ export function initMenuEditor(prefix: string): void {
     if (state.drag) { state.drag = null; save(); }
     if (state.dragFx) { state.dragFx = null; save(); setStatus(''); }
     if (state.dragObj) { state.dragObj = null; save(); }
+    if (state.dragChar) { state.dragChar = null; save(); }
     if (state.resizeObj) { state.resizeObj = null; save(); setStatus(''); }
   });
   window.addEventListener('keydown', (e) => {
@@ -739,7 +884,57 @@ export function initMenuEditor(prefix: string): void {
       } else if (state.selObj) {
         page().objects = objs().filter((o) => o.id !== state.selObj);
         state.objImgs.delete(state.selObj); state.selObj = null; save(); draw();
+      } else if (state.selChar) {
+        page().chars = chars().filter((c) => c.id !== state.selChar);
+        state.selChar = null; save(); renderCharsPanel(); draw();
       }
+    }
+    // G/R/S — клавіатурні трансформації виділеного (об'єкт/персонаж/кнопка), як у Мандрах.
+    // X/Z під час G — вісь; M — дзеркало; клік/Enter — підтвердити, Esc — скасувати.
+    if (state.view === 'page' && !state.preview && !state.kbMode
+        && (e.code === 'KeyG' || e.code === 'KeyR' || e.code === 'KeyS')) {
+      const t = kbTarget();
+      if (t) {
+        e.preventDefault();
+        const f = frameRect();
+        const px = t.kind === 'obj' ? t.o.x : t.kind === 'char' ? t.c.x : t.b.x;
+        const py = t.kind === 'obj' ? t.o.y : t.kind === 'char' ? t.c.y : t.b.y;
+        const scx = f.x + px * f.s, scy = f.y + py * f.s;
+        state.kbMode = e.code === 'KeyG' ? 'G' : e.code === 'KeyR' ? 'R' : 'S';
+        state.kbAxis = null;
+        state.kbStart = {
+          mx: lastMouse.x, my: lastMouse.y,
+          ang: Math.atan2(lastMouse.y - scy, lastMouse.x - scx) * 180 / Math.PI,
+          dist: Math.max(8, Math.hypot(lastMouse.x - scx, lastMouse.y - scy)),
+        };
+        state.kbOrig = {
+          x: px, y: py,
+          rot: t.kind === 'obj' ? (t.o.rot ?? 0) : 0,
+          scale: t.kind === 'obj' ? t.o.scale : t.kind === 'char' ? t.c.scale : 1,
+          size: t.kind === 'btn' ? t.b.size : 0,
+        };
+        setStatus(`${state.kbMode} — рухай мишею · X/Z — вісь · клік — підтвердити · Esc — скасувати`);
+      }
+    } else if (state.kbMode && (e.code === 'KeyX' || e.code === 'KeyZ')) {
+      state.kbAxis = e.code === 'KeyX' ? 'x' : 'z';
+    } else if (state.kbMode && (e.key === 'Enter' || e.code === 'Space')) {
+      state.kbMode = null; state.kbAxis = null; state.kbOrig = null; save(); draw();
+    } else if (state.kbMode && e.key === 'Escape') {
+      // скасувати: повернути оригінальні значення
+      const t = kbTarget();
+      if (t && state.kbOrig) {
+        if (t.kind === 'obj') { t.o.x = state.kbOrig.x; t.o.y = state.kbOrig.y; t.o.rot = state.kbOrig.rot; t.o.scale = state.kbOrig.scale; }
+        else if (t.kind === 'char') { t.c.x = state.kbOrig.x; t.c.y = state.kbOrig.y; t.c.scale = state.kbOrig.scale; }
+        else { t.b.x = state.kbOrig.x; t.b.y = state.kbOrig.y; t.b.size = state.kbOrig.size; }
+      }
+      state.kbMode = null; state.kbAxis = null; state.kbOrig = null; draw();
+      return;
+    }
+    // M — дзеркало виділеного об'єкта/персонажа
+    if (e.code === 'KeyM' && state.view === 'page' && !state.preview) {
+      const o = selectedObj();
+      if (o) { o.flip = !o.flip; save(); draw(); }
+      else { const c = selectedChar(); if (c) { c.flip = !c.flip; save(); draw(); } }
     }
     // Плановість виділеного об'єкта: [ / ] — назад/вперед
     if (state.selObj && state.view === 'page' && (e.key === '[' || e.key === ']')) {
@@ -768,7 +963,7 @@ export function initMenuEditor(prefix: string): void {
       const chip = document.createElement('button');
       chip.textContent = p.name;
       chip.style.cssText = `font-size:12px;padding:4px 10px;border-radius:5px;border:1px solid var(--line);cursor:pointer;background:${i === state.cur ? 'var(--accent)' : 'var(--rail)'};color:${i === state.cur ? '#1b1b1b' : 'var(--ink)'}`;
-      chip.onclick = () => { state.cur = i; state.sel = null; state.view = 'page'; renderPages(); renderProps(); renderFx(); draw(); };
+      chip.onclick = () => { state.cur = i; state.sel = null; state.selObj = null; state.selChar = null; state.view = 'page'; renderPages(); renderProps(); renderFx(); renderAtmPanel(); renderCharsPanel(); draw(); };
       chip.ondblclick = () => { const n = prompt('Назва сторінки:', p.name); if (n) { p.name = n; save(); renderPages(); } };
       list.appendChild(chip);
     });
@@ -868,19 +1063,22 @@ export function initMenuEditor(prefix: string): void {
       : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
     draw();
   });
+  // «Конструктор»: увімкнено = режим редагування (гізмо/рамки/трансформації);
+  // вимкнено = чисте прев'ю 20:9, як бачить гравець.
+  const CONSTR_HINT = 'конструктор: клік — вибрати · тягни / G — рух (X/Z — вісь) · R — оберт · S — масштаб · M — дзеркало · ПКМ — меню · Del — видалити';
   $('previewBtn')?.addEventListener('click', () => {
     state.preview = !state.preview;
-    if (state.preview) { state.view = 'page'; state.sel = null; } // прев'ю лише для сторінки
-    ($('previewBtn') as HTMLButtonElement).classList.toggle('on', state.preview);
+    if (state.preview) { state.view = 'page'; state.sel = null; state.selObj = null; state.selChar = null; state.kbMode = null; }
+    ($('previewBtn') as HTMLButtonElement).classList.toggle('on', !state.preview);
     const hint = $('stageHint');
     if (hint) hint.textContent = state.preview
-      ? 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Прев\'ю 20:9» ще раз, щоб редагувати'
-      : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
+      ? 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Конструктор», щоб редагувати'
+      : CONSTR_HINT;
     renderProps(); draw();
   });
-  // Прев'ю 20:9 увімкнене за замовчуванням — одразу видно фактичний кадр гри.
-  ($('previewBtn') as HTMLButtonElement | null)?.classList.toggle('on', state.preview);
-  { const hint = $('stageHint'); if (hint && state.preview) hint.textContent = 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Прев\'ю 20:9», щоб редагувати'; }
+  // Старт у прев'ю (конструктор вимкнено) — одразу видно фактичний кадр гри.
+  ($('previewBtn') as HTMLButtonElement | null)?.classList.toggle('on', !state.preview);
+  { const hint = $('stageHint'); if (hint && state.preview) hint.textContent = 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Конструктор», щоб редагувати'; }
   $('bgBtn')?.addEventListener('click', () => ($('bgInput') as HTMLInputElement)?.click());
   ($('bgInput') as HTMLInputElement | null)?.addEventListener('change', function () {
     const f = this.files?.[0]; if (!f) return;
@@ -894,12 +1092,15 @@ export function initMenuEditor(prefix: string): void {
   // .libCard-грід, ✕ на картці, тягни картку у кадр, кинь PNG на порожню картку,
   // середня кнопка — ренейм, ПКМ — меню (розмістити / фон сторінки / видалити).
   function saveAssets(): void { void idbSet('zag_menu_assets', state.assets); }
+  // Тогл «✂ Фон» — вирізати рівний фон у завантажуваних PNG (як у Мандрах/Персонажах).
+  const keyBgOn = (): boolean => $('keyBgBtn')?.classList.contains('on') ?? false;
+  $('keyBgBtn')?.addEventListener('click', (e) => (e.currentTarget as HTMLElement).classList.toggle('on'));
   function addAssetFiles(files: File[], atX?: number, atY?: number): void {
     for (const f of files) {
       if (!f.type.startsWith('image/')) continue;
       const rd = new FileReader();
-      rd.onload = () => {
-        const a = { id: uid(), name: f.name.replace(/\.\w+$/, ''), url: String(rd.result) };
+      rd.onload = () => void keyDataUrl(String(rd.result), keyBgOn()).then((url) => {
+        const a = { id: uid(), name: f.name.replace(/\.\w+$/, ''), url };
         state.assets.push(a);
         saveAssets(); renderAssets();
         if (atX !== undefined) {
@@ -907,9 +1108,100 @@ export function initMenuEditor(prefix: string): void {
           im.onload = () => placeObject(a, im.naturalHeight, atX, atY);
           im.src = a.url;
         }
-      };
+      });
       rd.readAsDataURL(f);
     }
+  }
+
+  // ── Атмосфера сторінки (спільна панель) ─────────────────────────────────────
+  const MN_ATM_LABELS: Partial<Record<LayerKey, string>> = {
+    sky: 'Небо (план 1)', clouds: 'Хмари (план 2)', bg: 'Найдальший (план 3)',
+    frontbg: 'Далекий (план 4)', map: 'Середній (план 5)', foreground: 'Близький/Найближчий (6–7)',
+  };
+  function renderAtmPanel(): void {
+    const box = $('atmPanel'); if (!box) return;
+    buildAtmospherePanel(box, () => (page().atmosphere ??= {}), () => save(), { labels: MN_ATM_LABELS });
+  }
+
+  // ── Персонажі сторінки ──────────────────────────────────────────────────────
+  const CHAR_ANIMS: Array<{ v: string; l: string }> = [
+    { v: 'sit', l: 'Сидить' }, { v: 'idle', l: 'Стоїть' },
+    { v: 'walk', l: 'Йде' }, { v: 'run', l: 'Біжить' },
+  ];
+  function renderCharsPanel(): void {
+    const box = $('charsPanel'); if (!box) return;
+    box.innerHTML = '';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    const lbl = document.createElement('span'); lbl.textContent = 'Кількість:'; lbl.style.cssText = 'color:var(--muted);font-size:12px';
+    row.appendChild(lbl);
+    for (let n = 0; n <= 5; n++) {
+      const b = document.createElement('button');
+      b.textContent = String(n);
+      const cur = chars().length;
+      b.style.cssText = `flex:1;padding:4px 0;border-radius:5px;border:1px solid var(--line);cursor:pointer;font-size:12px;background:${cur === n ? 'var(--accent)' : 'var(--rail)'};color:${cur === n ? '#1b1b1b' : 'var(--ink)'}`;
+      b.onclick = () => { setCharCount(n); };
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+    const hint = document.createElement('div');
+    hint.textContent = chars().length
+      ? 'Тягни персонажа у вьюпорті (конструктор) · ПКМ — анімація/дзеркало · G/S/M'
+      : 'Нема персонажів — гра покаже легасі-персонажа біля вогнища (Житло)';
+    hint.style.cssText = 'font-size:11px;color:var(--muted)';
+    box.appendChild(hint);
+  }
+  function setCharCount(n: number): void {
+    const list = chars();
+    while (list.length > n) {
+      const rm = list.pop();
+      if (rm && state.selChar === rm.id) state.selChar = null;
+    }
+    let i = list.length;
+    while (list.length < n) {
+      list.push({ id: uid(), x: 420 + i * 130, y: 400, scale: 1.4, anim: i === 0 ? 'sit' : 'idle' });
+      i++;
+    }
+    save(); renderCharsPanel(); draw();
+  }
+  // Персонаж під курсором (координати кадру) — прямокутник як у fx-гізмо.
+  function charAt(px: number, py: number): MenuChar | null {
+    for (const c of [...chars()].reverse()) {
+      const H = 150 * c.scale;
+      if (Math.abs(px - c.x) < H * 0.3 && Math.abs(py - c.y) < H / 2) return c;
+    }
+    return null;
+  }
+  function drawChars(f: { x: number; y: number; s: number }, preview: boolean): void {
+    const list = chars();
+    if (!list.length) return;
+    const th = state.charThumb;
+    list.forEach((c, i) => {
+      const cx = f.x + c.x * f.s, cy = f.y + c.y * f.s;
+      const H = 150 * c.scale * f.s;
+      ctx.save();
+      if (th?.complete && th.naturalWidth) {
+        const W2 = H * th.naturalWidth / th.naturalHeight;
+        ctx.translate(cx, cy);
+        if (c.flip) ctx.scale(-1, 1);
+        ctx.globalAlpha = preview ? 1 : 0.9;
+        ctx.drawImage(th, -W2 / 2, -H / 2, W2, H);
+      } else if (!preview) {
+        ctx.fillStyle = 'rgba(220,205,170,0.35)';
+        ctx.beginPath(); ctx.arc(cx, cy - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(cx - H * 0.14, cy - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
+      }
+      ctx.restore();
+      if (!preview) {
+        const sel = state.selChar === c.id;
+        ctx.strokeStyle = sel ? '#ffcf8f' : 'rgba(255,207,143,0.45)'; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(cx - H * 0.3, cy - H / 2, H * 0.6, H);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        const animL = CHAR_ANIMS.find((a) => a.v === c.anim)?.l ?? c.anim;
+        ctx.fillText(`персонаж ${i + 1} · ${animL}`, cx, cy + H / 2 + 12);
+      }
+    });
   }
   function startAssetRename(a: typeof state.assets[0]): void {
     const v = prompt('Назва ассета:', a.name);
@@ -1017,8 +1309,10 @@ export function initMenuEditor(prefix: string): void {
       state.doc = best;
       if (best === pub) void idbSet('zag_menu', pub); // осідає локально
     }
-    renderPages(); renderProps(); renderFx(); draw();
-  }).catch(() => { renderPages(); renderFx(); draw(); });
+    // Доводимо до повного набору розділів (Житло/Мандри/Хоругва/Завдання/Досягнення/Інвентар)
+    if (ensurePages(state.doc)) save();
+    renderPages(); renderProps(); renderFx(); renderAtmPanel(); renderCharsPanel(); draw();
+  }).catch(() => { renderPages(); renderFx(); renderAtmPanel(); renderCharsPanel(); draw(); });
   renderAssets(); // одразу порожні картки-плейсхолдери (клік/дроп — додати PNG)
   void idbGet<typeof state.assets>('zag_menu_assets').then((a) => {
     if (Array.isArray(a)) { state.assets = a; }

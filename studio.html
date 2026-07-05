@@ -690,7 +690,8 @@
           <button id="mn-mapBtn" title="Сторінки та гіперпосилання: яка кнопка куди веде">Мапа переходів</button>
           <button id="mn-addPage" title="Створити нову сторінку меню">＋ Сторінка</button>
           <div style="width:1px;background:var(--line);align-self:stretch;margin:0 4px"></div>
-          <button id="mn-previewBtn" title="Чисте прев'ю 20:9 — точно як гравець бачить меню (без рамок редактора)">Прев'ю 20:9</button>
+          <button id="mn-previewBtn" title="Режим редагування: переміщення кнопок/об'єктів/персонажів (G/R/S/M, X/Z — вісь). Вимкнено = чисте прев'ю 20:9">Конструктор</button>
+          <button id="mn-keyBgBtn" class="on" title="Вирізати рівний фон у завантажуваних PNG-ассетах">✂ Фон</button>
         </div>
 
         <!-- НИЖНІЙ ТУЛБАР режиму Звуку -->
@@ -972,12 +973,16 @@
               <button id="mn-btnDelete" style="width:100%;padding:6px;font-size:12px">Видалити кнопку</button>
             </div>
           </div>
+          <button class="header secToggle open" style="margin-top:6px" title="Плановість (7 планів), погода, віньєтка й баланс кольору — як у Редакторі Мандр. Діє на поточну сторінку.">Атмосфера</button>
+          <div class="secBody" style="display:flex;flex-direction:column;gap:8px">
+            <div id="mn-atmPanel" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
           <button class="header secToggle open" style="margin-top:6px">Ефекти сцени</button>
           <div class="secBody" style="display:flex;flex-direction:column;gap:10px;font-size:12px">
             <div style="color:var(--muted);font-size:11px">Персонажа, вогнище й вікно дощу тягни прямо у вьюпорті. Налаштування діють на поточну сторінку.</div>
-            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
-              <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxCharOn">Персонаж (сидить)</label>
-              <label style="display:flex;align-items:center;gap:6px">Масштаб<input type="range" id="mn-fxCharScale" min="0.4" max="3" step="0.05" style="flex:1"><span id="mn-fxCharScaleV" style="flex:0 0 34px;text-align:right;color:var(--muted)"></span></label>
+            <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px" title="Кількість персонажів на сторінці. Тягни персонажа у вьюпорті (конструктор), G/R/S/M — трансформації, ПКМ — анімація/дзеркало">
+              <div style="font-weight:600">Персонажі</div>
+              <div id="mn-charsPanel" style="display:flex;flex-direction:column;gap:6px"></div>
             </div>
             <div style="display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:8px;padding:8px">
               <label style="display:flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" id="mn-fxFireOn">Вогнище</label>
