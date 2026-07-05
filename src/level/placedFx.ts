@@ -171,11 +171,14 @@ export function recordDeformKeyframe(deform: PlacedDeform, base: FxBase): number
 
 // ── ПКМ-меню об'єкта: плановість + анімація + деформація + пункти редактора ──
 
+// 7 іменованих планів (1..7) — спільні для редакторів Меню і Локацій.
+export const PLAN_NAMES = ['Небо', 'Хмари', 'Найдальший', 'Далекий', 'Середній', 'Близький', 'Найближчий'];
+
 export interface FxMenuOpts {
   title: string;
   objId: string;                       // для збереження стану колапсу секцій
   obj: { anim?: PlacedAnim; deform?: PlacedDeform };
-  plan: { get: () => number; set: (v: number) => void; min: number; max: number; hint?: string };
+  plan: { get: () => number; set: (v: number) => void; min: number; max: number; hint?: string; names?: string[] };
   getBase: () => FxBase;               // для запису кейфреймів (animPos/Rot/Scale)
   isEditingHandles: () => boolean;
   toggleEditHandles: () => void;
@@ -225,12 +228,23 @@ export function openFxObjMenu(clientX: number, clientY: number, o: FxMenuOpts): 
 
   // Плановість
   m.appendChild(mk('div', 'opacity:0.7;margin:6px 0 2px;', 'Плановість' + (o.plan.hint ? ` (${o.plan.hint})` : '')));
-  const prow = mk('div', 'display:flex;align-items:center;gap:6px;');
+  if (o.plan.names) {
+    // Іменовані плани: список-вибір (клік = поставити на цей план)
+    const plist = mk('div', 'display:flex;flex-direction:column;gap:2px;');
+    for (let v = o.plan.min; v <= o.plan.max; v++) {
+      const nm = o.plan.names[v - o.plan.min] ?? String(v);
+      const btn = mk('button', btnCss(o.plan.get() === v) + 'text-align:left;', `${v} · ${nm}`);
+      btn.onclick = () => { o.pushUndo(); o.plan.set(v); o.save(); o.draw(); rebuild(); };
+      plist.appendChild(btn);
+    }
+    m.appendChild(plist);
+  }
+  const prow = mk('div', 'display:flex;align-items:center;gap:6px;margin-top:4px;');
   const far = mk('button', btnCss(false), '− Дальше');
   const planVal = mk('span', 'min-width:26px;text-align:center;', String(o.plan.get()));
   const near = mk('button', btnCss(false), 'Ближче +');
-  far.onclick = () => { o.pushUndo(); o.plan.set(Math.max(o.plan.min, o.plan.get() - 1)); planVal.textContent = String(o.plan.get()); o.save(); o.draw(); };
-  near.onclick = () => { o.pushUndo(); o.plan.set(Math.min(o.plan.max, o.plan.get() + 1)); planVal.textContent = String(o.plan.get()); o.save(); o.draw(); };
+  far.onclick = () => { o.pushUndo(); o.plan.set(Math.max(o.plan.min, o.plan.get() - 1)); planVal.textContent = String(o.plan.get()); o.save(); o.draw(); if (o.plan.names) rebuild(); };
+  near.onclick = () => { o.pushUndo(); o.plan.set(Math.min(o.plan.max, o.plan.get() + 1)); planVal.textContent = String(o.plan.get()); o.save(); o.draw(); if (o.plan.names) rebuild(); };
   prow.append(far, planVal, near); m.appendChild(prow);
 
   // Анімація

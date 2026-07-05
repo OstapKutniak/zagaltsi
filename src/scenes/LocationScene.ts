@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { setTouchUI } from './uiButton';
 import {
-  type LocationDoc, loadLocationsForGame, locationForNode, locationFit, type WorldNode,
+  type LocationDoc, loadLocationsForGame, locationForNode, type WorldNode,
 } from '../world/worldData';
 import {
   type Atmosphere, type LayerTint, type WeatherState, type LayerKey, type FogLayer as AtmFogLayer,
@@ -500,31 +500,25 @@ export class LocationScene extends Phaser.Scene {
     this.tweens.add({ targets: fogFront, tilePositionX: -512, duration: 34000, repeat: -1 });
   }
 
-  // Рендер LocationDoc: та сама система координат, що в Редакторі Локацій
-  // (центр полотна = світова (0,0); фон — верхнім лівим кутом у (0,0)).
+  // Рендер LocationDoc: ФІКСОВАНЕ вікно — світовий прямокутник 1280×576 з центром
+  // у (0,0) рендериться 1:1 у логічний кадр (те саме, що рамка 20:9 у редакторі).
   private async renderDoc(doc: LocationDoc): Promise<void> {
-    // Вписування — СПІЛЬНА математика з рамкою 20:9 Редактора Локацій (locationFit).
     const bgKey = 'locbg_' + doc.id;
-    let bgW = 0, bgH = 0;
-    if (doc.bg) {
-      if (!this.textures.exists(bgKey)) {
-        await new Promise<void>((res) => {
-          this.textures.once('addtexture-' + bgKey, () => res());
-          this.textures.addBase64(bgKey, doc.bg);
-        });
-      }
-      if (!this.scene.isActive()) return;
-      const src = this.textures.get(bgKey).getSourceImage() as HTMLImageElement;
-      bgW = src.width; bgH = src.height;
+    if (doc.bg && !this.textures.exists(bgKey)) {
+      await new Promise<void>((res) => {
+        this.textures.once('addtexture-' + bgKey, () => res());
+        this.textures.addBase64(bgKey, doc.bg);
+      });
     }
-    const fit = locationFit(doc, bgW, bgH, LOGICAL_W, LOGICAL_H);
-    const s = fit.s;
-    const ox = fit.ox + this.offX;
-    const oy = fit.oy + this.offY;
+    if (!this.scene.isActive()) return;
+    const s = 1;
+    const ox = LOGICAL_W / 2 + this.offX; // світова (0,0) → центр кадру
+    const oy = LOGICAL_H / 2 + this.offY;
 
     let bgImg: Phaser.GameObjects.Image | null = null;
     if (doc.bg) {
-      bgImg = this.add.image(ox, oy, bgKey).setOrigin(0, 0).setScale(s).setScrollFactor(0).setDepth(1);
+      // Фон центрований у світовій (0,0) — як у редакторі
+      bgImg = this.add.image(ox, oy, bgKey).setOrigin(0.5).setScrollFactor(0).setDepth(1);
     }
     // Розставлені будівлі/ассети
     const placedImgs: Phaser.GameObjects.Image[] = [];

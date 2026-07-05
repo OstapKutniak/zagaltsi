@@ -11,6 +11,8 @@ import { publishMyChar, publishMyEquip, loadMemberCharDoc, loadMemberEquip } fro
 import { cachedMembers, refreshMembers, type KhMember } from '../khorugva';
 import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 import { FxSprites } from '../level/fxSprites';
+import { SceneAtmosphere } from '../level/sceneAtmosphere';
+import { type Atmosphere, planLayerKey } from '../level/atmosphere';
 
 // Розділи, що морфляться в лоббі БЕЗ зміни сцени (персонаж лишається, змінюється
 // лише напис + панель праворуч). Мандри — окрема сцена (реальний перехід на карту).
@@ -63,7 +65,8 @@ interface MenuBtnDoc { id: string; label: string; x: number; y: number; size: nu
 // Розміщений PNG-об'єкт (декор) із Редактора Меню: плановість depth 1..7 (5 —
 // рівень персонажа/вогню; кнопки завжди зверху). anim/deform — на майбутнє.
 interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; rot?: number; flip?: boolean; depth: number; anim?: PlacedAnim; deform?: PlacedDeform }
-interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; objects?: MenuObjDoc[]; fx?: Partial<MenuFxData> }
+interface MenuCharDoc { id: string; x: number; y: number; scale: number; anim: string; flip?: boolean }
+interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; objects?: MenuObjDoc[]; fx?: Partial<MenuFxData>; chars?: MenuCharDoc[]; atmosphere?: Atmosphere }
 interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
 
 async function loadMenuDoc(): Promise<MenuDocData | null> {
@@ -114,6 +117,13 @@ export class MenuScene extends Phaser.Scene {
   private boltDur = 0.4;
   protected fx: MenuFxData = normFx(null); // ефекти сцени (перекриваються pg.fx з menu.json)
   private objFx = new FxSprites(); // анімація/деформація розміщених об'єктів (декору)
+  private menuDoc: MenuDocData | null = null; // збережений док — для морфу між розділами
+  private objGOs: Phaser.GameObjects.GameObject[] = []; // декор поточної сторінки/розділу
+  private sceneAtm: SceneAtmosphere | null = null; // атмосфера сторінки (погода/віньєтка/баланс)
+  private pageChars: MenuCharDoc[] | null = null; // персонажі сторінки (нема — легасі fx.char)
+  private extraChars: Array<{ char: CutoutCharacter; holder: Phaser.GameObjects.Container; facing: number }> = [];
+  private myCharDoc: CharDoc | null = null; // док мого персонажа (для додаткових копій)
+  private lobbyFacing = CHAR_FACING;
 
   // key параметризовано: сторінка «Інвентар» (InventoryScene) успадковує хатину.
   constructor(key = 'Menu') { super(key); }
@@ -132,6 +142,9 @@ export class MenuScene extends Phaser.Scene {
   protected pageTitle(): string { return 'ЖИТЛО'; }
   // Поза/позиція персонажа; feetY — поставити ступні на цю логічну висоту.
   protected charSetup(): { anim: string; x: number; y: number; scale: number; feetY?: number } {
+    // Персонаж №1 зі сторінки редактора (якщо задано) — позиція/масштаб/анімація.
+    const pc = this.pageChars?.[0];
+    if (pc) return { anim: pc.anim || 'sit', x: pc.x, y: pc.y, scale: pc.scale };
     const C = this.fx.char;
     return { anim: 'sit', x: C.x, y: C.y, scale: C.scale };
   }
@@ -168,6 +181,8 @@ export class MenuScene extends Phaser.Scene {
     // нового (персонаж зникав / не перевдягався у свіже спорядження).
     this.lobbyChar = null; this.charHolder = null; this.seatingChar = false; this.gather = [];
     this.objFx.clear(); // старі GameObjects знищені рестартом — скидаємо реєстр анімацій
+    this.objGOs = []; this.extraChars = []; this.sceneAtm = null;
+    this.pageChars = null; this.myCharDoc = null; this.lobbyFacing = CHAR_FACING;
     this.titleObj = this.add.text(LOGICAL_W / 2 + offX, 58 + offY, this.pageTitle(), {
       fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '50px', color: '#efe3c8',
     }).setOrigin(0.5, 0.5).setScrollFactor(0).setShadow(2, 3, '#000000', 7, false, true);
@@ -189,14 +204,25 @@ export class MenuScene extends Phaser.Scene {
     // кнопки/вогонь/шторм у новий кадр (guard isActive НЕ ловить це — сцену
     // переактивували під тим самим обʼєктом).
     if (gen !== this.buildGen || !this.scene.isActive()) return;
+    this.menuDoc = doc;
     const pg = doc?.pages.find((p) => p.id === (this.pageId ?? 'main')) ?? doc?.pages[0] ?? null;
     this.fx = normFx(pg?.fx ?? null);
+    this.pageChars = pg?.chars?.length ? pg.chars : null;
+    // Атмосфера сторінки: погода/віньєтка/баланс + тінти плановості; грім — під спалах.
+    try {
+      this.sceneAtm = new SceneAtmosphere(this, offX, offY, {
+        rainDepth: 7.6, lightningDepth: 9,
+        fogDepth: { sky: 0.5, clouds: 1.5, bg: 2.5, frontbg: 3.5, map: 5.5, foreground: 7.5 },
+        onLightning: () => triggerThunder(400 + Math.random() * 1600),
+      });
+      this.sceneAtm.setAtmosphere(pg?.atmosphere ?? null);
+    } catch { this.sceneAtm = null; }
     // Кожен ефект — окремо в try: збій на конкретному пристрої не має з'їдати КНОПКИ.
     try { if (this.fx.fire.on) this.buildFire(offX, offY); } catch { /* без вогню */ }
     try { this.buildStorm(offX, offY); } catch { /* без шторму */ }
     try { this.buildObjects(pg, offX, offY, gen); } catch { /* без декору */ }
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
-    try { if (this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
+    try { if (this.pageChars || this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
     try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
     // Deep-link: одразу морфимо в потрібний розділ (напр. join хоругви з бота).
     if (this.startPage && this.sys.settings.key === 'Menu') { const sp = this.startPage; this.startPage = null; this.morphTo(sp); }
@@ -272,12 +298,17 @@ export class MenuScene extends Phaser.Scene {
       const place = (): void => {
         if (gen !== this.buildGen || !this.scene.isActive() || !this.textures.exists(key)) return;
         // Image або deform-mesh + реєстрація анімацій — спільний хелпер FxSprites.
-        this.objFx.add(this, key, {
+        const depth = Math.max(1, Math.min(7, o.depth));
+        const go = this.objFx.add(this, key, {
           x: o.x + offX, y: o.y + offY, rot: o.rot ?? 0,
           scaleX: o.scale, scaleY: o.scale, flip: o.flip ? -1 : 1,
-          depth: Math.max(1, Math.min(7, o.depth)),
+          depth,
           anim: o.anim, deform: o.deform,
         });
+        this.objGOs.push(go);
+        // Тінт плановості з атмосфери сторінки (план 1..7 → шар)
+        const tint = this.sceneAtm?.tintFor(planLayerKey(depth));
+        if (tint != null && go instanceof Phaser.GameObjects.Image) go.setTint(tint);
       };
       if (this.textures.exists(key)) place();
       else { this.textures.once('addtexture-' + key, place); this.textures.addBase64(key, o.url); }
@@ -355,6 +386,9 @@ export class MenuScene extends Phaser.Scene {
     // показуємо ВСІХ побратимів; на інших сторінках — навпаки.
     if (page === 'khorugva') this.buildGathering(offX, offY);
     else this.clearGathering();
+
+    // Декор/атмосфера/персонажі цього розділу зі сторінки Редактора Меню.
+    try { this.applyPageDecor(page); } catch { /* без декору розділу */ }
 
     this.curPage = page;
     // Таймер-подія (time.delayedCall) у цій сцені не спрацьовує надійно — тому
@@ -515,7 +549,50 @@ export class MenuScene extends Phaser.Scene {
     if (st.feetY != null) { char.tick(0, CHAR_FACING); holder.y = st.feetY + offY - char.feetOffset() * st.scale; }
     this.lobbyChar = char;
     this.charHolder = holder;
+    this.myCharDoc = doc;
+    this.lobbyFacing = this.pageChars?.[0]?.flip ? 1 : CHAR_FACING;
     this.onCharReady(char);
+    // Додаткові персонажі сторінки (2..5) — копії мого героя з власними позиціями/анімаціями.
+    this.rebuildExtraChars(offX, offY);
+  }
+
+  // Пере-спавн додаткових персонажів сторінки (chars[1..]).
+  private rebuildExtraChars(offX: number, offY: number): void {
+    for (const ec of this.extraChars) ec.holder.destroy(true);
+    this.extraChars = [];
+    const list = this.pageChars;
+    const doc = this.myCharDoc;
+    if (!list || list.length < 2 || !doc) return;
+    list.slice(1).forEach((c, i) => {
+      void CutoutCharacter.load(this, doc, `pgch${i}_${c.id}_`).then((char) => {
+        if (!char || !this.scene.isActive()) { char?.destroy(); return; }
+        char.setAnim(c.anim || 'idle');
+        const holder = this.add.container(c.x + offX, c.y + offY, [char]);
+        holder.setScrollFactor(0).setScale(c.scale).setDepth(5);
+        this.extraChars.push({ char, holder, facing: c.flip ? 1 : -1 });
+      }).catch(() => { /* без копії */ });
+    });
+  }
+
+  // Декор/атмосфера/персонажі ЦІЛЬОВОГО розділу при морфі (сторінка з тим самим id).
+  private applyPageDecor(pageKey: PageKey): void {
+    const id = pageKey === 'home' ? 'main' : pageKey;
+    const pg = this.menuDoc?.pages.find((p) => p.id === id) ?? null;
+    const offX = LOGICAL_W * (RENDER_SCALE - 1) / 2;
+    const offY = LOGICAL_H * (RENDER_SCALE - 1) / 2;
+    for (const go of this.objGOs) go.destroy();
+    this.objGOs = [];
+    this.objFx.clear();
+    this.sceneAtm?.setAtmosphere(pg?.atmosphere ?? null);
+    try { this.buildObjects(pg, offX, offY, this.buildGen); } catch { /* без декору */ }
+    this.pageChars = pg?.chars?.length ? pg.chars : null;
+    const pc = this.pageChars?.[0];
+    if (pc && this.charHolder && this.lobbyChar) {
+      this.charHolder.setPosition(pc.x + offX, pc.y + offY).setScale(pc.scale);
+      this.lobbyChar.setAnim(pc.anim || 'sit');
+      this.lobbyFacing = pc.flip ? 1 : CHAR_FACING;
+    }
+    this.rebuildExtraChars(offX, offY);
   }
 
   // ── Збір побратимів біля вогнища (сторінка Хоругва) ─────────────────────────
@@ -616,7 +693,9 @@ export class MenuScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     this.objFx.tick(deltaMs / 1000); // анімація/деформація декору з Редактора Меню
-    this.lobbyChar?.tick(deltaMs / 1000, CHAR_FACING);
+    this.sceneAtm?.tick(Math.min(deltaMs / 1000, 0.1)); // атмосфера сторінки
+    for (const ec of this.extraChars) ec.char.tick(deltaMs / 1000, ec.facing);
+    this.lobbyChar?.tick(deltaMs / 1000, this.lobbyFacing);
     for (const g of this.gather) g.char.tick(deltaMs / 1000, g.facing); // збір біля вогнища
     // Раз на ~0.8с переперевіряємо склад збору (хтось приєднався/вийшов).
     if (this.regather) { this.regatherAcc += deltaMs; if (this.regatherAcc > 800) { this.regatherAcc = 0; this.regather(); } }

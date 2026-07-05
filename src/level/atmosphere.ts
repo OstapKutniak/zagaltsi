@@ -19,6 +19,11 @@ export const BLEND_LABELS: Record<BlendMode, string> = {
 export interface LayerTint { color: string; alpha: number; blend: BlendMode; }
 export type TodLayers = Partial<Record<LayerKey, LayerTint>>;
 
+// 7 іменованих планів редакторів Меню/Локацій → шари атмосфери (тінти/туман).
+// План 1..7: Небо, Хмари, Найдальший, Далекий, Середній, Близький, Найближчий.
+export const PLAN_LAYER_KEYS: LayerKey[] = ['sky', 'clouds', 'bg', 'frontbg', 'map', 'foreground', 'foreground'];
+export const planLayerKey = (plan: number): LayerKey => PLAN_LAYER_KEYS[Math.max(1, Math.min(7, plan)) - 1];
+
 // ── Три незалежні секції атмосфери ──────────────────────────────────────────
 
 export interface SkyPhase     { durationSec: number; skyHex: string; groundHex: string }
