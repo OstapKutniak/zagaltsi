@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 16; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 17; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -24,6 +24,7 @@ const CATS_PATH = 'shopping/categories';
 const PRODS_PATH = 'shopping/products';
 const LIST_PATH = 'shopping/list';
 const ARCH_PATH = 'shopping/archive';
+const STORES_PATH = 'shopping/stores'; // обрані філії для порівняння цін (спільні на два телефони)
 
 // ── ICONS (inline SVG, viewBox 0 0 24 24) ───────────────────
 const ICONS = {
@@ -230,6 +231,7 @@ function subscribe() {
     scheduleRender();
   });
   onValue(ref(db, ARCH_PATH), s => { archMap = s.val() || {}; scheduleRender(); });
+  onValue(ref(db, STORES_PATH), s => { storeSel = s.val() || {}; renderStoresSheet(); ppFetchKey = ''; refreshPrices(); });
   // індикатор з'єднання з базою (зелена/червона крапка в налаштуваннях)
   onValue(ref(db, '.info/connected'), s => {
     const ok = !!s.val();
@@ -562,6 +564,28 @@ function openItemSheet(id) {
   $('item-variant').value = it.variant || '';
   $('item-place').value = it.place || '';
   $('item-overlay').classList.add('open');
+  renderVariantSuggest(it.name);
+}
+// підказки реальних варіантів товару (з Сільпо) — тап підставляє в «Яке саме»
+async function renderVariantSuggest(name) {
+  const box = $('item-suggest');
+  if (!box) return;
+  box.innerHTML = '';
+  const s = PRICE_STORES.find(x => x.key === 'silpo');
+  try {
+    const r = await fetch(`${WORKER_PRICE}/suggest?chain=silpo&branch=${encodeURIComponent(branchOf(s))}&q=${encodeURIComponent(name)}`);
+    const names = await r.json();
+    if (!Array.isArray(names) || !itemSheetId) return;
+    const base = name.trim().toLowerCase().slice(0, 5);
+    box.innerHTML = names.slice(0, 8).map(full => {
+      const parts = String(full).split(/\s+/);
+      // прибрати провідне узагальнене слово: «Молоко Яготинське…» → «Яготинське…»
+      const v = (parts[0] && parts[0].toLowerCase().slice(0, 5) === base) ? parts.slice(1).join(' ') : full;
+      return `<button class="vsug" data-v="${esc(v)}">${esc(v)}</button>`;
+    }).join('');
+    box.querySelectorAll('.vsug').forEach(b =>
+      b.addEventListener('click', () => { $('item-variant').value = b.dataset.v; }));
+  } catch {}
 }
 function saveItemSheet() {
   if (!itemSheetId) return;
@@ -750,6 +774,7 @@ let ppSel = 'avg';
 let ppData = {};       // storeKey → { nameLower → {price,title,oldPrice} | null }
 let ppFetchKey = '';   // хеш назв, для яких уже тягнули ціни
 let ppScrollTimer = null;
+let storeSel = {};     // chain → {id,name,city,address}, обране в налаштуваннях (з Firebase)
 
 // Зациклений барабан: список магазинів рендериться PP_REP копій поспіль,
 // стартує в середній копії; докрутившись до краю — безшовно телепортується
@@ -796,14 +821,23 @@ function onPpScroll() {
     }
   }, 90);
 }
-// назви активних (не куплених) позицій — унікальні
-function activeNames() { return [...new Set(Object.values(listMap).filter(it => !it.done).map(it => it.name))]; }
+// запит ціни для позиції: уточнення (variant) звужує пошук до конкретного товару
+function itemQuery(it) {
+  const v = (it.variant || '').trim();
+  return v ? `${it.name} ${v}` : it.name;
+}
+const activeItems = () => Object.values(listMap).filter(it => !it.done);
+// філія магазину: обрана в налаштуваннях або дефолтна
+const branchOf = s => (storeSel[s.key] && storeSel[s.key].id) || s.branch;
 
 async function refreshPrices() {
   if (state.tab !== 'list') return;
-  const names = activeNames();
-  const key = names.map(n => n.toLowerCase()).sort().join('|');
-  if (!names.length) { ppFetchKey = ''; renderPriceTotals(); return; }
+  const items = activeItems();
+  const queries = [...new Set(items.map(itemQuery))];
+  // ключ враховує і запити, і обрані філії — зміна магазину змушує перезапит
+  const key = queries.map(n => n.toLowerCase()).sort().join('|') + '@'
+    + PRICE_STORES.filter(s => s.chain).map(branchOf).join(',');
+  if (!queries.length) { ppFetchKey = ''; renderPriceTotals(); return; }
   if (key === ppFetchKey) { renderPriceTotals(); return; } // дані вже є — лише перемалювати
   ppFetchKey = key;
   $('pp-amount').classList.add('load');
@@ -811,7 +845,7 @@ async function refreshPrices() {
     try {
       const r = await fetch(`${WORKER_PRICE}/prices`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chain: s.chain, branch: s.branch, queries: names }),
+        body: JSON.stringify({ chain: s.chain, branch: branchOf(s), queries }),
       });
       const j = await r.json();
       const map = {};
@@ -824,22 +858,22 @@ async function refreshPrices() {
   renderPriceTotals();
 }
 
-function priceFor(storeKey, nameLower) {
+function priceFor(storeKey, qLower) {
   if (storeKey === 'avg') {
     const vals = PRICE_STORES.filter(s => s.chain)
-      .map(s => ppData[s.key] && ppData[s.key][nameLower]).filter(v => v && v.price != null).map(v => v.price);
+      .map(s => ppData[s.key] && ppData[s.key][qLower]).filter(v => v && v.price != null).map(v => v.price);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }
-  const v = ppData[storeKey] && ppData[storeKey][nameLower];
+  const v = ppData[storeKey] && ppData[storeKey][qLower];
   return v && v.price != null ? v.price : null;
 }
 
 function renderPriceTotals() {
-  const names = activeNames();
+  const items = activeItems();
   let total = 0, missing = 0;
-  names.forEach(n => { const p = priceFor(ppSel, n.toLowerCase()); if (p == null) missing++; else total += p; });
+  items.forEach(it => { const p = priceFor(ppSel, itemQuery(it).toLowerCase()); if (p == null) missing++; else total += p; });
   const amt = $('pp-amount'), note = $('pp-note');
-  if (!names.length) { amt.textContent = '≈ —'; note.textContent = ''; }
+  if (!items.length) { amt.textContent = '≈ —'; note.textContent = ''; }
   else {
     amt.textContent = `≈ ${Math.round(total)} ₴`;
     note.textContent = missing ? `нема ${missing} ${plural(missing, 'позиції', 'позиції', 'позицій')}` : '';
@@ -850,9 +884,67 @@ function renderPriceTotals() {
 function applyUnavail() {
   document.querySelectorAll('#list-wrap .litem').forEach(row => {
     const it = listMap[row.dataset.id];
-    const bad = it && !it.done && ppSel !== 'avg' && priceFor(ppSel, it.name.toLowerCase()) == null;
+    const bad = it && !it.done && ppSel !== 'avg' && priceFor(ppSel, itemQuery(it).toLowerCase()) == null;
     row.classList.toggle('unavail', !!bad);
   });
+}
+
+// ── ВИБІР МАГАЗИНІВ (налаштування → «Мої магазини») ────────
+let storePickChain = null, storePickList = [];
+function openStoresSheet() { renderStoresSheet(); $('stores-overlay').classList.add('open'); }
+function renderStoresSheet() {
+  const el = $('stores-list');
+  if (!el) return;
+  el.innerHTML = PRICE_STORES.filter(s => s.chain).map(s => {
+    const cur = storeSel[s.key];
+    const sub = cur ? esc([cur.city, cur.address].filter(Boolean).join(', ') || cur.name) : 'За замовчуванням';
+    return `<div class="sheet-item" data-key="${s.key}">
+      <div class="sheet-item-ic" style="--c:${s.color}">${ic('cart')}</div>
+      <div class="si-name">${esc(s.name)}<div class="si-sub">${sub}</div></div>
+      <span class="si-arrow">›</span>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.sheet-item[data-key]').forEach(row =>
+    row.addEventListener('click', () => openStorePicker(row.dataset.key)));
+}
+async function openStorePicker(key) {
+  const s = PRICE_STORES.find(x => x.key === key);
+  storePickChain = s;
+  $('storepick-title').textContent = s.name;
+  $('storepick-search').value = '';
+  $('storepick-list').innerHTML = '<div class="empty" style="padding:24px">Завантаження…</div>';
+  $('storepick-overlay').classList.add('open');
+  try {
+    const r = await fetch(`${WORKER_PRICE}/stores?chain=${s.chain}`);
+    const d = await r.json();
+    storePickList = Array.isArray(d) ? d : [];
+  } catch { storePickList = []; }
+  renderStorePickList();
+}
+function renderStorePickList() {
+  const s = storePickChain;
+  if (!s) return;
+  const q = $('storepick-search').value.trim().toLowerCase();
+  let list = storePickList;
+  if (q) list = list.filter(x => `${x.city || ''} ${x.address || ''} ${x.name || ''}`.toLowerCase().includes(q));
+  list = list.slice(0, 80);
+  const cur = storeSel[s.key];
+  $('storepick-list').innerHTML = list.map(x => {
+    const label = esc([x.city, x.address].filter(Boolean).join(', ') || x.name);
+    const sel = cur && String(cur.id) === String(x.id);
+    return `<div class="sheet-item ${sel ? 'sel' : ''}" data-id="${esc(String(x.id))}">
+      <div class="si-name">${label}</div>
+      ${sel ? '<span class="si-arrow" style="color:var(--active-ink)">✓</span>' : '<span class="si-arrow">›</span>'}
+    </div>`;
+  }).join('') || '<div class="empty" style="padding:24px">Нічого не знайдено</div>';
+  $('storepick-list').querySelectorAll('.sheet-item[data-id]').forEach(row =>
+    row.addEventListener('click', () => {
+      const x = storePickList.find(y => String(y.id) === row.dataset.id);
+      if (x) set(ref(db, `${STORES_PATH}/${s.key}`),
+        { id: String(x.id), name: x.name || s.name, city: x.city || '', address: x.address || '' }).catch(() => {});
+      $('storepick-overlay').classList.remove('open');
+      toast(`${s.name}: ${x ? (x.city || x.name) : ''}`);
+    }));
 }
 
 // ── ADD VIEW (середня сторінка Список | + | Архів) ─────────
@@ -1087,6 +1179,8 @@ function bindEvents() {
   $('btn-settings').addEventListener('click', () => { renderNotifyRow(); $('settings-overlay').classList.add('open'); });
   $('btn-notify').addEventListener('click', enableNotifications);
   $('btn-test-push').addEventListener('click', testPush);
+  $('btn-stores').addEventListener('click', () => { $('settings-overlay').classList.remove('open'); openStoresSheet(); });
+  $('storepick-search').addEventListener('input', renderStorePickList);
   $('btn-clear-done').addEventListener('click', () => {
     const upd = {};
     Object.entries(listMap).forEach(([id, it]) => { if (it.done) upd[id] = null; });

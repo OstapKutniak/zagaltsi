@@ -41,6 +41,7 @@ export default {
     const url = new URL(req.url);
     try {
       if (url.pathname === '/stores') return await handleStores(url);
+      if (url.pathname === '/suggest') return await handleSuggest(url);
       if (url.pathname === '/prices') return await handlePrices(req, ctx);
       return json({ ok: true, service: 'shopping-price', chains: ['silpo', 'fora', ...ZAKAZ_CHAINS] });
     } catch (e) {
@@ -76,6 +77,22 @@ async function handleStores(url) {
     return json([{ id: '148', name: 'Фора, Київ', city: 'Київ', address: '' }]);
   }
   return json({ error: 'unknown chain' }, 400);
+}
+
+// ── ПІДКАЗКИ ВАРІАНТІВ (реальні назви товарів для шторки «Яке саме») ─────
+// Джерело — Сільпо (назви українською, багатий каталог).
+async function handleSuggest(url) {
+  const branch = url.searchParams.get('branch') || '';
+  const q = url.searchParams.get('q') || '';
+  if (!branch || !q) return json([]);
+  const u = `https://sf-ecom-api.silpo.ua/v1/uk/branches/${branch}/products`
+    + `?limit=20&offset=0&deliveryType=DeliveryHome&inStock=true&search=${encodeURIComponent(q)}`;
+  const r = await fetch(u, { headers: { 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'uk' } });
+  if (!r.ok) return json([]);
+  const d = await r.json();
+  const w = q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5);
+  const names = (d.items || []).filter(i => (i.title || '').toLowerCase().includes(w)).map(i => i.title);
+  return json([...new Set(names)].slice(0, 10));
 }
 
 // ── ЦІНИ ПО СПИСКУ ТОВАРІВ ДЛЯ ОДНОГО МАГАЗИНУ ──────────────────────────

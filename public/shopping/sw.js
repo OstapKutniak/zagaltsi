@@ -1,4 +1,4 @@
-const CACHE = 'shop-v16';
+const CACHE = 'shop-v17';
 const BASE = '/zagaltsi/shopping';
 const ASSETS = [BASE+'/', BASE+'/index.html', BASE+'/style.css', BASE+'/app.js', BASE+'/manifest.json'];
 

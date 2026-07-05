@@ -135,6 +135,7 @@
       <div class="sheet-title" id="item-title">Продукт</div>
       <div class="form-sub" id="item-which">Яке саме</div>
       <input class="sheet-search" id="item-variant" type="text">
+      <div class="vsug-row" id="item-suggest"></div>
       <div class="form-sub">Де купити</div>
       <input class="sheet-search" id="item-place" type="text">
       <div class="form-foot">
@@ -180,6 +181,10 @@
         <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg></span>
         <div class="r-tx">Перевірити пуш<div class="r-sub" id="testpush-sub">Надішле тестове сповіщення на інший телефон</div></div>
       </div>
+      <div class="settings-row" id="btn-stores">
+        <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M4 9h16l-1 11H5z"/><path d="M4 9l2-5h12l2 5"/><path d="M9 13h6"/></svg></span>
+        <div class="r-tx">Мої магазини<div class="r-sub" id="stores-sub">Обери свої точки для порівняння цін</div></div>
+      </div>
       <div class="settings-row" id="btn-clear-done">
         <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
         <div class="r-tx">Прибрати куплене<div class="r-sub">Сховати позначені зі списку зараз (в архіві залишаться)</div></div>
@@ -189,6 +194,25 @@
         <div class="r-tx">Синхронізація<div class="r-sub" id="sync-sub">Firebase · спільна база на два телефони</div></div>
         <span class="dot" id="sync-dot"></span>
       </div>
+    </div>
+  </div>
+
+  <!-- STORES: список мереж -->
+  <div class="sheet-overlay" id="stores-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Мої магазини</div>
+      <div class="sheet-list" id="stores-list"></div>
+    </div>
+  </div>
+
+  <!-- STORE PICKER: вибір філії мережі -->
+  <div class="sheet-overlay" id="storepick-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="storepick-title">Магазин</div>
+      <input class="sheet-search" id="storepick-search" type="text" placeholder="Пошук за містом чи адресою…">
+      <div class="sheet-list" id="storepick-list"></div>
     </div>
   </div>
 
