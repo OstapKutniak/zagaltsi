@@ -106,7 +106,7 @@ export function initMenuEditor(prefix: string): void {
     cur: 0,
     sel: null as string | null,
     view: 'page' as 'page' | 'map',
-    preview: false, // чисте прев'ю 20:9 (без рамок/підписів/гізмо редактора) — як бачить гравець
+    preview: true, // чисте прев'ю 20:9 (без рамок/підписів/гізмо редактора) — УВІМК за замовчуванням: одразу видно фактичний кадр гри; вимкни кнопкою, щоб редагувати
     bgImgs: new Map<string, HTMLImageElement>(), // pageId → фон
     assets: [] as Array<{ id: string; name: string; url: string }>,
     drag: null as null | { id: string; ox: number; oy: number },
@@ -736,6 +736,9 @@ export function initMenuEditor(prefix: string): void {
       : 'клік — вибрати кнопку · тягни — перемістити · подвійний клік — текст · Del — видалити';
     renderProps(); draw();
   });
+  // Прев'ю 20:9 увімкнене за замовчуванням — одразу видно фактичний кадр гри.
+  ($('previewBtn') as HTMLButtonElement | null)?.classList.toggle('on', state.preview);
+  { const hint = $('stageHint'); if (hint && state.preview) hint.textContent = 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Прев\'ю 20:9», щоб редагувати'; }
   $('bgBtn')?.addEventListener('click', () => ($('bgInput') as HTMLInputElement)?.click());
   ($('bgInput') as HTMLInputElement | null)?.addEventListener('change', function () {
     const f = this.files?.[0]; if (!f) return;
