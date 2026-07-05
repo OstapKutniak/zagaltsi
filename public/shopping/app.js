@@ -14,17 +14,23 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 17; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 18; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+// ── ПРОСТІР (space) ─────────────────────────────────────────
+// Один код обслуговує кілька родин: /shopping/ — наш простір,
+// /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
+// своя PWA і свій service worker; index/sw для батьків генеруються
+// на білді з основних (див. vite.config.ts → shoppingSpacesPlugin).
+const SPACE = location.pathname.includes('shopping-parents') ? 'shopping-parents' : 'shopping';
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
-const PUSH_PATH = 'shopping/push';
+const PUSH_PATH = `${SPACE}/push`;
 
-const CATS_PATH = 'shopping/categories';
-const PRODS_PATH = 'shopping/products';
-const LIST_PATH = 'shopping/list';
-const ARCH_PATH = 'shopping/archive';
-const STORES_PATH = 'shopping/stores'; // обрані філії для порівняння цін (спільні на два телефони)
+const CATS_PATH = `${SPACE}/categories`;
+const PRODS_PATH = `${SPACE}/products`;
+const LIST_PATH = `${SPACE}/list`;
+const ARCH_PATH = `${SPACE}/archive`;
+const STORES_PATH = `${SPACE}/stores`; // обрані філії для порівняння цін (спільні на два телефони)
 
 // ── ICONS (inline SVG, viewBox 0 0 24 24) ───────────────────
 const ICONS = {
@@ -173,7 +179,7 @@ const catOf = item => cats[item.cat] || { name: 'Інше', color: '#9E9E9E', ic
 let swReg = null;
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
-    navigator.serviceWorker.register('/zagaltsi/shopping/sw.js', { scope: '/zagaltsi/shopping/' })
+    navigator.serviceWorker.register(`/zagaltsi/${SPACE}/sw.js`, { scope: `/zagaltsi/${SPACE}/` })
       .then(r => { swReg = r; refreshPushSub(); }).catch(() => {});
   // iOS тримає PWA замороженим — при поверненні у форграунд перевіряємо оновлення SW
   document.addEventListener('visibilitychange', () => {
@@ -202,14 +208,14 @@ async function seedIfEmpty() {
     DEFAULT_PRODS.forEach(([cat, name, icon], i) => {
       prodObj[`p${String(i).padStart(3,'0')}`] = { name, icon, cat, order: i };
     });
-    await update(ref(db, 'shopping'), { categories: DEFAULT_CATS, products: prodObj });
+    await update(ref(db, SPACE), { categories: DEFAULT_CATS, products: prodObj });
   } catch (e) { console.warn('seed failed', e); }
 }
 
 // ── SYNC ───────────────────────────────────────────────────
 function subscribe() {
-  // автооновлення: хтось із новішою версією підняв shopping/meta/version → старі клієнти перезавантажуються
-  onValue(ref(db, 'shopping/meta/version'), s => {
+  // автооновлення: хтось із новішою версією підняв {space}/meta/version → старі клієнти перезавантажуються
+  onValue(ref(db, `${SPACE}/meta/version`), s => {
     const v = s.val() || 0;
     if (v > APP_VERSION) {
       const last = +sessionStorage.getItem('verReload') || 0;
@@ -219,7 +225,7 @@ function subscribe() {
         setTimeout(() => location.reload(), 400);
       }
     } else if (v < APP_VERSION) {
-      set(ref(db, 'shopping/meta/version'), APP_VERSION).catch(() => {});
+      set(ref(db, `${SPACE}/meta/version`), APP_VERSION).catch(() => {});
     }
   });
   onValue(ref(db, CATS_PATH), s => { cats = s.val() || {}; scheduleRender(); });
@@ -337,7 +343,7 @@ async function testPush() {
   try {
     const res = await fetch(WORKER_URL, {
       method: 'POST',
-      body: JSON.stringify({ event: 'test', names: ['Перевірка зв’язку — все працює'], from: deviceId() }),
+      body: JSON.stringify({ event: 'test', names: ['Перевірка зв’язку — все працює'], from: deviceId(), space: SPACE }),
     });
     const j = await res.json();
     if (j.errors?.length) sub.textContent = ('Помилка: ' + j.errors[0]).slice(0, 140);
@@ -367,7 +373,7 @@ function flushNotify() {
   notifyQueue = { added: [], bought: [] };
   ['added', 'bought'].forEach(kind => {
     if (!q[kind].length || !WORKER_URL) return;
-    const payload = JSON.stringify({ event: kind, names: q[kind], from: deviceId() });
+    const payload = JSON.stringify({ event: kind, names: q[kind], from: deviceId(), space: SPACE });
     if (navigator.sendBeacon) navigator.sendBeacon(WORKER_URL, payload);
     else fetch(WORKER_URL, { method: 'POST', body: payload }).catch(() => {});
   });

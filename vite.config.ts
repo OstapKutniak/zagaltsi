@@ -44,11 +44,55 @@ function publishPlugin(): Plugin {
   };
 }
 
+// Простори SList: /shopping-parents/ — той самий додаток, але окрема PWA й
+// окрема гілка в Firebase (для батьків). index.html і sw.js НЕ дублюються в
+// репо — генеруються з public/shopping/ (посилання на style/app/icons
+// переписуються на ../shopping/). Ручний у репо лише manifest.json.
+function shoppingSpacesPlugin(): Plugin {
+  const SPACES = ['shopping-parents'];
+  const rewriteIndex = (html: string) => html
+    .replace('href="style.css"', 'href="../shopping/style.css"')
+    .replace('src="app.js"', 'src="../shopping/app.js"')
+    .replace('href="icons/icon-192.png"', 'href="../shopping/icons/icon-192.png"');
+  const srcDir = path.resolve(process.cwd(), 'public/shopping');
+  return {
+    name: 'shopping-spaces',
+    // dev: віддаємо згенеровані файли, щоб простір можна було перевірити локально
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const m = (req.url || '').match(/^\/(shopping-[a-z]+)\/(index\.html)?(\?.*)?$|^\/(shopping-[a-z]+)\/(sw\.js)(\?.*)?$/);
+        if (!m) { next(); return; }
+        const space = m[1] || m[4];
+        if (!SPACES.includes(space)) { next(); return; }
+        if (m[5] === 'sw.js') {
+          res.setHeader('Content-Type', 'text/javascript');
+          res.end(fs.readFileSync(path.join(srcDir, 'sw.js'), 'utf8'));
+        } else {
+          res.setHeader('Content-Type', 'text/html');
+          res.end(rewriteIndex(fs.readFileSync(path.join(srcDir, 'index.html'), 'utf8')));
+        }
+      });
+    },
+    // build: кладемо копії в dist/<простір>/
+    closeBundle() {
+      const dist = path.resolve(process.cwd(), 'dist');
+      if (!fs.existsSync(path.join(dist, 'shopping'))) return;
+      for (const space of SPACES) {
+        const dir = path.join(dist, space);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'index.html'),
+          rewriteIndex(fs.readFileSync(path.join(dist, 'shopping/index.html'), 'utf8')));
+        fs.copyFileSync(path.join(dist, 'shopping/sw.js'), path.join(dir, 'sw.js'));
+      }
+    },
+  };
+}
+
 // base: './' — щоб усе працювало з будь-якого підшляху на хостингу/в Telegram.
 export default defineConfig({
   base: './',
   server: { host: true },
-  plugins: [publishPlugin()],
+  plugins: [publishPlugin(), shoppingSpacesPlugin()],
   build: {
     rollupOptions: {
       input: {

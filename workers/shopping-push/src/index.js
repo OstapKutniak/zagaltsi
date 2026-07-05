@@ -1,7 +1,8 @@
 // shopping-push — «поштар» пуш-сповіщень для додатка «Покупки».
-// Приймає POST {event:'added'|'bought', names:[...], from:'<deviceId>'},
-// читає підписки з Firebase (shopping/push) і шле Web Push (RFC 8291/8292)
+// Приймає POST {event:'added'|'bought', names:[...], from:'<deviceId>', space?},
+// читає підписки з Firebase ({space}/push) і шле Web Push (RFC 8291/8292)
 // на всі пристрої, КРІМ відправника. Мертві підписки прибирає з бази.
+// space — простір (родина): 'shopping' (дефолт) або 'shopping-parents'.
 
 const te = new TextEncoder();
 
@@ -109,13 +110,14 @@ export default {
     const { event, names, from } = data || {};
     if (!Array.isArray(names) || !names.length || !['added', 'bought', 'test'].includes(event))
       return json({ error: 'bad payload' }, 400);
+    const space = ['shopping', 'shopping-parents'].includes(data.space) ? data.space : 'shopping';
 
-    const subsRes = await fetch(`${env.DB_URL}/shopping/push.json`);
+    const subsRes = await fetch(`${env.DB_URL}/${space}/push.json`);
     const subs = (await subsRes.json()) || {};
     const msg = event === 'test'
       ? { title: 'Покупки', body: names.join(', ') }
       : buildMessage(event, names);
-    const payload = JSON.stringify({ ...msg, url: '/zagaltsi/shopping/' });
+    const payload = JSON.stringify({ ...msg, url: `/zagaltsi/${space}/` });
 
     let sent = 0, dead = 0, errors = [];
     await Promise.all(Object.entries(subs).map(async ([deviceId, rec]) => {
@@ -126,7 +128,7 @@ export default {
         const res = await sendPush(sub, payload, env);
         if (res.status === 404 || res.status === 410) {
           dead++;
-          await fetch(`${env.DB_URL}/shopping/push/${deviceId}.json`, { method: 'DELETE' });
+          await fetch(`${env.DB_URL}/${space}/push/${deviceId}.json`, { method: 'DELETE' });
         } else if (res.ok || res.status === 201) sent++;
         else errors.push(`${deviceId}: ${res.status} ${(await res.text()).slice(0, 120)}`);
       } catch (e) { errors.push(`${deviceId}: ${e.message}`); }
