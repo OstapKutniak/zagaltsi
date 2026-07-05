@@ -42,7 +42,7 @@ export default {
     try {
       if (url.pathname === '/stores') return await handleStores(url);
       if (url.pathname === '/prices') return await handlePrices(req, ctx);
-      return json({ ok: true, service: 'shopping-price', chains: ['silpo', ...ZAKAZ_CHAINS] });
+      return json({ ok: true, service: 'shopping-price', chains: ['silpo', 'fora', ...ZAKAZ_CHAINS] });
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }
@@ -70,6 +70,11 @@ async function handleStores(url) {
       address: s.address ? `${s.address.street || ''} ${s.address.building || ''}`.trim() : '',
     })));
   }
+  if (chain === 'fora') {
+    // список філій Фори через API не дається (геокод-флоу); ціни онлайн єдині
+    // по місту, тож віддаємо відому робочу київську філію
+    return json([{ id: '148', name: 'Фора, Київ', city: 'Київ', address: '' }]);
+  }
   return json({ error: 'unknown chain' }, 400);
 }
 
@@ -82,6 +87,7 @@ async function handlePrices(req, ctx) {
   if (!branch || !queries.length) return json({ error: 'need branch and queries' }, 400);
 
   const lookup = chain === 'silpo' ? silpoPrice
+    : chain === 'fora' ? foraPrice
     : ZAKAZ_CHAINS.has(chain) ? zakazPrice
     : null;
   if (!lookup) return json({ error: 'unknown chain' }, 400);
@@ -159,6 +165,24 @@ async function zakazPrice(branch, q) {
     const disc = i.discount && i.discount.status ? num(i.discount.old_price) : null;
     return { title: i.title, price: p == null ? null : p / 100, oldPrice: disc == null ? null : disc / 100 };
   });
+  return represent(cands);
+}
+
+// Фора (Fozzy, як Сільпо): POST-RPC EcomCatalogGlobal, назви українською,
+// ціна в грн, залишок у storeQuantity, oldPrice для акцій. Фільтр за назвою +
+// медіана. merchantId 4 / businessId 3 / deliveryType 2 (доставка) — з бандла.
+async function foraPrice(branch, q) {
+  const r = await fetch('https://api.catalog.ecom.fora.ua/api/2.0/exec/EcomCatalogGlobal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': UA, Origin: 'https://fora.ua', Referer: 'https://fora.ua/' },
+    body: JSON.stringify({ method: 'GetSimpleCatalogItems', data: { merchantId: 4, deliveryType: 2, filialId: +branch, customFilter: q, From: 1, To: 30 } }),
+  });
+  if (!r.ok) return null;
+  const d = await r.json();
+  const w = q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5);
+  const cands = (d.items || [])
+    .filter(i => (i.storeQuantity ?? 1) > 0 && (i.name || '').toLowerCase().includes(w))
+    .map(i => ({ title: i.name, price: num(i.price), oldPrice: num(i.oldPrice) }));
   return represent(cands);
 }
 

@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 15; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 16; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── PUSH-сповіщення ─────────────────────────────────────────
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // Cloudflare Worker (поштар пушів)
 const VAPID_PUBLIC = 'BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg';
@@ -742,6 +742,7 @@ const PP_ITEM = 120; // ширина рядка барабана, синхрон
 const PRICE_STORES = [
   { key: 'avg',    name: 'Середня', color: '#8a8a90' },
   { key: 'silpo',  name: 'Сільпо',  color: '#2D9CDB', chain: 'silpo',  branch: '1edb6b1b-2d1b-66f4-9b4b-eb10f39e9fe0' },
+  { key: 'fora',   name: 'Фора',    color: '#27AE60', chain: 'fora',   branch: '148' },
   { key: 'novus',  name: 'Новус',   color: '#EB5C8B', chain: 'novus',  branch: '48201070' },
   { key: 'auchan', name: 'Ашан',    color: '#F2994A', chain: 'auchan', branch: '48246414' },
 ];
