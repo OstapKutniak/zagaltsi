@@ -177,11 +177,35 @@ export function initMenuEditor(prefix: string): void {
     kbOrig: null as null | { x: number; y: number; rot: number; scale: number; size: number },
     // Прев'ю атмосфери (кнопкою можна вимкнути)
     showAtm: true,
+    // Інструмент розміщення: ЛКМ по картці бібліотеки → білий силует за курсором
+    pendingPlace: null as null | { url: string; name: string; img: HTMLImageElement; ghost: HTMLCanvasElement | null },
   };
   const page = (): MenuPage => state.doc.pages[state.cur];
   const objs = (): MenuObject[] => (page().objects ??= []);
   const chars = (): MenuChar[] => (page().chars ??= []);
   const lastMouse = { x: 0, y: 0 }; // остання позиція миші на канвасі (для G/R/S)
+
+  // ── Інструмент розміщення (як у Локаціях/Мандрах): силует → клік ставить ────
+  function whiteSilhouette(img: HTMLImageElement): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, img.naturalWidth); c.height = Math.max(1, img.naturalHeight);
+    const x = c.getContext('2d')!;
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-atop';
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    x.fillRect(0, 0, c.width, c.height);
+    return c;
+  }
+  function startPending(url: string, name: string): void {
+    const img = new Image(); img.onload = () => draw(); img.src = url;
+    state.pendingPlace = { url, name, img, ghost: null };
+    setStatus(`«${name}»: клік у кадрі — поставити · ПКМ/Esc — скасувати`);
+    draw();
+  }
+  function cancelPending(): void {
+    if (!state.pendingPlace) return;
+    state.pendingPlace = null; setStatus(''); draw();
+  }
   const selectedChar = (): MenuChar | null => chars().find((c) => c.id === state.selChar) ?? null;
 
   // Ціль клавіатурної трансформації: виділений об'єкт / персонаж / кнопка.
@@ -330,6 +354,17 @@ export function initMenuEditor(prefix: string): void {
       ctx.fillText(tgt, bx, by + b.size * f.s * 0.85);
     }
     drawFxGizmos(f, state.preview);
+    // Білий силует розміщуваного ассета за курсором (клік — поставити)
+    const pp = state.pendingPlace;
+    if (pp?.img.complete && pp.img.naturalWidth) {
+      if (!pp.ghost) pp.ghost = whiteSilhouette(pp.img);
+      const targetH = 230;
+      const sc0 = Math.min(1.5, targetH / pp.img.naturalHeight);
+      const gw = pp.ghost.width * sc0 * f.s, gh = pp.ghost.height * sc0 * f.s;
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(pp.ghost, lastMouse.x - gw / 2, lastMouse.y - gh / 2, gw, gh);
+      ctx.globalAlpha = 1;
+    }
     if (state.preview) return; // прев'ю: без назви сторінки
     // назва сторінки
     ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -509,7 +544,7 @@ export function initMenuEditor(prefix: string): void {
         // Деформація (перспектива/FFD, кейфрейми) — квадосітка як у Редакторі Мандр
         const v = objDeformView(o, f, playing && state.deformEdit !== o.id)!;
         drawDeformedImage(ctx, im, v);
-        if (!preview && state.deformEdit === o.id) drawDeformHandles(ctx, v, state.deformHandleIdx);
+        if (state.deformEdit === o.id) drawDeformHandles(ctx, v, state.deformHandleIdx);
       } else {
         ctx.save();
         ctx.translate(cx, cy);
@@ -519,7 +554,7 @@ export function initMenuEditor(prefix: string): void {
         else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
         ctx.restore();
       }
-      if (!preview && state.selObj === o.id && state.deformEdit !== o.id) {
+      if (state.selObj === o.id && state.deformEdit !== o.id) {
         const bx = f.x + o.x * f.s, by = f.y + o.y * f.s;
         const bw = w * f.s, bh = h * f.s;
         ctx.save();
@@ -646,8 +681,15 @@ export function initMenuEditor(prefix: string): void {
       state.linkFrom = null; draw();
       return;
     }
-    if (state.preview) return; // прев'ю read-only: без вибору/перетягування
     const fp = toFrame(sx, sy);
+    // Інструмент розміщення: клік ставить ассет у точку курсора (працює і в прев'ю)
+    if (state.pendingPlace) {
+      const pend = state.pendingPlace;
+      const im = pend.img;
+      state.pendingPlace = null;
+      placeObject({ name: pend.name, url: pend.url }, im.naturalHeight || 128, fp.x, fp.y);
+      return;
+    }
     // 0а) активна клавіатурна трансформація (G/R/S) — клік підтверджує
     if (state.kbMode) { state.kbMode = null; state.kbAxis = null; state.kbOrig = null; save(); draw(); return; }
     // 0) режим «Задати лінію напряму» анімації переміщення — старт лінії
@@ -676,8 +718,8 @@ export function initMenuEditor(prefix: string): void {
       state.resizeObj = { id: ro.id, cx: ro.x, cy: ro.y, startDist: Math.hypot(fp.x - ro.x, fp.y - ro.y) || 1, startScale: ro.scale };
       setStatus('Масштаб об\'єкта'); return;
     }
-    // 2) кнопки меню (пріоритет над об'єктами — це головний контент меню)
-    const b = btnAt(sx, sy);
+    // 2) кнопки меню (лише конструктор; пріоритет над об'єктами)
+    const b = state.preview ? null : btnAt(sx, sy);
     if (b) {
       const now = Date.now();
       if (state.sel === b.id && now - state.lastClick < 350) {
@@ -688,8 +730,8 @@ export function initMenuEditor(prefix: string): void {
       state.sel = b.id; state.selObj = null;
       state.drag = { id: b.id, ox: fp.x - b.x, oy: fp.y - b.y };
     } else {
-      // 3) персонаж сторінки
-      const ch = charAt(fp.x, fp.y);
+      // 3) персонаж сторінки (лише конструктор)
+      const ch = state.preview ? null : charAt(fp.x, fp.y);
       if (ch) {
         state.selChar = ch.id; state.sel = null; state.selObj = null;
         state.dragChar = { id: ch.id, ox: fp.x - ch.x, oy: fp.y - ch.y };
@@ -702,8 +744,8 @@ export function initMenuEditor(prefix: string): void {
           state.dragObj = { id: o.id, ox: fp.x - o.x, oy: fp.y - o.y };
           setStatus(`Об'єкт: ${o.name ?? ''} · ПКМ — план/анімація/деформація`);
         } else {
-          // 5) гізмо ефектів: тягнути персонажа/вогонь/вікно дощу
-          const kind = fxAt(fp.x, fp.y);
+          // 5) гізмо ефектів (лише конструктор)
+          const kind = state.preview ? null : fxAt(fp.x, fp.y);
           if (kind) {
             const e = fx();
             const ref = kind === 'char' ? e.char : kind === 'fire' ? e.fire
@@ -721,11 +763,12 @@ export function initMenuEditor(prefix: string): void {
   // (плановість + анімація + деформація з кейфреймами) + пункти меню-редактора.
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    if (state.view !== 'page' || state.preview) return;
+    if (state.view !== 'page') return;
+    if (state.pendingPlace) { cancelPending(); return; } // ПКМ скасовує розміщення
     const r = canvas!.getBoundingClientRect();
     const fp = toFrame(e.clientX - r.left, e.clientY - r.top);
-    // ПКМ по персонажу — вибір анімації/дзеркало/видалити
-    const ch = charAt(fp.x, fp.y);
+    // ПКМ по персонажу — вибір анімації/дзеркало/видалити (лише конструктор)
+    const ch = state.preview ? null : charAt(fp.x, fp.y);
     if (ch) {
       state.selChar = ch.id; state.sel = null; state.selObj = null; draw();
       showCtxMenu(e.clientX, e.clientY, [
@@ -891,7 +934,7 @@ export function initMenuEditor(prefix: string): void {
     }
     // G/R/S — клавіатурні трансформації виділеного (об'єкт/персонаж/кнопка), як у Мандрах.
     // X/Z під час G — вісь; M — дзеркало; клік/Enter — підтвердити, Esc — скасувати.
-    if (state.view === 'page' && !state.preview && !state.kbMode
+    if (state.view === 'page' && !state.kbMode
         && (e.code === 'KeyG' || e.code === 'KeyR' || e.code === 'KeyS')) {
       const t = kbTarget();
       if (t) {
@@ -931,7 +974,7 @@ export function initMenuEditor(prefix: string): void {
       return;
     }
     // M — дзеркало виділеного об'єкта/персонажа
-    if (e.code === 'KeyM' && state.view === 'page' && !state.preview) {
+    if (e.code === 'KeyM' && state.view === 'page') {
       const o = selectedObj();
       if (o) { o.flip = !o.flip; save(); draw(); }
       else { const c = selectedChar(); if (c) { c.flip = !c.flip; save(); draw(); } }
@@ -949,9 +992,9 @@ export function initMenuEditor(prefix: string): void {
         save(); draw(); setStatus(`Кейфрейм ${n} записано · K — додати ще`);
       } else setStatus('Спочатку додай деформацію (ПКМ по об\'єкту)');
     }
-    // Esc — вийти з редагування хендлів / скасувати лінію напряму
-    if (e.key === 'Escape' && (state.deformEdit || state.moveLine)) {
-      state.deformEdit = null; state.moveLine = null; draw();
+    // Esc — вийти з редагування хендлів / скасувати лінію напряму / інструмент
+    if (e.key === 'Escape' && (state.deformEdit || state.moveLine || state.pendingPlace)) {
+      state.deformEdit = null; state.moveLine = null; state.pendingPlace = null; draw();
     }
   });
 
@@ -1068,7 +1111,7 @@ export function initMenuEditor(prefix: string): void {
   const CONSTR_HINT = 'конструктор: клік — вибрати · тягни / G — рух (X/Z — вісь) · R — оберт · S — масштаб · M — дзеркало · ПКМ — меню · Del — видалити';
   $('previewBtn')?.addEventListener('click', () => {
     state.preview = !state.preview;
-    if (state.preview) { state.view = 'page'; state.sel = null; state.selObj = null; state.selChar = null; state.kbMode = null; }
+    if (state.preview) { state.view = 'page'; state.sel = null; state.selChar = null; state.kbMode = null; }
     ($('previewBtn') as HTMLButtonElement).classList.toggle('on', !state.preview);
     const hint = $('stageHint');
     if (hint) hint.textContent = state.preview
@@ -1223,11 +1266,11 @@ export function initMenuEditor(prefix: string): void {
       });
       card.append(im, nm, del);
       // ЛКМ — розмістити об'єктом на сторінці; ПКМ — меню (розмістити / фон / видалити).
-      card.addEventListener('click', () => placeObject(a, im.naturalHeight));
+      card.addEventListener('click', () => startPending(a.url, a.name));
       card.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         showCtxMenu(ev.clientX, ev.clientY, [
-          { label: 'Розмістити на сторінці', on: () => placeObject(a, im.naturalHeight) },
+          { label: 'Розмістити на сторінці', on: () => startPending(a.url, a.name) },
           { label: 'Зробити фоном сторінки', on: () => { page().bg = a.url; state.bgImgs.delete(page().id); save(); draw(); setStatus(`Фон сторінки: ${a.name}`); } },
           { label: 'Перейменувати', on: () => startAssetRename(a) },
           'sep',
@@ -1261,6 +1304,14 @@ export function initMenuEditor(prefix: string): void {
       });
       list.appendChild(e);
     }
+  }
+  {
+    const list = $('assetList');
+    list?.addEventListener('dragover', (ev) => { ev.preventDefault(); (ev as DragEvent).dataTransfer!.dropEffect = 'copy'; });
+    list?.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      addAssetFiles(Array.from((ev as DragEvent).dataTransfer?.files ?? []));
+    });
   }
   $('addAsset')?.addEventListener('click', () => ($('assetInput') as HTMLInputElement)?.click());
   ($('assetInput') as HTMLInputElement | null)?.addEventListener('change', function () {
