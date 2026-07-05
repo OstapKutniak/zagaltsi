@@ -20,7 +20,7 @@ import { CutoutCharacter } from '../anim/CutoutCharacter';
 import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
 import { playDialogDoc, closeDialogPlay } from '../dialogPlay';
 import { loadQuests, type Quest } from '../story/quests';
-import { acceptQuest, reportProgress } from '../story/questState';
+import { acceptQuest, reportProgress, questsForAcq, turnInWithGiver } from '../story/questState';
 import { rewardLabel } from '../story/profile';
 import { idbGet } from '../store';
 
@@ -41,6 +41,7 @@ export class LocationScene extends Phaser.Scene {
   private slotObjs: Phaser.GameObjects.GameObject[] = [];
   private lib: LibItem[] = [];
   private presGen = 0; // покоління слотів — щоб async-мініатюра не лягла у вже стерті слоти
+  private boardOverlay: Phaser.GameObjects.Container | null = null; // оверлей дошки оголошень
 
   constructor() { super('Location'); }
 
@@ -107,13 +108,20 @@ export class LocationScene extends Phaser.Scene {
     void this.renderLocation();
     this.setupPresence();
     this.npc = null;
-    if (this.encounterQuestId) void this.spawnEncounter(this.encounterQuestId);
+    // НПС локації: з бота-енкаунтера (encounterQuestId) АБО квест-видавець, привʼязаний
+    // до цієї локації (acq='location_npc'), — виходить назустріч і дає квест.
+    const npcQuestId = this.encounterQuestId ?? this.locationNpcQuest();
+    if (npcQuestId) void this.spawnEncounter(npcQuestId);
 
     // Ціль квесту «дійти до локації»: зайшли у вузол → прогрес.
     if (this.nodeId) for (const q of reportProgress('reach', this.nodeId)) this.questDoneToast(q);
 
+    // Дошка оголошень: контракти (acq='board'), привʼязані до цієї локації.
+    this.buildBoard();
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unwatch?.(); this.unwatch = null;
+      this.boardOverlay?.destroy(true); this.boardOverlay = null;
       closeDialogPlay();
       leaveLocation();
     });
@@ -334,9 +342,14 @@ export class LocationScene extends Phaser.Scene {
       playDialogDoc(doc, {
         onOutcome: (o) => {
           if (o === 'positive') {
+            if (q.giver) {
+              // Спершу ЗДАЧА: активні квести цього НПС з успіхом 'dialog_positive'
+              // і виконаними цілями — завершуємо (revisit = здав квест).
+              for (const done of turnInWithGiver(q.giver)) this.questDoneToast(done);
+              // Ціль «поговорити з НПС» в інших активних квестах.
+              for (const done of reportProgress('talk', q.giver)) this.questDoneToast(done);
+            }
             acceptQuest(q); this.toastQuest();
-            // Ціль «поговорити з НПС» в інших активних квестах.
-            if (q.giver) for (const done of reportProgress('talk', q.giver)) this.questDoneToast(done);
           }
         },
       });
@@ -376,6 +389,82 @@ export class LocationScene extends Phaser.Scene {
         fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(40).setShadow(1, 2, '#000000', 5, false, true);
     this.tweens.add({ targets: t, alpha: 0, delay: 2800, duration: 700, onComplete: () => t.destroy() });
+  }
+
+  // ── Квести локації: НПС-видавець (acq='location_npc') + дошка контрактів (board) ─
+  // Квест привʼязаний до локації, якщо його locationId збігається з id/вузлом цієї
+  // локації (порожній locationId = «будь-де», глобальний контракт).
+  private matchLoc(q: Quest): boolean {
+    return !q.locationId || q.locationId === this.locationId || q.locationId === this.nodeId;
+  }
+
+  private locationNpcQuest(): string | undefined {
+    return questsForAcq('location_npc', (q) => this.matchLoc(q) && !!q.giver)[0]?.id;
+  }
+
+  // Дошка оголошень: кнопка «Оголошення (N)» у кутку → оверлей зі списком контрактів.
+  private buildBoard(): void {
+    const contracts = questsForAcq('board', (q) => this.matchLoc(q));
+    if (!contracts.length) return;
+    const btn = this.add.text(LOGICAL_W - 30 + this.offX, 84 + this.offY, `Оголошення (${contracts.length})`, {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '22px', color: COL_TEXT,
+    }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(30).setShadow(1, 2, '#000', 5, false, true)
+      .setInteractive({ useHandCursor: true });
+    btn.on('pointerover', () => btn.setColor('#ffcf8f'));
+    btn.on('pointerout', () => btn.setColor(COL_TEXT));
+    btn.on('pointerup', () => this.openBoard());
+  }
+
+  private openBoard(): void {
+    this.boardOverlay?.destroy(true);
+    const contracts = questsForAcq('board', (q) => this.matchLoc(q));
+    const W = this.cameras.main.width, H = this.cameras.main.height;
+    const c = this.add.container(W / 2, H / 2).setScrollFactor(0).setDepth(120);
+    const bw = 560, bh = Math.min(H - 40, 120 + contracts.length * 66);
+    // Затемнення на весь екран — клік поза панеллю закриває дошку.
+    const backdrop = this.add.zone(0, 0, W, H).setInteractive();
+    backdrop.on('pointerup', () => { c.destroy(true); this.boardOverlay = null; });
+    c.add(backdrop);
+    const g = this.add.graphics();
+    g.fillStyle(0x000000, 0.55); g.fillRect(-W / 2, -H / 2, W, H);
+    g.fillStyle(0x2b1f16, 1); g.fillRect(-bw / 2, -bh / 2, bw, bh);
+    g.lineStyle(3, 0x4a3524, 1); g.strokeRect(-bw / 2, -bh / 2, bw, bh);
+    c.add(g);
+    // Блокер по панелі: клік по самій дошці НЕ закриває (перехоплює над backdrop).
+    c.add(this.add.zone(0, 0, bw, bh).setInteractive());
+    c.add(this.add.text(0, -bh / 2 + 22, 'ДОШКА ОГОЛОШЕНЬ', {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '24px', color: '#efe3c8',
+    }).setOrigin(0.5));
+    if (!contracts.length) {
+      c.add(this.add.text(0, 0, 'Усі контракти взято', {
+        fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '18px', color: '#8a8171',
+      }).setOrigin(0.5));
+    }
+    contracts.forEach((q, i) => {
+      const y = -bh / 2 + 70 + i * 66;
+      const rl = rewardLabel(q.reward);
+      const row = this.add.container(0, y);
+      const rg = this.add.graphics();
+      rg.fillStyle(0xe4d6b0, 1); rg.fillRect(-bw / 2 + 20, 0, bw - 40, 56);
+      row.add(rg);
+      row.add(this.add.text(-bw / 2 + 34, 8, (q.cat === 'main' ? '★ ' : '') + q.title, {
+        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '18px', color: '#2b2115',
+        wordWrap: { width: bw - 180 },
+      }).setOrigin(0, 0));
+      if (rl) row.add(this.add.text(-bw / 2 + 34, 32, 'Нагорода: ' + rl, {
+        fontFamily: MENU_FONT, fontSize: '13px', color: '#5a4526',
+      }).setOrigin(0, 0));
+      const take = this.add.text(bw / 2 - 36, 28, 'Взяти', {
+        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '18px', color: '#7a3d12',
+      }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+      take.on('pointerup', () => {
+        acceptQuest(q); this.toastQuest();
+        this.openBoard(); // перемалювати (контракт зник зі списку)
+      });
+      row.add(take);
+      c.add(row);
+    });
+    this.boardOverlay = c;
   }
 
   // ── Арт локації (або куби) ─────────────────────────────────────────────────

@@ -7,7 +7,7 @@
 import { ref, set } from 'firebase/database';
 import { db } from '../firebase';
 import { getPlayerId } from '../multiplayer/lobby';
-import { loadQuests, type Quest, type QuestObjective } from './quests';
+import { loadQuests, type Quest, type QuestObjective, type QuestAcq } from './quests';
 import { grantReward } from './profile';
 
 const LS = 'zag_taken_quests';
@@ -21,9 +21,25 @@ export interface PlayerQuest {
 
 // Кеш ВИЗНАЧЕНЬ квестів (щоб оцінювати цілі в рантаймі без async у гарячому шляху).
 let defs: Quest[] = [];
-export function primeQuests(): void { void loadQuests().then((s) => { defs = s.quests; }).catch(() => { /* ignore */ }); }
+export function primeQuests(): void {
+  void loadQuests().then((s) => { defs = s.quests; autoAcceptAuto(); }).catch(() => { /* ignore */ });
+}
 primeQuests();
 const questDef = (id: string): Quest | undefined => defs.find((q) => q.id === id);
+
+// Спосіб отримання з дефолтом (сумісність зі старими квестами).
+export const acqOf = (q: Quest): QuestAcq => q.acq ?? (q.giver ? 'tg_encounter' : 'auto');
+
+// Квести певного способу отримання, ЩЕ НЕ взяті (для дошки/НПС локації тощо).
+export function questsForAcq(acq: QuestAcq, match?: (q: Quest) => boolean): Quest[] {
+  const taken = readAll();
+  return defs.filter((q) => acqOf(q) === acq && !taken[q.id] && (!match || match(q)));
+}
+
+// «Одразу відомі» квести стають активними самі (щоб цілі трекались із старту гри).
+export function autoAcceptAuto(): void {
+  for (const q of defs) if (acqOf(q) === 'auto') acceptQuest(q);
+}
 
 function readAll(): Record<string, PlayerQuest> {
   let raw: Record<string, unknown> = {};
@@ -51,13 +67,8 @@ export function questStatus(id: string): PlayerQuest['status'] | null { return r
 export function acceptQuest(q: Quest): void {
   const all = readAll();
   if (all[q.id]) return;
-  const progress: Record<string, number> = {};
-  for (const o of q.objectives ?? []) progress[o.id] = 0;
-  all[q.id] = { status: 'active', takenAt: Date.now(), progress };
+  startQuest(q, all);
   writeAll(all);
-  void set(ref(db, `player_quests/${getPlayerId()}/${q.id}`), {
-    title: q.title, takenAt: Date.now(), lastRemind: Date.now(),
-  }).catch(() => { /* ignore */ });
 }
 
 const need = (o: QuestObjective): number => Math.max(1, o.count ?? 1);
@@ -70,10 +81,20 @@ function allObjectivesDone(q: Quest, pq: PlayerQuest): boolean {
   return objs.every((o) => objectiveDone(o, pq));
 }
 
+function startQuest(q: Quest, all: Record<string, PlayerQuest>): void {
+  if (all[q.id]) return;
+  const progress: Record<string, number> = {};
+  for (const o of q.objectives ?? []) progress[o.id] = 0;
+  all[q.id] = { status: 'active', takenAt: Date.now(), progress };
+  void set(ref(db, `player_quests/${getPlayerId()}/${q.id}`), { title: q.title, takenAt: Date.now(), lastRemind: Date.now() }).catch(() => { /* ignore */ });
+}
+
 function finish(id: string, q: Quest, all: Record<string, PlayerQuest>): void {
   all[id].status = 'done'; all[id].doneAt = Date.now();
   grantReward(q.reward);
   void set(ref(db, `player_quests/${getPlayerId()}/${id}`), null).catch(() => { /* ignore */ });
+  // Ланцюг: активуємо наступні квести, що чекали на завершення цього.
+  for (const nx of defs) if (acqOf(nx) === 'chain' && nx.prevQuestId === id) startQuest(nx, all);
 }
 
 // Просунути прогрес усіх АКТИВНИХ квестів за подією (kind + target). Ціль без
@@ -116,7 +137,23 @@ export function failQuest(id: string): void {
   void set(ref(db, `player_quests/${getPlayerId()}/${id}`), null).catch(() => { /* ignore */ });
 }
 
+// Здача квестів «по діалогу»: активні квести цього НПС з успіхом 'dialog_positive',
+// у яких цілі виконано (або цілей нема) — завершуємо. Повертає щойно виконані.
+export function turnInWithGiver(giverCharId: string): Quest[] {
+  const all = readAll(); const done: Quest[] = []; let changed = false;
+  for (const [id, pq] of Object.entries(all)) {
+    if (pq.status !== 'active') continue;
+    const q = questDef(id); if (!q || q.giver !== giverCharId) continue;
+    if ((q.successOn ?? 'objectives') !== 'dialog_positive') continue;
+    const objs = q.objectives ?? [];
+    if (objs.length && !objs.every((o) => objectiveDone(o, pq))) continue;
+    finish(id, q, all); done.push(q); changed = true;
+  }
+  if (changed) writeAll(all);
+  return done;
+}
+
 // Dev-only: доступ до квест-логіки з консолі (у проді не активний).
 if (import.meta.env.DEV) {
-  (window as unknown as { __quest?: unknown }).__quest = { reportProgress, completeQuest, failQuest, acceptQuest, takenQuests, primeQuests };
+  (window as unknown as { __quest?: unknown }).__quest = { reportProgress, completeQuest, failQuest, acceptQuest, takenQuests, primeQuests, questsForAcq, turnInWithGiver, autoAcceptAuto };
 }
