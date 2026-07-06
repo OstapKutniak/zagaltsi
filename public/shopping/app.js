@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 19; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 20; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -773,10 +773,10 @@ function openDaySheet(day) {
 // (їх у списку підсвічує червона полоска). Ціни бере воркер shopping-price.
 const WORKER_PRICE = 'https://shopping-price.priko1isf.workers.dev';
 const PP_ITEM = 120; // ширина рядка барабана, синхронно зі style.css
-// Магазини за категоріями. Барабан показує набір активної категорії: за
-// замовчуванням «Їжа» (продуктові мережі), а при затиску на заголовку категорії
-// в списку перемикається на її магазини — ліки → аптеки, господарче → Епіцентр/
-// Бонус/Аврора, гігієна → EVA/Watsons/Простор. Кожен запис:
+// Магазини за категоріями. Без фокуса барабан показує УСІ магазини всіх
+// категорій (ALL_STORES). Затиск на заголовку категорії в списку звужує його до
+// магазинів цієї категорії — ліки → аптеки, господарче → Епіцентр/Бонус/Аврора,
+// гігієна → EVA/Watsons/Простор; повторний затиск повертає «усі». Кожен запис:
 //   { key, name, color, chain?, branch?, pick? }
 //   без chain — псевдо-магазин «Середня» (ціни не тягне)
 //   pick:true — можна обрати конкретну філію в налаштуваннях (є /stores у воркері)
@@ -811,9 +811,14 @@ const STORE_SETS = {
     { key: 'prostor', name: 'Простор', color: '#00AEEF', chain: 'prostor' },
   ],
 };
-// активна категорія барабана (null → набір «Їжі»); задається затиском категорії
+// набір «усі магазини» — стан барабана без фокуса: «Середня» в центрі, одразу
+// праворуч продуктові («Їжа»), а господарче (Епіцентр/Бонус/Аврора) — в кінці,
+// тобто найближче ліворуч від центру (барабан зациклений). Порядок явний.
+const ALL_ORDER = ['food', 'meds', 'hygiene', 'house'];
+const ALL_STORES = [AVG, ...ALL_ORDER.flatMap(k => STORE_SETS[k].filter(s => s.key !== 'avg'))];
+// активна категорія барабана (null → «усі магазини»); задається затиском категорії
 let ppCat = null;
-const curStores = () => STORE_SETS[ppCat] || STORE_SETS.food;
+const curStores = () => STORE_SETS[ppCat] || ALL_STORES;
 const pickableStores = () => Object.values(STORE_SETS).flat().filter(s => s.pick);
 let ppSel = 'avg';
 let ppData = {};       // storeKey → { nameLower → {price,title,oldPrice} | null }
