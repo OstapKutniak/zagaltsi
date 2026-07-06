@@ -136,33 +136,56 @@
       .set-btn-primary { flex: 1; padding: 11px; border: 0; border-radius: 10px; background: #ff9a1f; color: #1b1b1b; font-size: 14px; font-weight: 700; cursor: pointer; }
       .set-btn { flex: 1; padding: 11px; border: 1px solid #3a3a3a; border-radius: 10px; background: #2a2a2a; color: #e8e8e8; font-size: 14px; cursor: pointer; }
 
-      /* ---- екран завантаження ---- */
+      /* ---- екран завантаження / бренд ---- */
       #loadScreen {
-        position: fixed; inset: 0; background: #000;
+        position: fixed; inset: 0;
+        background: radial-gradient(circle at 50% 43%, rgba(255,154,31,0.07), #000 62%);
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
         gap: 20px; z-index: 9999;
         transition: opacity 0.5s ease;
       }
       #loadScreen.hide { opacity: 0; pointer-events: none; }
-      #loadLabel {
-        color: #e8e8e8; font-family: system-ui, sans-serif;
-        font-size: 15px; letter-spacing: 3px; text-transform: uppercase;
+      #loadLogo { width: 108px; height: auto; filter: drop-shadow(0 3px 12px rgba(0,0,0,0.7)); }
+      #loadWord {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 32px; letter-spacing: 10px; color: #e5d8bc;
+        text-shadow: 0 2px 7px rgba(0,0,0,0.75); padding-left: 10px; /* компенсуємо трекінг */
       }
       #loadTrack {
-        width: 220px; height: 3px;
-        background: #2a2a2a; border-radius: 2px; overflow: hidden;
+        width: 172px; height: 2px; margin-top: 4px;
+        background: rgba(203,185,138,0.16); border-radius: 2px; overflow: hidden;
       }
       #loadFill {
         height: 100%; width: 0; border-radius: 2px;
-        background: #ff9a1f;
+        background: #cbb98a;
         animation: loadProg 2.2s cubic-bezier(.4,0,.2,1) forwards;
       }
       @keyframes loadProg { to { width: 88%; } }
     </style>
   </head>
   <body>
-    <div id="loadScreen"><p id="loadLabel">Завантаження</p><div id="loadTrack"><div id="loadFill"></div></div></div>
+    <div id="loadScreen">
+      <!-- Лого: мінімалістична хоругва (корогва) — полотнище з роздвоєним низом
+           на древку з поперечиною й хрестом-фініалом; емблема-хрест теплим світлом. -->
+      <svg id="loadLogo" viewBox="0 0 120 152" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Хоругва">
+        <g stroke="#8a7a5c" stroke-width="2.4" stroke-linecap="round">
+          <line x1="60" y1="4"  x2="60" y2="16" />
+          <line x1="53" y1="9"  x2="67" y2="9" />
+          <line x1="60" y1="16" x2="60" y2="30" />
+          <line x1="28" y1="30" x2="92" y2="30" />
+          <line x1="60" y1="98" x2="60" y2="148" />
+        </g>
+        <path d="M34 36 L86 36 L86 116 L60 98 L34 116 Z"
+              fill="rgba(203,185,138,0.05)" stroke="#cbb98a" stroke-width="2.4" stroke-linejoin="round" />
+        <g stroke="#ff9a1f" stroke-width="2.8" stroke-linecap="round">
+          <line x1="60" y1="52" x2="60" y2="82" />
+          <line x1="49" y1="62" x2="71" y2="62" />
+        </g>
+      </svg>
+      <div id="loadWord">ХОРУГВА</div>
+      <div id="loadTrack"><div id="loadFill"></div></div>
+    </div>
 
     <!-- Lobby overlay — hidden until user picks co-op -->
     <div id="lobby" class="hidden">
