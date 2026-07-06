@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 18; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 19; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -515,13 +515,18 @@ function renderList() {
     wrap.querySelectorAll('.litem.open').forEach(r => r.classList.remove('open'));
     openActionsId = null;
   };
-  wrap.querySelectorAll('.lcat-head').forEach(el => el.addEventListener('click', () => {
-    const cid = el.dataset.cid;
-    collapsedCats.has(cid) ? collapsedCats.delete(cid) : collapsedCats.add(cid);
-    refreshListOrder(); // куплене осяде вниз при наступному перемальовуванні
-    // без renderList: клас перемикається на живому DOM, щоб CSS плавно згорнув висоту
-    el.parentElement.classList.toggle('collapsed', collapsedCats.has(cid));
-  }));
+  wrap.querySelectorAll('.lcat-head').forEach(el => {
+    el.addEventListener('click', () => {
+      const cid = el.dataset.cid;
+      collapsedCats.has(cid) ? collapsedCats.delete(cid) : collapsedCats.add(cid);
+      refreshListOrder(); // куплене осяде вниз при наступному перемальовуванні
+      // без renderList: клас перемикається на живому DOM, щоб CSS плавно згорнув висоту
+      el.parentElement.classList.toggle('collapsed', collapsedCats.has(cid));
+    });
+    // затиск заголовка → барабан цін перемикається на магазини цієї категорії
+    // (клік-згортання після затиску глушиться глобально через lpUntil)
+    longPress(el, () => setPpCat(el.dataset.cid));
+  });
   wrap.querySelectorAll('.litem-check').forEach(el => el.addEventListener('click', e => {
     e.stopPropagation();
     // оптимістичний відгук: рядок сіріє/зеленіє миттєво, база доганяє
@@ -577,7 +582,7 @@ async function renderVariantSuggest(name) {
   const box = $('item-suggest');
   if (!box) return;
   box.innerHTML = '';
-  const s = PRICE_STORES.find(x => x.key === 'silpo');
+  const s = STORE_SETS.food.find(x => x.key === 'silpo');
   try {
     const r = await fetch(`${WORKER_PRICE}/suggest?chain=silpo&branch=${encodeURIComponent(branchOf(s))}&q=${encodeURIComponent(name)}`);
     const names = await r.json();
@@ -768,14 +773,48 @@ function openDaySheet(day) {
 // (їх у списку підсвічує червона полоска). Ціни бере воркер shopping-price.
 const WORKER_PRICE = 'https://shopping-price.priko1isf.workers.dev';
 const PP_ITEM = 120; // ширина рядка барабана, синхронно зі style.css
-// магазини за замовчуванням (Русанівка/Осокорки, Київ). Пізніше — вибір у налаштуваннях.
-const PRICE_STORES = [
-  { key: 'avg',    name: 'Середня', color: '#8a8a90' },
-  { key: 'silpo',  name: 'Сільпо',  color: '#2D9CDB', chain: 'silpo',  branch: '1edb6b1b-2d1b-66f4-9b4b-eb10f39e9fe0' },
-  { key: 'fora',   name: 'Фора',    color: '#27AE60', chain: 'fora',   branch: '148' },
-  { key: 'novus',  name: 'Новус',   color: '#EB5C8B', chain: 'novus',  branch: '48201070' },
-  { key: 'auchan', name: 'Ашан',    color: '#F2994A', chain: 'auchan', branch: '48246414' },
-];
+// Магазини за категоріями. Барабан показує набір активної категорії: за
+// замовчуванням «Їжа» (продуктові мережі), а при затиску на заголовку категорії
+// в списку перемикається на її магазини — ліки → аптеки, господарче → Епіцентр/
+// Бонус/Аврора, гігієна → EVA/Watsons/Простор. Кожен запис:
+//   { key, name, color, chain?, branch?, pick? }
+//   без chain — псевдо-магазин «Середня» (ціни не тягне)
+//   pick:true — можна обрати конкретну філію в налаштуваннях (є /stores у воркері)
+// Магазини за замовчуванням — Русанівка/Осокорки, Київ.
+const AVG = { key: 'avg', name: 'Середня', color: '#8a8a90' };
+const STORE_SETS = {
+  food: [
+    AVG,
+    { key: 'silpo',  name: 'Сільпо',  color: '#2D9CDB', chain: 'silpo',  branch: '1edb6b1b-2d1b-66f4-9b4b-eb10f39e9fe0', pick: true },
+    { key: 'fora',   name: 'Фора',    color: '#27AE60', chain: 'fora',   branch: '148', pick: true },
+    { key: 'novus',  name: 'Новус',   color: '#EB5C8B', chain: 'novus',  branch: '48201070', pick: true },
+    { key: 'auchan', name: 'Ашан',    color: '#F2994A', chain: 'auchan', branch: '48246414', pick: true },
+  ],
+  house: [
+    AVG,
+    { key: 'epicentr', name: 'Епіцентр', color: '#E30613', chain: 'epicentr' },
+    { key: 'bonus',    name: 'Бонус',    color: '#F5A623', chain: 'bonus' },
+    { key: 'aurora',   name: 'Аврора',   color: '#00A0E3', chain: 'aurora' },
+  ],
+  meds: [
+    AVG,
+    { key: 'podorozhnyk', name: 'Подорожник',       color: '#F39200', chain: 'podorozhnyk' },
+    { key: 'anc',         name: 'АНЦ',              color: '#0071BC', chain: 'anc' },
+    { key: 'dobrogo',     name: 'Доброго дня',      color: '#E6007E', chain: 'dobrogo' },
+    { key: 'bzh',         name: 'Бажаємо здоров’я', color: '#8DC63F', chain: 'bzh' },
+    { key: 'algofarm',    name: 'Альгофарм',        color: '#00A651', chain: 'algofarm' },
+  ],
+  hygiene: [
+    AVG,
+    { key: 'eva',     name: 'EVA',     color: '#EC008C', chain: 'eva' },
+    { key: 'watsons', name: 'Watsons', color: '#00A94F', chain: 'watsons' },
+    { key: 'prostor', name: 'Простор', color: '#00AEEF', chain: 'prostor' },
+  ],
+};
+// активна категорія барабана (null → набір «Їжі»); задається затиском категорії
+let ppCat = null;
+const curStores = () => STORE_SETS[ppCat] || STORE_SETS.food;
+const pickableStores = () => Object.values(STORE_SETS).flat().filter(s => s.pick);
 let ppSel = 'avg';
 let ppData = {};       // storeKey → { nameLower → {price,title,oldPrice} | null }
 let ppFetchKey = '';   // хеш назв, для яких уже тягнули ціни
@@ -788,23 +827,40 @@ let storeSel = {};     // chain → {id,name,city,address}, обране в на
 const PP_REP = 7;
 let ppPositioned = false;
 function initPricePanel() {
+  $('pp-track').addEventListener('scroll', onPpScroll);
+  renderDrum();
+}
+// (пере)малювати стрічку магазинів під активну категорію
+function renderDrum() {
   const track = $('pp-track');
-  const one = PRICE_STORES.map(s =>
-    `<div class="pp-item" data-key="${s.key}"><span class="pp-dot" style="--c:${s.color}"></span>${s.name}</div>`).join('');
+  const one = curStores().map(s =>
+    `<div class="pp-item" data-key="${s.key}"><span class="pp-dot" style="--c:${s.color}"></span>${esc(s.name)}</div>`).join('');
   track.innerHTML = one.repeat(PP_REP);
   track.querySelectorAll('.pp-item').forEach((el, i) =>
     el.addEventListener('click', () => track.scrollTo({ left: i * PP_ITEM, behavior: 'smooth' })));
-  track.addEventListener('scroll', onPpScroll);
+}
+// затиск на категорії в списку → барабан перемикається на її магазини, панель
+// підсвічується кольором категорії; повторний затиск тієї ж категорії — скидає.
+function setPpCat(cid) {
+  if (!cats[cid]) return;                 // лише реальні категорії (не «Інше»)
+  ppCat = ppCat === cid ? null : cid;
+  ppSel = 'avg';
+  const c = ppCat && cats[ppCat];
+  $('price-panel').style.background = c ? hexA(c.color, 0.13) : '';
+  renderDrum();
+  ppStart();
+  ppFetchKey = '';                        // інший набір магазинів → перезапит цін
+  refreshPrices();
 }
 // поставити барабан у центральну копію (виклик, коли панель уже видима)
 function ppStart() {
-  const track = $('pp-track'), N = PRICE_STORES.length;
+  const track = $('pp-track'), N = curStores().length;
   track.scrollLeft = N * ((PP_REP - 1) >> 1) * PP_ITEM;
   markPpSel(track.scrollLeft / PP_ITEM);
 }
 // підсвітити центральний магазин (і його копії — вони поза видимою зоною)
 function markPpSel(rawIdx) {
-  const N = PRICE_STORES.length, sel = ((Math.round(rawIdx) % N) + N) % N;
+  const N = curStores().length, sel = ((Math.round(rawIdx) % N) + N) % N;
   $('pp-track').querySelectorAll('.pp-item').forEach((el, j) => el.classList.toggle('sel', (j % N) === sel));
 }
 function onPpScroll() {
@@ -812,10 +868,10 @@ function onPpScroll() {
   markPpSel(track.scrollLeft / PP_ITEM);
   clearTimeout(ppScrollTimer);
   ppScrollTimer = setTimeout(() => {
-    const N = PRICE_STORES.length;
+    const N = curStores().length;
     const raw = Math.round(track.scrollLeft / PP_ITEM);
     const sel = ((raw % N) + N) % N;
-    if (PRICE_STORES[sel].key !== ppSel) { ppSel = PRICE_STORES[sel].key; renderPriceTotals(); }
+    if (curStores()[sel].key !== ppSel) { ppSel = curStores()[sel].key; renderPriceTotals(); }
     // повернути в середню копію, якщо відкотилися на цілий список від центру
     const target = N * ((PP_REP - 1) >> 1) + sel;
     if (Math.abs(raw - target) >= N) {
@@ -832,7 +888,9 @@ function itemQuery(it) {
   const v = (it.variant || '').trim();
   return v ? `${it.name} ${v}` : it.name;
 }
-const activeItems = () => Object.values(listMap).filter(it => !it.done);
+// активні позиції; у режимі фокуса категорії — лише позиції цієї категорії
+// (барабан показує її магазини, тож і ≈ ціна рахується по її товарах)
+const activeItems = () => Object.values(listMap).filter(it => !it.done && (!ppCat || it.cat === ppCat));
 // філія магазину: обрана в налаштуваннях або дефолтна
 const branchOf = s => (storeSel[s.key] && storeSel[s.key].id) || s.branch;
 
@@ -841,13 +899,13 @@ async function refreshPrices() {
   const items = activeItems();
   const queries = [...new Set(items.map(itemQuery))];
   // ключ враховує і запити, і обрані філії — зміна магазину змушує перезапит
-  const key = queries.map(n => n.toLowerCase()).sort().join('|') + '@'
-    + PRICE_STORES.filter(s => s.chain).map(branchOf).join(',');
+  const key = (ppCat || 'food') + '#' + queries.map(n => n.toLowerCase()).sort().join('|') + '@'
+    + curStores().filter(s => s.chain).map(branchOf).join(',');
   if (!queries.length) { ppFetchKey = ''; renderPriceTotals(); return; }
   if (key === ppFetchKey) { renderPriceTotals(); return; } // дані вже є — лише перемалювати
   ppFetchKey = key;
   $('pp-amount').classList.add('load');
-  await Promise.all(PRICE_STORES.filter(s => s.chain).map(async s => {
+  await Promise.all(curStores().filter(s => s.chain).map(async s => {
     try {
       const r = await fetch(`${WORKER_PRICE}/prices`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -866,7 +924,7 @@ async function refreshPrices() {
 
 function priceFor(storeKey, qLower) {
   if (storeKey === 'avg') {
-    const vals = PRICE_STORES.filter(s => s.chain)
+    const vals = curStores().filter(s => s.chain)
       .map(s => ppData[s.key] && ppData[s.key][qLower]).filter(v => v && v.price != null).map(v => v.price);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }
@@ -879,7 +937,7 @@ function renderPriceTotals() {
   let total = 0, missing = 0;
   items.forEach(it => { const p = priceFor(ppSel, itemQuery(it).toLowerCase()); if (p == null) missing++; else total += p; });
   const amt = $('pp-amount'), note = $('pp-note');
-  if (!items.length) { amt.textContent = '≈ —'; note.textContent = ''; }
+  if (!items.length || missing === items.length) { amt.textContent = '≈ —'; note.textContent = ''; }
   else {
     amt.textContent = `≈ ${Math.round(total)} ₴`;
     note.textContent = missing ? `нема ${missing} ${plural(missing, 'позиції', 'позиції', 'позицій')}` : '';
@@ -901,7 +959,7 @@ function openStoresSheet() { renderStoresSheet(); $('stores-overlay').classList.
 function renderStoresSheet() {
   const el = $('stores-list');
   if (!el) return;
-  el.innerHTML = PRICE_STORES.filter(s => s.chain).map(s => {
+  el.innerHTML = pickableStores().map(s => {
     const cur = storeSel[s.key];
     const sub = cur ? esc([cur.city, cur.address].filter(Boolean).join(', ') || cur.name) : 'За замовчуванням';
     return `<div class="sheet-item" data-key="${s.key}">
@@ -914,7 +972,7 @@ function renderStoresSheet() {
     row.addEventListener('click', () => openStorePicker(row.dataset.key)));
 }
 async function openStorePicker(key) {
-  const s = PRICE_STORES.find(x => x.key === key);
+  const s = Object.values(STORE_SETS).flat().find(x => x.key === key);
   storePickChain = s;
   $('storepick-title').textContent = s.name;
   $('storepick-search').value = '';
@@ -1307,6 +1365,13 @@ function initSheetDrag() {
 }
 
 // ── HELPERS ────────────────────────────────────────────────
+// #RRGGBB → rgba(...,a): напівпрозорий тінт панелі під колір категорії
+function hexA(hex, a) {
+  const h = String(hex).replace('#', '');
+  const s = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const n = parseInt(s, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
 // Клік, що прилітає ПІСЛЯ спрацьованого затиску, гасимо глобально —
 // інакше він одразу закривав кнопки дій / знімав щойно поставлену позначку.
 let lpUntil = 0;
