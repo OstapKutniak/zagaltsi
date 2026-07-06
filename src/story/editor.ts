@@ -18,6 +18,7 @@ import {
   type Quest, type QuestStore, type QuestAcq, type QuestObjective, type ObjectiveKind,
   type QuestSuccess, type QuestFail, loadQuests, newQuestId, newObjectiveId,
 } from './quests';
+import { pushQuest, tombstoneQuest, watchQuestNodes } from './contentSync';
 
 const INPUT_CSS = 'background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box';
 
@@ -169,7 +170,7 @@ function initQuestsPanel(panel: HTMLElement): void {
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => { void idbSet('zag_quests', store); }, 250);
   };
-  const touch = (q: Quest): void => { q.updatedAt = Date.now(); save(); };
+  const touch = (q: Quest): void => { q.updatedAt = Date.now(); save(); pushQuest(q); };
   const charOpts = (): [string, string][] => [NONE_OPT, ...chars.map((c) => [c.id, c.name] as [string, string])];
   const locOpts = (): [string, string][] => [NONE_OPT, ...locs.map((l) => [l.id, l.name] as [string, string])];
   const nodeOpts = (): [string, string][] => [NONE_OPT, ...nodes.map((n) => [n.id, n.label] as [string, string])];
@@ -315,6 +316,7 @@ function initQuestsPanel(panel: HTMLElement): void {
     del.addEventListener('click', () => {
       if (!confirm(`Видалити «${q.title}»?`)) return;
       store.quests = store.quests.filter((x) => x.id !== q.id);
+      tombstoneQuest(q.id);
       sel = null; save(); renderList(); renderProps();
     });
     props.appendChild(del);
@@ -325,7 +327,7 @@ function initQuestsPanel(panel: HTMLElement): void {
   add.style.cssText = 'width:100%;padding:6px;font-size:12px';
   add.addEventListener('click', () => {
     const q: Quest = { id: newQuestId(), title: 'Новий квест', text: '', cat: 'side', acq: 'auto', updatedAt: Date.now() };
-    store.quests.push(q); sel = q.id; save(); renderList(); renderProps();
+    store.quests.push(q); sel = q.id; save(); pushQuest(q); renderList(); renderProps();
   });
 
   panel.appendChild(add); panel.appendChild(list); panel.appendChild(props);
@@ -333,6 +335,25 @@ function initQuestsPanel(panel: HTMLElement): void {
   registerPublisher(() => ({ 'public/studio-data/quests.json': JSON.stringify(store, null, 2) }));
   const refreshIfOpen = (): void => { if (sel) renderProps(); };
   void loadQuests().then((s) => { store = s; renderList(); });
+
+  // Живі правки з гри/Літопису/іншої вкладки студії (Firebase). Застосовуємо
+  // ноду лише якщо вона НОВІША за локальну копію (LWW) — так власне відлуння
+  // не перетирає квест, який редагуєш просто зараз.
+  watchQuestNodes((nodes) => {
+    let dirty = false;
+    for (const n of nodes) {
+      const idx = store.quests.findIndex((x) => x.id === n.id);
+      const localAt = idx >= 0 ? (store.quests[idx].updatedAt ?? 0) : -1;
+      const nodeAt = n.updatedAt ?? 0;
+      if ((n as { deleted?: boolean }).deleted) {
+        if (idx >= 0 && nodeAt > localAt) { store.quests.splice(idx, 1); if (sel === n.id) sel = null; dirty = true; }
+      } else if (nodeAt > localAt) {
+        if (idx >= 0) store.quests[idx] = n as Quest; else store.quests.push(n as Quest);
+        dirty = true;
+      }
+    }
+    if (dirty) { void idbSet('zag_quests', store); renderList(); refreshIfOpen(); }
+  });
   void loadCharLibrary().then((lib) => { chars = lib.filter((x) => x.cat === 'enemy' || x.cat === 'neutral' || x.cat === 'char').map((c) => ({ id: c.id, name: c.name })); refreshIfOpen(); });
   void loadLocationsForGame().then((l) => { locs = l.map((x) => ({ id: x.id, name: x.name })); refreshIfOpen(); }).catch(() => {});
   void loadWorldsForGame().then((ws) => { nodes = ws.flatMap((w) => w.nodes.map((n) => ({ id: n.id, label: n.label || n.id }))); refreshIfOpen(); }).catch(() => {});

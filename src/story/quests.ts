@@ -69,6 +69,16 @@ export async function loadQuests(): Promise<QuestStore> {
     if (r.ok) remote = await r.json() as QuestStore;
   } catch { /* ignore */ }
   const local = await idbGet<QuestStore>('zag_quests').catch(() => null);
+  // Живий шар Firebase (правки студії/Літопису в реальному часі). Мердж — по
+  // кожному квесту (LWW), щоб паралельні правки не затирали одна одну. Динамічний
+  // імпорт — щоб офлайн/перше завантаження не залежали від Firebase-SDK.
+  let nodes: import('./contentSync').QuestNode[] = [];
+  try {
+    const cs = await import('./contentSync');
+    nodes = await cs.fetchQuestNodes();
+    const quests = cs.mergeQuests(remote?.quests ?? [], local?.quests ?? [], nodes);
+    if (nodes.length) return { quests, updatedAt: Math.max(local?.updatedAt ?? 0, remote?.updatedAt ?? 0, Date.now()) };
+  } catch { /* Firebase недоступний — падаємо на JSON+IDB нижче */ }
   const lw = local?.updatedAt ?? 0, rw = remote?.updatedAt ?? 0;
   return (local && lw >= rw) ? local : (remote ?? local ?? { quests: [] });
 }

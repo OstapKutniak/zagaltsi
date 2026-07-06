@@ -8,6 +8,7 @@ import { ref, set } from 'firebase/database';
 import { db } from '../firebase';
 import { getPlayerId } from '../multiplayer/lobby';
 import { loadQuests, type Quest, type QuestObjective, type QuestAcq } from './quests';
+import { watchQuestNodes } from './contentSync';
 import { grantReward } from './profile';
 
 const LS = 'zag_taken_quests';
@@ -25,6 +26,27 @@ export function primeQuests(): void {
   void loadQuests().then((s) => { defs = s.quests; autoAcceptAuto(); }).catch(() => { /* ignore */ });
 }
 primeQuests();
+
+// Живі правки визначень квестів (студія/Літопис) — оновлюємо кеш defs по кожній
+// ноді (LWW за updatedAt), нові 'auto'-квести одразу стають активними.
+let _watching = false;
+export function watchQuestDefs(): void {
+  if (_watching) return; _watching = true;
+  watchQuestNodes((nodes) => {
+    for (const n of nodes) {
+      const idx = defs.findIndex((q) => q.id === n.id);
+      const localAt = idx >= 0 ? (defs[idx].updatedAt ?? 0) : -1;
+      const nodeAt = n.updatedAt ?? 0;
+      if ((n as { deleted?: boolean }).deleted) {
+        if (idx >= 0 && nodeAt > localAt) defs.splice(idx, 1);
+      } else if (nodeAt > localAt) {
+        if (idx >= 0) defs[idx] = n as Quest; else defs.push(n as Quest);
+      }
+    }
+    autoAcceptAuto();
+  });
+}
+watchQuestDefs();
 const questDef = (id: string): Quest | undefined => defs.find((q) => q.id === id);
 
 // Спосіб отримання з дефолтом (сумісність зі старими квестами).

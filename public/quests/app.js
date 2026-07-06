@@ -362,10 +362,10 @@ function applyEdit(pathStr) {
     if (p[3] === 'who') return openM('Хто перестрів', () => pt.encounter.who, (v) => pt.encounter.who = v, false);
     if (p[3] === 'line') return openM('Що каже', () => pt.encounter.line, (v) => pt.encounter.line = v, true); }
   if (kind === 'quest') { const q = W.quests.find((x) => x.id === p[1]);
-    if (p[2] === 'title') return openM('Назва квеста', () => q.title, (v) => q.title = v, false);
-    if (p[2] === 'cat') return openM('Тип', () => q.cat, (v) => q.cat = v, false); }
+    if (p[2] === 'title') return openM('Назва квеста', () => q.title, (v) => { q.title = v; touchQuest(q); }, false);
+    if (p[2] === 'cat') return openM('Тип', () => q.cat, (v) => { q.cat = v; touchQuest(q); }, false); }
   if (kind === 'step') { const q = W.quests.find((x) => x.id === p[1]);
-    return openM('Крок квеста', () => q.steps[+p[2]].text, (v) => q.steps[+p[2]].text = v, true); }
+    return openM('Крок квеста', () => q.steps[+p[2]].text, (v) => { q.steps[+p[2]].text = v; touchQuest(q); }, true); }
 }
 
 // Додавання
@@ -378,8 +378,8 @@ function applyAdd(pathStr) {
   else if (k === 'act') { const n = npcById(bldById(locById(p[1]), p[2]), p[3]); n.actions.push({ id: uid('act'), label: 'Нова дія', say: '' }); }
   else if (k === 'path') { const l = locById(p[1]); const other = W.locations.find((x) => x.id !== l.id); l.paths.push({ to: other ? other.id : l.id, encounter: null }); }
   else if (k === 'loc') { const id = uid('loc'); W.locations.push({ id, name: 'Нова локація', desc: '', buildings: [], paths: [] }); }
-  else if (k === 'quest') { W.quests.push({ id: uid('q'), title: 'Новий квест', cat: 'побічний', steps: [] }); }
-  else if (k === 'step') { const q = W.quests.find((x) => x.id === p[1]); q.steps.push({ text: 'Новий крок', done: false }); }
+  else if (k === 'quest') { const q = { id: uid('q'), title: 'Новий квест', cat: 'побічний', steps: [] }; W.quests.push(q); pushQuestToFb(q); }
+  else if (k === 'step') { const q = W.quests.find((x) => x.id === p[1]); q.steps.push({ text: 'Новий крок', done: false }); pushQuestToFb(q); }
   save(); render('f');
 }
 
@@ -393,8 +393,8 @@ function applyDel(pathStr) {
   else if (k === 'act') { const n = npcById(bldById(locById(p[1]), p[2]), p[3]); n.actions = n.actions.filter((a) => a.id !== p[4]); }
   else if (k === 'path') { const l = locById(p[1]); l.paths.splice(+p[2], 1); }
   else if (k === 'loc') { W.locations = W.locations.filter((l) => l.id !== p[1]); }
-  else if (k === 'quest') { W.quests = W.quests.filter((q) => q.id !== p[1]); }
-  else if (k === 'step') { const q = W.quests.find((x) => x.id === p[1]); q.steps.splice(+p[2], 1); }
+  else if (k === 'quest') { W.quests = W.quests.filter((q) => q.id !== p[1]); tombstoneQuestFb(p[1]); }
+  else if (k === 'step') { const q = W.quests.find((x) => x.id === p[1]); q.steps.splice(+p[2], 1); pushQuestToFb(q); }
   save(); render('f');
 }
 
@@ -484,9 +484,92 @@ document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () 
   }, { passive: true });
 })();
 
+// ── Синхронізація КВЕСТІВ із грою та студією (Firebase REST) ───────────────────
+// Спільний живий шар: content/quests/{id} = ігровий Quest із updatedAt. Літопис
+// пише сюди на кожну правку квесту й підтягує чужі правки (студія/гра) поллінгом.
+// Мердж — по кожному квесту (LWW за updatedAt). SDK не потрібен — чистий REST.
+const FB_DB = 'https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app';
+const QPATH = FB_DB + '/content/quests';
+
+const catToGame = (c) => /голов|основн/i.test(c || '') ? 'main' : 'side';
+const catFromGame = (c) => c === 'main' ? 'головний' : 'побічний';
+
+// Літопис-квест → ігровий Quest. Літопис редагує лише title/text/cat/кроки —
+// решту багатих полів (acq, локація, нагорода, тип/ціль кроку) НЕ знає, тож
+// НЕ затираємо їх: стартуємо з останньої відомої ігрової ноди (q._game) і
+// накладаємо зверху лише свої поля. Нові квести Літопису → acq 'auto'.
+function questToGame(q) {
+  const base = q._game ? JSON.parse(JSON.stringify(q._game)) : {};
+  const prevObjs = base.objectives || [];
+  const objectives = (q.steps || []).map((s, i) => {
+    const id = s.oid || (q.id + '_o' + i);
+    const prev = prevObjs.find((o) => o.id === id) || {};
+    return Object.assign({}, prev, { id, kind: prev.kind || 'custom', desc: s.text || '' });
+  });
+  delete base.deleted;
+  return Object.assign(base, {
+    id: q.id, title: q.title || '', text: q.text || '', cat: catToGame(q.cat),
+    acq: base.acq || 'auto', objectives, successOn: base.successOn || 'objectives', updatedAt: Date.now(),
+  });
+}
+// Ігровий Quest → Літопис-квест. Зберігаємо локальні done по збігу oid; повну
+// ноду ховаємо в _game, щоб зворотний пуш не втратив багаті поля студії.
+function questFromGame(node, prev) {
+  const ps = (prev && prev.steps) || [];
+  return {
+    id: node.id, title: node.title || '', text: node.text || '', cat: catFromGame(node.cat),
+    steps: (node.objectives || []).map((o) => {
+      const was = ps.find((s) => s.oid === o.id);
+      return { oid: o.id, text: o.desc || '', done: !!(was && was.done) };
+    }),
+    updatedAt: node.updatedAt || 0, _game: node,
+  };
+}
+
+function pushQuestToFb(q) {
+  const node = questToGame(q);
+  q.updatedAt = node.updatedAt; // локальний стамп == нода → пул не відлунює назад
+  fetch(`${QPATH}/${q.id}.json`, { method: 'PUT', body: JSON.stringify(node) }).catch(() => {});
+}
+function tombstoneQuestFb(id) {
+  fetch(`${QPATH}/${id}.json`, { method: 'PUT', body: JSON.stringify({ id, deleted: true, updatedAt: Date.now() }) }).catch(() => {});
+}
+function touchQuest(q) { pushQuestToFb(q); save(); }
+
+// Підтягнути чужі правки квестів і змерджити (LWW). Оновлює вью, якщо відкрито квести.
+async function pullQuests() {
+  let val = null;
+  try { const r = await fetch(`${QPATH}.json`); if (r.ok) val = await r.json(); } catch (e) { return; }
+  if (!val || typeof val !== 'object') return;
+  let dirty = false;
+  for (const node of Object.values(val)) {
+    if (!node || typeof node !== 'object' || !node.id) continue;
+    const idx = W.quests.findIndex((x) => x.id === node.id);
+    const localAt = idx >= 0 ? (W.quests[idx].updatedAt || 0) : -1;
+    const nodeAt = node.updatedAt || 0;
+    if (node.deleted) {
+      if (idx >= 0 && nodeAt > localAt) { W.quests.splice(idx, 1); dirty = true; }
+    } else if (nodeAt > localAt) {
+      const conv = questFromGame(node, idx >= 0 ? W.quests[idx] : null);
+      if (idx >= 0) W.quests[idx] = conv; else W.quests.push(conv);
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    save();
+    if (ui.route.t === 'quests' || ui.route.t === 'quest') {
+      if (ui.route.t === 'quest' && !W.quests.some((q) => q.id === ui.route.id)) ui.route = { t: 'quests' };
+      render('f'); syncTab();
+    }
+  }
+}
+
 // ── Модалка-контейнер + SW ────────────────────────────────────────────────────
 (function initModal() { const d = document.createElement('div'); d.id = 'modal'; document.body.appendChild(d); })();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // Старт
 render('f'); syncTab();
+void pullQuests();
+setInterval(() => { void pullQuests(); }, 6000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void pullQuests(); });
