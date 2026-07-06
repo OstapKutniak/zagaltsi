@@ -1,0 +1,24 @@
+# Автодеплой цінового воркера «shopping-price» на Cloudflare.
+# Тригер: push у main, що чіпає workers/shopping-price/* (або запуск руками).
+# Потрібен той самий секрет репо CLOUDFLARE_API_TOKEN, що й для бот-воркера
+# (Cloudflare → My Profile → API Tokens → шаблон «Edit Cloudflare Workers»).
+name: Deploy shopping-price worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/shopping-price/**'
+      - '.github/workflows/deploy-shopping-price.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: workers/shopping-price
