@@ -189,7 +189,7 @@ export class Enemy extends Actor {
           this.dialogTriggered = true;
           // onOutcome — діалог повідомить, чим скінчився («Кінець» у репліці).
           this.scene.events.emit('enemyDialog', {
-            graph: this.behavior, nodeId: act.id, netId: this.netId,
+            graph: this.behavior, nodeId: act.id, netId: this.netId, charKey: this.charKey,
             getHeadPos: (): { wx: number; wy: number } => this.headWorldPos(),
             onOutcome: (o: 'positive' | 'negative') => { this.dialogOutcome = o; },
           });

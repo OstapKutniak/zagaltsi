@@ -46,6 +46,7 @@ export async function stageLevelById(levelId: string | undefined | null): Promis
   const assets = await loadAssets();
   const used = assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
   const doc: Record<string, unknown> = {
+    id: lv.id ?? '', // ціль survive-квестів «протриматись у рівні X»
     name: lv.name, placed: lv.placed, collider: lv.collider,
     enemySpawns: lv.enemySpawns ?? [], neutralSpawns: lv.neutralSpawns ?? [],
     grid: lv.grid ?? 32, spawn: lv.spawns?.[0] ?? lv.spawn, spawns: lv.spawns ?? [lv.spawn],

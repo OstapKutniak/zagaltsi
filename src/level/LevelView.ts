@@ -141,6 +141,7 @@ export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: numb
 
 export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; pivotX?: number; pivotY?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; outline?: OutlineMod }
 export interface LevelDoc {
+  id?: string;   // id рівня з редактора (ціль survive-квестів)
   name?: string;
   placed: LevelPlaced[];
   assets: { id: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }[];

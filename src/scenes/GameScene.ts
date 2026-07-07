@@ -108,6 +108,8 @@ export class GameScene extends Phaser.Scene {
   private waveSpawned = false;
   private cleared = false;
   private levelMode = false;
+  private curLevelId = '';   // id рівня з редактора — ціль survive-квестів
+  private surviveAcc = 0;    // накопичені секунди для цілі «протриматись N сек»
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
@@ -391,13 +393,17 @@ export class GameScene extends Phaser.Scene {
     // Нода «Діалог» у поведінці ворога просить відкрити діалогову кульку. Це буває
     // ЛИШЕ в хоста (лише він рахує think). Хост веде розмову інтерактивно й транслює
     // поточну ноду — побратими БАЧАТЬ кульку, але обирати відповіді може лише хост.
-    const onDialog = (d: { graph: NodeGraph; nodeId: string; netId?: number; getHeadPos?: () => { wx: number; wy: number }; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
+    const onDialog = (d: { graph: NodeGraph; nodeId: string; netId?: number; charKey?: string; getHeadPos?: () => { wx: number; wy: number }; onOutcome?: (o: 'positive' | 'negative') => void }): void => {
       if (isDialogActive()) return;
       const netId = d.netId ?? -1;
       const getAnchor = d.getHeadPos ? (): { x: number; y: number } => this.screenAnchor(d.getHeadPos!()) : undefined;
       openDialog(d.graph, d.nodeId, {
         getAnchor,
-        onOutcome: d.onOutcome,
+        onOutcome: (o) => {
+          d.onOutcome?.(o);
+          // Ціль «поговорити» в бітемапі: домовились (positive) → прогрес по charId.
+          if (o === 'positive' && d.charKey) for (const q of reportProgress('talk', d.charKey)) this.questToast(q);
+        },
         onAdvance: (nodeId) => { if (this.isMulti) pushDialog(this.lobbyCode, { netId, nodeId }); },
         onClose: () => { if (this.isMulti) pushDialog(this.lobbyCode, null); },
       });
@@ -447,6 +453,8 @@ export class GameScene extends Phaser.Scene {
   // Застосувати рівень із редактора: візуал + спавн + межі камери/гравця.
   private applyLevel(doc: LevelDoc): void {
     this.levelMode = true;
+    this.curLevelId = doc.id ?? '';
+    this.surviveAcc = 0;
     const hasSky = !!doc.atmosphere?.sky?.enabled;
     this.skyRect.setVisible(hasSky); this.groundRect.setVisible(hasSky); this.horizon.setVisible(hasSky);
     this.gateLine.setVisible(false); this.goal.setVisible(false); this.goalLabel.setVisible(false);
@@ -1236,6 +1244,16 @@ export class GameScene extends Phaser.Scene {
     // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
     else this.amHost = true; // соло = сам собі хост
+
+    // Ціль «вижити/протриматись N сек» — тікає щосекунди, поки гравець живий у рівні.
+    if (this.levelMode && this.playerSpawned && this.player.hp > 0) {
+      this.surviveAcc += dt;
+      if (this.surviveAcc >= 1) {
+        const s = Math.floor(this.surviveAcc);
+        this.surviveAcc -= s;
+        for (const q of reportProgress('survive', this.curLevelId || undefined, s)) this.questToast(q);
+      }
+    }
 
     // Тригер хвилі (демо-арена; у режимі рівня вимкнено)
     if (!this.levelMode && !this.waveSpawned && this.player.floorX > WAVE_TRIGGER_X) this.spawnWave();

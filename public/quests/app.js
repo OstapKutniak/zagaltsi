@@ -14,6 +14,23 @@ const KINDS = ['talk', 'kill', 'reach', 'collect', 'survive', 'escort', 'custom'
 const KIND_LABEL = { talk: 'поговорити', kill: 'вбити', reach: 'дійти', collect: 'зібрати', survive: 'вижити', escort: 'супроводити', custom: 'інше' };
 const KIND_HAS_COUNT = { kill: true, collect: true, survive: true };
 
+// ── Карта: координати з worlds.json (той самий світ, що в грі) ────────────────
+const SEED_XY = {
+  n_peresolykha: [-420, 40], n_hreblya: [-260, -60], n_dub: [-120, -160], n_balka: [-330, -190],
+  n_krynytsia: [-180, 130], n_korchma: [-40, 40], n_duplyany: [120, -40], n_pasika: [250, -160],
+  n_zavod: [60, 185], n_brody: [290, 120], n_kaplytsia: [460, 30], n_bahno: [470, -130],
+};
+const SEED_REGIONS = () => ([
+  { id: 'r_tykhoplav', name: 'Тихоплав', desc: 'Загрузла заплава. Цього літа жито взялося ріжками.', x: -300, y: 60 },
+  { id: 'r_verkhovyna', name: 'Верховина', desc: 'Високі полонини. Шлях туди ще не проторовано.', x: -40, y: -120 },
+  { id: 'r_polonyny', name: 'Чорні Полонини', desc: 'Кажуть, там і вдень темно.', x: 230, y: -30 },
+  { id: 'r_solekamin', name: 'Солекамінь', desc: 'Соляні копальні. Зачинено.', x: 40, y: 150 },
+]);
+const SEED_REGION_EDGES = () => ([
+  { a: 'r_tykhoplav', b: 'r_verkhovyna' }, { a: 'r_verkhovyna', b: 'r_polonyny' },
+  { a: 'r_tykhoplav', b: 'r_solekamin' }, { a: 'r_solekamin', b: 'r_polonyny' },
+]);
+
 // ── Болванка світу (засів) ───────────────────────────────────────────────────
 function seed() {
   const L = (id, name, desc, buildings, paths, extra) => Object.assign({ id, name, desc, buildings: buildings || [], paths: paths || [], npcs: [], boards: [] }, extra || {});
@@ -120,26 +137,49 @@ function seed() {
       [ path('n_pasika'), path('n_kaplytsia') ]),
   ];
 
-  return { v: 2, title: 'Тихоплав', startId: 'n_korchma', locations, quests: [q1, q2] };
+  // Координати точок + належність до краю (карта регіону Тихоплав).
+  for (const l of locations) {
+    const c = SEED_XY[l.id];
+    l.x = c ? c[0] : 0; l.y = c ? c[1] : 0;
+    l.regionId = 'r_tykhoplav';
+  }
+  return { v: 3, title: 'Карпатський край', startId: 'n_korchma', regions: SEED_REGIONS(), regionEdges: SEED_REGION_EDGES(), locations, quests: [q1, q2] };
 }
 
-// ── Міграція v1 → v2 (старі дані в localStorage) ─────────────────────────────
+// ── Міграція старих даних у localStorage ─────────────────────────────────────
 function migrate(w) {
-  if (!w || w.v >= 2) return w;
-  for (const l of w.locations || []) {
-    l.npcs = l.npcs || [];
-    l.boards = l.boards || [];
-    for (const b of l.buildings || []) {
-      for (const n of b.npcs || []) migrateNpc(n);
+  if (!w) return w;
+  if (w.v < 2) {
+    for (const l of w.locations || []) {
+      l.npcs = l.npcs || [];
+      l.boards = l.boards || [];
+      for (const b of l.buildings || []) {
+        for (const n of b.npcs || []) migrateNpc(n);
+      }
+      for (const n of l.npcs) migrateNpc(n);
     }
-    for (const n of l.npcs) migrateNpc(n);
+    for (const q of w.quests || []) {
+      q.state = q.state || 'idle';
+      q.turnin = q.turnin || 'dialog';
+      for (const s of q.steps || []) { s.kind = s.kind || 'custom'; }
+    }
+    w.v = 2;
   }
-  for (const q of w.quests || []) {
-    q.state = q.state || 'idle';
-    q.turnin = q.turnin || 'dialog';
-    for (const s of q.steps || []) { s.kind = s.kind || 'custom'; }
+  if (w.v < 3) {
+    // Карта: глобальні краї + координати точок (відомі — з worlds.json, решта — сіткою).
+    w.regions = w.regions || SEED_REGIONS();
+    w.regionEdges = w.regionEdges || SEED_REGION_EDGES();
+    let gi = 0;
+    for (const l of w.locations || []) {
+      if (l.x == null || l.y == null) {
+        const c = SEED_XY[l.id];
+        if (c) { l.x = c[0]; l.y = c[1]; }
+        else { l.x = -350 + (gi % 5) * 180; l.y = -180 + Math.floor(gi / 5) * 150; gi++; }
+      }
+      l.regionId = l.regionId || 'r_tykhoplav';
+    }
+    w.v = 3;
   }
-  w.v = 2;
   return w;
 }
 function migrateNpc(n) {
@@ -162,7 +202,7 @@ function save(w) {
 }
 
 let W = load();
-const ui = { route: { t: 'location', id: W.startId }, history: [], edit: false, tab: 'play' };
+const ui = { route: { t: 'location', id: W.startId }, history: [], edit: false, tab: 'play', mapSel: null, mapMode: null };
 
 // ── Хелпери ──────────────────────────────────────────────────────────────────
 const $ = (s) => document.querySelector(s);
@@ -211,7 +251,7 @@ function replace(route) { ui.route = route; render('f'); syncTab(); }
 
 function syncTab() {
   const t = ui.route.t;
-  ui.tab = (t === 'quests' || t === 'quest') ? 'quests' : (t === 'map') ? 'map' : (t === 'active') ? 'active' : 'play';
+  ui.tab = (t === 'quests' || t === 'quest') ? 'quests' : (t === 'map') ? 'map' : (t === 'active') ? 'active' : (t === 'karta') ? 'karta' : 'play';
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === ui.tab));
   $('#btn-back').classList.toggle('hidden', ui.history.length === 0);
 }
@@ -229,6 +269,7 @@ function render(dir) {
   else if (r.t === 'quests') html = renderQuests();
   else if (r.t === 'quest') html = renderQuest(r);
   else if (r.t === 'active') html = renderActive();
+  else if (r.t === 'karta') html = renderKarta(r);
   else if (r.t === 'map') html = renderMap();
   v.innerHTML = html;
   void v.offsetWidth;
@@ -247,6 +288,7 @@ function setCrumbs() {
   else if (r.t === 'quests') c = `<b>Квести</b>`;
   else if (r.t === 'quest') c = `<b>${esc((questById(r.id) || {}).title || '')}</b>`;
   else if (r.t === 'active') c = `<b>Активні квести</b>`;
+  else if (r.t === 'karta') { const g = r.regionId ? regById(r.regionId) : null; c = `Карта · <b>${esc(g ? g.name : W.title)}</b>`; }
   else if (r.t === 'map') c = `<b>Локації · ${esc(W.title)}</b>`;
   $('#crumbs').innerHTML = c;
 }
@@ -257,6 +299,197 @@ function ed(attr, tag, cls, text, ph) {
 }
 function editBanner() {
   return ui.edit ? `<div class="edit-banner">Режим редагування: тапни текст — змінити; чіп типу цілі — теж тапається. ＋ додати, ✕ видалити.</div>` : '';
+}
+
+// ── Вью: Карта (глобальна = краї; всередині краю = локації + шляхи) ──────────
+const regById = (id) => (W.regions || []).find((g) => g.id === id);
+function renderKarta(r) {
+  const regionId = r.regionId || null;
+  const reg = regionId ? regById(regionId) : null;
+  let h = editBanner();
+  if (regionId) {
+    h += ed(`reg:${regionId}:name`, 'div', 'title', reg ? reg.name : '?', 'Назва краю');
+    if (reg) h += ed(`reg:${regionId}:desc`, 'div', 'subtitle', reg.desc, 'Опис краю');
+  } else {
+    h += ed('world:title', 'div', 'title', W.title, 'Назва світу');
+    h += `<div class="subtitle">${ui.edit ? 'Тап по точці — вибрати · тап по порожньому — нова точка · тап по лінії — прибрати шлях' : 'Тапни край — відкриється його карта'}</div>`;
+  }
+  // Дії над вибраною точкою
+  if (ui.edit && ui.mapSel) {
+    const isReg = ui.mapSel.kind === 'reg';
+    h += `<div class="mini-row">
+      <button class="mini-btn" data-kact="open">Відкрити</button>
+      <button class="mini-btn" data-kact="connect">З'єднати…</button>
+      <button class="mini-btn" data-kact="move">Перемістити…</button>
+      <button class="mini-btn" data-kact="rename">Назва…</button>
+      ${isReg ? `<button class="mini-btn" data-kact="desc">Опис…</button>` : ''}
+      <button class="mini-btn" style="color:var(--danger)" data-kact="del">Видалити</button>
+    </div>`;
+  }
+  if (ui.edit && ui.mapMode) {
+    h += `<div class="karta-hint" style="color:var(--gold)">${ui.mapMode === 'connect' ? 'Тапни другу точку — з’єднати' : 'Тапни місце на карті — туди переміститься'}</div>`;
+  }
+  h += `<div class="karta-wrap">${kartaSvg(regionId)}</div>`;
+  if (!ui.edit) h += `<div class="karta-hint">${regionId ? 'Тап по точці — відкрити локацію' : ''}</div>`;
+  return h;
+}
+function kartaSvg(regionId) {
+  const pts = regionId
+    ? W.locations.filter((l) => (l.regionId || 'r_tykhoplav') === regionId)
+        .map((l) => ({ id: l.id, kind: 'loc', x: l.x || 0, y: l.y || 0, label: l.name }))
+    : (W.regions || []).map((g) => ({ id: g.id, kind: 'reg', x: g.x || 0, y: g.y || 0, label: g.name }));
+  // Ребра: у краї — з paths (унікальні пари в межах краю); глобально — regionEdges.
+  const edges = [];
+  if (regionId) {
+    const inReg = new Set(pts.map((p) => p.id));
+    const seen = new Set();
+    for (const l of W.locations) {
+      if (!inReg.has(l.id)) continue;
+      for (const p of l.paths || []) {
+        if (!inReg.has(p.to)) continue;
+        const key = [l.id, p.to].sort().join('|');
+        if (seen.has(key)) continue; seen.add(key);
+        edges.push([l.id, p.to]);
+      }
+    }
+  } else {
+    for (const e of W.regionEdges || []) edges.push([e.a, e.b]);
+  }
+  const P = 130;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const minX = (xs.length ? Math.min(...xs) : 0) - P, maxX = (xs.length ? Math.max(...xs) : 0) + P;
+  const minY = (ys.length ? Math.min(...ys) : 0) - P, maxY = (ys.length ? Math.max(...ys) : 0) + P;
+  const w = Math.max(300, maxX - minX), hh = Math.max(240, maxY - minY);
+  const R = Math.max(w, hh) * 0.026;
+  const fs = R * 1.15, fs2 = R * 0.85;
+  const at = (id) => pts.find((p) => p.id === id);
+  let s = `<svg class="karta-svg" viewBox="${minX} ${minY} ${w} ${hh}" style="aspect-ratio:${w}/${hh}" xmlns="http://www.w3.org/2000/svg">`;
+  for (const [a, b] of edges) {
+    const A = at(a), B = at(b); if (!A || !B) continue;
+    s += `<line class="edge-hit" data-edge="${a}|${b}" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"></line>`;
+    s += `<line class="edge" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" style="pointer-events:none"></line>`;
+  }
+  for (const p of pts) {
+    const sel = ui.mapSel && ui.mapSel.id === p.id;
+    s += `<g class="pt${sel ? ' sel' : ''}" data-pt="${p.kind}:${p.id}">
+      <circle cx="${p.x}" cy="${p.y}" r="${R}"></circle>
+      <text x="${p.x}" y="${p.y + R + fs}" font-size="${fs}">${esc(p.label)}</text>
+      ${p.kind === 'reg' ? `<text class="sub" x="${p.x}" y="${p.y + R + fs + fs2 + 3}" font-size="${fs2}">край</text>` : ''}
+    </g>`;
+  }
+  s += `</svg>`;
+  return s;
+}
+// Координати тапу в системі карти (svg зі style aspect-ratio = viewBox → лінійно).
+function kartaPoint(e) {
+  const svg = document.querySelector('.karta-svg'); if (!svg) return null;
+  const rect = svg.getBoundingClientRect(); const vb = svg.viewBox.baseVal;
+  return {
+    x: vb.x + (e.clientX - rect.left) / rect.width * vb.width,
+    y: vb.y + (e.clientY - rect.top) / rect.height * vb.height,
+  };
+}
+// З'єднати дві точки (край: шляхи в ОБИДВА боки; глобально: одне ребро).
+function kartaConnect(A, B, regionId) {
+  if (regionId && A.kind === 'loc' && B.kind === 'loc') {
+    const la = locById(A.id), lb = locById(B.id);
+    if (la && lb) {
+      if (!(la.paths || []).some((p) => p.to === B.id)) (la.paths = la.paths || []).push({ to: B.id, encounter: null });
+      if (!(lb.paths || []).some((p) => p.to === A.id)) (lb.paths = lb.paths || []).push({ to: A.id, encounter: null });
+    }
+  } else if (!regionId && A.kind === 'reg' && B.kind === 'reg') {
+    const key = [A.id, B.id].sort().join('|');
+    if (!(W.regionEdges || []).some((x) => [x.a, x.b].sort().join('|') === key)) {
+      (W.regionEdges = W.regionEdges || []).push({ a: A.id, b: B.id });
+    }
+  }
+}
+function kartaDisconnect(a, b, regionId) {
+  if (regionId) {
+    const la = locById(a), lb = locById(b);
+    if (la) la.paths = (la.paths || []).filter((p) => p.to !== b);
+    if (lb) lb.paths = (lb.paths || []).filter((p) => p.to !== a);
+  } else {
+    const key = [a, b].sort().join('|');
+    W.regionEdges = (W.regionEdges || []).filter((x) => [x.a, x.b].sort().join('|') !== key);
+  }
+}
+// Кліки по карті (обидва режими). Повертає true, якщо оброблено.
+function kartaClick(e, ptEl, edgeEl, bgEl) {
+  const r = ui.route; const regionId = r.regionId || null;
+  if (!ui.edit) {
+    if (!ptEl) return true;
+    const [kind, id] = ptEl.dataset.pt.split(':');
+    if (kind === 'reg') { go({ t: 'karta', regionId: id }); return true; }
+    ui.history = []; go({ t: 'location', id }); return true;
+  }
+  const mp = kartaPoint(e);
+  if (ui.mapMode === 'move' && ui.mapSel && mp) {
+    const o = ui.mapSel.kind === 'reg' ? regById(ui.mapSel.id) : locById(ui.mapSel.id);
+    if (o) { o.x = Math.round(mp.x); o.y = Math.round(mp.y); }
+    ui.mapMode = null; save(); render('f'); return true;
+  }
+  if (ptEl) {
+    const [kind, id] = ptEl.dataset.pt.split(':');
+    if (ui.mapMode === 'connect' && ui.mapSel && ui.mapSel.id !== id) {
+      kartaConnect(ui.mapSel, { kind, id }, regionId);
+      ui.mapMode = null; save(); render('f'); return true;
+    }
+    ui.mapSel = (ui.mapSel && ui.mapSel.id === id) ? null : { kind, id };
+    ui.mapMode = null; render('f'); return true;
+  }
+  if (edgeEl) {
+    const [a, b] = edgeEl.dataset.edge.split('|');
+    if (confirm('Прибрати з’єднання?')) { kartaDisconnect(a, b, regionId); save(); render('f'); }
+    return true;
+  }
+  if (bgEl && mp) { // порожнє місце → нова точка
+    if (regionId) {
+      const l = { id: uid('loc'), name: 'Нова локація', desc: '', buildings: [], paths: [], npcs: [], boards: [], x: Math.round(mp.x), y: Math.round(mp.y), regionId };
+      W.locations.push(l); ui.mapSel = { kind: 'loc', id: l.id };
+    } else {
+      const g = { id: uid('reg'), name: 'Новий край', desc: '', x: Math.round(mp.x), y: Math.round(mp.y) };
+      (W.regions = W.regions || []).push(g); ui.mapSel = { kind: 'reg', id: g.id };
+    }
+    save(); render('f'); return true;
+  }
+  return true;
+}
+// Дії над вибраною точкою (кнопки над картою).
+function kartaAction(act) {
+  const sel = ui.mapSel; if (!sel) return;
+  const r = ui.route; const regionId = r.regionId || null;
+  if (act === 'open') {
+    if (sel.kind === 'reg') { ui.mapSel = null; return go({ t: 'karta', regionId: sel.id }); }
+    return go({ t: 'location', id: sel.id });
+  }
+  if (act === 'connect') { ui.mapMode = 'connect'; return render('f'); }
+  if (act === 'move') { ui.mapMode = 'move'; return render('f'); }
+  if (act === 'rename') {
+    const o = sel.kind === 'reg' ? regById(sel.id) : locById(sel.id);
+    if (o) editText('Назва', o.name, false, (v) => { o.name = v; });
+    return;
+  }
+  if (act === 'desc' && sel.kind === 'reg') {
+    const g = regById(sel.id);
+    if (g) editText('Опис краю', g.desc || '', true, (v) => { g.desc = v; });
+    return;
+  }
+  if (act === 'del') {
+    if (sel.kind === 'loc') {
+      if (!confirm('Видалити локацію з усім вмістом?')) return;
+      W.locations = W.locations.filter((l) => l.id !== sel.id);
+      for (const l of W.locations) l.paths = (l.paths || []).filter((p) => p.to !== sel.id);
+      tombstoneLocFb(sel.id);
+    } else {
+      const has = W.locations.some((l) => (l.regionId || 'r_tykhoplav') === sel.id);
+      if (has) { alert('У краї є локації — спершу перенеси або видали їх.'); return; }
+      W.regions = (W.regions || []).filter((g) => g.id !== sel.id);
+      W.regionEdges = (W.regionEdges || []).filter((x) => x.a !== sel.id && x.b !== sel.id);
+    }
+    ui.mapSel = null; save(); render('f'); return;
+  }
+  if (regionId) { /* no-op — заглушка для лінтера */ }
 }
 
 // ── Вью: Локація ─────────────────────────────────────────────────────────────
@@ -690,7 +923,10 @@ function applyEdit(pathStr) {
   const p = pathStr.split(':');
   const kind = p[0];
   const openM = (title, get, set, multi) => editText(title, get(), multi !== false, (v) => set(v));
-  if (kind === 'world' && p[1] === 'title') return openM('Назва краю', () => W.title, (v) => W.title = v, false);
+  if (kind === 'world' && p[1] === 'title') return openM('Назва світу', () => W.title, (v) => W.title = v, false);
+  if (kind === 'reg') { const g = regById(p[1]); if (!g) return;
+    if (p[2] === 'name') return openM('Назва краю', () => g.name, (v) => g.name = v, false);
+    if (p[2] === 'desc') return openM('Опис краю', () => g.desc || '', (v) => g.desc = v, true); }
   if (kind === 'loc') { const l = locById(p[1]);
     if (p[2] === 'name') return openM('Назва локації', () => l.name, (v) => l.name = v, false);
     if (p[2] === 'desc') return openM('Опис локації', () => l.desc, (v) => l.desc = v, true); }
@@ -811,6 +1047,16 @@ view().addEventListener('click', (e) => {
   const rcondEl = e.target.closest('[data-rcond]');
   const qmodeEl = e.target.closest('[data-qmode]');
 
+  // Карта: точки/ребра/порожнє поле + кнопки дій над вибраною точкою.
+  const kactEl = e.target.closest('[data-kact]');
+  if (ui.route.t === 'karta' && kactEl) { e.stopPropagation(); return kartaAction(kactEl.dataset.kact); }
+  const ptEl = e.target.closest('[data-pt]');
+  const edgeEl2 = e.target.closest('[data-edge]');
+  const svgEl = e.target.closest('.karta-svg');
+  if (ui.route.t === 'karta' && (ptEl || edgeEl2 || svgEl)) {
+    e.stopPropagation(); return void kartaClick(e, ptEl, edgeEl2, svgEl);
+  }
+
   if (ui.edit && delEl) { e.stopPropagation(); return applyDel(delEl.dataset.del); }
   if (ui.edit && addEl) { e.stopPropagation(); return applyAdd(addEl.dataset.add); }
   if (ui.edit && qmodeEl) { // здача: діалог ↔ одразу по виконанню
@@ -899,7 +1145,9 @@ $('#btn-edit').addEventListener('click', () => {
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
   const t = b.dataset.tab;
   ui.history = [];
+  ui.mapSel = null; ui.mapMode = null;
   if (t === 'play') ui.route = { t: 'location', id: W.startId };
+  else if (t === 'karta') ui.route = { t: 'karta' };
   else if (t === 'active') ui.route = { t: 'active' };
   else if (t === 'quests') ui.route = { t: 'quests' };
   else if (t === 'map') ui.route = { t: 'map' };
@@ -1038,10 +1286,12 @@ function pushWorldDirty() {
     l.updatedAt = Date.now();
     fetch(`${WPATH}/world/${l.id}.json`, { method: 'PUT', body: JSON.stringify(l) }).catch(() => {});
   }
-  if (_metaSig !== W.title) {
-    _metaSig = W.title;
+  // Мета: назва світу + глобальна карта (краї та ребра між ними).
+  const ms = JSON.stringify([W.title, W.startId, W.regions, W.regionEdges]);
+  if (_metaSig !== ms) {
+    _metaSig = ms;
     W.metaAt = Date.now();
-    fetch(`${WPATH}/meta.json`, { method: 'PUT', body: JSON.stringify({ title: W.title, startId: W.startId, updatedAt: W.metaAt }) }).catch(() => {});
+    fetch(`${WPATH}/meta.json`, { method: 'PUT', body: JSON.stringify({ title: W.title, startId: W.startId, regions: W.regions || [], regionEdges: W.regionEdges || [], updatedAt: W.metaAt }) }).catch(() => {});
   }
 }
 function tombstoneLocFb(id) {
@@ -1063,6 +1313,7 @@ function normNpc(n) { return { id: n.id, name: n.name || '', dlg: { text: (n.dlg
 function normalizeLoc(node) {
   return {
     id: node.id, name: node.name || '', desc: node.desc || '',
+    x: node.x ?? 0, y: node.y ?? 0, regionId: node.regionId || 'r_tykhoplav', // точка на карті
     buildings: (node.buildings || []).map((b) => ({ id: b.id, name: b.name || '', desc: b.desc || '', npcs: (b.npcs || []).map(normNpc) })),
     npcs: (node.npcs || []).map(normNpc),
     boards: (node.boards || []).map((bd) => ({ id: bd.id, name: bd.name || '', posts: (bd.posts || []).map((p) => Object.assign({ id: p.id, kind: p.kind || 'gossip', text: p.text || '' }, p.questId ? { questId: p.questId } : {})) })),
@@ -1094,7 +1345,12 @@ async function pullWorld() {
   if (meta && (meta.updatedAt || 0) > (W.metaAt || 0)) {
     W.title = meta.title || W.title;
     if (meta.startId && locById(meta.startId)) W.startId = meta.startId;
-    W.metaAt = meta.updatedAt; _metaSig = W.title;
+    if (Array.isArray(meta.regions) || meta.regions) {
+      W.regions = Object.values(meta.regions || {}).map((g) => ({ id: g.id, name: g.name || '', desc: g.desc || '', x: g.x ?? 0, y: g.y ?? 0 }));
+    }
+    W.regionEdges = Object.values(meta.regionEdges || {}).map((x) => ({ a: x.a, b: x.b })).filter((x) => x.a && x.b);
+    W.metaAt = meta.updatedAt;
+    _metaSig = JSON.stringify([W.title, W.startId, W.regions, W.regionEdges]);
     dirty = true;
   }
   if (dirty) {
@@ -1112,13 +1368,16 @@ async function pullWorld() {
 (function initModal() { const d = document.createElement('div'); d.id = 'modal'; document.body.appendChild(d); })();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-// Старт: спершу ПУЛ світу (щоб не затерти чужі правки болванкою), тоді пуш-дозвіл.
+// Старт: спершу ПУЛ світу (свіжіше з Firebase перемагає болванку/старе локальне),
+// а тоді — ПУШ УСЬОГО, що після пулу лишилось відмінним (локальні правки, локації,
+// яких у ФБ ще нема). Так локальний стан ЗАВЖДИ осідає у Firebase і переживає
+// перевстановлення застосунку/зміну пристрою. (Раніше стартові правки не пушились —
+// перевстановлення PWA втрачало їх безповоротно.)
 render('f'); syncTab();
 void pullQuests();
 void pullWorld().finally(() => {
-  for (const l of W.locations) _locSig[l.id] = locSig(l);
-  _metaSig = W.title;
   _pushEnabled = true;
+  schedulePushWorld(); // сиги знає лише пул → усе інше (локальне) заллється зараз
 });
 setInterval(() => { void pullQuests(); void pullWorld(); }, 6000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { void pullQuests(); void pullWorld(); } });
