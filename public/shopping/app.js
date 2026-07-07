@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 20; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 21; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -640,8 +640,15 @@ function renderReplaceGrid() {
   $('replace-grid').querySelectorAll('.ptile[data-pid]').forEach(tile =>
     tile.addEventListener('click', () => {
       const p = prods[tile.dataset.pid];
-      if (p && listMap[replaceItemId]) {
+      const it = listMap[replaceItemId];
+      if (p && it) {
         update(ref(db, `${LIST_PATH}/${replaceItemId}`), { pid: tile.dataset.pid, name: p.name, icon: p.icon, cat: p.cat }).catch(() => {});
+        // якщо товар уже куплений — оновлюємо і його запис в архіві (ts лишається)
+        if (it.done && it.archDay && it.archKey) {
+          const c = cats[p.cat] || { name: 'Інше', color: '#9E9E9E', icon: 'tag' };
+          update(ref(db, `${ARCH_PATH}/${it.archDay}/${it.archKey}`),
+            { name: p.name, icon: p.icon, catName: c.name, catColor: c.color, catIcon: c.icon }).catch(() => {});
+        }
         toast(`Замінено на «${p.name}»`);
       }
       $('replace-overlay').classList.remove('open');
