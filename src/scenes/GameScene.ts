@@ -5,7 +5,7 @@ import { setTouchUI } from './uiButton';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
-import { buildLevelView, animOffset, deformKfAt, deformImgPt, type LevelDoc, type PlacedAnim, type PlacedDeform } from '../level/LevelView';
+import { buildLevelView, animOffset, deformKfAt, deformImgPt, type LevelDoc, type PlacedAnim, type PlacedDeform, type SpawnZoneCfg } from '../level/LevelView';
 import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
@@ -15,6 +15,7 @@ import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
   pushEnemies, watchEnemies, pushEnemyHit, watchEnemyHits, pushPlayerDamage, watchMyDamage,
+  pushZonesCleared, watchZonesCleared,
   pushDialog, watchDialog,
   type EnemyNet, type EnemyHit,
 } from '../multiplayer/lobby';
@@ -38,6 +39,16 @@ interface Remote {
   tx: number; ty: number; tz: number;  // ціль із мережі
   anim: string; facing: number;
   equipSig?: string; // підпис спорядження — перевдягаємо лише при зміні
+}
+
+// Слот спавна (детермінований): netId = 1000 + зона*100 + хвиля*10 + i (i<8, хвиль<8).
+interface SpawnSlot { netId: number; zoneIdx: number; waveIdx: number; gx: number; gy: number; charId: string }
+interface ZoneRt {
+  idx: number; gateX: number; centerX: number;
+  trigger: 'start' | 'near'; gate: boolean;
+  waves: number[][];  // netId-и по хвилях
+  curWave: number;    // -1 = ще не стартувала
+  done: boolean;      // зачищена (усі хвилі вийшли й мертві)
 }
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -110,6 +121,12 @@ export class GameScene extends Phaser.Scene {
   private levelMode = false;
   private curLevelId = '';   // id рівня з редактора — ціль survive-квестів
   private surviveAcc = 0;    // накопичені секунди для цілі «протриматись N сек»
+  // Спавн v2: детермінована таблиця слотів (netId → слот) однакова на всіх
+  // клієнтах; хост вирішує КОЛИ спавнити (хвилі/наближення), не-хост створює
+  // ворога, щойно його netId зʼявився у знімку хоста.
+  private spawnTable = new Map<number, SpawnSlot>();
+  private spawnZonesRt: ZoneRt[] = [];
+  private camZonesRt: Array<{ x: number; w: number; camX: number }> = [];
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
@@ -157,6 +174,7 @@ export class GameScene extends Phaser.Scene {
   private netStates: Record<string, PlayerState> = {};
   private remotes: Record<string, Remote> = {};
   private unwatchState: (() => void) | null = null;
+  private unwatchZones: (() => void) | null = null;
   private started = false;
   // Host-authoritative вороги: хост рахує й транслює, решта дзеркалять.
   private amHost = false;
@@ -172,6 +190,8 @@ export class GameScene extends Phaser.Scene {
 
   constructor() {
     super('Game');
+    // Dev-only: доступ до сцени з консолі/headless-тестів (у проді не активний).
+    if (import.meta.env.DEV) (window as unknown as { __gs?: unknown }).__gs = this;
   }
 
   // Логічні розміри кадру (backing у RENDER_SCALE× більший — ділимо, щоб лишити 1280×576).
@@ -354,6 +374,7 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
+      this.unwatchZones?.();
       this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.(); this.unwatchDialog?.();
       this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = this.unwatchDialog = null;
       this.coopDialog?.close(); this.coopDialog = null;
@@ -520,41 +541,54 @@ export class GameScene extends Phaser.Scene {
       for (const g of this.greenCells) { this.blockedCells.delete(g); if (!this.floorSet.has(g)) this.floorSet.add(g); }
     }
 
-    // Вороги з намальованих зон 3×3: позиція в межах зони — детермінована (однакова
-    // на всіх клієнтах коопу й між перезаходами), щоб не було розсинхрону.
+    // Спавн v2: зони 3×3 з налаштуваннями (хвилі/тригер/ворота). Таблиця слотів
+    // детермінована (позиції/charId/netId однакові на всіх клієнтах і між
+    // перезаходами) — легасі-зони без cfg поводяться як раніше (1 ворог одразу).
+    this.spawnTable.clear(); this.spawnZonesRt = [];
     if (doc.enemySpawns && doc.enemySpawns.length) {
       const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
       const rnd = (a: number, b: number): number => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
-      const toAttach: Array<{ enemy: Enemy; charId: string }> = [];
-      // netId = порядковий індекс: спавн детермінований (однаковий на всіх клієнтах),
-      // тож цей індекс — стабільний ключ синхронізації ворога між гравцями.
-      doc.enemySpawns.forEach((z, idx) => {
+      doc.enemySpawns.forEach((z, zi) => {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
         if (!Number.isFinite(acx) || !Number.isFinite(acy)) return;
-        const rcx = acx + rnd(acx, acy) * 3, rcy = acy + rnd(acy, acx) * 3;
-        const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
-        const enemy = new Enemy(this, gx, gy);
-        enemy.netId = idx;
-        if (p[2]) enemy.charKey = p[2];
-        this.enemies.push(enemy);
-        if (p[2]) toAttach.push({ enemy, charId: p[2] });
-      });
-      if (toAttach.length) {
-        void (this.libReady ?? Promise.resolve()).then(async () => {
-          // Опубліковані поведінки з репо (працюють на всіх пристроях/коопі), один раз.
-          const pub = await loadPublishedBehaviors();
-          toAttach.forEach(({ enemy, charId }, i) => {
-            const d = docById(this.lib, charId);
-            if (d) void enemy.attachChar(d, `npc_${i}_`);
-            // нодова поведінка цього ворога (1 крок = 1 клітинка колайдера = gs px):
-            // спершу локальна IDB (свіжі правки автора), фолбек — опублікований граф.
-            void idbGet<NodeGraph>('zag_behavior_' + charId)
-              .then((bg) => enemy.setBehavior(bg ?? pub[charId] ?? null, gs))
-              .catch(() => enemy.setBehavior(pub[charId] ?? null, gs));
-          });
+        const cfg: SpawnZoneCfg = doc.spawnCfg?.[acx + ',' + acy]
+          ?? { waves: [{ charId: p[2] ?? '', count: 1 }], trigger: 'start' };
+        const waves: number[][] = [];
+        cfg.waves.slice(0, 8).forEach((wv, wi) => {
+          const ids: number[] = [];
+          const n = Math.max(1, Math.min(8, wv.count || 1));
+          for (let i = 0; i < n; i++) {
+            const netId = 1000 + zi * 100 + wi * 10 + i;
+            // Позиція в межах зони: детермінований шум від (анкер, хвиля, індекс).
+            const rcx = acx + rnd(acx + wi * 7 + i * 3, acy + i) * 3;
+            const rcy = acy + rnd(acy + i * 5, acx + wi * 11 + i) * 3;
+            this.spawnTable.set(netId, {
+              netId, zoneIdx: zi, waveIdx: wi,
+              gx: rcx * gs + rcy * k, gy: this.bandBottom + rcy * k,
+              charId: wv.charId || '',
+            });
+            ids.push(netId);
+          }
+          waves.push(ids);
         });
+        const centerX = (acx + 1.5) * gs + (acy + 1.5) * k;
+        this.spawnZonesRt.push({
+          idx: zi, centerX,
+          gateX: (acx + 3) * gs + (acy + 1.5) * k + 60, // трохи за правим краєм зони
+          trigger: cfg.trigger === 'near' ? 'near' : 'start',
+          gate: !!cfg.gate, waves, curWave: -1, done: false,
+        });
+      });
+      // 'start'-зони: перша хвиля виходить одразу на ВСІХ клієнтах (детерміновано).
+      for (const zr of this.spawnZonesRt) {
+        if (zr.trigger === 'start' && zr.waves.length) {
+          zr.curWave = 0;
+          for (const id of zr.waves[0]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        }
       }
     }
+    // Камера-зони (фіксований екран): гравець у [x, x+w] → камера стає на camX.
+    this.camZonesRt = (doc.camZones ?? []).map((z) => ({ x: z.x, w: z.w, camX: z.camX }));
 
     // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
@@ -767,6 +801,10 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isMulti) {
       this.unwatchState = watchGameState(code, (states) => { this.netStates = states; });
+      // Зачищені зони від хоста → не-хост відпускає ворота (свій tickZones не крутить).
+      this.unwatchZones = watchZonesCleared(code, (cleared) => {
+        for (const zr of this.spawnZonesRt) if (cleared.includes(zr.idx)) zr.done = true;
+      });
       // Дзеркало ворогів від хоста (застосовуємо лише коли я НЕ хост).
       this.unwatchEnemies = watchEnemies(code, (e) => { this.netEnemies = e; });
       // Шкода від ворогів, яку хост маршрутизував саме мені.
@@ -914,6 +952,53 @@ export class GameScene extends Phaser.Scene {
     if (e && e.vulnerable(this.simTime) && e.hurt(h.dmg, this.simTime, h.fromX)) this.removeEnemy(e);
   }
 
+  // Створити ворога зі слота таблиці (детерміновано; арт/поведінка — асинхронно).
+  private spawnFromSlot(slot: SpawnSlot): void {
+    if (this.enemies.some((e) => e.netId === slot.netId)) return;
+    const enemy = new Enemy(this, slot.gx, slot.gy);
+    enemy.netId = slot.netId;
+    enemy.zoneIdx = slot.zoneIdx;
+    if (slot.charId) {
+      enemy.charKey = slot.charId;
+      void (this.libReady ?? Promise.resolve()).then(async () => {
+        const pub = await loadPublishedBehaviors();
+        const d = docById(this.lib, slot.charId);
+        if (d) void enemy.attachChar(d, `npc_${slot.netId}_`);
+        void idbGet<NodeGraph>('zag_behavior_' + slot.charId)
+          .then((bg) => enemy.setBehavior(bg ?? pub[slot.charId] ?? null, this.colliderGrid))
+          .catch(() => enemy.setBehavior(pub[slot.charId] ?? null, this.colliderGrid));
+      });
+    }
+    this.enemies.push(enemy);
+  }
+
+  // ХОСТ: життя зон — тригер наближення, хвилі по черзі, зачистка (ворота).
+  private tickZones(): void {
+    for (const zr of this.spawnZonesRt) {
+      if (zr.done || !zr.waves.length) continue;
+      const aliveInZone = this.enemies.some((e) => e.zoneIdx === zr.idx);
+      if (zr.curWave === -1) {
+        // Ще не стартувала ('near'): будь-який гравець близько → перша хвиля.
+        let nearest = Math.abs(this.player.floorX - zr.centerX);
+        for (const r of Object.values(this.remotes)) nearest = Math.min(nearest, Math.abs(r.rx - zr.centerX));
+        if (nearest < 700) {
+          zr.curWave = 0;
+          for (const id of zr.waves[0]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        }
+        continue;
+      }
+      if (!aliveInZone) {
+        if (zr.curWave < zr.waves.length - 1) {
+          zr.curWave++;
+          for (const id of zr.waves[zr.curWave]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        } else {
+          zr.done = true;
+          if (this.isMulti) pushZonesCleared(this.lobbyCode, this.spawnZonesRt.filter((z) => z.done).map((z) => z.idx));
+        }
+      }
+    }
+  }
+
   private removeEnemy(e: Enemy): void {
     const key = e.charKey;
     e.destroy();
@@ -945,6 +1030,15 @@ export class GameScene extends Phaser.Scene {
   // Не-хост: дзеркалимо ворогів. Відсутній netId, який РАНІШЕ бачили → загинув
   // (прибираємо); якого ще не бачили → хост ще не почав слати (лишаємо як є).
   private mirrorEnemies(dt: number): void {
+    // Динамічні хвилі: хост наспавнив нове netId → створюємо його зі своєї
+    // детермінованої таблиці (та сама позиція/charId), стан домалює applyNet.
+    for (const idStr of Object.keys(this.netEnemies)) {
+      const id = Number(idStr);
+      if (!this.enemies.some((e) => e.netId === id)) {
+        const slot = this.spawnTable.get(id);
+        if (slot) this.spawnFromSlot(slot);
+      }
+    }
     for (const id of Object.keys(this.netEnemies)) this.seenEnemyIds.add(Number(id));
     for (const e of [...this.enemies]) {
       const s = e.netId >= 0 ? this.netEnemies[e.netId] : undefined;
@@ -1238,7 +1332,11 @@ export class GameScene extends Phaser.Scene {
     // синхронні, без дрожу. Та сама формула центрування, що й Phaser startFollow:
     // scrollX = target.x − width·0.5 (width — повна ширина камери, zoom застосовується окремо).
     const cam = this.cameras.main;
-    const targetScrollX = this.player.x - cam.width * 0.5;
+    // Камера-зона (редактор Мандр): гравець усередині → кадр фіксується на camX.
+    const cz = this.levelMode
+      ? this.camZonesRt.find((z) => this.player.floorX >= z.x && this.player.floorX <= z.x + z.w)
+      : undefined;
+    const targetScrollX = cz ? cz.camX : this.player.x - cam.width * 0.5;
     cam.scrollX += (targetScrollX - cam.scrollX) * 0.08;
 
     // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
@@ -1284,10 +1382,20 @@ export class GameScene extends Phaser.Scene {
         const dmg = e.think(t, time, dt, band);
         if (dmg > 0) this.applyEnemyDamage(t.victim, dmg, e.floorX, time);
       }
+      this.tickZones(); // хвилі/тригери/зачистка зон — авторитетно в хоста
       if (this.isMulti) this.broadcastEnemies(time);
     } else {
       // Не-хост: дзеркалимо стан ворогів від хоста.
       this.mirrorEnemies(dt);
+    }
+
+    // Ворота зон: поки зона з gate не зачищена — далі за неї не пройти.
+    if (this.levelMode) {
+      let mx = this.levelEnd - 20;
+      for (const zr of this.spawnZonesRt) {
+        if (zr.gate && !zr.done && zr.gateX > this.player.floorX - 60) mx = Math.min(mx, zr.gateX);
+      }
+      this.player.maxX = mx;
     }
 
     // Арена зачищена — відкриваємо шлях

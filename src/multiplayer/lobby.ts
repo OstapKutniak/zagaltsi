@@ -154,6 +154,15 @@ export interface DmgEvent { dmg: number; fromX: number }
 export function pushEnemies(code: string, enemies: Record<string, EnemyNet>): void {
   set(ref(db, `lobbies/${code.toUpperCase()}/enemies`), enemies).catch(() => {});
 }
+// Індекси ЗАЧИЩЕНИХ зон спавна (хост → всі): не-хост відпускає ворота локально.
+export function pushZonesCleared(code: string, cleared: number[]): void {
+  set(ref(db, `lobbies/${code.toUpperCase()}/zones`), cleared).catch(() => {});
+}
+export function watchZonesCleared(code: string, cb: (cleared: number[]) => void): Unsubscribe {
+  const r = ref(db, `lobbies/${code.toUpperCase()}/zones`);
+  onValue(r, (snap) => cb(snap.exists() ? Object.values(snap.val() as Record<string, number>) : []));
+  return () => off(r);
+}
 export function watchEnemies(code: string, cb: (e: Record<string, EnemyNet>) => void): Unsubscribe {
   const r = ref(db, `lobbies/${code.toUpperCase()}/enemies`);
   onValue(r, (snap) => cb(snap.exists() ? (snap.val() as Record<string, EnemyNet>) : {}));

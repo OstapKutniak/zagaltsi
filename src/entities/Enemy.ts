@@ -17,7 +17,8 @@ interface Target { floorX: number; floorY: number }
 
 // Простий ворог: підходить до гравця по площині, у дистанції б'є по кулдауну.
 export class Enemy extends Actor {
-  netId = -1; // стабільний індекс у кооп-синхронізації (порядок спавну з doc.enemySpawns)
+  netId = -1; // стабільний індекс у кооп-синхронізації (слот детермінованої таблиці спавна)
+  zoneIdx = -1; // до якої зони спавна належить (хвилі/ворота)
   charKey = ''; // charId джерела (для цілей квесту «здолати такого-то»)
   private nextAttackAt = 0;
   private immuneUntil = 0;

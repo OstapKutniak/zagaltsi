@@ -53,13 +53,18 @@ interface Placed { id: string; cat: string; asset: string; x: number; y: number;
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
-interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[] }
+// Налаштування зони спавна ворогів (ключ = 'cx,cy' анкера зони). Хвилі йдуть одна
+// за одною після зачистки попередньої; trigger 'near' = спавн при наближенні гравця;
+// gate = «ворота»: далі не пройти, поки зону не зачищено.
+export interface SpawnWave { charId: string; count: number }
+export interface SpawnZoneCfg { waves: SpawnWave[]; trigger: 'start' | 'near'; gate?: boolean }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[]; spawnCfg?: Record<string, SpawnZoneCfg> }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
+  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS }, spawnCfg: {} });
   // Стабільний id для легасі-рівнів без id (на двох компах виводиться однаково з назви,
   // тож ті самі рівні зливаються, а не дублюються). Викликати перед merge-by-id.
   const ensureLevelId = (lv: Level): Level => { if (!lv.id) lv.id = 'L:' + lv.name; return lv; };
@@ -109,6 +114,7 @@ export function initLevelEditor(prefix: string): void {
     pendingFlip: 1,   // 1 або -1 (M = дзеркало)
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     pendingEnemy: null as string | null,          // id ворога що зараз виставляється
+    selZone: null as string | null,               // вибрана зона спавна ('cx,cy') — панель налаштувань
     pendingNeutral: null as string | null,        // id нейтрала що зараз виставляється
     animLinePid: null as string | null,           // id ассета, для якого зараз малюємо лінію руху
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
@@ -335,6 +341,7 @@ export function initLevelEditor(prefix: string): void {
     if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // один спавн -> масив
     if (!lv.enemySpawns) lv.enemySpawns = []; // зони спавна ворогів
     if (!lv.neutralSpawns) lv.neutralSpawns = []; // зони спавна нейтралів
+    if (!lv.spawnCfg) lv.spawnCfg = {}; // налаштування зон (хвилі/тригер/ворота)
     if (typeof lv.start !== 'number') lv.start = 0;
     if (typeof lv.end !== 'number') lv.end = 2400;
     if (typeof lv.grid !== 'number') lv.grid = 32; // всі рівні на gs=32
@@ -885,6 +892,10 @@ export function initLevelEditor(prefix: string): void {
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
         ctx.fillStyle = hovered ? 'rgba(255,40,40,0.55)' : 'rgba(255,40,40,0.20)'; ctx.fill();
         ctx.strokeStyle = hovered ? 'rgba(255,80,80,1)' : 'rgba(255,40,40,0.9)'; ctx.lineWidth = hovered ? 3 : 2; ctx.stroke();
+        const zoneKey = acx + ',' + acy;
+        if (state.selZone === zoneKey) { // вибрана зона — золота рамка (панель унизу)
+          ctx.strokeStyle = '#ffcf8f'; ctx.lineWidth = 3; ctx.stroke();
+        }
         const ctr = Pf(acx + 1.5, acy + 1.5);
         const tint = enemyId ? npcTinted.get(enemyId) : null;
         if (tint) { // напівпрозоре червоне зображення виставленого ворога, прив'язане до зони
@@ -895,6 +906,18 @@ export function initLevelEditor(prefix: string): void {
           ctx.globalAlpha = 1;
         } else {
           ctx.fillStyle = 'rgba(255,40,40,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
+        }
+        // Бейдж налаштувань: «N воїнів / M хвиль», ворота — рискою під бейджем.
+        const zcfg = level().spawnCfg?.[zoneKey];
+        if (zcfg && zcfg.waves.length) {
+          const total = zcfg.waves.reduce((sum, wv) => sum + Math.max(1, wv.count), 0);
+          const label = total + ' у ' + zcfg.waves.length + ' хв.' + (zcfg.trigger === 'near' ? ' · близько' : '') + (zcfg.gate ? ' · ворота' : '');
+          ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+          const tw = ctx.measureText(label).width;
+          ctx.fillStyle = 'rgba(20,10,10,0.82)';
+          ctx.fillRect(ctr.x - tw / 2 - 5, d.y + 4, tw + 10, 16);
+          ctx.fillStyle = '#ffb0a0';
+          ctx.fillText(label, ctr.x, d.y + 16);
         }
       }
     }
@@ -1762,7 +1785,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; draw(); save(); });
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; level().spawnCfg = {}; state.selZone = null; renderZonePanel(); draw(); save(); });
   const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
   const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
   for (const id of pathBtnIds) {
@@ -1896,6 +1919,89 @@ export function initLevelEditor(prefix: string): void {
     lv.spawn = lv.spawns[0];
     draw();
   }
+  // ── Панель вибраної зони спавна: хвилі (ворог × кількість), тригер, ворота ──
+  let zonePanelEl: HTMLDivElement | null = null;
+  function zoneCfg(key: string): SpawnZoneCfg {
+    const lv = level();
+    if (!lv.spawnCfg) lv.spawnCfg = {};
+    if (!lv.spawnCfg[key]) {
+      // Дефолт: одна хвиля з ворогом, який уже висить на зоні (легасі 'cx,cy,charId').
+      const legacy = lv.enemySpawns.find((z) => z === key || z.startsWith(key + ','));
+      const charId = legacy ? (legacy.split(',')[2] ?? '') : '';
+      lv.spawnCfg[key] = { waves: [{ charId, count: 1 }], trigger: 'start' };
+    }
+    return lv.spawnCfg[key];
+  }
+  // Перша хвиля дублюється в легасі-рядок зони — щоб картинка ворога на зоні жила.
+  function syncZoneChar(key: string, charId: string): void {
+    const lv = level();
+    const idx = lv.enemySpawns.findIndex((z) => z === key || z.startsWith(key + ','));
+    if (idx >= 0) lv.enemySpawns[idx] = charId ? key + ',' + charId : key;
+  }
+  function renderZonePanel(): void {
+    if (!zonePanelEl) {
+      zonePanelEl = document.createElement('div');
+      zonePanelEl.id = 'lv-zonePanel';
+      zonePanelEl.style.cssText = 'position:absolute;left:10px;bottom:10px;z-index:30;background:#1d1d1f;' +
+        'border:1px solid #3a3a3a;border-radius:10px;padding:10px;min-width:280px;max-width:340px;' +
+        'box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:12px;color:#ddd;display:none';
+      document.getElementById('lv-stageWrap')?.appendChild(zonePanelEl);
+    }
+    const key = state.selZone;
+    if (!key) { zonePanelEl.style.display = 'none'; return; }
+    const cfg = zoneCfg(key);
+    const enemies = npcLib.filter((x) => x.cat === 'enemy');
+    const opts = (cur: string): string => ['<option value="">— ворог —</option>']
+      .concat(enemies.map((e) => '<option value="' + e.id + '"' + (e.id === cur ? ' selected' : '') + '>' + e.name + '</option>')).join('');
+    zonePanelEl.style.display = 'block';
+    zonePanelEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+        '<b style="color:#ffb0a0">Зона спавна</b><span style="flex:1"></span>' +
+        '<button data-zp="close" style="padding:2px 10px">Готово</button></div>' +
+      cfg.waves.map((w, i) => '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+        '<span style="color:#888;flex:0 0 auto">Хвиля ' + (i + 1) + '</span>' +
+        '<select data-zpw="' + i + '" style="flex:1;min-width:0">' + opts(w.charId) + '</select>' +
+        '<input data-zpc="' + i + '" type="number" min="1" max="8" value="' + Math.max(1, w.count) + '" style="width:52px">' +
+        '<button data-zpx="' + i + '" style="color:#d98a6a">✕</button></div>').join('') +
+      '<div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap">' +
+        '<button data-zp="addwave">＋ Хвиля</button>' +
+        '<select data-zp="trigger">' +
+          '<option value="start"' + (cfg.trigger === 'start' ? ' selected' : '') + '>Спавн: одразу</option>' +
+          '<option value="near"' + (cfg.trigger === 'near' ? ' selected' : '') + '>Спавн: при наближенні</option>' +
+        '</select>' +
+        '<label style="display:flex;align-items:center;gap:4px;cursor:pointer">' +
+          '<input data-zp="gate" type="checkbox"' + (cfg.gate ? ' checked' : '') + '>ворота</label></div>' +
+      '<div style="color:#777">Хвилі виходять по черзі після зачистки. Ворота: далі не пройти, поки зону не зачищено.</div>';
+    zonePanelEl.querySelector('[data-zp="close"]')?.addEventListener('click', () => { state.selZone = null; renderZonePanel(); draw(); });
+    zonePanelEl.querySelector('[data-zp="addwave"]')?.addEventListener('click', () => {
+      cfg.waves.push({ charId: cfg.waves[cfg.waves.length - 1]?.charId ?? '', count: 1 });
+      save(); renderZonePanel(); draw();
+    });
+    zonePanelEl.querySelector('[data-zp="trigger"]')?.addEventListener('change', (ev) => {
+      cfg.trigger = (ev.target as HTMLSelectElement).value as 'start' | 'near'; save(); draw();
+    });
+    zonePanelEl.querySelector('[data-zp="gate"]')?.addEventListener('change', (ev) => {
+      cfg.gate = (ev.target as HTMLInputElement).checked; save(); draw();
+    });
+    zonePanelEl.querySelectorAll('[data-zpw]').forEach((el) => el.addEventListener('change', (ev) => {
+      const t = ev.target as HTMLSelectElement; const i = Number(t.getAttribute('data-zpw'));
+      cfg.waves[i].charId = t.value;
+      if (i === 0) syncZoneChar(key, t.value);
+      save(); draw();
+    }));
+    zonePanelEl.querySelectorAll('[data-zpc]').forEach((el) => el.addEventListener('change', (ev) => {
+      const t = ev.target as HTMLInputElement;
+      cfg.waves[Number(t.getAttribute('data-zpc'))].count = Math.max(1, Math.min(8, Number(t.value) || 1));
+      save(); draw();
+    }));
+    zonePanelEl.querySelectorAll('[data-zpx]').forEach((el) => el.addEventListener('click', (ev) => {
+      const t = ev.currentTarget as HTMLButtonElement;
+      cfg.waves.splice(Number(t.getAttribute('data-zpx')), 1);
+      if (!cfg.waves.length) cfg.waves.push({ charId: '', count: 1 });
+      syncZoneChar(key, cfg.waves[0].charId);
+      save(); renderZonePanel(); draw();
+    }));
+  }
+
   // Зона спавна ворогів — 3×3 підлогових клітинки, центровані на клітинці під курсором.
   function enemyAt(sx: number, sy: number): void {
     const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
@@ -1905,11 +2011,28 @@ export function initLevelEditor(prefix: string): void {
     if (state.pathTool === 'enemyErase') {
       lv.enemySpawns = lv.enemySpawns.filter((z) => {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
-        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+        const hit = fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2;
+        if (hit && lv.spawnCfg) delete lv.spawnCfg[acx + ',' + acy]; // чистимо і налаштування
+        return !hit;
       });
+      if (state.selZone && !lv.enemySpawns.some((z) => z.startsWith(state.selZone + ','))
+        && !lv.enemySpawns.includes(state.selZone)) { state.selZone = null; renderZonePanel(); }
     } else {
-      const key = (fcx - 1) + ',' + (fcy - 1); // 3×3 з центром на клітинці курсора
-      if (!lv.enemySpawns.includes(key)) lv.enemySpawns.push(key);
+      // Клік по НАЯВНІЙ зоні = вибрати її (панель хвиль/тригера/воріт унизу);
+      // по порожньому місцю = нова зона (і одразу вибрана).
+      const existing = lv.enemySpawns.find((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2;
+      });
+      if (existing) {
+        const p = existing.split(',');
+        state.selZone = p[0] + ',' + p[1];
+      } else {
+        const key = (fcx - 1) + ',' + (fcy - 1); // 3×3 з центром на клітинці курсора
+        if (!lv.enemySpawns.includes(key)) lv.enemySpawns.push(key);
+        state.selZone = key;
+      }
+      renderZonePanel();
     }
     draw();
   }
@@ -1976,6 +2099,8 @@ export function initLevelEditor(prefix: string): void {
         pushUndo();
         const p = lv.enemySpawns[idx].split(',');
         lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${state.pendingEnemy}`;
+        const zc0 = lv.spawnCfg?.[`${Number(p[0])},${Number(p[1])}`];
+        if (zc0?.waves[0]) zc0.waves[0].charId = state.pendingEnemy!;
         save(); draw(); setStatus('Ворога виставлено'); return;
       }
       // клік поза зоною — скасувати
@@ -3211,6 +3336,8 @@ export function initLevelEditor(prefix: string): void {
       pushUndo();
       const p = lv.enemySpawns[idx].split(',');
       lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${enemyId}`;
+      const zc1 = lv.spawnCfg?.[`${Number(p[0])},${Number(p[1])}`];
+      if (zc1?.waves[0]) zc1.waves[0].charId = enemyId;
       save(); draw(); setStatus('Ворога призначено зоні');
     } else if (neutralId) {
       const idx = lv.neutralSpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
@@ -3346,7 +3473,7 @@ export function initLevelEditor(prefix: string): void {
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, spawnCfg: lv.spawnCfg ?? {}, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
     if (lv.atmosphere) doc.atmosphere = lv.atmosphere;
     if (lv.camZones?.length) doc.camZones = lv.camZones;
     return doc;
