@@ -833,6 +833,16 @@ function pickQuest(title, cb) {
     s.querySelectorAll('[data-q]').forEach((b) => { b.onclick = () => { close(); cb(b.dataset.q); save(); render('f'); }; });
   });
 }
+// Вибір локації (для «＋ Шлях» — куди вестиме дорога)
+function pickLocation(exceptId, cb) {
+  const items = W.locations.filter((l) => l.id !== exceptId)
+    .map((l) => `<button class="pick" data-l="${l.id}" style="text-align:left">${esc(l.name)}</button>`).join('');
+  sheet(`<h4>Куди веде шлях?</h4><div class="pick-list">${items || '<div class="empty">Нема інших локацій</div>'}</div>
+    <div class="row"><button class="cancel">Скасувати</button></div>`, (s, close) => {
+    s.querySelector('.cancel').onclick = close;
+    s.querySelectorAll('[data-l]').forEach((b) => { b.onclick = () => { close(); cb(b.dataset.l); save(); render('f'); }; });
+  });
+}
 // Вибір цілі квеста (для дії «виконати ціль»)
 function pickObjective(qid, cb) {
   const q = questById(qid); if (!q) return;
@@ -997,7 +1007,15 @@ function applyAdd(pathStr) {
       });
     }
   }
-  else if (k === 'path') { const l = locById(p[1]); const other = W.locations.find((x) => x.id !== l.id); l.paths.push({ to: other ? other.id : l.id, encounter: null }); }
+  else if (k === 'path') {
+    // Вибір локації-цілі списком; шлях кладеться в ОБИДВА боки (як на карті).
+    const l = locById(p[1]);
+    return pickLocation(l.id, (toId) => {
+      const lb = locById(toId); if (!lb) return;
+      if (!(l.paths || []).some((x) => x.to === toId)) (l.paths = l.paths || []).push({ to: toId, encounter: null });
+      if (!(lb.paths || []).some((x) => x.to === l.id)) (lb.paths = lb.paths || []).push({ to: l.id, encounter: null });
+    });
+  }
   else if (k === 'loc') { W.locations.push({ id: uid('loc'), name: 'Нова локація', desc: '', buildings: [], paths: [], npcs: [], boards: [] }); }
   else if (k === 'quest') { const q = { id: uid('q'), title: 'Новий квест', cat: 'побічний', state: 'idle', steps: [] }; W.quests.push(q); pushQuestToFb(q); }
   else if (k === 'step') { const q = questById(p[1]); q.steps.push({ oid: q.id + '_o' + Date.now().toString(36), kind: 'custom', text: 'Нова ціль', done: false }); pushQuestToFb(q); }
@@ -1024,7 +1042,14 @@ function applyDel(pathStr) {
     const idx = list.findIndex((x) => x.id === last);
     if (idx >= 0) list.splice(idx, 1);
   }
-  else if (k === 'path') { const l = locById(p[1]); l.paths.splice(+p[2], 1); }
+  else if (k === 'path') {
+    // Шлях двобічний за суттю: прибираємо і зворотний — інакше на карті ребро
+    // лишалось (малюється, якщо шлях є хоч з одного боку).
+    const l = locById(p[1]);
+    const dst = (l.paths || [])[+p[2]];
+    l.paths.splice(+p[2], 1);
+    if (dst) { const lb = locById(dst.to); if (lb) lb.paths = (lb.paths || []).filter((x) => x.to !== l.id); }
+  }
   else if (k === 'loc') { W.locations = W.locations.filter((l) => l.id !== p[1]); tombstoneLocFb(p[1]); }
   else if (k === 'quest') { W.quests = W.quests.filter((q) => q.id !== p[1]); tombstoneQuestFb(p[1]); }
   else if (k === 'step') { const q = questById(p[1]); q.steps.splice(+p[2], 1); pushQuestToFb(q); }
