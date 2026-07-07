@@ -1,6 +1,6 @@
 {
-  "name": "Літопис — тестер квестів",
-  "short_name": "Літопис",
+  "name": "Хоругва — Літопис",
+  "short_name": "Хоругва",
   "description": "Текстовий симулятор квестів і світу Загальців",
   "start_url": "/zagaltsi/quests/",
   "scope": "/zagaltsi/quests/",

@@ -23,13 +23,14 @@ function seed() {
   const path = (to, enc) => ({ to, encounter: enc || null });
 
   // Квести (типізовані цілі). id фіксовані — на них посилаються діалоги/дошки.
-  const q1 = { id: 'q_khudoba', title: 'Худоба втекла!', cat: 'побічний', state: 'idle', steps: [
+  // turnin: 'dialog' = здається реплікою в НПС; 'auto' = закривається сам, щойно всі цілі.
+  const q1 = { id: 'q_khudoba', title: 'Худоба втекла!', cat: 'побічний', state: 'idle', turnin: 'dialog', steps: [
     { oid: 'q_khudoba_o0', kind: 'talk', text: 'Поговорити з господарем Панасом у Дуплянах', done: false },
     { oid: 'q_khudoba_o1', kind: 'reach', text: 'Піти слідом на Пасіку-Борть', done: false },
     { oid: 'q_khudoba_o2', kind: 'kill', count: 1, text: 'Здолати те, що чинить розор', done: false },
     { oid: 'q_khudoba_o3', kind: 'custom', text: 'Повернути худобу господарю', done: false },
   ] };
-  const q2 = { id: 'q_sil', title: 'Сіль із багна', cat: 'побічний', state: 'idle', steps: [
+  const q2 = { id: 'q_sil', title: 'Сіль із багна', cat: 'побічний', state: 'idle', turnin: 'dialog', steps: [
     { oid: 'q_sil_o0', kind: 'reach', text: 'Дістатись Солоного Багна', done: false },
     { oid: 'q_sil_o1', kind: 'collect', count: 3, text: 'Зібрати три грудки солі-інею', done: false },
     { oid: 'q_sil_o2', kind: 'talk', text: 'Віднести сіль чумаку Свириду', done: false },
@@ -87,10 +88,14 @@ function seed() {
       [ bld('Хата господаря', 'На покуті — образ, завішений рушником. Господар не підводить очей.',
           [ npc('Господар Панас', 'Худоба втекла вночі. Уся. Наче хтось відчинив і покликав.',
               [ Object.assign(reply('Взятися відшукати', 'Дякую, чоловіче. Слід повів на Пасіку.'), { action: { type: 'give', questId: 'q_khudoba' } }),
+                // Видно ЛИШЕ коли квест активний; вибір = виконати talk-ціль o0.
+                Object.assign(reply('Розпитати про слід', 'Копита йшли рівно, як під вуздою. А поруч — босі ступні. Великі.'), { cond: { questId: 'q_khudoba', state: 'active' }, action: { type: 'obj', questId: 'q_khudoba', oid: 'q_khudoba_o0' } }),
                 Object.assign(reply('Худоба вдома, господарю', 'Вернулась?! Ох… тримай, заслужив. І нікому не кажи, ЩО ти там бачив.'), { action: { type: 'turnin', questId: 'q_khudoba' } }) ]) ]) ],
       [ path('n_korchma'), path('n_dub'), path('n_pasika'), path('n_brody') ],
       { npcs: [ npc('Пастушок', 'Дядьку, а правда, що вночі хтось ходив селом і співав без рота?',
-          [ reply('Розпитати малого', 'Я чув! Через сон. Пісня була як мамина, тільки навпаки.') ]) ] }),
+          [ reply('Розпитати малого', 'Я чув! Через сон. Пісня була як мамина, тільки навпаки.'),
+            // Приклад репліки-за-умовою: зʼявляється лише при активній «Худобі».
+            Object.assign(reply('Питав про худобу?', 'Бачив! Щось гнало корів до Пасіки, а само не ступало по землі.'), { cond: { questId: 'q_khudoba', state: 'active' } }) ]) ] }),
 
     L('n_pasika', 'Пасіка-Борть', 'Борті розорено. Слід — майже на двох ногах.',
       [ bld('Розорена борть', 'Колоди розтрощені, віск здертий пазурами завбільшки з долоню.', []) ],
@@ -131,6 +136,7 @@ function migrate(w) {
   }
   for (const q of w.quests || []) {
     q.state = q.state || 'idle';
+    q.turnin = q.turnin || 'dialog';
     for (const s of q.steps || []) { s.kind = s.kind || 'custom'; }
   }
   w.v = 2;
@@ -358,13 +364,24 @@ function renderNpc(r) {
   if (path) h += `<button class="choice" data-reply=".."><span class="arrow">↩</span>Перепитати</button>`;
   return h;
 }
-// Видимість відповіді залежно від стану її квеста: give ховаємо коли вже взято/
-// здано; turnin показуємо лише коли квест активний (заблоковано, поки цілі не всі).
+// Видимість відповіді. Спершу умова показу (cond: квест у заданому стані) — це
+// «фраза зʼявляється лише коли квест активний» тощо. Далі за дією: give ховаємо
+// коли вже взято/здано; obj (виконати ціль) — лише коли квест активний і ціль ще
+// не виконана; turnin — лише в активного (заблоковано, поки цілі не всі).
 function replyVisible(rep) {
+  if (rep.cond) {
+    const q = questById(rep.cond.questId);
+    if (!q || (q.state || 'idle') !== rep.cond.state) return 'hidden';
+  }
   if (!rep.action) return 'ok';
   const q = questById(rep.action.questId);
   if (!q) return 'hidden';
   if (rep.action.type === 'give') return q.state === 'idle' ? 'ok' : 'hidden';
+  if (rep.action.type === 'obj') {
+    if (q.state !== 'active') return 'hidden';
+    const s = (q.steps || []).find((x) => x.oid === rep.action.oid);
+    return s && !s.done ? 'ok' : 'hidden';
+  }
   if (q.state !== 'active') return 'hidden';
   return questDone(q) ? 'ok' : 'locked';
 }
@@ -382,9 +399,22 @@ function renderReplyRows(replies, base, path) {
   for (const rep of replies) {
     const p = path ? path + '.' + rep.id : rep.id;
     const q = rep.action ? questById(rep.action.questId) : null;
-    const tag = rep.action ? `<span class="qtag${rep.action.type === 'turnin' ? ' turnin' : ''}">${rep.action.type === 'give' ? 'видати' : 'здати'}: ${esc(q ? q.title : '?')}</span>` : '';
+    let tag = '';
+    if (rep.action) {
+      const verb = rep.action.type === 'give' ? 'видати' : rep.action.type === 'obj' ? 'ціль' : 'здати';
+      let what = q ? q.title : '?';
+      if (rep.action.type === 'obj' && q) { const s = (q.steps || []).find((x) => x.oid === rep.action.oid); what = s ? s.text : what; }
+      tag = `<span class="qtag${rep.action.type === 'turnin' ? ' turnin' : ''}">${verb}: ${esc(what)}</span>`;
+    }
+    // Тег умови показу (fраза видна лише при заданому стані квеста).
+    if (rep.cond) {
+      const cq = questById(rep.cond.questId);
+      const st = rep.cond.state === 'active' ? 'активний' : rep.cond.state === 'done' ? 'виконаний' : 'не взятий';
+      tag += ` <span class="qtag" style="color:#9ec7e8">якщо «${esc(cq ? cq.title : '?')}» ${st}</span>`;
+    }
     h += `<div class="reply-row">
       <div class="rhead">${ed(`rlabel:${base}:${p}`, 'div', 'name', rep.label, 'Репліка гравця')}${tag}
+        <button class="mini-btn edit-only" data-rcond="${base}:${p}" title="Показувати лише при стані квеста">умова</button>
         <button class="del-btn edit-only" data-del="reply:${base}:${p}">✕</button></div>
       <div class="line player" style="margin:6px 0 8px"><div class="who">нпс відповість</div>${ed(`rsay:${base}:${p}`, 'div', 'text', rep.say, 'Відповідь НПС')}</div>`;
     h += renderReplyRows(rep.replies || [], base, p);
@@ -398,6 +428,7 @@ function addReplyRow(base, path) {
     <button class="mini-btn" data-add="reply:${base}:${path}">＋ Відповідь</button>
     <button class="mini-btn" data-add="replyg:${base}:${path}">＋ Видати квест</button>
     <button class="mini-btn" data-add="replyt:${base}:${path}">＋ Здати квест</button>
+    <button class="mini-btn" data-add="replyo:${base}:${path}">＋ Виконати ціль</button>
   </div>`;
 }
 
@@ -465,7 +496,9 @@ function renderQuest(r) {
   let h = editBanner();
   h += ed(`quest:${q.id}:title`, 'div', 'title', q.title, 'Назва квеста');
   h += `<span class="tag editable" data-edit="quest:${q.id}:cat">${esc(q.cat || 'квест')}</span> `;
-  h += `<span class="tag">${q.state === 'active' ? 'активний' : q.state === 'done' ? 'виконано' : 'не взято'}</span>`;
+  h += `<span class="tag">${q.state === 'active' ? 'активний' : q.state === 'done' ? 'виконано' : 'не взято'}</span> `;
+  // Режим здачі: тап циклить діалог ↔ одразу (авто-закриття по останній цілі).
+  h += `<span class="tag" data-qmode="${q.id}" style="cursor:pointer">здача: ${q.turnin === 'auto' ? 'одразу по виконанню' : 'через діалог'}</span>`;
   h += `<div class="section-label">Цілі</div><div class="quest">`;
   h += questSteps(q, true);
   h += `</div><div class="card add edit-only" data-add="step:${q.id}"><div class="name">＋ Ціль</div></div>`;
@@ -559,7 +592,29 @@ function pickQuest(title, cb) {
   sheet(`<h4>${esc(title)}</h4><div class="pick-list">${items || '<div class="empty">Спершу створи квест у вкладці «Квести»</div>'}</div>
     <div class="row"><button class="cancel">Скасувати</button></div>`, (s, close) => {
     s.querySelector('.cancel').onclick = close;
-    s.querySelectorAll('[data-q]').forEach((b) => { b.onclick = () => { cb(b.dataset.q); close(); save(); render('f'); }; });
+    // close ПЕРЕД cb: колбек може відкрити наступний шит (ланцюжок вибору) —
+    // закриття після нього стирало б щойно відкриту модалку.
+    s.querySelectorAll('[data-q]').forEach((b) => { b.onclick = () => { close(); cb(b.dataset.q); save(); render('f'); }; });
+  });
+}
+// Вибір цілі квеста (для дії «виконати ціль»)
+function pickObjective(qid, cb) {
+  const q = questById(qid); if (!q) return;
+  const items = (q.steps || []).map((s) => `<button class="pick" data-o="${s.oid}" style="text-align:left">${esc(KIND_LABEL[s.kind] || s.kind)}: ${esc(s.text)}</button>`).join('');
+  sheet(`<h4>Яку ціль виконує ця репліка?</h4><div class="pick-list">${items || '<div class="empty">У квеста нема цілей</div>'}</div>
+    <div class="row"><button class="cancel">Скасувати</button></div>`, (s, close) => {
+    s.querySelector('.cancel').onclick = close;
+    s.querySelectorAll('[data-o]').forEach((b) => { b.onclick = () => { close(); cb(b.dataset.o); save(); render('f'); }; });
+  });
+}
+// Вибір стану квеста (для умови показу репліки)
+function pickState(cb) {
+  const opts = [ ['active', 'квест активний'], ['done', 'квест виконаний'], ['idle', 'квест не взято'], ['', 'зняти умову'] ];
+  const items = opts.map(([v, l]) => `<button class="pick" data-s="${v}" style="text-align:left">${l}</button>`).join('');
+  sheet(`<h4>Коли показувати репліку?</h4><div class="pick-list">${items}</div>
+    <div class="row"><button class="cancel">Скасувати</button></div>`, (s, close) => {
+    s.querySelector('.cancel').onclick = close;
+    s.querySelectorAll('[data-s]').forEach((b) => { b.onclick = () => { close(); cb(b.dataset.s); save(); render('f'); }; });
   });
 }
 // Редагування цілі: тип + кількість + текст
@@ -597,13 +652,34 @@ function turninQuest(qid) {
   const q = questById(qid); if (!q || q.state !== 'active' || !questDone(q)) return;
   q.state = 'done';
   save();
+  flashSay(doneMessage(q), 'літопис');
+}
+function doneMessage(q) {
   const rw = (q._game && q._game.reward) || {};
   const parts = [];
   if (rw.gold) parts.push(rw.gold + ' золота');
   if (rw.xp) parts.push(rw.xp + ' досвіду');
   if (rw.itemId) parts.push('предмет: ' + rw.itemId);
   if (rw.note) parts.push(rw.note);
-  flashSay(parts.length ? `Квест «${q.title}» завершено. Нагорода: ${parts.join(', ')}.` : `Квест «${q.title}» завершено.`, 'літопис');
+  return parts.length ? `Квест «${q.title}» завершено. Нагорода: ${parts.join(', ')}.` : `Квест «${q.title}» завершено.`;
+}
+// Виконати конкретну ціль (напр. «розмова з НПС = talk-ціль»). Якщо квест у режимі
+// «одразу по виконанню» і це була остання ціль — закриваємо квест тут же.
+function completeObjective(qid, oid) {
+  const q = questById(qid); if (!q || q.state !== 'active') return;
+  const s = (q.steps || []).find((x) => x.oid === oid); if (!s || s.done) return;
+  s.done = true;
+  const auto = maybeAutoComplete(q);
+  save();
+  if (!auto) flashSay(`Виконано: ${s.text}`, 'літопис');
+}
+// true, якщо квест закрився сам (turnin='auto' і всі цілі готові).
+function maybeAutoComplete(q) {
+  if (q.state !== 'active' || q.turnin !== 'auto' || !questDone(q)) return false;
+  q.state = 'done';
+  save();
+  flashSay(doneMessage(q), 'літопис');
+  return true;
 }
 
 // ── Редагування: шляхи data-edit ─────────────────────────────────────────────
@@ -660,11 +736,20 @@ function applyAdd(pathStr) {
     const list = p[2] === '-' ? (l.npcs = l.npcs || []) : bldById(l, p[2]).npcs;
     list.push({ id: uid('npc'), name: 'Хтось', dlg: { text: '', replies: [] } });
   }
-  else if (k === 'reply' || k === 'replyg' || k === 'replyt') {
+  else if (k === 'reply' || k === 'replyg' || k === 'replyt' || k === 'replyo') {
     const n = npcRef(p[1], p[2], p[3]);
     const parent = p[4] ? replyByPath(n, p[4]) : null;
     const list = parent ? (parent.replies = parent.replies || []) : n.dlg.replies;
     if (k === 'reply') { list.push({ id: uid('r'), label: 'Нова відповідь', say: '', replies: [] }); }
+    else if (k === 'replyo') {
+      // «розмова = виконання цілі»: вибрати квест → вибрати ціль → репліка з дією obj
+      return pickQuest('Чию ціль виконує ця репліка?', (qid) => {
+        pickObjective(qid, (oid) => {
+          const q = questById(qid); const s = q && (q.steps || []).find((x) => x.oid === oid);
+          list.push({ id: uid('r'), label: s ? s.text : 'Виконати ціль', say: '', replies: [], action: { type: 'obj', questId: qid, oid } });
+        });
+      });
+    }
     else {
       const type = k === 'replyg' ? 'give' : 'turnin';
       return pickQuest(type === 'give' ? 'Який квест видати?' : 'Який квест здавати?', (qid) => {
@@ -720,9 +805,28 @@ view().addEventListener('click', (e) => {
   const takeEl = e.target.closest('[data-take]');
   const qresetEl = e.target.closest('[data-qreset]');
   const pkindEl = e.target.closest('[data-pkind]');
+  const rcondEl = e.target.closest('[data-rcond]');
+  const qmodeEl = e.target.closest('[data-qmode]');
 
   if (ui.edit && delEl) { e.stopPropagation(); return applyDel(delEl.dataset.del); }
   if (ui.edit && addEl) { e.stopPropagation(); return applyAdd(addEl.dataset.add); }
+  if (ui.edit && qmodeEl) { // здача: діалог ↔ одразу по виконанню
+    e.stopPropagation();
+    const q = questById(qmodeEl.dataset.qmode);
+    q.turnin = q.turnin === 'auto' ? 'dialog' : 'auto';
+    save(); render('f'); return;
+  }
+  if (ui.edit && rcondEl) { // умова показу репліки: квест + стан
+    e.stopPropagation();
+    const parts = rcondEl.dataset.rcond.split(':');
+    const n = npcRef(parts[0], parts[1], parts[2]);
+    const rep = replyByPath(n, parts[3]); if (!rep) return;
+    return pickQuest('Від якого квеста залежить репліка?', (qid) => {
+      pickState((st) => {
+        if (!st) delete rep.cond; else rep.cond = { questId: qid, state: st };
+      });
+    });
+  }
   if (ui.edit && pkindEl) { // цикл типу оголошення; task → вибір квеста
     e.stopPropagation();
     const [locId, bdId, pid] = pkindEl.dataset.pkind.split(':');
@@ -741,7 +845,12 @@ view().addEventListener('click', (e) => {
   if (arriveEl) return replace({ t: 'location', id: arriveEl.dataset.arrive });
   if (qresetEl) { const q = questById(qresetEl.dataset.qreset); q.state = 'idle'; for (const s of q.steps) s.done = false; save(); render('f'); return; }
   if (takeEl) { giveQuest(takeEl.dataset.take); render('f'); return; }
-  if (stepEl) { const [qid, i] = stepEl.dataset.step.split(':'); const q = questById(qid); q.steps[+i].done = !q.steps[+i].done; save(); render('f'); return; }
+  if (stepEl) {
+    const [qid, i] = stepEl.dataset.step.split(':'); const q = questById(qid);
+    q.steps[+i].done = !q.steps[+i].done;
+    if (q.steps[+i].done) maybeAutoComplete(q); // «одразу по виконанню» — закривається сам
+    save(); render('f'); return;
+  }
 
   // Крок діалогу: '..' = перепитати (корінь), інакше — углиб дерева.
   if (replyEl) {
@@ -753,6 +862,7 @@ view().addEventListener('click', (e) => {
     const rep = replyByPath(n, newPath);
     if (rep && rep.action) {
       if (rep.action.type === 'give') giveQuest(rep.action.questId);
+      else if (rep.action.type === 'obj') completeObjective(rep.action.questId, rep.action.oid);
       else turninQuest(rep.action.questId);
     }
     return go({ t: 'npc', locId: r.locId, bId: r.bId, nId: r.nId, path: newPath });

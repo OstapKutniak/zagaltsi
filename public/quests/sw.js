@@ -1,4 +1,4 @@
-const CACHE = 'lit-v2';
+const CACHE = 'lit-v3';
 const BASE = '/zagaltsi/quests';
 const ASSETS = [BASE + '/', BASE + '/index.html', BASE + '/style.css', BASE + '/app.js', BASE + '/manifest.json'];
 
