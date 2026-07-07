@@ -146,6 +146,36 @@ export function reportProgress(kind: QuestObjective['kind'], target?: string, am
   return completed;
 }
 
+// ── Доступ для Літопис-НПС (діалоги з умовами/діями по конкретних цілях) ──────
+export function questDefById(id: string): Quest | undefined { return questDef(id); }
+// Чи виконана КОНКРЕТНА ціль активного квеста.
+export function objectiveComplete(questId: string, objId: string): boolean {
+  const pq = readAll()[questId]; if (!pq) return false;
+  const o = questDef(questId)?.objectives?.find((x) => x.id === objId);
+  return !!o && objectiveDone(o, pq);
+}
+// Чи всі цілі виконані (для гейта «здати» в діалозі).
+export function allObjectivesComplete(questId: string): boolean {
+  const pq = readAll()[questId]; const q = questDef(questId);
+  return !!pq && !!q && allObjectivesDone(q, pq);
+}
+// Виконати конкретну ціль (репліка «розмова = ціль»). Якщо це була остання і
+// успіх = objectives — квест завершується тут же; повертаємо його для тоста.
+export function completeObjectiveById(questId: string, objId: string): Quest | null {
+  const all = readAll(); const pq = all[questId];
+  if (!pq || pq.status !== 'active') return null;
+  const q = questDef(questId); const o = q?.objectives?.find((x) => x.id === objId);
+  if (!q || !o) return null;
+  pq.progress[o.id] = need(o);
+  let completed: Quest | null = null;
+  const success = q.successOn ?? 'objectives';
+  if ((success === 'objectives' || success === 'reach') && allObjectivesDone(q, pq)) {
+    finish(questId, q, all); completed = q;
+  }
+  writeAll(all);
+  return completed;
+}
+
 // Явне завершення (діалог-здача / успіх 'dialog_positive' / 'custom').
 export function completeQuest(id: string): Quest | null {
   const all = readAll(); const pq = all[id]; if (!pq || pq.status !== 'active') return null;
@@ -177,5 +207,9 @@ export function turnInWithGiver(giverCharId: string): Quest[] {
 
 // Dev-only: доступ до квест-логіки з консолі (у проді не активний).
 if (import.meta.env.DEV) {
-  (window as unknown as { __quest?: unknown }).__quest = { reportProgress, completeQuest, failQuest, acceptQuest, takenQuests, primeQuests, questsForAcq, turnInWithGiver, autoAcceptAuto };
+  (window as unknown as { __quest?: unknown }).__quest = {
+    reportProgress, completeQuest, failQuest, acceptQuest, takenQuests, primeQuests, questsForAcq, turnInWithGiver, autoAcceptAuto,
+    questDefById, completeObjectiveById, objectiveComplete, allObjectivesComplete,
+    injectDefs: (qs: Quest[]): void => { defs = qs; }, // для headless-тестів без Firebase
+  };
 }

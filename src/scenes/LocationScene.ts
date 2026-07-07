@@ -20,6 +20,7 @@ import { ensureFogTexture } from '../level/fogTexture';
 import { CutoutCharacter } from '../anim/CutoutCharacter';
 import { dialogsKey, loadPublishedDialogs, type DialogDoc } from '../dialogs';
 import { playDialogDoc, closeDialogPlay } from '../dialogPlay';
+import { loadLitopysNpcs, playLitopysNpc, closeLitopysDialog, type LitPlacedNpc } from '../story/litopysNpcs';
 import { loadQuests, type Quest } from '../story/quests';
 import { acceptQuest, reportProgress, questsForAcq, turnInWithGiver } from '../story/questState';
 import { rewardLabel } from '../story/profile';
@@ -117,6 +118,9 @@ export class LocationScene extends Phaser.Scene {
     // до цієї локації (acq='location_npc'), — виходить назустріч і дає квест.
     const npcQuestId = this.encounterQuestId ?? this.locationNpcQuest();
     if (npcQuestId) void this.spawnEncounter(npcQuestId);
+    // НПС зі світу Літопису (текстовий редактор): стоять у локації, тап → діалог
+    // з умовами/видачею/здачею квестів (та сама семантика, що в симуляторі).
+    void this.spawnLitopysNpcs();
 
     // Ціль квесту «дійти до локації»: зайшли у вузол → прогрес.
     if (this.nodeId) for (const q of reportProgress('reach', this.nodeId)) this.questDoneToast(q);
@@ -128,6 +132,7 @@ export class LocationScene extends Phaser.Scene {
       this.unwatch?.(); this.unwatch = null;
       this.boardOverlay?.destroy(true); this.boardOverlay = null;
       closeDialogPlay();
+      closeLitopysDialog();
       leaveLocation();
     });
   }
@@ -314,6 +319,51 @@ export class LocationScene extends Phaser.Scene {
         this.lightningNext = every * (1 - vary + Math.random() * vary * 2);
       }
     }
+  }
+
+  // ── НПС зі світу Літопису: силуети вздовж землі, тап → діалог-дерево ────────
+  private async spawnLitopysNpcs(): Promise<void> {
+    if (!this.nodeId) return;
+    const list = await loadLitopysNpcs(this.nodeId).catch(() => [] as LitPlacedNpc[]);
+    if (!list.length || !this.scene.isActive()) return;
+    const groundY = LOGICAL_H - 130 + this.offY; // ступні (трохи вище нижнього краю)
+    const n = Math.min(list.length, 6);
+    for (let i = 0; i < n; i++) {
+      // Розкладка вздовж землі: один — лівіше центру; кілька — рівномірно 210..1070.
+      const x = this.offX + (n === 1 ? 400 : 210 + (860 / (n - 1)) * i);
+      this.drawLitNpc(list[i], x, groundY);
+    }
+  }
+
+  private drawLitNpc(item: LitPlacedNpc, x: number, footY: number): void {
+    // Простий силует (арта в Літопис-НПС нема): голова + тулуб пергаментним
+    // контуром на темному, як тимчасова фігура; імʼя під ногами, місце — дрібніше.
+    const H = 96;
+    const g = this.add.graphics().setScrollFactor(0).setDepth(12);
+    g.fillStyle(0x1d1712, 0.85).lineStyle(2, 0xcbb98a, 0.9);
+    g.fillCircle(x, footY - H + 14, 13); g.strokeCircle(x, footY - H + 14, 13);
+    g.fillRoundedRect(x - 15, footY - H + 30, 30, H - 32, 9);
+    g.strokeRoundedRect(x - 15, footY - H + 30, 30, H - 32, 9);
+    const name = this.add.text(x, footY + 6, item.npc.name, {
+      fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '17px', color: COL_TEXT,
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(12).setShadow(1, 2, '#000000', 5, false, true);
+    if (item.place) this.add.text(x, footY + 27, item.place, {
+      fontFamily: MENU_FONT, fontSize: '12px', color: '#8a8171',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(12);
+    const hit = this.add.zone(x, footY - H / 2, 96, H + 44).setInteractive({ useHandCursor: true });
+    hit.on('pointerover', () => name.setColor('#ffcf8f'));
+    hit.on('pointerout', () => name.setColor(COL_TEXT));
+    hit.on('pointerup', () => playLitopysNpc(item.npc, {
+      onToast: (msg) => this.litToast(msg),
+      onQuestDone: (q) => this.questDoneToast(q),
+    }));
+  }
+
+  private litToast(msg: string): void {
+    const t = this.add.text(LOGICAL_W / 2 + this.offX, LOGICAL_H - 40 + this.offY, msg, {
+      fontFamily: MENU_FONT, fontStyle: 'italic', fontSize: '20px', color: '#ffcf8f',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(40).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 600, onComplete: () => t.destroy() });
   }
 
   // ── Енкаунтер: «у вашій локації хтось є» — НПС виходить на передній план,

@@ -944,7 +944,12 @@ function questToGame(q) {
   delete base.deleted;
   return Object.assign(base, {
     id: q.id, title: q.title || '', text: q.text || '', cat: catToGame(q.cat),
-    acq: base.acq || 'auto', objectives, successOn: base.successOn || 'objectives', updatedAt: Date.now(),
+    acq: base.acq || 'auto', objectives,
+    // Режим здачі → успіх гри: «одразу» = objectives (гра закриє сама на останній
+    // цілі); «через діалог» = custom (гра ЧЕКАЄ репліки-здачі в НПС — інакше
+    // квест завершився б сам і здавати було б нічого).
+    successOn: q.turnin === 'auto' ? 'objectives' : 'custom',
+    updatedAt: Date.now(),
   });
 }
 // Ігровий Quest → Літопис-квест. Локальні done/state зберігаємо по збігу oid;
@@ -954,6 +959,7 @@ function questFromGame(node, prev) {
   return {
     id: node.id, title: node.title || '', text: node.text || '', cat: catFromGame(node.cat),
     state: (prev && prev.state) || 'idle',
+    turnin: node.successOn === 'objectives' ? 'auto' : 'dialog',
     steps: (node.objectives || []).map((o) => {
       const was = ps.find((s) => s.oid === o.id);
       const s = { oid: o.id, kind: o.kind || 'custom', text: o.desc || '', done: !!(was && was.done) };
