@@ -156,7 +156,10 @@ function load() {
   try { const s = localStorage.getItem(KEY); if (s) return migrate(JSON.parse(s)); } catch (e) { /* ignore */ }
   const w = seed(); save(w); return w;
 }
-function save(w) { try { localStorage.setItem(KEY, JSON.stringify(w || W)); } catch (e) { /* ignore */ } }
+function save(w) {
+  try { localStorage.setItem(KEY, JSON.stringify(w || W)); } catch (e) { /* ignore */ }
+  schedulePushWorld(); // світ (локації/НПС/діалоги/дошки) — у спільний шар Firebase
+}
 
 let W = load();
 const ui = { route: { t: 'location', id: W.startId }, history: [], edit: false, tab: 'play' };
@@ -786,7 +789,7 @@ function applyDel(pathStr) {
     if (idx >= 0) list.splice(idx, 1);
   }
   else if (k === 'path') { const l = locById(p[1]); l.paths.splice(+p[2], 1); }
-  else if (k === 'loc') { W.locations = W.locations.filter((l) => l.id !== p[1]); }
+  else if (k === 'loc') { W.locations = W.locations.filter((l) => l.id !== p[1]); tombstoneLocFb(p[1]); }
   else if (k === 'quest') { W.quests = W.quests.filter((q) => q.id !== p[1]); tombstoneQuestFb(p[1]); }
   else if (k === 'step') { const q = questById(p[1]); q.steps.splice(+p[2], 1); pushQuestToFb(q); }
   save(); render('f');
@@ -1001,12 +1004,115 @@ async function pullQuests() {
   }
 }
 
+// ── Синхронізація СВІТУ (локації/НПС/діалоги/дошки) — content/litopys ─────────
+// Той самий патерн, що для квестів: per-локація LWW за updatedAt, тумбстоуни на
+// видалення, пул поллінгом. Пуш вмикається ЛИШЕ після першого пулу (інакше свіжий
+// пристрій із болванкою затер би чужі правки «новішим» updatedAt).
+const WPATH = FB_DB + '/content/litopys';
+// var (не let): save() смикає schedulePushWorld ще при первинному load()/seed(),
+// до виконання цих рядків — var хойститься, undefined тут безпечний (пуш вимкнено).
+var _pushEnabled = false;
+var _locSig = {};   // locId → підпис останнього відомого стану (щоб пушити лише зміни)
+var _metaSig = '';  // підпис назви краю
+var _pushTimer = 0;
+
+function schedulePushWorld() {
+  if (!_pushEnabled) return;
+  clearTimeout(_pushTimer);
+  _pushTimer = setTimeout(pushWorldDirty, 700);
+}
+// Підпис БЕЗ updatedAt — інакше кожен пуш «змінював» би локацію знову.
+function locSig(l) { const c = Object.assign({}, l); delete c.updatedAt; return JSON.stringify(c); }
+
+function pushWorldDirty() {
+  for (const l of W.locations) {
+    const sig = locSig(l);
+    if (_locSig[l.id] === sig) continue;
+    _locSig[l.id] = sig;
+    l.updatedAt = Date.now();
+    fetch(`${WPATH}/world/${l.id}.json`, { method: 'PUT', body: JSON.stringify(l) }).catch(() => {});
+  }
+  if (_metaSig !== W.title) {
+    _metaSig = W.title;
+    W.metaAt = Date.now();
+    fetch(`${WPATH}/meta.json`, { method: 'PUT', body: JSON.stringify({ title: W.title, startId: W.startId, updatedAt: W.metaAt }) }).catch(() => {});
+  }
+}
+function tombstoneLocFb(id) {
+  delete _locSig[id];
+  if (!_pushEnabled) return;
+  fetch(`${WPATH}/world/${id}.json`, { method: 'PUT', body: JSON.stringify({ id, deleted: true, updatedAt: Date.now() }) }).catch(() => {});
+}
+
+// Firebase не зберігає порожні масиви — після пулу відновлюємо структуру вглиб.
+function normReplies(list) {
+  return (list || []).map((r) => {
+    const o = { id: r.id, label: r.label || '', say: r.say || '', replies: normReplies(r.replies) };
+    if (r.action) o.action = r.action;
+    if (r.cond) o.cond = r.cond;
+    return o;
+  });
+}
+function normNpc(n) { return { id: n.id, name: n.name || '', dlg: { text: (n.dlg && n.dlg.text) || '', replies: normReplies(n.dlg && n.dlg.replies) } }; }
+function normalizeLoc(node) {
+  return {
+    id: node.id, name: node.name || '', desc: node.desc || '',
+    buildings: (node.buildings || []).map((b) => ({ id: b.id, name: b.name || '', desc: b.desc || '', npcs: (b.npcs || []).map(normNpc) })),
+    npcs: (node.npcs || []).map(normNpc),
+    boards: (node.boards || []).map((bd) => ({ id: bd.id, name: bd.name || '', posts: (bd.posts || []).map((p) => Object.assign({ id: p.id, kind: p.kind || 'gossip', text: p.text || '' }, p.questId ? { questId: p.questId } : {})) })),
+    paths: (node.paths || []).map((p) => ({ to: p.to, encounter: p.encounter || null })),
+    updatedAt: node.updatedAt || 0,
+  };
+}
+
+async function pullWorld() {
+  let v = null;
+  try { const r = await fetch(`${WPATH}.json`); if (r.ok) v = await r.json(); } catch (e) { return; }
+  if (!v || typeof v !== 'object') return;
+  let dirty = false;
+  for (const node of Object.values(v.world || {})) {
+    if (!node || typeof node !== 'object' || !node.id) continue;
+    const idx = W.locations.findIndex((l) => l.id === node.id);
+    const localAt = idx >= 0 ? (W.locations[idx].updatedAt || 0) : -1;
+    const nodeAt = node.updatedAt || 0;
+    if (node.deleted) {
+      if (idx >= 0 && nodeAt > localAt) { W.locations.splice(idx, 1); delete _locSig[node.id]; dirty = true; }
+    } else if (nodeAt > localAt) {
+      const c = normalizeLoc(node);
+      if (idx >= 0) W.locations[idx] = c; else W.locations.push(c);
+      _locSig[c.id] = locSig(c);
+      dirty = true;
+    }
+  }
+  const meta = v.meta;
+  if (meta && (meta.updatedAt || 0) > (W.metaAt || 0)) {
+    W.title = meta.title || W.title;
+    if (meta.startId && locById(meta.startId)) W.startId = meta.startId;
+    W.metaAt = meta.updatedAt; _metaSig = W.title;
+    dirty = true;
+  }
+  if (dirty) {
+    try { localStorage.setItem(KEY, JSON.stringify(W)); } catch (e) { /* ignore */ }
+    // Якщо поточна локація зникла — на мапу; інакше перемалювати активний екран.
+    const r = ui.route;
+    if ((r.t === 'location' && !locById(r.id)) || (r.t !== 'quests' && r.t !== 'quest' && r.t !== 'active')) {
+      if (r.t === 'location' && !locById(r.id)) ui.route = { t: 'map' };
+      render('f'); syncTab();
+    }
+  }
+}
+
 // ── Модалка-контейнер + SW ────────────────────────────────────────────────────
 (function initModal() { const d = document.createElement('div'); d.id = 'modal'; document.body.appendChild(d); })();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-// Старт
+// Старт: спершу ПУЛ світу (щоб не затерти чужі правки болванкою), тоді пуш-дозвіл.
 render('f'); syncTab();
 void pullQuests();
-setInterval(() => { void pullQuests(); }, 6000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void pullQuests(); });
+void pullWorld().finally(() => {
+  for (const l of W.locations) _locSig[l.id] = locSig(l);
+  _metaSig = W.title;
+  _pushEnabled = true;
+});
+setInterval(() => { void pullQuests(); void pullWorld(); }, 6000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { void pullQuests(); void pullWorld(); } });
