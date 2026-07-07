@@ -12,6 +12,7 @@ import {
   applyHandleDrag, recordDeformKeyframe, openFxObjMenu, PLAN_NAMES, type DeformView,
   type PlacedAnim, type PlacedDeform,
 } from '../level/placedFx';
+import { emitNameSync, NAME_SYNC_EVENT, type NameSyncDetail } from '../world/nameSync';
 
 interface PlacedAsset {
   id: string; url: string; name: string;
@@ -872,7 +873,16 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
       const name = document.createElement('span');
       name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       name.textContent = l.name;
-      name.addEventListener('blur', () => { name.contentEditable = 'false'; l.name = name.textContent || l.name; save(); renderList(); });
+      name.addEventListener('blur', () => {
+        name.contentEditable = 'false';
+        const oldName = l.name;
+        l.name = name.textContent || l.name;
+        if (l.name !== oldName) {
+          l.updatedAt = Date.now(); // ренейм може бути не в поточній локації
+          emitNameSync({ source: 'location', locId: l.id, oldName, newName: l.name });
+        }
+        save(); renderList();
+      });
       name.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); name.blur(); } });
 
       // ЛКМ — просто вибрати локацію; ренейм — середньою кнопкою (колесо).
@@ -1334,6 +1344,20 @@ export function initLocationEditor(prefix: string, onOpenNodes?: OpenNodesFn): v
 
   window.addEventListener('locationTabActivated', () => {
     canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+  });
+
+  // Ренейм вузла на карті (Редактор Карт) або локації в Літописі → перейменувати
+  // документ у НАШОМУ стані (за закріпленим locId або збігом старої назви).
+  window.addEventListener(NAME_SYNC_EVENT, (e) => {
+    const d = (e as CustomEvent<NameSyncDetail>).detail;
+    if ((d.source !== 'world' && d.source !== 'litopys') || !d.newName) return;
+    const key = d.oldName.trim().toLowerCase();
+    const l = (d.locId ? state.locs.find((x) => x.id === d.locId) : undefined)
+      ?? state.locs.find((x) => x.name.trim().toLowerCase() === key);
+    if (!l || l.name === d.newName) return;
+    l.name = d.newName;
+    l.updatedAt = Date.now(); // save() бампає лише поточну — а ренейм міг прийти в іншу
+    save(); renderList();
   });
 
   void loadBuildings();

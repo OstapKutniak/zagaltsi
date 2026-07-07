@@ -5,6 +5,7 @@ import {
   type WorldDoc, type WorldNode, loadWorldsForGame, findGlobalWorld,
   loadTravel, saveTravel,
 } from '../world/worldData';
+import { syncNamesFromLitopys } from '../world/nameSync';
 import { parchmentCanvas, drawInkDecor, locationIcon, regionSeal, compassRose, iconFromLabel, type MapIconKind } from '../world/mapArt';
 import { ensureAmbience } from '../sound/ambience';
 import { iAmLeaderCached } from '../khorugva';
@@ -87,6 +88,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private async loadAndRender(): Promise<void> {
+    await syncNamesFromLitopys(); // ренейми з Літопису → labels вузлів + назви локацій (IDB)
     this.worlds = await loadWorldsForGame();
     const global = findGlobalWorld(this.worlds);
     const wanted = this._wantedWorldId ? this.worlds.find((w) => w.id === this._wantedWorldId) : null;

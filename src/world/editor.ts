@@ -7,6 +7,7 @@ import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { keyDataUrl } from '../rig/keyer';
 import { locationIcon, regionSeal, iconFromLabel, MAP_ICON_KINDS, type MapIconKind } from './mapArt';
+import { emitNameSync, pushNameToLitopys, watchLitopysNames, NAME_SYNC_EVENT, type NameSyncDetail } from './nameSync';
 
 interface WorldNode {
   id: string;
@@ -16,6 +17,7 @@ interface WorldNode {
   regionId?: string;   // type=region → id вкладеної карти
   locationId?: string; // type=location → id LocationDoc (нема — гра шукає за назвою)
   desc?: string;       // короткий опис для прапорця на ігровій мапі
+  labelAt?: number;    // мітка останнього ренейму (ехо-гейт синку назв із Літописом)
   icon?: string;       // вид чорнильної іконки на мапі (нема — гра вгадує з назви)
   img?: string;        // своя картинка-іконка (dataURL) — перекриває icon
   iconScale?: number;  // множник розміру іконки/картинки на мапі
@@ -571,7 +573,13 @@ export function initWorldEditor(prefix: string): void {
     const n = nodeAt(mx, my);
     if (n) {
       const name = prompt('Назва вузла:', n.label);
-      if (name) { pushUndo(); n.label = name; select(n.id, 'node'); save(); }
+      if (name) {
+        pushUndo();
+        const oldName = n.label;
+        n.label = name;
+        propagateNodeRename(n, oldName);
+        select(n.id, 'node'); save();
+      }
       return;
     }
     if (state.tool !== 'select') return;
@@ -868,9 +876,71 @@ export function initWorldEditor(prefix: string): void {
     }
   }
 
+  // Ренейм у полі йде по клавішах: стару назву фіксуємо ДО першої зміни (за нею
+  // Редактор Локацій знаходить документ), а розліт — дебаунсом по фінальному значенню.
+  let renameOld: { id: string; label: string } | null = null;
+  let renameTimer = 0;
   $<HTMLInputElement>('nodeName')?.addEventListener('input', function () {
     const n = nodeById(state.sel!);
-    if (n) { n.label = this.value; save(); }
+    if (!n) return;
+    if (renameOld?.id !== n.id) renameOld = { id: n.id, label: n.label };
+    n.label = this.value; save();
+    window.clearTimeout(renameTimer);
+    renameTimer = window.setTimeout(() => {
+      if (renameOld?.id === n.id) propagateNodeRename(n, renameOld.label);
+      renameOld = null;
+    }, 600);
+  });
+
+  // Парний ренейм вузла: мітка часу (ехо-гейт), подія Редактору Локацій, пуш у Літопис.
+  function propagateNodeRename(n: WorldNode, oldName: string): void {
+    if (!oldName || !n.label || oldName === n.label) return;
+    n.labelAt = Date.now();
+    emitNameSync({ source: 'world', nodeId: n.id, locId: n.locationId, oldName, newName: n.label });
+    pushNameToLitopys(n.id, n.label);
+  }
+
+  // Ренейм документа в Редакторі Локацій → оновити label вузлів, що на нього
+  // посилаються (закріплено locationId або збіг старої назви).
+  window.addEventListener(NAME_SYNC_EVENT, (e) => {
+    const d = (e as CustomEvent<NameSyncDetail>).detail;
+    if (d.source !== 'location' || !d.newName) return;
+    const key = d.oldName.trim().toLowerCase();
+    let changed = false;
+    for (const w of state.worlds) {
+      for (const n of w.nodes) {
+        const linked = (d.locId && n.locationId === d.locId) ||
+          (!n.locationId && n.type === 'location' && n.label.trim().toLowerCase() === key);
+        if (!linked || n.label === d.newName) continue;
+        n.label = d.newName; n.labelAt = Date.now();
+        if (d.locId) n.locationId = d.locId; // закріпити зв'язок, щоб не рвався далі
+        w.updatedAt = Date.now();
+        pushNameToLitopys(n.id, d.newName);
+        changed = true;
+      }
+    }
+    if (changed) { void save(); draw(); updateProps(); }
+  });
+
+  // Живі ренейми з Літопису: застосовуємо новіші за labelAt і сповіщаємо
+  // Редактор Локацій (він перейменує документ у своєму стані).
+  // Стартуємо ПІСЛЯ load() — інакше перший снапшот прилетить у ще порожні карти.
+  const startLitopysWatch = (): void => void watchLitopysNames((names) => {
+    let changed = false;
+    for (const w of state.worlds) {
+      for (const n of w.nodes) {
+        const lit = names[n.id];
+        if (!lit || lit.deleted || !lit.name) continue;
+        const at = lit.updatedAt ?? 0;
+        if (at <= (n.labelAt ?? 0) || lit.name === n.label) continue;
+        const oldName = n.label;
+        n.label = lit.name; n.labelAt = at;
+        w.updatedAt = Date.now();
+        emitNameSync({ source: 'litopys', nodeId: n.id, locId: n.locationId, oldName, newName: lit.name });
+        changed = true;
+      }
+    }
+    if (changed) { void save(); draw(); updateProps(); }
   });
 
   for (const t of ['Location', 'Region', 'Stop'] as const) {
@@ -1028,7 +1098,7 @@ export function initWorldEditor(prefix: string): void {
     canvas.height = canvas.clientHeight;
   });
 
-  load();
+  void load().finally(startLitopysWatch);
   draw();
   updateToolBtns();
 }

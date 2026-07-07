@@ -29,6 +29,7 @@ export interface WorldNode {
   regionId?: string;    // type=region → id дочірньої карти (WorldDoc)
   locationId?: string;  // type=location → id LocationDoc (нема — шукаємо за назвою)
   desc?: string;        // короткий опис для прапорця на мапі
+  labelAt?: number;     // мітка часу останнього ренейму (ехо-гейт синку назв із Літописом)
   icon?: string;        // MapIconKind для чорнильної іконки (нема — з назви)
   img?: string;         // своя картинка-іконка (dataURL) — перекриває icon
   iconScale?: number;   // множник розміру іконки/картинки на мапі
