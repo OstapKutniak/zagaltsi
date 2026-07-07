@@ -7,7 +7,8 @@ import { pullArray, mergeByIdLWW } from '../sync';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { keyDataUrl } from '../rig/keyer';
 import { locationIcon, regionSeal, iconFromLabel, MAP_ICON_KINDS, type MapIconKind } from './mapArt';
-import { emitNameSync, pushNameToLitopys, watchLitopysNames, NAME_SYNC_EVENT, type NameSyncDetail } from './nameSync';
+import { emitNameSync, pushNodeToLitopys, tombstoneLitopysLoc, watchLitopys, applyLitopys, NAME_SYNC_EVENT, type NameSyncDetail } from './nameSync';
+import type { WorldDoc as SyncWorldDoc } from './worldData';
 
 interface WorldNode {
   id: string;
@@ -175,11 +176,17 @@ export function initWorldEditor(prefix: string): void {
 
   function deleteSelected() {
     if (!state.sel) return;
-    pushUndo();
     if (state.selType === 'node') {
-      world().nodes = world().nodes.filter(n => n.id !== state.sel);
+      const n = world().nodes.find(x => x.id === state.sel);
+      // Локація живе і в Літописі (НПС/діалоги/дошки) — видаляємо СКРІЗЬ або ніяк:
+      // інакше вузол воскресне з живої копії Літопису при наступному синку.
+      if (n?.type === 'location' && !confirm(`Видалити «${n.label}» скрізь — з карти, Літопису і гри?`)) return;
+      pushUndo();
+      world().nodes = world().nodes.filter(x => x.id !== state.sel);
       world().edges = world().edges.filter(e => e.from !== state.sel && e.to !== state.sel);
+      if (n?.type === 'location') tombstoneLitopysLoc(n.id);
     } else {
+      pushUndo();
       world().edges = world().edges.filter(e => e.id !== state.sel);
     }
     deselect();
@@ -505,6 +512,7 @@ export function initWorldEditor(prefix: string): void {
       world().nodes.push(n);
       select(n.id, 'node');
       save();
+      pushNodeToLitopys(n, state.worlds as SyncWorldDoc[]); // кістяк локації в Літописі
     }
 
     if (state.tool === 'edge') {
@@ -591,6 +599,7 @@ export function initWorldEditor(prefix: string): void {
     const name = prompt('Назва нової локації:', '');
     if (name) nn.label = name;
     save();
+    pushNodeToLitopys(nn, state.worlds as SyncWorldDoc[]); // кістяк локації в Літописі
   });
 
   canvas.addEventListener('wheel', e => {
@@ -892,12 +901,19 @@ export function initWorldEditor(prefix: string): void {
     }, 600);
   });
 
-  // Парний ренейм вузла: мітка часу (ехо-гейт), подія Редактору Локацій, пуш у Літопис.
+  // Парний ренейм вузла: мітка часу (ехо-гейт), подія Редактору Локацій, пуш у
+  // Літопис (локація — назва/кістяк; край — регіон у meta + назва вкладеної карти).
   function propagateNodeRename(n: WorldNode, oldName: string): void {
     if (!oldName || !n.label || oldName === n.label) return;
     n.labelAt = Date.now();
-    emitNameSync({ source: 'world', nodeId: n.id, locId: n.locationId, oldName, newName: n.label });
-    pushNameToLitopys(n.id, n.label);
+    if (n.type === 'location') {
+      emitNameSync({ source: 'world', nodeId: n.id, locId: n.locationId, oldName, newName: n.label });
+    }
+    if (n.type === 'region' && n.regionId) {
+      const sub = state.worlds.find((w) => w.id === n.regionId);
+      if (sub && sub.name !== n.label) { sub.name = n.label; sub.updatedAt = Date.now(); renderList(); }
+    }
+    pushNodeToLitopys(n, state.worlds as SyncWorldDoc[]);
   }
 
   // Ренейм документа в Редакторі Локацій → оновити label вузлів, що на нього
@@ -915,32 +931,24 @@ export function initWorldEditor(prefix: string): void {
         n.label = d.newName; n.labelAt = Date.now();
         if (d.locId) n.locationId = d.locId; // закріпити зв'язок, щоб не рвався далі
         w.updatedAt = Date.now();
-        pushNameToLitopys(n.id, d.newName);
+        pushNodeToLitopys(n, state.worlds as SyncWorldDoc[]);
         changed = true;
       }
     }
     if (changed) { void save(); draw(); updateProps(); }
   });
 
-  // Живі ренейми з Літопису: застосовуємо новіші за labelAt і сповіщаємо
-  // Редактор Локацій (він перейменує документ у своєму стані).
+  // Живий стан Літопису: ренейми локацій/країв, нові локації з їхніми шляхами.
+  // Редактор Локацій сповіщаємо подією (він перейменує документ у своєму стані).
   // Стартуємо ПІСЛЯ load() — інакше перший снапшот прилетить у ще порожні карти.
-  const startLitopysWatch = (): void => void watchLitopysNames((names) => {
-    let changed = false;
-    for (const w of state.worlds) {
-      for (const n of w.nodes) {
-        const lit = names[n.id];
-        if (!lit || lit.deleted || !lit.name) continue;
-        const at = lit.updatedAt ?? 0;
-        if (at <= (n.labelAt ?? 0) || lit.name === n.label) continue;
-        const oldName = n.label;
-        n.label = lit.name; n.labelAt = at;
-        w.updatedAt = Date.now();
-        emitNameSync({ source: 'litopys', nodeId: n.id, locId: n.locationId, oldName, newName: lit.name });
-        changed = true;
+  const startLitopysWatch = (): void => void watchLitopys((d) => {
+    const { renames, changed } = applyLitopys(d, state.worlds as SyncWorldDoc[], null);
+    for (const r of renames) {
+      if (r.node.type === 'location') {
+        emitNameSync({ source: 'litopys', nodeId: r.node.id, locId: r.locId, oldName: r.oldName, newName: r.newName });
       }
     }
-    if (changed) { void save(); draw(); updateProps(); }
+    if (changed) { void save(); draw(); updateProps(); renderList(); }
   });
 
   for (const t of ['Location', 'Region', 'Stop'] as const) {
