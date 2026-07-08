@@ -58,13 +58,13 @@ interface CamZone { id: string; x: number; w: number; camX: number; label?: stri
 // gate = «ворота»: далі не пройти, поки зону не зачищено.
 export interface SpawnWave { charId: string; count: number }
 export interface SpawnZoneCfg { waves: SpawnWave[]; trigger: 'start' | 'near'; gate?: boolean }
-interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[]; spawnCfg?: Record<string, SpawnZoneCfg> }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[]; spawnCfg?: Record<string, SpawnZoneCfg>; arriveZones?: string[] }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS }, spawnCfg: {} });
+  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS }, spawnCfg: {}, arriveZones: [] });
   // Стабільний id для легасі-рівнів без id (на двох компах виводиться однаково з назви,
   // тож ті самі рівні зливаються, а не дублюються). Викликати перед merge-by-id.
   const ensureLevelId = (lv: Level): Level => { if (!lv.id) lv.id = 'L:' + lv.name; return lv; };
@@ -83,7 +83,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'neutral' | 'neutralErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'neutral' | 'neutralErase' | 'arrive' | 'arriveErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -342,6 +342,7 @@ export function initLevelEditor(prefix: string): void {
     if (!lv.enemySpawns) lv.enemySpawns = []; // зони спавна ворогів
     if (!lv.neutralSpawns) lv.neutralSpawns = []; // зони спавна нейтралів
     if (!lv.spawnCfg) lv.spawnCfg = {}; // налаштування зон (хвилі/тригер/ворота)
+    if (!lv.arriveZones) lv.arriveZones = []; // зони прибуття (кінець рівня)
     if (typeof lv.start !== 'number') lv.start = 0;
     if (typeof lv.end !== 'number') lv.end = 2400;
     if (typeof lv.grid !== 'number') lv.grid = 32; // всі рівні на gs=32
@@ -922,6 +923,23 @@ export function initLevelEditor(prefix: string): void {
       }
     }
 
+    // Зони ПРИБУТТЯ — зелені.
+    if (state.showEnemySpawns) {
+      const gs = state.grid, k2 = gs * Math.SQRT1_2;
+      const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
+      for (const z of level().arriveZones ?? []) {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+        ctx.fillStyle = 'rgba(90,220,140,0.20)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(90,220,140,0.95)'; ctx.lineWidth = 2; ctx.stroke();
+        const ctr = Pf(acx + 1.5, acy + 1.5);
+        ctx.fillStyle = 'rgba(120,230,160,0.95)'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('прибуття', ctr.x, ctr.y + 4);
+      }
+    }
+
     // Зони спавна нейтралів — фіолетові.
     if (state.showEnemySpawns) {
       const gs = state.grid, k2 = gs * Math.SQRT1_2;
@@ -987,6 +1005,10 @@ export function initLevelEditor(prefix: string): void {
         const col = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length];
         ctx.globalAlpha = 0.35; fillStroke(floorPts(c.cx, c.cy), col, null); ctx.globalAlpha = 1;
         fillStroke(floorPts(c.cx, c.cy), null, col, 2.5);
+      } else if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') {
+        const c = floorCellAt(state.mouse.x, state.mouse.y);
+        if (state.pathTool === 'arrive') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(90,220,140,0.18)', 'rgba(90,220,140,0.9)', 2);
+        else fillStroke(floorPts(c.cx, c.cy, 1, 1), 'rgba(90,220,140,0.10)', 'rgba(90,220,140,0.7)', 2);
       } else if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') {
         const hit = zoneAt(c.cx, c.cy);
         if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(255,40,40,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
@@ -1785,7 +1807,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; level().spawnCfg = {}; state.selZone = null; renderZonePanel(); draw(); save(); });
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; level().spawnCfg = {}; level().arriveZones = []; state.selZone = null; renderZonePanel(); draw(); save(); });
   const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
   const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
   for (const id of pathBtnIds) {
@@ -1850,6 +1872,7 @@ export function initLevelEditor(prefix: string): void {
     $('walkBtn')?.classList.toggle('on', state.pathTool === 'walk');
     $('enemyBtn')?.classList.toggle('on', state.pathTool === 'enemy' || state.pathTool === 'enemyErase');
     $('neutralBtn')?.classList.toggle('on', state.pathTool === 'neutral' || state.pathTool === 'neutralErase');
+    $('arriveBtn')?.classList.toggle('on', state.pathTool === 'arrive' || state.pathTool === 'arriveErase');
     $('spawnBtn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
   $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
@@ -2053,6 +2076,25 @@ export function initLevelEditor(prefix: string): void {
     }
     draw();
   }
+  // Зона ПРИБУТТЯ — 3×3, зелена: гравець у зоні і жодного ворога в кадрі → рівень
+  // пройдено (прибуття в локацію-ціль подорожі).
+  function arriveAt(sx: number, sy: number): void {
+    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
+    const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+    if (!Number.isFinite(fcx) || !Number.isFinite(fcy)) return;
+    const lv = level();
+    if (!lv.arriveZones) lv.arriveZones = [];
+    if (state.pathTool === 'arriveErase') {
+      lv.arriveZones = lv.arriveZones.filter((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+      });
+    } else {
+      const key = (fcx - 1) + ',' + (fcy - 1);
+      if (!lv.arriveZones.includes(key)) lv.arriveZones.push(key);
+    }
+    draw();
+  }
   canvas.addEventListener('mousedown', (ev) => {
     const x = ev.offsetX, y = ev.offsetY;
     if (ev.button === 1) { ev.preventDefault(); panning = true; panStart = { mx: x, my: y, px: state.pan.x, py: state.pan.y }; return; }
@@ -2161,6 +2203,7 @@ export function initLevelEditor(prefix: string): void {
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
     if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { pushUndo(); neutralAt(x, y); save(); return; }
+    if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { pushUndo(); arriveAt(x, y); save(); return; }
     if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
     // Хендли деформації: якщо state.deformEdit → перевіряємо, чи клік потрапив у хендл
     if (state.deformEdit && ev.button === 0) {
@@ -2347,6 +2390,7 @@ export function initLevelEditor(prefix: string): void {
         if (state.mode) return; // touchmove відстежує позицію, touchend підтверджує
         if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
         if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
+        if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { pushUndo(); arriveAt(x, y); save(); return; }
         if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
         const hit = hitTest(x, y);
         state.selected = hit; state.multiSel.clear(); if (hit) state.multiSel.add(hit);
@@ -3467,13 +3511,32 @@ export function initLevelEditor(prefix: string): void {
         updatePathBtns();
       });
     }
+    // Arrive button: LMB = act current mode, RMB = toggle add/erase
+    const arriveBtn = $<HTMLButtonElement>('arriveBtn');
+    let _arriveMode: 'add' | 'erase' = 'add';
+    if (arriveBtn) {
+      arriveBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        _arriveMode = _arriveMode === 'add' ? 'erase' : 'add';
+        arriveBtn.textContent = _arriveMode === 'add' ? 'Зона прибуття' : 'Прибрати прибуття';
+        arriveBtn.classList.remove('on');
+        if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { state.pathTool = null; updatePathBtns(); draw(); }
+      });
+      arriveBtn.addEventListener('click', () => {
+        const tool: 'arrive' | 'arriveErase' = _arriveMode === 'add' ? 'arrive' : 'arriveErase';
+        state.pathTool = state.pathTool === tool ? null : tool;
+        updatePathBtns();
+        setStatus(state.pathTool ? 'Зона прибуття: гравець у зоні без ворогів у кадрі — рівень пройдено' : '');
+        draw();
+      });
+    }
     refreshSpawnUI();
   }
 
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, spawnCfg: lv.spawnCfg ?? {}, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, spawnCfg: lv.spawnCfg ?? {}, arriveZones: lv.arriveZones ?? [], neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
     if (lv.atmosphere) doc.atmosphere = lv.atmosphere;
     if (lv.camZones?.length) doc.camZones = lv.camZones;
     return doc;

@@ -421,6 +421,13 @@ export class WorldScene extends Phaser.Scene {
             if (!this.scene.isActive()) return;
             // прибуття фіксуємо в ціль хопа — після рівня гравець уже «там»
             saveTravel({ worldId: w.id, nodeId: n.id });
+            // Ціль подорожі — для «прибуття» в кінці рівня (зона прибуття в Мандрах).
+            try {
+              sessionStorage.setItem('zag_travel_dest', JSON.stringify({
+                nodeId: n.id, label: n.label, worldId: w.id,
+                locationId: n.locationId ?? '', icon: n.icon ?? '',
+              }));
+            } catch { /* ignore */ }
             this.showTravelEvent(midX, midY, edge.levelId);
           },
         });

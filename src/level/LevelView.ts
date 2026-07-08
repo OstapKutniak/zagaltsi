@@ -152,6 +152,7 @@ export interface LevelDoc {
   assets: { id: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }[];
   spawn: { x: number; y: number };
   spawnCfg?: Record<string, SpawnZoneCfg>; // налаштування зон спавна ворогів
+  arriveZones?: string[]; // зони прибуття 'cx,cy' (3×3): у зоні без ворогів у кадрі = рівень пройдено
   camZones?: Array<{ id?: string; x: number; w: number; camX: number; label?: string }>; // фіксований екран
   spawns?: { x: number; y: number }[]; // до 5 точок спавна (кооп); spawn = spawns[0] для сумісності
   start: number;

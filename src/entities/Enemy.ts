@@ -44,6 +44,9 @@ export class Enemy extends Actor {
     if (cellSize > 0) this.cellSize = cellSize;
   }
 
+  // Мирний після діалогу ворог не блокує зону прибуття.
+  get isNeutralized(): boolean { return this.neutralized; }
+
   // Граф поведінки (містить діалог-ноди) — не-хост бере його, щоб показати ту саму
   // діалог-кульку, що й хост (граф однаковий на всіх, вантажиться з тих самих даних).
   get dialogGraph(): NodeGraph | null { return this.behavior; }

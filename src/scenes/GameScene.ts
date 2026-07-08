@@ -21,7 +21,7 @@ import {
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import { myKhorugvaId, cachedLeaderId } from '../khorugva';
-import { reportProgress } from '../story/questState';
+import { reportProgress, takenQuests, questDefById, objectiveDone } from '../story/questState';
 import { loadProfile, saveHeroStats, addHryvni } from '../story/profile';
 import { rewardLabel } from '../story/profile';
 import type { Quest } from '../story/quests';
@@ -123,12 +123,20 @@ export class GameScene extends Phaser.Scene {
   private curLevelId = '';   // id рівня з редактора — ціль survive-квестів
   private surviveAcc = 0;    // накопичені секунди для цілі «протриматись N сек»
   private statsSaveAcc = 0;  // акумулятор збереження болю/тривоги в профіль
+  // Напис активних квестів під хітбарами: тап — згорнути/розгорнути (памʼятається).
+  private questHudObjs: Phaser.GameObjects.GameObject[] = [];
+  private questHudAcc = 0;
+  private questHudSig = '';
   // Спавн v2: детермінована таблиця слотів (netId → слот) однакова на всіх
   // клієнтах; хост вирішує КОЛИ спавнити (хвилі/наближення), не-хост створює
   // ворога, щойно його netId зʼявився у знімку хоста.
   private spawnTable = new Map<number, SpawnSlot>();
   private spawnZonesRt: ZoneRt[] = [];
   private camZonesRt: Array<{ x: number; w: number; camX: number }> = [];
+  // Прибуття: зони 'cx,cy' з редактора; гравець у зоні і жодного ворога в кадрі →
+  // рівень пройдено, їдемо в локацію-ціль подорожі (sessionStorage zag_travel_dest).
+  private arriveZonesRt: Array<{ acx: number; acy: number }> = [];
+  private arrived = false;
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
@@ -592,6 +600,10 @@ export class GameScene extends Phaser.Scene {
     }
     // Камера-зони (фіксований екран): гравець у [x, x+w] → камера стає на camX.
     this.camZonesRt = (doc.camZones ?? []).map((z) => ({ x: z.x, w: z.w, camX: z.camX }));
+    this.arriveZonesRt = (doc.arriveZones ?? []).map((z) => {
+      const p = z.split(','); return { acx: Number(p[0]), acy: Number(p[1]) };
+    }).filter((z) => Number.isFinite(z.acx) && Number.isFinite(z.acy));
+    this.arrived = false;
 
     // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
@@ -1022,6 +1034,36 @@ export class GameScene extends Phaser.Scene {
     for (const q of reportProgress('kill', key || undefined)) this.questToast(q);
   }
 
+  // Рівень пройдено: банер «Дістався…» → локація-ціль подорожі (або карта).
+  private arriveAtDestination(): void {
+    this.arrived = true;
+    saveHeroStats(this.player.backPain, this.player.anxiety);
+    interface TravelDest { nodeId?: string; label?: string; worldId?: string; locationId?: string; icon?: string }
+    let dest: TravelDest | null = null;
+    try {
+      const s = sessionStorage.getItem('zag_travel_dest');
+      if (s) dest = JSON.parse(s) as TravelDest;
+      sessionStorage.removeItem('zag_travel_dest');
+    } catch { /* ignore */ }
+    const label = dest?.label ? `Дістався: ${dest.label}` : 'Шлях пройдено';
+    const t = this.add.text(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 - 30 + this.uiOffY, label, {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '34px',
+      color: '#efe3c8', backgroundColor: '#000000b0', padding: { x: 18, y: 10 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10000).setShadow(2, 3, '#000000', 7, false, true);
+    this.tweens.add({ targets: t, alpha: { from: 0, to: 1 }, duration: 300 });
+    this.time.delayedCall(1400, () => {
+      if (!this.scene.isActive()) return;
+      if (dest?.nodeId) {
+        // Веду хоругву за собою (як у WorldScene) і прибуваю сам.
+        void import('../khorugva').then(({ iAmLeaderCached }) => {
+          if (iAmLeaderCached()) void import('../multiplayer/partyNav').then(({ broadcastNav }) => broadcastNav('Location', { ...dest }));
+        }).finally(() => this.scene.start('Location', dest));
+      } else {
+        this.scene.start('World', { worldId: dest?.worldId });
+      }
+    });
+  }
+
   // Тост «Квест виконано» + нагорода (короткочасно вгорі кадру).
   private questToast(q: Quest): void {
     const label = rewardLabel(q.reward);
@@ -1089,6 +1131,45 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── HUD helpers ─────────────────────────────────────────────────────────────
+
+  // ── Активні квести під хітбарами (тап по заголовку — згорнути/розгорнути) ──
+  private buildQuestHud(): void {
+    for (const o of this.questHudObjs) o.destroy();
+    this.questHudObjs = [];
+    const collapsed = localStorage.getItem('zag_qhud_collapsed') === '1';
+    const taken = takenQuests();
+    const act: Array<{ title: string; done: number; total: number }> = [];
+    for (const [id, pq] of Object.entries(taken)) {
+      if (pq.status !== 'active') continue;
+      const q = questDefById(id); if (!q) continue;
+      const objs = q.objectives ?? [];
+      act.push({ title: q.title, done: objs.filter((o) => objectiveDone(o, pq)).length, total: objs.length });
+    }
+    const sig = collapsed + '|' + act.map((a) => a.title + a.done + '/' + a.total).join(';');
+    if (sig === this.questHudSig && this.questHudObjs.length) return;
+    this.questHudSig = sig;
+    if (!act.length) return;
+    const x = 10 + this.uiOffX;
+    let y = 56 + this.uiOffY;
+    const header = this.add.text(x, y, collapsed ? `Квести (${act.length}) ▸` : 'Квести ▾', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '15px', color: '#cbb98a',
+    }).setScrollFactor(0).setDepth(10001).setShadow(1, 1, '#000000', 4, false, true)
+      .setInteractive({ useHandCursor: true });
+    header.on('pointerup', () => {
+      localStorage.setItem('zag_qhud_collapsed', collapsed ? '0' : '1');
+      this.questHudSig = ''; this.buildQuestHud();
+    });
+    this.questHudObjs.push(header);
+    if (!collapsed) {
+      y += 20;
+      for (const a of act.slice(0, 4)) {
+        const line = this.add.text(x, y, `• ${a.title}` + (a.total ? `  ${a.done}/${a.total}` : ''), {
+          fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '14px', color: '#e5d8bcdd',
+        }).setScrollFactor(0).setDepth(10001).setShadow(1, 1, '#000000', 4, false, true);
+        this.questHudObjs.push(line); y += 18;
+      }
+    }
+  }
 
   private buildHudLayout(): void {
     const w = this.logicalW;
@@ -1358,6 +1439,10 @@ export class GameScene extends Phaser.Scene {
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
     else this.amHost = true; // соло = сам собі хост
 
+    // Напис активних квестів — оновлюємо раз на ~1с (дешева перевірка підпису).
+    this.questHudAcc += dt;
+    if (this.questHudAcc >= 1) { this.questHudAcc = 0; this.buildQuestHud(); }
+
     // Стани героя (біль/тривога) — у профіль раз на ~2с (переживають рівень).
     if (this.playerSpawned) {
       this.statsSaveAcc += dt;
@@ -1417,6 +1502,21 @@ export class GameScene extends Phaser.Scene {
         if (zr.gate && !zr.done && zr.gateX > this.player.floorX - 60) mx = Math.min(mx, zr.gateX);
       }
       this.player.maxX = mx;
+    }
+
+    // Прибуття: гравець у зоні прибуття і жодного ЖИВОГО ворога в кадрі
+    // (нейтралізований діалогом не рахується — повз нього проходимо спокійно).
+    if (this.levelMode && !this.arrived && this.playerSpawned && this.arriveZonesRt.length) {
+      const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
+      const rcy = (this.player.floorY - this.bandBottom) / k;
+      const rcx = (this.player.floorX - rcy * k) / gs;
+      const inZone = this.arriveZonesRt.some((z) => rcx >= z.acx && rcx <= z.acx + 3 && rcy >= z.acy && rcy <= z.acy + 3);
+      if (inZone) {
+        const camL = this.cameras.main.midPoint.x - this.logicalW / 2 - 80;
+        const camR = this.cameras.main.midPoint.x + this.logicalW / 2 + 80;
+        const hostile = this.enemies.some((e) => !e.isNeutralized && e.floorX > camL && e.floorX < camR);
+        if (!hostile) this.arriveAtDestination();
+      }
     }
 
     // Арена зачищена — відкриваємо шлях
