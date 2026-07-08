@@ -8,14 +8,17 @@ import { idbGet, idbSet } from '../store';
 import { registerPublisher, wirePublishButton } from '../publish';
 import { initStoryEditor } from '../story/editor';
 import { keyDataUrl } from '../rig/keyer';
+import { loadCharLibrary } from '../charlib';
 import type { PlacedAnim, PlacedDeform } from '../level/LevelView';
 import {
   fxDisp, fxDeformAt, drawDeformedImage, drawDeformHandles, hitDeformHandle,
   applyHandleDrag, recordDeformKeyframe, openFxObjMenu, PLAN_NAMES, type DeformView,
 } from '../level/placedFx';
-import { type Atmosphere, type LayerKey, weatherToggles, type WeatherPhase } from '../level/atmosphere';
+import { type Atmosphere, type LayerKey, type LayerTint, weatherToggles, type WeatherPhase, evalTod, planLayerKey } from '../level/atmosphere';
 import { buildAtmospherePanel } from '../level/atmospherePanel';
 import { drawFogLayerCanvas, drawRainCanvas, drawVignetteCanvas, applyColorBalanceCanvas } from '../level/atmoPreview';
+import { CharPoseCache } from '../anim/charSnapshot';
+import type { CharDoc } from '../anim/CutoutCharacter';
 
 export interface MenuButton {
   id: string; label: string;
@@ -32,6 +35,8 @@ export interface MenuObject {
   name?: string;
   x: number; y: number;      // центр, логічні координати 1280×576
   scale: number;
+  sw?: number;               // масштаб по X (S→X), поверх scale; 1 = рівномірний
+  sh?: number;               // масштаб по Y (S→Z)
   rot?: number;              // градуси
   flip?: boolean;            // дзеркалення по X
   depth: number;             // плановість: 1..7 (5 = рівень персонажа/вогню)
@@ -174,7 +179,7 @@ export function initMenuEditor(prefix: string): void {
     kbMode: null as null | 'G' | 'R' | 'S',
     kbAxis: null as null | 'x' | 'z',
     kbStart: { mx: 0, my: 0, ang: 0, dist: 1 },
-    kbOrig: null as null | { x: number; y: number; rot: number; scale: number; size: number },
+    kbOrig: null as null | { x: number; y: number; rot: number; scale: number; size: number; sw: number; sh: number },
     // Прев'ю атмосфери (кнопкою можна вимкнути)
     showAtm: true,
     // Інструмент розміщення: ЛКМ по картці бібліотеки → білий силует за курсором
@@ -184,6 +189,9 @@ export function initMenuEditor(prefix: string): void {
   const objs = (): MenuObject[] => (page().objects ??= []);
   const chars = (): MenuChar[] => (page().chars ??= []);
   const lastMouse = { x: 0, y: 0 }; // остання позиція миші на канвасі (для G/R/S)
+
+  // Повна фігура героя в позі (канвас-рендер CutoutCharacter-математики) — WYSIWYG.
+  const poseCache = new CharPoseCache();
 
   // ── Інструмент розміщення (як у Локаціях/Мандрах): силует → клік ставить ────
   function whiteSilhouette(img: HTMLImageElement): HTMLCanvasElement {
@@ -275,6 +283,66 @@ export function initMenuEditor(prefix: string): void {
   window.addEventListener('mousedown', (e) => { if (ctxEl && !ctxEl.contains(e.target as Node)) closeCtx(); }, true);
   window.addEventListener('scroll', closeCtx, true);
 
+  // ── Продублювати об'єкт на інші сторінки (ідентичні трансформи/анімації/деформації).
+  // Якщо на цільовій сторінці вже є об'єкт із цим же зображенням — ОНОВЛЮЄМО його
+  // (більшість декору однакова на всіх сторінках), інакше додаємо копію.
+  function dupToPages(o: MenuObject): void {
+    closeCtx();
+    const others = state.doc.pages.filter((p) => p.id !== page().id);
+    if (!others.length) { setStatus('Інших сторінок нема'); return; }
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+    const box = document.createElement('div');
+    box.style.cssText = 'min-width:240px;max-width:320px;background:#1d1d1f;border:1px solid #3a3a3a;border-radius:10px;padding:12px;box-shadow:0 10px 32px rgba(0,0,0,.6);color:#e5d8bc;font-size:13px;display:flex;flex-direction:column;gap:8px';
+    const h = document.createElement('div');
+    h.textContent = `«${o.name ?? 'Об\'єкт'}» — на які сторінки?`;
+    h.style.cssText = 'font-weight:700';
+    box.appendChild(h);
+    const checks: Array<{ p: MenuPage; cb: HTMLInputElement }> = [];
+    for (const p of others) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:2px 0';
+      const cb = document.createElement('input'); cb.type = 'checkbox';
+      const has = (p.objects ?? []).some((x) => x.url === o.url);
+      const t = document.createElement('span');
+      t.textContent = p.name + (has ? ' (оновиться наявний)' : '');
+      row.appendChild(cb); row.appendChild(t);
+      box.appendChild(row);
+      checks.push({ p, cb });
+    }
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:4px';
+    const mk = (label: string): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'padding:6px 14px;border-radius:6px;border:1px solid #3a3a3a;background:var(--rail);color:var(--ink);cursor:pointer;font-size:13px';
+      return b;
+    };
+    const cancel = mk('Скасувати');
+    const ok = mk('Продублювати');
+    ok.style.background = 'var(--accent)'; ok.style.color = '#1b1b1b';
+    const close = (): void => wrap.remove();
+    cancel.onclick = close;
+    wrap.addEventListener('mousedown', (ev) => { if (ev.target === wrap) close(); });
+    ok.onclick = (): void => {
+      let n = 0;
+      for (const { p, cb } of checks) {
+        if (!cb.checked) continue;
+        const clone = JSON.parse(JSON.stringify(o)) as MenuObject;
+        const ex = (p.objects ??= []).find((x) => x.url === o.url);
+        if (ex) { Object.assign(ex, clone, { id: ex.id }); }
+        else { clone.id = uid(); p.objects.push(clone); }
+        n++;
+      }
+      close();
+      if (n) { save(); setStatus(`Продубльовано на ${n} стор.`); }
+    };
+    btns.appendChild(cancel); btns.appendChild(ok);
+    box.appendChild(btns);
+    wrap.appendChild(box);
+    document.body.appendChild(wrap);
+  }
+
   // Розмістити ассет як об'єкт на поточній сторінці (дефолт — центр кадру).
   function placeObject(asset: { name: string; url: string }, naturalH: number, fx = 640, fy = 300): void {
     const targetH = 230; // бажана логічна висота за замовчуванням
@@ -324,11 +392,10 @@ export function initMenuEditor(prefix: string): void {
     }
     ctx.strokeStyle = 'var(--line)'; ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 1;
     ctx.strokeRect(f.x, f.y, f.w, f.h);
-    // розміщені об'єкти (декор) — між фоном і кнопками, у порядку плановості
+    // розміщені об'єкти (декор) — між фоном і кнопками, у порядку плановості;
+    // атмосфера (тінти планів/туман/дощ) вплетена МІЖ планами, як у грі
     ctx.save(); ctx.beginPath(); ctx.rect(f.x, f.y, f.w, f.h); ctx.clip();
-    drawObjects(f, state.preview);
-    drawChars(f, state.preview);
-    drawAtmPreview(f);
+    drawScene(f, state.preview);
     ctx.restore();
     // кнопки
     for (const b of p.buttons) {
@@ -371,23 +438,45 @@ export function initMenuEditor(prefix: string): void {
     ctx.fillText('Сторінка: ' + p.name + ' (' + p.id + ')', f.x + 4, f.y - 6);
   }
 
-  // ── Прев'ю атмосфери сторінки: туман/дощ/віньєтка/баланс у межах кадру ──────
-  function drawAtmPreview(f: { x: number; y: number; w: number; h: number }): void {
-    if (!state.showAtm) return;
-    const atm = page().atmosphere;
-    if (!atm) return;
+  // ── Сцена сторінки: об'єкти/персонажі ПО ПЛАНАХ + атмосфера між планами ─────
+  // Порядок як у грі: план 1..7; туман шару K — після «свого» плану (глибини з
+  // MenuScene: sky→до планів, clouds→1, bg→2, frontbg→3, map→5, foreground→7);
+  // дощ — після плану atm.weatherPlan (нема — поверх усього); персонажі — план 5;
+  // тінти планів (Плановість/час доби) — на пікселях об'єктів; віньєтка/баланс — зверху.
+  const FOG_AFTER_PLAN: Partial<Record<LayerKey, number>> = { sky: 0, clouds: 1, bg: 2, frontbg: 3, map: 5, foreground: 7 };
+  function drawScene(f: { x: number; y: number; s: number; w: number; h: number }, preview: boolean): void {
+    const atm = state.showAtm ? page().atmosphere : undefined;
     const tNow = performance.now() / 1000;
-    const wx = atm.weather?.enabled ? (atm.weather.phases[0] as WeatherPhase | undefined) : undefined;
+    const wx = atm?.weather?.enabled ? (atm.weather.phases[0] as WeatherPhase | undefined) : undefined;
     const fogOn = wx ? weatherToggles(wx).fog && !!wx.fogLayers : false;
-    if (fogOn) {
-      for (const lk of ['sky', 'clouds', 'bg', 'frontbg', 'map', 'foreground'] as LayerKey[]) {
+    const todLayers = atm?.tod?.enabled ? evalTod(atm.tod, 0).layers : null;
+    const rainAfter = wx ? (atm?.weatherPlan != null ? Math.max(0, Math.min(7, Math.round(atm.weatherPlan))) : 7) : -1;
+    const byDepth = new Map<number, MenuObject[]>();
+    for (const o of objs()) {
+      const d = Math.max(1, Math.min(7, o.depth));
+      const arr = byDepth.get(d); if (arr) arr.push(o); else byDepth.set(d, [o]);
+    }
+    const fogFor = (plan: number): void => {
+      if (!fogOn) return;
+      for (const [lk, after] of Object.entries(FOG_AFTER_PLAN) as Array<[LayerKey, number]>) {
+        if (after !== plan) continue;
         const fl = wx!.fogLayers![lk];
         if (fl) drawFogLayerCanvas(ctx, canvas!.width, canvas!.height, fl, 1, tNow);
       }
+    };
+    fogFor(0);
+    if (rainAfter === 0) drawRainCanvas(ctx, canvas!.width, canvas!.height, wx!, 1, tNow);
+    for (let d = 1; d <= 7; d++) {
+      const tint = todLayers?.[planLayerKey(d)];
+      for (const o of byDepth.get(d) ?? []) drawObject(o, f, preview, tint && tint.alpha > 0.005 ? tint : undefined);
+      if (d === 5) drawChars(f, preview);
+      fogFor(d);
+      if (d === rainAfter) drawRainCanvas(ctx, canvas!.width, canvas!.height, wx!, 1, tNow);
     }
-    if (atm.vignette?.enabled) drawVignetteCanvas(ctx, f.x, f.y, f.w, f.h, atm.vignette);
-    if (wx) drawRainCanvas(ctx, canvas!.width, canvas!.height, wx, 1, tNow);
-    if (atm.colorBalance?.enabled) applyColorBalanceCanvas(ctx, canvas!, atm.colorBalance);
+    drawMoveLine(f);
+    if (atm?.vignette?.enabled) drawVignetteCanvas(ctx, f.x, f.y, f.w, f.h, atm.vignette);
+    if (atm?.colorBalance?.enabled) applyColorBalanceCanvas(ctx, canvas!, atm.colorBalance);
+    ensureAnimLoop();
     // погода/туман анімовані — тримаємо RAF-перемальовування
     if (wx || fogOn) requestAnimationFrame(() => { if (state.view === 'page') draw(); });
   }
@@ -499,20 +588,81 @@ export function initMenuEditor(prefix: string): void {
     if (!im) { im = new Image(); im.onload = () => draw(); im.src = o.url; state.objImgs.set(o.id, im); }
     return im;
   }
-  // Габарити об'єкта в координатах кадру (натуральний розмір × scale).
+  // Габарити об'єкта в координатах кадру (натуральний розмір × scale × sw/sh).
   function objBox(o: MenuObject): { w: number; h: number } {
     const im = ensureObjImg(o);
     const iw = im.naturalWidth || 128, ih = im.naturalHeight || 128;
-    return { w: iw * o.scale, h: ih * o.scale };
+    return { w: iw * o.scale * (o.sw ?? 1), h: ih * o.scale * (o.sh ?? 1) };
+  }
+  // Кеш альфи зображень — вибір по ФАКТИЧНОМУ силуету, а не по квадрату (як у Мандрах).
+  const _alphaCache = new Map<HTMLImageElement, Uint8ClampedArray | null>();
+  function imgAlphaAt(im: HTMLImageElement, lx: number, ly: number): number {
+    // lx/ly — піксельні координати зображення від його центру
+    const W = im.naturalWidth, H = im.naturalHeight;
+    const px = Math.round(lx + W / 2), py = Math.round(ly + H / 2);
+    if (px < 0 || py < 0 || px >= W || py >= H) return 0;
+    let data = _alphaCache.get(im);
+    if (data === undefined) {
+      try {
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const x = c.getContext('2d', { willReadFrequently: true })!;
+        x.drawImage(im, 0, 0);
+        const rgba = x.getImageData(0, 0, W, H).data;
+        data = new Uint8ClampedArray(W * H);
+        for (let i = 0; i < W * H; i++) data[i] = rgba[i * 4 + 3];
+      } catch { data = null; } // tainted — вважаємо непрозорим
+      _alphaCache.set(im, data);
+    }
+    if (data === null) return 255;
+    return data[py * W + px] ?? 0;
+  }
+  // Чи влучає точка кадру в силует об'єкта (обернений трансформ: зсув → поворот → масштаб).
+  function objHit(o: MenuObject, px: number, py: number): boolean {
+    const im = ensureObjImg(o);
+    if (!im.complete || !im.naturalWidth) {
+      const { w, h } = objBox(o);
+      return Math.abs(px - o.x) <= w / 2 && Math.abs(py - o.y) <= h / 2;
+    }
+    const dx = px - o.x, dy = py - o.y;
+    const r = -(o.rot ?? 0) * Math.PI / 180;
+    const co = Math.cos(r), si = Math.sin(r);
+    let lx = dx * co - dy * si, ly = dx * si + dy * co;
+    lx /= o.scale * (o.sw ?? 1) * (o.flip ? -1 : 1);
+    ly /= o.scale * (o.sh ?? 1);
+    if (Math.abs(lx) > im.naturalWidth / 2 || Math.abs(ly) > im.naturalHeight / 2) return false;
+    // Деформація міняє геометрію — там лишаємо влучання по прямокутнику.
+    if (o.deform) return true;
+    return imgAlphaAt(im, lx, ly) > 10;
   }
   // Об'єкт під курсором (координати кадру), зверху вниз за плановістю.
   function objAt(px: number, py: number): MenuObject | null {
     const list = [...objs()].sort((a, b) => b.depth - a.depth); // спершу передні
-    for (const o of list) {
-      const { w, h } = objBox(o);
-      if (Math.abs(px - o.x) <= w / 2 && Math.abs(py - o.y) <= h / 2) return o;
-    }
+    for (const o of list) if (objHit(o, px, py)) return o;
     return null;
+  }
+  // Тінт плановості (multiply-накладання лише по пікселях об'єкта) — кеш по шару.
+  const _tintCache = new Map<HTMLImageElement, Map<string, HTMLCanvasElement>>();
+  function tintedImage(im: HTMLImageElement, lt: LayerTint): CanvasImageSource {
+    const key = lt.color + ':' + Math.round(lt.alpha * 100) + ':' + (lt.blend ?? 'multiply');
+    let byKey = _tintCache.get(im);
+    if (!byKey) { byKey = new Map(); _tintCache.set(im, byKey); }
+    const hit = byKey.get(key);
+    if (hit) return hit;
+    const W = im.naturalWidth, H = im.naturalHeight;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d')!;
+    x.drawImage(im, 0, 0);
+    const mask = document.createElement('canvas'); mask.width = W; mask.height = H;
+    const mx = mask.getContext('2d')!;
+    mx.fillStyle = lt.color; mx.fillRect(0, 0, W, H);
+    mx.globalCompositeOperation = 'destination-in';
+    mx.drawImage(im, 0, 0);
+    x.globalCompositeOperation = (lt.blend as GlobalCompositeOperation) || 'multiply';
+    x.globalAlpha = Math.min(1, lt.alpha);
+    x.drawImage(mask, 0, 0);
+    x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1;
+    byKey.set(key, c);
+    return c;
   }
   function selectedObj(): MenuObject | null { return objs().find((o) => o.id === state.selObj) ?? null; }
   // Дисплейна DeformView об'єкта (для рендера/хендлів/хіт-тесту хендлів).
@@ -525,64 +675,63 @@ export function initMenuEditor(prefix: string): void {
       W: iw, H: ih,
       deform: fxDeformAt(o.deform, animClock, playing),
       x: f.x + d.x * f.s, y: f.y + d.y * f.s,
-      rot: d.rot, kx: d.scale * f.s, ky: d.scale * f.s,
+      rot: d.rot, kx: d.scale * (o.sw ?? 1) * f.s, ky: d.scale * (o.sh ?? 1) * f.s,
       flip: o.flip ? -1 : 1, baked: o.deform.baked,
     };
   }
 
-  // Малюємо об'єкти сторінки (сортовані за плановістю). Виділений — рамка + кут-ресайз.
-  function drawObjects(f: { x: number; y: number; s: number }, preview: boolean): void {
-    const list = [...objs()].sort((a, b) => a.depth - b.depth); // ззаду наперед
+  // Один об'єкт сторінки. tint — тінт плановості (multiply по пікселях, як у грі).
+  function drawObject(o: MenuObject, f: { x: number; y: number; s: number }, preview: boolean, tint?: LayerTint): void {
     const playing = fxPlaying();
-    for (const o of list) {
-      const im = ensureObjImg(o);
-      const { w, h } = objBox(o);
-      const d = fxDisp({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale, anim: o.anim, deform: o.deform }, animClock, playing);
-      const cx = f.x + d.x * f.s, cy = f.y + d.y * f.s;
-      const dw = (im.naturalWidth || 128) * d.scale * f.s, dh = (im.naturalHeight || 128) * d.scale * f.s;
-      if (o.deform && im.complete && im.naturalWidth) {
-        // Деформація (перспектива/FFD, кейфрейми) — квадосітка як у Редакторі Мандр
-        const v = objDeformView(o, f, playing && state.deformEdit !== o.id)!;
-        drawDeformedImage(ctx, im, v);
-        if (state.deformEdit === o.id) drawDeformHandles(ctx, v, state.deformHandleIdx);
-      } else {
-        ctx.save();
-        ctx.translate(cx, cy);
-        if (d.rot) ctx.rotate(d.rot * Math.PI / 180);
-        if (o.flip) ctx.scale(-1, 1);
-        if (im.complete && im.naturalWidth) ctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
-        else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
-        ctx.restore();
-      }
-      if (state.selObj === o.id && state.deformEdit !== o.id) {
-        const bx = f.x + o.x * f.s, by = f.y + o.y * f.s;
-        const bw = w * f.s, bh = h * f.s;
-        ctx.save();
-        ctx.translate(bx, by);
-        if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
-        ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
-        ctx.strokeRect(-bw / 2, -bh / 2, bw, bh); ctx.setLineDash([]);
-        ctx.fillStyle = '#7fd0ff'; ctx.fillRect(bw / 2 - 5, bh / 2 - 5, 10, 10); // кут-ресайз
-        ctx.restore();
-        ctx.fillStyle = 'rgba(127,208,255,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
-        const fxMark = o.anim ? ' · анім' : o.deform?.keyframes?.length ? ' · кф' : '';
-        ctx.fillText(`${o.name ?? 'об\'єкт'} · план ${o.depth}${fxMark}`, bx, by - bh / 2 - 6);
-      }
+    const im = ensureObjImg(o);
+    const { w, h } = objBox(o);
+    const d = fxDisp({ x: o.x, y: o.y, rot: o.rot ?? 0, scale: o.scale, anim: o.anim, deform: o.deform }, animClock, playing);
+    const cx = f.x + d.x * f.s, cy = f.y + d.y * f.s;
+    const dw = (im.naturalWidth || 128) * d.scale * (o.sw ?? 1) * f.s, dh = (im.naturalHeight || 128) * d.scale * (o.sh ?? 1) * f.s;
+    const src: CanvasImageSource | null = im.complete && im.naturalWidth
+      ? (tint ? tintedImage(im, tint) : im) : null;
+    if (o.deform && src) {
+      // Деформація (перспектива/FFD, кейфрейми) — квадосітка як у Редакторі Мандр
+      const v = objDeformView(o, f, playing && state.deformEdit !== o.id)!;
+      drawDeformedImage(ctx, src, v);
+      if (state.deformEdit === o.id) drawDeformHandles(ctx, v, state.deformHandleIdx);
+    } else {
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (d.rot) ctx.rotate(d.rot * Math.PI / 180);
+      if (o.flip) ctx.scale(-1, 1);
+      if (src) ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+      else { ctx.fillStyle = 'rgba(200,180,140,0.25)'; ctx.fillRect(-dw / 2, -dh / 2, dw, dh); }
+      ctx.restore();
     }
-    // Лінія напряму руху (режим «Задати лінію»)
-    if (state.moveLine?.x0 !== undefined) {
-      const L = state.moveLine;
-      const x0 = f.x + L.x0! * f.s, y0 = f.y + L.y0! * f.s;
-      const x1 = f.x + (L.x1 ?? L.x0!) * f.s, y1 = f.y + (L.y1 ?? L.y0!) * f.s;
-      ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-      const ang = Math.atan2(y1 - y0, x1 - x0);
-      ctx.beginPath(); ctx.moveTo(x1, y1);
-      ctx.lineTo(x1 - 12 * Math.cos(ang - 0.4), y1 - 12 * Math.sin(ang - 0.4));
-      ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
-      ctx.closePath(); ctx.fill();
+    if (state.selObj === o.id && state.deformEdit !== o.id && !preview) {
+      const bx = f.x + o.x * f.s, by = f.y + o.y * f.s;
+      const bw = w * f.s, bh = h * f.s;
+      ctx.save();
+      ctx.translate(bx, by);
+      if (o.rot) ctx.rotate(o.rot * Math.PI / 180);
+      ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+      ctx.strokeRect(-bw / 2, -bh / 2, bw, bh); ctx.setLineDash([]);
+      ctx.fillStyle = '#7fd0ff'; ctx.fillRect(bw / 2 - 5, bh / 2 - 5, 10, 10); // кут-ресайз
+      ctx.restore();
+      ctx.fillStyle = 'rgba(127,208,255,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+      const fxMark = o.anim ? ' · анім' : o.deform?.keyframes?.length ? ' · кф' : '';
+      ctx.fillText(`${o.name ?? 'об\'єкт'} · план ${o.depth}${fxMark}`, bx, by - bh / 2 - 6);
     }
-    ensureAnimLoop();
+  }
+  // Лінія напряму руху (режим «Задати лінію»)
+  function drawMoveLine(f: { x: number; y: number; s: number }): void {
+    if (state.moveLine?.x0 === undefined) return;
+    const L = state.moveLine!;
+    const x0 = f.x + L.x0! * f.s, y0 = f.y + L.y0! * f.s;
+    const x1 = f.x + (L.x1 ?? L.x0!) * f.s, y1 = f.y + (L.y1 ?? L.y0!) * f.s;
+    ctx.strokeStyle = '#39d0ff'; ctx.fillStyle = '#39d0ff'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    const ang = Math.atan2(y1 - y0, x1 - x0);
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - 12 * Math.cos(ang - 0.4), y1 - 12 * Math.sin(ang - 0.4));
+    ctx.lineTo(x1 - 12 * Math.cos(ang + 0.4), y1 - 12 * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
   }
   // Кут-ресайз виділеного об'єкта під курсором? (у координатах кадру)
   function objResizeAt(px: number, py: number): MenuObject | null {
@@ -803,6 +952,8 @@ export function initMenuEditor(prefix: string): void {
         { label: 'Обертання…', on: () => { const v = prompt('Кут повороту (градуси):', String(o.rot ?? 0)); if (v !== null) { o.rot = Number(v) || 0; save(); draw(); } } },
         { label: 'Масштаб…', on: () => { const v = prompt('Масштаб (1 = натуральний):', String(o.scale)); if (v !== null) { o.scale = Math.max(0.02, Number(v) || o.scale); save(); draw(); } } },
         'sep',
+        { label: 'Продублювати на сторінки…', on: () => dupToPages(o) },
+        'sep',
         { label: 'Видалити об\'єкт', danger: true, on: () => { page().objects = objs().filter((x) => x.id !== o.id); state.objImgs.delete(o.id); if (state.selObj === o.id) state.selObj = null; if (state.deformEdit === o.id) state.deformEdit = null; save(); draw(); } },
       ],
       pushUndo: () => {},
@@ -884,8 +1035,12 @@ export function initMenuEditor(prefix: string): void {
           const cy = t.kind === 'obj' ? t.o.y : t.kind === 'char' ? t.c.y : t.b.y;
           const scx = f.x + cx * f.s, scy = f.y + cy * f.s;
           const ratio = Math.max(0.05, Math.hypot(sx - scx, sy - scy) / state.kbStart.dist);
-          if (t.kind === 'obj') t.o.scale = Math.max(0.02, Math.round(state.kbOrig.scale * ratio * 1000) / 1000);
-          else if (t.kind === 'char') t.c.scale = Math.max(0.2, Math.round(state.kbOrig.scale * ratio * 100) / 100);
+          if (t.kind === 'obj') {
+            // S + X/Z — нерівномірний масштаб по одній осі (як у Мандрах/Блендері)
+            if (state.kbAxis === 'x') t.o.sw = Math.max(0.05, Math.round(state.kbOrig.sw * ratio * 1000) / 1000);
+            else if (state.kbAxis === 'z') t.o.sh = Math.max(0.05, Math.round(state.kbOrig.sh * ratio * 1000) / 1000);
+            else t.o.scale = Math.max(0.02, Math.round(state.kbOrig.scale * ratio * 1000) / 1000);
+          } else if (t.kind === 'char') t.c.scale = Math.max(0.2, Math.round(state.kbOrig.scale * ratio * 100) / 100);
           else t.b.size = Math.max(10, Math.min(96, Math.round(state.kbOrig.size * ratio)));
         }
         draw(); return;
@@ -955,6 +1110,8 @@ export function initMenuEditor(prefix: string): void {
           rot: t.kind === 'obj' ? (t.o.rot ?? 0) : 0,
           scale: t.kind === 'obj' ? t.o.scale : t.kind === 'char' ? t.c.scale : 1,
           size: t.kind === 'btn' ? t.b.size : 0,
+          sw: t.kind === 'obj' ? (t.o.sw ?? 1) : 1,
+          sh: t.kind === 'obj' ? (t.o.sh ?? 1) : 1,
         };
         setStatus(`${state.kbMode} — рухай мишею · X/Z — вісь · клік — підтвердити · Esc — скасувати`);
       }
@@ -966,7 +1123,7 @@ export function initMenuEditor(prefix: string): void {
       // скасувати: повернути оригінальні значення
       const t = kbTarget();
       if (t && state.kbOrig) {
-        if (t.kind === 'obj') { t.o.x = state.kbOrig.x; t.o.y = state.kbOrig.y; t.o.rot = state.kbOrig.rot; t.o.scale = state.kbOrig.scale; }
+        if (t.kind === 'obj') { t.o.x = state.kbOrig.x; t.o.y = state.kbOrig.y; t.o.rot = state.kbOrig.rot; t.o.scale = state.kbOrig.scale; t.o.sw = state.kbOrig.sw; t.o.sh = state.kbOrig.sh; }
         else if (t.kind === 'char') { t.c.x = state.kbOrig.x; t.c.y = state.kbOrig.y; t.c.scale = state.kbOrig.scale; }
         else { t.b.x = state.kbOrig.x; t.b.y = state.kbOrig.y; t.b.size = state.kbOrig.size; }
       }
@@ -1079,11 +1236,16 @@ export function initMenuEditor(prefix: string): void {
   wireFxNum('fxBoltEvery', (v) => { fx().bolt.every = v; });
   wireFxNum('fxBoltVary', (v) => { fx().bolt.vary = v; });
   wireFxNum('fxBoltBright', (v) => { fx().bolt.bright = v; });
-  // Портрет персонажа для гізмо — thumb героя з бібліотеки персонажів.
-  void idbGet<Array<{ cat?: string; thumb?: string }>>('zag_char_lib').then((lib) => {
-    const hero = lib?.find((x) => (x.cat ?? 'char') === 'char' && x.thumb);
+  // Герой з бібліотеки персонажів: thumb — портрет-заглушка (легасі fx.char);
+  // doc — у кеш поз, щоб малювати ПОВНУ фігуру в позі (як у грі).
+  void loadCharLibrary().then((lib) => {
+    const hero = lib.find((x) => (x.cat ?? 'char') === 'char' && x.doc);
     if (hero?.thumb) { const im = new Image(); im.onload = () => draw(); im.src = hero.thumb; state.charThumb = im; }
-  }).catch(() => { /* без портрета — силует */ });
+    if (hero?.doc) {
+      poseCache.onReady = (): void => draw();
+      poseCache.setDoc(hero.doc as CharDoc);
+    }
+  }).catch(() => { /* без героя — силует */ });
 
   // ── Тулбар ──────────────────────────────────────────────────────────────────
   $('addBtn')?.addEventListener('click', () => {
@@ -1119,6 +1281,13 @@ export function initMenuEditor(prefix: string): void {
       : CONSTR_HINT;
     renderProps(); draw();
   });
+  // Вкл/викл показ атмосфери у вьюпорті (тінти планів/погода/віньєтка/баланс) — як у Мандрах.
+  $('atmBtn')?.addEventListener('click', () => {
+    state.showAtm = !state.showAtm;
+    ($('atmBtn') as HTMLButtonElement).classList.toggle('on', state.showAtm);
+    draw();
+  });
+  ($('atmBtn') as HTMLButtonElement | null)?.classList.toggle('on', state.showAtm);
   // Старт у прев'ю (конструктор вимкнено) — одразу видно фактичний кадр гри.
   ($('previewBtn') as HTMLButtonElement | null)?.classList.toggle('on', !state.preview);
   { const hint = $('stageHint'); if (hint && state.preview) hint.textContent = 'чисте прев\'ю 20:9 — як бачить гравець · натисни «Конструктор», щоб редагувати'; }
@@ -1164,6 +1333,31 @@ export function initMenuEditor(prefix: string): void {
   function renderAtmPanel(): void {
     const box = $('atmPanel'); if (!box) return;
     buildAtmospherePanel(box, () => (page().atmosphere ??= {}), () => save(), { labels: MN_ATM_LABELS });
+    // План погоди — окремий блок ПІСЛЯ панелі (вона чистить свій контейнер при
+    // перемальовуванні). Дощ малюється ЗА об'єктами ближчих планів: «за вікном» = 1–2.
+    let extra = document.getElementById('mn-atmExtra');
+    if (!extra) {
+      extra = document.createElement('div');
+      extra.id = 'mn-atmExtra';
+      extra.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px';
+      box.insertAdjacentElement('afterend', extra);
+    }
+    extra.innerHTML = '';
+    const lbl = document.createElement('span');
+    lbl.textContent = 'План погоди (дощ)';
+    lbl.style.cssText = 'font-size:11px;color:var(--muted);flex:1';
+    const sel = document.createElement('select');
+    sel.style.cssText = 'background:var(--rail);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-size:12px';
+    const opts: Array<[string, string]> = [['', 'поверх усього'],
+      ['1', '1 — найдальший'], ['2', '2 — за вікном'], ['3', '3'], ['4', '4'], ['5', '5 — рівень персонажа'], ['6', '6'], ['7', '7 — найближчий']];
+    for (const [v, l] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = l; sel.appendChild(o); }
+    sel.value = page().atmosphere?.weatherPlan != null ? String(page().atmosphere!.weatherPlan) : '';
+    sel.addEventListener('change', () => {
+      const atm = (page().atmosphere ??= {});
+      if (sel.value === '') delete atm.weatherPlan; else atm.weatherPlan = Number(sel.value);
+      save(); draw();
+    });
+    extra.appendChild(lbl); extra.appendChild(sel);
   }
 
   // ── Персонажі сторінки ──────────────────────────────────────────────────────
@@ -1207,9 +1401,29 @@ export function initMenuEditor(prefix: string): void {
     }
     save(); renderCharsPanel(); draw();
   }
-  // Персонаж під курсором (координати кадру) — прямокутник як у fx-гізмо.
+  // Дзеркало персонажа у грі: без flip дивиться ліворуч (facing -1), із flip — праворуч.
+  const charFace = (c: MenuChar): number => (c.flip ? 1 : -1);
+  // Рамка пози в координатах кадру (тісний bbox з урахуванням дзеркала й масштабу).
+  function charFrameBox(c: MenuChar): { x0: number; y0: number; x1: number; y1: number } | null {
+    const snap = poseCache.pose(c.anim || 'idle');
+    if (!snap) return null;
+    const k = c.scale, face = charFace(c);
+    const b = snap.bounds;
+    const rx0 = face > 0 ? b.x0 : -b.x1, rx1 = face > 0 ? b.x1 : -b.x0;
+    return { x0: c.x + rx0 * k, y0: c.y + b.y0 * k, x1: c.x + rx1 * k, y1: c.y + b.y1 * k };
+  }
+  // Персонаж під курсором — по ФАКТИЧНОМУ силуету пози (не по квадрату).
   function charAt(px: number, py: number): MenuChar | null {
     for (const c of [...chars()].reverse()) {
+      const box = charFrameBox(c);
+      if (box) {
+        if (px < box.x0 || px > box.x1 || py < box.y0 || py > box.y1) continue;
+        const k = c.scale, face = charFace(c);
+        const lx = (px - c.x) / (k * face), ly = (py - c.y) / k;
+        if (poseCache.alphaAt(c.anim || 'idle', lx, ly) > 10) return c;
+        continue;
+      }
+      // Кеш поз ще не готовий — легасі-прямокутник, щоб не втратити керування.
       const H = 150 * c.scale;
       if (Math.abs(px - c.x) < H * 0.3 && Math.abs(py - c.y) < H / 2) return c;
     }
@@ -1218,31 +1432,53 @@ export function initMenuEditor(prefix: string): void {
   function drawChars(f: { x: number; y: number; s: number }, preview: boolean): void {
     const list = chars();
     if (!list.length) return;
-    const th = state.charThumb;
     list.forEach((c, i) => {
       const cx = f.x + c.x * f.s, cy = f.y + c.y * f.s;
-      const H = 150 * c.scale * f.s;
-      ctx.save();
-      if (th?.complete && th.naturalWidth) {
-        const W2 = H * th.naturalWidth / th.naturalHeight;
+      const snap = poseCache.pose(c.anim || 'idle');
+      const k = c.scale * f.s;
+      if (snap) {
+        // Повна фігура в позі (той самий скелет-рендер, що в грі; дзеркало як у грі)
+        ctx.save();
         ctx.translate(cx, cy);
-        if (c.flip) ctx.scale(-1, 1);
-        ctx.globalAlpha = preview ? 1 : 0.9;
-        ctx.drawImage(th, -W2 / 2, -H / 2, W2, H);
-      } else if (!preview) {
-        ctx.fillStyle = 'rgba(220,205,170,0.35)';
-        ctx.beginPath(); ctx.arc(cx, cy - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.roundRect(cx - H * 0.14, cy - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
+        ctx.scale(charFace(c) * k, k);
+        ctx.drawImage(snap.canvas, -snap.originX, -snap.originY);
+        ctx.restore();
+      } else {
+        // Кеш ще вантажиться: портрет/силует-заглушка
+        const H = 150 * c.scale * f.s;
+        const th = state.charThumb;
+        ctx.save();
+        if (th?.complete && th.naturalWidth) {
+          const W2 = H * th.naturalWidth / th.naturalHeight;
+          ctx.translate(cx, cy);
+          if (c.flip) ctx.scale(-1, 1);
+          ctx.globalAlpha = preview ? 1 : 0.9;
+          ctx.drawImage(th, -W2 / 2, -H / 2, W2, H);
+        } else if (!preview) {
+          ctx.fillStyle = 'rgba(220,205,170,0.35)';
+          ctx.beginPath(); ctx.arc(cx, cy - H * 0.32, H * 0.14, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.roundRect(cx - H * 0.14, cy - H * 0.16, H * 0.28, H * 0.6, H * 0.08); ctx.fill();
+        }
+        ctx.restore();
       }
-      ctx.restore();
       if (!preview) {
         const sel = state.selChar === c.id;
+        const box = charFrameBox(c);
         ctx.strokeStyle = sel ? '#ffcf8f' : 'rgba(255,207,143,0.45)'; ctx.setLineDash([4, 3]);
-        ctx.strokeRect(cx - H * 0.3, cy - H / 2, H * 0.6, H);
+        let labelY: number;
+        if (box) {
+          const bx = f.x + box.x0 * f.s, by = f.y + box.y0 * f.s;
+          ctx.strokeRect(bx, by, (box.x1 - box.x0) * f.s, (box.y1 - box.y0) * f.s);
+          labelY = f.y + box.y1 * f.s + 12;
+        } else {
+          const H = 150 * c.scale * f.s;
+          ctx.strokeRect(cx - H * 0.3, cy - H / 2, H * 0.6, H);
+          labelY = cy + H / 2 + 12;
+        }
         ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(255,207,143,0.85)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
         const animL = CHAR_ANIMS.find((a) => a.v === c.anim)?.l ?? c.anim;
-        ctx.fillText(`персонаж ${i + 1} · ${animL}`, cx, cy + H / 2 + 12);
+        ctx.fillText(`персонаж ${i + 1} · ${animL}`, cx, labelY);
       }
     });
   }
@@ -1372,6 +1608,13 @@ export function initMenuEditor(prefix: string): void {
 
   window.addEventListener('menuTabActivated', () => draw());
   draw();
+
+  // Dev-only: доступ до хіт-тестів/стану для headless-перевірок (у проді не активний).
+  if (import.meta.env.DEV) {
+    (window as unknown as { __menuEd?: unknown }).__menuEd = {
+      state, page, objs, chars, charAt, objAt, charFrameBox, frameRect, poseCache,
+    };
+  }
 
   // Редактор Історії: перемикач [Меню|Квести|Бот|Діалоги] у правій панелі.
   // Меню-редактор стає першим розділом; квести/бот/діалоги — поряд.

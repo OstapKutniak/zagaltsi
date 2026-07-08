@@ -72,7 +72,9 @@ export class SceneAtmosphere {
     }
     this.applyGrade();
     if (atm?.weather?.enabled) {
-      if (!this.rainGfx) this.rainGfx = this.scene.add.graphics().setScrollFactor(0).setDepth(this.opts.rainDepth ?? 6);
+      if (!this.rainGfx) this.rainGfx = this.scene.add.graphics().setScrollFactor(0);
+      // Плановість погоди: план N → між об'єктами плану N і N+1 (+0.5). Нема — дефолт сцени.
+      this.rainGfx.setDepth(atm.weatherPlan != null ? atm.weatherPlan + 0.5 : (this.opts.rainDepth ?? 6));
       if (!this.lightningRect) {
         this.lightningRect = this.scene.add.rectangle(
           LOGICAL_W / 2 + this.offX, LOGICAL_H / 2 + this.offY, LOGICAL_W * 3, LOGICAL_H * 3, 0xffffff, 0,

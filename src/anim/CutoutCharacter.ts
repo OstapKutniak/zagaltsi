@@ -750,3 +750,8 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     this.scaleY = 1;
   }
 }
+
+// ── Експорт чистої поз-математики для канвас-рендерера поз (студія, без Phaser) ──
+// Функції вище не залежать від Phaser: ієрархія, кріплення, процедурні кліпи.
+export { SLOT_DEFS, BASE, PARENT, TARGET_PX, conn, animOff, animRoot, animBend, animBend2, animBend3 };
+export type { Slot, KeyPose, Clip, AnimCtx };

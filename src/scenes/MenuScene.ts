@@ -64,7 +64,7 @@ const CHAR_FACING = -1; // обличчям до вогнища
 interface MenuBtnDoc { id: string; label: string; x: number; y: number; size: number; target: string }
 // Розміщений PNG-об'єкт (декор) із Редактора Меню: плановість depth 1..7 (5 —
 // рівень персонажа/вогню; кнопки завжди зверху). anim/deform — на майбутнє.
-interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; rot?: number; flip?: boolean; depth: number; anim?: PlacedAnim; deform?: PlacedDeform }
+interface MenuObjDoc { id: string; url: string; x: number; y: number; scale: number; sw?: number; sh?: number; rot?: number; flip?: boolean; depth: number; anim?: PlacedAnim; deform?: PlacedDeform }
 interface MenuCharDoc { id: string; x: number; y: number; scale: number; anim: string; flip?: boolean }
 interface MenuPageDoc { id: string; name: string; bg: string; buttons: MenuBtnDoc[]; objects?: MenuObjDoc[]; fx?: Partial<MenuFxData>; chars?: MenuCharDoc[]; atmosphere?: Atmosphere }
 interface MenuDocData { pages: MenuPageDoc[]; updatedAt?: number }
@@ -301,7 +301,7 @@ export class MenuScene extends Phaser.Scene {
         const depth = Math.max(1, Math.min(7, o.depth));
         const go = this.objFx.add(this, key, {
           x: o.x + offX, y: o.y + offY, rot: o.rot ?? 0,
-          scaleX: o.scale, scaleY: o.scale, flip: o.flip ? -1 : 1,
+          scaleX: o.scale * (o.sw ?? 1), scaleY: o.scale * (o.sh ?? 1), flip: o.flip ? -1 : 1,
           depth,
           anim: o.anim, deform: o.deform,
         });
