@@ -342,7 +342,10 @@ function loadTextures(scene: Phaser.Scene, images: Record<string, string>, prefi
 }
 
 // Видимі шматки спорядження (плейсхолдери): білі силуети поверх частин + меч.
-export interface EquipVisual { pants?: boolean; armor?: boolean; helmet?: boolean; weapon?: boolean }
+// Значення слота: false/undefined = нема; true = білий варіант; число = tint-колір
+// (сині/фіолетові варіанти речей фарбують ті самі силуети).
+export type EquipPiece = boolean | number | undefined;
+export interface EquipVisual { pants?: EquipPiece; armor?: EquipPiece; helmet?: EquipPiece; weapon?: EquipPiece }
 
 // Умовний білий меч (вістрям униз; хват біля верху — origin ~(0.5, 0.14)).
 function swordCanvas(): HTMLCanvasElement {
@@ -534,24 +537,28 @@ export class CutoutCharacter extends Phaser.GameObjects.Container {
     for (const o of this.equipOvs) o.ov.destroy();
     this.equipOvs = [];
     this.weaponImg?.destroy(); this.weaponImg = null;
-    const addOv = (piece: Phaser.GameObjects.Image | undefined, tex: string | null): void => {
+    const addOv = (piece: Phaser.GameObjects.Image | undefined, tex: string | null, tint?: number): void => {
       if (!piece || !tex) return;
       const ov = this.scene.add.image(0, 0, tex).setAlpha(0.92);
+      if (tint != null) ov.setTint(tint); // кольоровий варіант речі
       this.add(ov);
       this.moveTo(ov, this.getIndex(piece) + 1); // одразу над своєю частиною (шари не ламаються)
       this.equipOvs.push({ ov, src: piece });
     };
+    const tintOf = (v: EquipPiece): number | undefined => (typeof v === 'number' ? v : undefined);
     // Штани — на ВСІ шматки ноги (стегно/гомілка/стопа): текстура штанів і так
     // порожня нижче кісточки, тож черевик не фарбується, а «шортів» не буває.
     if (eq.pants) for (const k of ['leg_front', 'leg_back']) {
-      for (const piece of [this.parts[k], this.lower[k], this.lower2[k], this.lower3[k]]) addOv(piece, this.pantsTexture(k));
+      for (const piece of [this.parts[k], this.lower[k], this.lower2[k], this.lower3[k]]) addOv(piece, this.pantsTexture(k), tintOf(eq.pants));
     }
-    if (eq.armor) for (const k of ['torso', 'arm_front', 'arm_back']) { addOv(this.parts[k], this.silTexture(k)); addOv(this.lower[k], this.silTexture(k)); }
-    if (eq.helmet) addOv(this.parts['head'], this.helmetTexture());
+    if (eq.armor) for (const k of ['torso', 'arm_front', 'arm_back']) { addOv(this.parts[k], this.silTexture(k), tintOf(eq.armor)); addOv(this.lower[k], this.silTexture(k), tintOf(eq.armor)); }
+    if (eq.helmet) addOv(this.parts['head'], this.helmetTexture(), tintOf(eq.helmet));
     if (eq.weapon) {
       const key = 'equip_sword';
       if (!this.scene.textures.exists(key)) this.scene.textures.addCanvas(key, swordCanvas());
       this.weaponImg = this.scene.add.image(0, 0, key).setOrigin(0.5, 0.14);
+      const wt = tintOf(eq.weapon);
+      if (wt != null) this.weaponImg.setTint(wt);
       this.add(this.weaponImg); // поверх — передня рука і так найближчий шар
     }
   }

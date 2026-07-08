@@ -25,7 +25,7 @@ import { reportProgress, takenQuests, questDefById, objectiveDone } from '../sto
 import { loadProfile, saveHeroStats, addHryvni } from '../story/profile';
 import { rewardLabel } from '../story/profile';
 import type { Quest } from '../story/quests';
-import { loadEquip } from '../inventory';
+import { loadEquip, equipVisual, itemById, itemIconTexture, addToBag, loadBag, saveBag, saveEquip, CATALOG, SLOT_ORDER, SLOT_LABELS, type EquipSlot } from '../inventory';
 import { stopAmbience } from '../sound/ambience';
 import type { NodeGraph } from '../node-editor';
 import { type Atmosphere, parseHex, hexToInt, evalSky, evalTod, evalWeather, type LayerKey, type FogLayer, type WeatherState } from '../level/atmosphere';
@@ -127,6 +127,11 @@ export class GameScene extends Phaser.Scene {
   private questHudObjs: Phaser.GameObjects.GameObject[] = [];
   private questHudAcc = 0;
   private questHudSig = '';
+  // Предмети на землі (дроп із ворогів) + ігровий інвентар (I / кнопка «Сумка»).
+  private groundItems: Array<{ itemId: string; x: number; y: number; img: Phaser.GameObjects.Image }> = [];
+  private invOpen = false;
+  private invObjs: Phaser.GameObjects.GameObject[] = [];
+  private bagFullToastAt = 0;
   // Спавн v2: детермінована таблиця слотів (netId → слот) однакова на всіх
   // клієнтах; хост вирішує КОЛИ спавнити (хвилі/наближення), не-хост створює
   // ворога, щойно його netId зʼявився у знімку хоста.
@@ -297,6 +302,7 @@ export class GameScene extends Phaser.Scene {
     this.remotes = {};
     this.netStates = {};
     this.amHost = false; this.lastEnemyPush = 0; this.netEnemies = {}; this.seenEnemyIds.clear();
+    this.groundItems = []; this.invOpen = false; this.invObjs = []; this.questHudObjs = []; this.questHudSig = '';
     this.coopDialog = null; this.coopDialogNetId = -1;
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
@@ -381,6 +387,15 @@ export class GameScene extends Phaser.Scene {
       void this.beginPlay(code);
     };
     window.addEventListener('lobbyStart', onStart);
+    // Інвентар: клавіша I або кнопка «Сумка» на телефоні.
+    const onBagKey = (ev: KeyboardEvent): void => { if (ev.code === 'KeyI') this.toggleInv(); };
+    const onBagBtn = (): void => this.toggleInv();
+    window.addEventListener('keydown', onBagKey);
+    document.getElementById('btn-bag')?.addEventListener('click', onBagBtn);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('keydown', onBagKey);
+      document.getElementById('btn-bag')?.removeEventListener('click', onBagBtn);
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
@@ -850,7 +865,7 @@ export class GameScene extends Phaser.Scene {
     this.add.existing(c);
     // Вдягнене в Інвентарі спорядження — видно й у бою (ті самі білі силуети/меч).
     const eq = loadEquip();
-    c.setEquipment({ pants: !!eq.pants, armor: !!eq.armor, helmet: !!eq.helmet, weapon: !!eq.weapon });
+    c.setEquipment(equipVisual(eq)); // кольорові варіанти фарбують силуети
     this.player.setVisible(false);
     if (doc.clips) {
       const hotkeyHandler = (ev: KeyboardEvent): void => {
@@ -1030,8 +1045,123 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', color: '#ffd76a',
     }).setOrigin(0.5).setDepth(9000).setShadow(1, 2, '#000000', 5, false, true);
     this.tweens.add({ targets: coin, y: coin.y - 80, alpha: 0, duration: 1200, ease: 'Sine.easeOut', onComplete: () => coin.destroy() });
+    // Дроп предмета (40%): випадкова річ з каталогу (з синіми/фіолетовими варіантами).
+    if (Math.random() < 0.4) this.dropItem(dropX, dropY);
     // Ціль квесту «здолати ворогів» (порожня ціль = будь-хто; або конкретний charKey).
     for (const q of reportProgress('kill', key || undefined)) this.questToast(q);
+  }
+
+  // ── Предмети: дроп на землю, підбір у сумку, ігровий інвентар ────────────────
+  private dropItem(x: number, y: number): void {
+    const item = CATALOG[Math.floor(Math.random() * CATALOG.length)];
+    const img = this.add.image(x, y - 26, itemIconTexture(this, item)).setDepth(y + 1).setScale(0.85);
+    this.tweens.add({ targets: img, y, duration: 420, ease: 'Bounce.easeOut' });
+    this.groundItems.push({ itemId: item.id, x, y, img });
+  }
+
+  private pickupTick(time: number): void {
+    if (!this.playerSpawned) return;
+    for (const gi of [...this.groundItems]) {
+      if (Math.abs(this.player.floorX - gi.x) > 46 || Math.abs(this.player.floorY - gi.y) > 42) continue;
+      const idx = addToBag(gi.itemId);
+      if (idx >= 0) {
+        gi.img.destroy();
+        this.groundItems = this.groundItems.filter((g) => g !== gi);
+        this.smallToast('Підняв: ' + (itemById(gi.itemId)?.name ?? 'річ'));
+        if (this.invOpen) this.buildInvUI();
+      } else if (time > this.bagFullToastAt) {
+        this.bagFullToastAt = time + 1600;
+        this.smallToast('Сумка повна');
+      }
+    }
+  }
+
+  private smallToast(msg: string): void {
+    const t = this.add.text(this.logicalW / 2 + this.uiOffX, this.logicalH - 132 + this.uiOffY, msg, {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontSize: '18px',
+      color: '#ffcf8f', backgroundColor: '#000000a0', padding: { x: 9, y: 5 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(11500);
+    this.tweens.add({ targets: t, alpha: 0, delay: 1500, duration: 500, onComplete: () => t.destroy() });
+  }
+
+  // Ігровий інвентар: знизу сумка (5 квадратів), праворуч вертикально — надіто.
+  // Тап по речі в сумці — вдягнути (обмін із вдягненим того ж слота); тап по
+  // надітій — зняти в сумку. Все зберігається (zag_bag / zag_equip).
+  private toggleInv(): void {
+    this.invOpen = !this.invOpen;
+    if (this.invOpen) this.buildInvUI();
+    else { for (const o of this.invObjs) o.destroy(); this.invObjs = []; }
+  }
+
+  private buildInvUI(): void {
+    for (const o of this.invObjs) o.destroy();
+    this.invObjs = [];
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => { this.invObjs.push(o); return o; };
+    const D = 11000;
+    const bag = loadBag();
+    const eq = loadEquip();
+    const cell = (x: number, y: number, size: number): Phaser.GameObjects.Graphics => {
+      const g = add(this.add.graphics().setScrollFactor(0).setDepth(D));
+      g.fillStyle(0x14101a, 0.9).fillRoundedRect(x - size / 2, y - size / 2, size, size, 9);
+      g.lineStyle(2, 0xcbb98a, 0.9).strokeRoundedRect(x - size / 2, y - size / 2, size, size, 9);
+      return g;
+    };
+    // ── Сумка: 5 квадратів по центру внизу ──
+    const S = 64, GAP = 12;
+    const startX = this.logicalW / 2 - (5 * (S + GAP) - GAP) / 2 + S / 2 + this.uiOffX;
+    const bagY = this.logicalH - 64 + this.uiOffY;
+    add(this.add.text(startX - S / 2, bagY - S / 2 - 20, 'Сумка', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '16px', color: '#cbb98a',
+    }).setScrollFactor(0).setDepth(D + 1).setShadow(1, 1, '#000', 4, false, true));
+    bag.forEach((id, i) => {
+      const x = startX + i * (S + GAP);
+      cell(x, bagY, S);
+      const item = itemById(id);
+      if (item) {
+        add(this.add.image(x, bagY, itemIconTexture(this, item)).setScrollFactor(0).setDepth(D + 1).setScale(0.8));
+        const hit = add(this.add.zone(x, bagY, S, S).setScrollFactor(0).setInteractive({ useHandCursor: true }));
+        hit.on('pointerup', () => {
+          // Вдягнути з сумки: попередня річ того ж слота — назад у ЦЕЙ слот сумки.
+          const cur = loadEquip();
+          const prev = cur[item.slot] ?? null;
+          cur[item.slot] = item.id;
+          const b = loadBag(); b[i] = prev; saveBag(b);
+          saveEquip(cur);
+          this.character?.setEquipment(equipVisual(cur));
+          this.smallToast('Вдягнув: ' + item.name);
+          this.buildInvUI();
+        });
+      }
+    });
+    // ── Надіто: вертикальна колонка праворуч ──
+    const ex = this.logicalW - 56 + this.uiOffX;
+    let ey = 132 + this.uiOffY;
+    add(this.add.text(ex, ey - 34, 'Надіто', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '16px', color: '#cbb98a',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1).setShadow(1, 1, '#000', 4, false, true));
+    for (const slot of SLOT_ORDER) {
+      cell(ex, ey, 58);
+      const id = eq[slot];
+      const item = itemById(id);
+      if (item) {
+        add(this.add.image(ex, ey, itemIconTexture(this, item)).setScrollFactor(0).setDepth(D + 1).setScale(0.72));
+        const hit = add(this.add.zone(ex, ey, 58, 58).setScrollFactor(0).setInteractive({ useHandCursor: true }));
+        hit.on('pointerup', () => {
+          // Зняти в сумку (якщо є місце).
+          const idx = addToBag(item.id);
+          if (idx < 0) { this.smallToast('Сумка повна'); return; }
+          const cur = loadEquip(); cur[slot] = null; saveEquip(cur);
+          this.character?.setEquipment(equipVisual(cur));
+          this.smallToast('Зняв: ' + item.name);
+          this.buildInvUI();
+        });
+      } else {
+        add(this.add.text(ex, ey, SLOT_LABELS[slot], {
+          fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '10px', color: '#8a8171',
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      }
+      ey += 70;
+    }
   }
 
   // Рівень пройдено: банер «Дістався…» → локація-ціль подорожі (або карта).
@@ -1438,6 +1568,9 @@ export class GameScene extends Phaser.Scene {
     // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
     else this.amHost = true; // соло = сам собі хост
+
+    // Підбір предметів із землі (дроп ворогів → сумка).
+    this.pickupTick(time);
 
     // Напис активних квестів — оновлюємо раз на ~1с (дешева перевірка підпису).
     this.questHudAcc += dt;

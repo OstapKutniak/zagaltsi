@@ -3,8 +3,7 @@ import { LOGICAL_W } from '../config';
 import type { CutoutCharacter } from '../anim/CutoutCharacter';
 import {
   CATALOG, SLOT_LABELS, SLOT_ORDER, type EquipState, type InvItem,
-  loadEquip, saveEquip, itemIconTexture,
-} from '../inventory';
+  loadEquip, saveEquip, itemIconTexture, equipVisual } from '../inventory';
 
 // Панель інвентаря (слоти спорядження праворуч + смуга речей знизу) — СПІЛЬНА
 // для сторінки InventoryScene і ріалтайм-морфу в MenuScene (перехід Житло↔Інвентар
@@ -25,9 +24,7 @@ const CELL_GAP = 12;
 export interface InvPanel { destroy(): void }
 
 export function applyEquipTo(char: CutoutCharacter | null, equip: EquipState): void {
-  char?.setEquipment({
-    pants: !!equip.pants, armor: !!equip.armor, helmet: !!equip.helmet, weapon: !!equip.weapon,
-  });
+  char?.setEquipment(equipVisual(equip)); // true = білий; число = tint кольорового варіанта
 }
 
 export function buildInvPanel(
