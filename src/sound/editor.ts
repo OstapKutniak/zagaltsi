@@ -6,17 +6,24 @@
 import { idbGet, idbSet } from '../store';
 import {
   type AmbienceMix, DEFAULT_MIX, startAmbience, stopAmbience, setMix,
-  triggerThunder, triggerCrow, getAnalyser, isAmbienceRunning,
+  triggerThunder, triggerCrow, triggerOwl, triggerCreak, triggerBell, triggerDog,
+  getAnalyser, isAmbienceRunning,
 } from './ambience';
 import { registerPublisher, wirePublishButton } from '../publish';
 
-interface SoundDef { key: keyof AmbienceMix; name: string; hint: string; oneShot?: 'thunder' | 'crow' }
+interface SoundDef { key: keyof AmbienceMix; name: string; hint: string; oneShot?: () => void }
 const SOUNDS: SoundDef[] = [
   { key: 'rain', name: 'Дощ', hint: 'фільтрований шум із поривами' },
   { key: 'fire', name: 'Вогнище', hint: 'шелест + випадкові тріски' },
+  { key: 'wind', name: 'Вітер', hint: 'гул із поривами + виття у щілинах' },
   { key: 'crickets', name: 'Цвіркуни', hint: 'цвірінькання пачками' },
-  { key: 'thunder', name: 'Блискавка (грім)', hint: 'низький розкат, тригериться під спалах', oneShot: 'thunder' },
-  { key: 'crow', name: 'Ворона', hint: 'кар-кар серіями, зрідка', oneShot: 'crow' },
+  { key: 'frogs', name: 'Жаби', hint: 'кумкання з болота, дві особини' },
+  { key: 'thunder', name: 'Блискавка (грім)', hint: 'низький розкат, тригериться під спалах', oneShot: () => triggerThunder(60) },
+  { key: 'crow', name: 'Ворона', hint: 'хрипке «карр» серіями, зрідка', oneShot: triggerCrow },
+  { key: 'owl', name: 'Сова', hint: 'м\'яке «у-гуу» вночі, зрідка', oneShot: triggerOwl },
+  { key: 'dog', name: 'Далекий пес', hint: 'приглушений гавкіт за селом', oneShot: triggerDog },
+  { key: 'creak', name: 'Скрип хати', hint: 'рипіння дерева зрідка', oneShot: triggerCreak },
+  { key: 'bell', name: 'Далекий дзвін', hint: 'тривожні удари, дуже зрідка', oneShot: triggerBell },
 ];
 
 let _init = false;
@@ -45,11 +52,11 @@ export function initSoundEditor(prefix: string): void {
       play.style.cssText = 'padding:4px 12px;font-size:13px';
       play.onclick = () => {
         // соло: усе в нуль, цей звук на робочій гучності
-        const solo: AmbienceMix = { master: mix.master, rain: 0, fire: 0, crickets: 0, thunder: 0, crow: 0 };
+        const solo: AmbienceMix = { ...DEFAULT_MIX, master: mix.master };
+        for (const s2 of SOUNDS) solo[s2.key] = 0;
         solo[s.key] = Math.max(0.5, mix[s.key]);
         startAmbience(solo); setMix(solo);
-        if (s.oneShot === 'thunder') triggerThunder(60);
-        if (s.oneShot === 'crow') triggerCrow();
+        s.oneShot?.();
         setStatus(`Соло: ${s.name} · «■ Стоп» щоб зупинити`);
       };
       row.appendChild(nm); row.appendChild(play);
@@ -79,11 +86,7 @@ export function initSoundEditor(prefix: string): void {
       body.appendChild(wr);
     };
     slider('Загальна', 'master');
-    slider('Дощ', 'rain');
-    slider('Вогнище', 'fire');
-    slider('Цвіркуни', 'crickets');
-    slider('Грім', 'thunder');
-    slider('Ворона', 'crow');
+    for (const s of SOUNDS) slider(s.name, s.key);
   }
 
   // ── Тулбар ──────────────────────────────────────────────────────────────────
