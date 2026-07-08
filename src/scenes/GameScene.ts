@@ -22,6 +22,7 @@ import {
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import { myKhorugvaId, cachedLeaderId } from '../khorugva';
 import { reportProgress } from '../story/questState';
+import { loadProfile, saveHeroStats, addHryvni } from '../story/profile';
 import { rewardLabel } from '../story/profile';
 import type { Quest } from '../story/quests';
 import { loadEquip } from '../inventory';
@@ -121,6 +122,7 @@ export class GameScene extends Phaser.Scene {
   private levelMode = false;
   private curLevelId = '';   // id рівня з редактора — ціль survive-квестів
   private surviveAcc = 0;    // накопичені секунди для цілі «протриматись N сек»
+  private statsSaveAcc = 0;  // акумулятор збереження болю/тривоги в профіль
   // Спавн v2: детермінована таблиця слотів (netId → слот) однакова на всіх
   // клієнтах; хост вирішує КОЛИ спавнити (хвилі/наближення), не-хост створює
   // ворога, щойно його netId зʼявився у знімку хоста.
@@ -375,6 +377,7 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
       this.unwatchZones?.();
+      if (this.playerSpawned) saveHeroStats(this.player.backPain, this.player.anxiety);
       this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.(); this.unwatchDialog?.();
       this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = this.unwatchDialog = null;
       this.coopDialog?.close(); this.coopDialog = null;
@@ -795,6 +798,10 @@ export class GameScene extends Phaser.Scene {
     }
     const sp = this.spawnPoint(slot);
     this.player.spawnAt(sp.x, sp.y);
+    // Біль у спині й тривожність — З ПРОФІЛЮ (переживають рівні й сесії).
+    const prof = loadProfile();
+    this.player.backPain = prof.backPain;
+    this.player.anxiety = prof.anxiety;
     // Снеп камери на спавн (без повільного панорамування з 0) — і фіксована точка для анкера паралаксу.
     this.cameras.main.centerOn(sp.x, this.cameras.main.midPoint.y);
     this.playerSpawned = true;
@@ -1001,8 +1008,16 @@ export class GameScene extends Phaser.Scene {
 
   private removeEnemy(e: Enemy): void {
     const key = e.charKey;
+    const dropX = e.floorX, dropY = e.floorY;
     e.destroy();
     this.enemies = this.enemies.filter((x) => x !== e);
+    // Гривні: з ворога вилітає 1..10 ₴ (летючий підпис) — одразу в профіль.
+    const amount = 1 + Math.floor(Math.random() * 10);
+    addHryvni(amount);
+    const coin = this.add.text(dropX, dropY - 70, '+' + amount + ' ₴', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', color: '#ffd76a',
+    }).setOrigin(0.5).setDepth(9000).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: coin, y: coin.y - 80, alpha: 0, duration: 1200, ease: 'Sine.easeOut', onComplete: () => coin.destroy() });
     // Ціль квесту «здолати ворогів» (порожня ціль = будь-хто; або конкретний charKey).
     for (const q of reportProgress('kill', key || undefined)) this.questToast(q);
   }
@@ -1342,6 +1357,12 @@ export class GameScene extends Phaser.Scene {
     // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
     else this.amHost = true; // соло = сам собі хост
+
+    // Стани героя (біль/тривога) — у профіль раз на ~2с (переживають рівень).
+    if (this.playerSpawned) {
+      this.statsSaveAcc += dt;
+      if (this.statsSaveAcc >= 2) { this.statsSaveAcc = 0; saveHeroStats(this.player.backPain, this.player.anxiety); }
+    }
 
     // Ціль «вижити/протриматись N сек» — тікає щосекунди, поки гравець живий у рівні.
     if (this.levelMode && this.playerSpawned && this.player.hp > 0) {

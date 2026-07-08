@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { LOGICAL_W, LOGICAL_H, RENDER_SCALE } from '../config';
 import { hideLoadScreen, setTouchUI } from './uiButton';
+import { hryvni } from '../story/profile';
 import { triggerThunder, ensureAmbience } from '../sound/ambience';
 import { CutoutCharacter, TRANS_DUR, type CharDoc } from '../anim/CutoutCharacter';
 import { buildInvPanel, applyEquipTo } from './invPanel';
@@ -89,6 +90,7 @@ export class MenuScene extends Phaser.Scene {
   protected lobbyChar: CutoutCharacter | null = null;
   protected charHolder: Phaser.GameObjects.Container | null = null;
   private titleObj: Phaser.GameObjects.Text | null = null;
+  private hryvniaLabel: Phaser.GameObjects.Text | null = null; // валюта (видно в Житлі та Інвентарі)
   // Ріалтайм-морф розділів БЕЗ зміни сцени (персонаж лишається на місці, напис
   // плавно перетворюється, фон/кнопки/шторм ті самі). Стоїть лише в Інвентарі —
   // решта розділів «персонаж просто сидить».
@@ -224,6 +226,14 @@ export class MenuScene extends Phaser.Scene {
     try { this.buildButtons(doc, pg, offX, offY); } catch { this.buildButtons(null, null, offX, offY); }
     try { if (this.pageChars || this.fx.char.on) void this.seatCharacter(offX, offY); } catch { /* без персонажа */ }
     try { this.afterBuild(offX, offY); } catch { /* без додаткового UI */ }
+    // Гривні — верхній правий кут; показуємо в Житлі та Інвентарі.
+    try {
+      this.hryvniaLabel?.destroy();
+      this.hryvniaLabel = this.add.text(LOGICAL_W - 40 + offX, 42 + offY, hryvni() + ' ₴', {
+        fontFamily: MENU_FONT, fontStyle: 'small-caps', fontSize: '24px', color: '#cbb98a',
+      }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(8).setShadow(1, 2, '#000000', 5, false, true);
+      this.hryvniaLabel.setVisible(this.curPage === 'home' || this.curPage === 'inventory');
+    } catch { /* без валюти */ }
     // Deep-link: одразу морфимо в потрібний розділ (напр. join хоругви з бота).
     if (this.startPage && this.sys.settings.key === 'Menu') { const sp = this.startPage; this.startPage = null; this.morphTo(sp); }
   }
@@ -391,6 +401,7 @@ export class MenuScene extends Phaser.Scene {
     try { this.applyPageDecor(page); } catch { /* без декору розділу */ }
 
     this.curPage = page;
+    this.hryvniaLabel?.setText(hryvni() + ' ₴').setVisible(page === 'home' || page === 'inventory');
     // Таймер-подія (time.delayedCall) у цій сцені не спрацьовує надійно — тому
     // завершення морфу веземо на твіні (він точно тікає): скидаємо блок і
     // фіксуємо фінальну позу персонажа (stand_up/sit_down у спокої = idle/sit).

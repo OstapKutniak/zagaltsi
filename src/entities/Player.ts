@@ -121,16 +121,18 @@ export class Player extends Actor {
       this.stamina = Math.min(PLAYER.maxStamina, this.stamina + PLAYER.staminaRegen * dt);
     }
 
-    // Тривожність: стабільно потроху при повному болю у спині; потроху при низькому ХП.
-    if (this.backPain >= STATS.painMax) this.addAnxiety(STATS.anxietyPainFull * dt);
-    if (this.hp < PLAYER.maxHp * STATS.anxietyLowHpFrac) this.addAnxiety(STATS.anxietyLowHp * dt);
+    // Тривожність: пасивне накопичення (повний біль / низьке ХП) — ЛИШЕ до 70%.
+    // Вище 70% доганяють тільки удари ворогів при максимальному болю (takeDamage).
+    if (this.backPain >= STATS.painMax) this.addAnxiety(STATS.anxietyPainFull * dt, STATS.anxietyPainCap);
+    if (this.hp < PLAYER.maxHp * STATS.anxietyLowHpFrac) this.addAnxiety(STATS.anxietyLowHp * dt, STATS.anxietyPainCap);
   }
 
   private addBackPain(amount: number): void {
     this.backPain = Math.min(STATS.painMax, this.backPain + amount);
   }
-  private addAnxiety(amount: number): void {
-    this.anxiety = Math.min(STATS.anxietyMax, this.anxiety + amount);
+  private addAnxiety(amount: number, cap = STATS.anxietyMax): void {
+    if (this.anxiety >= cap) return; // пасивні джерела не піднімають вище своєї стелі
+    this.anxiety = Math.min(cap, this.anxiety + amount);
   }
 
   // Бік по глибині (1 = вглиб/вниз, -1 = ближче/вгору) для ковзання повз край.
@@ -179,7 +181,9 @@ export class Player extends Actor {
     this.hurtUntil = time + 600;
     this.fx += (this.fx < fromX ? -1 : 1) * 26; // відкидання
     this.addBackPain(STATS.painOnHit * dmg);   // урон → біль у спині
-    this.addAnxiety(STATS.anxietyOnHit * dmg); // урон → тривожність
+    // Урон → тривожність: при МАКСИМАЛЬНОМУ болю удари пробивають стелю 70% (до 100).
+    const hitCap = this.backPain >= STATS.painMax ? STATS.anxietyMax : STATS.anxietyPainCap;
+    this.addAnxiety(STATS.anxietyOnHit * dmg, hitCap);
     return true;
   }
 }
