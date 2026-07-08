@@ -34,6 +34,23 @@ function saveProfile(p: Profile): void {
   try { localStorage.setItem(LS, JSON.stringify(p)); } catch { /* ignore */ }
 }
 
+// Гривні — ігрова валюта (зберігається в полі gold профілю).
+export function addHryvni(n: number): number {
+  const p = loadProfile();
+  p.gold = Math.max(0, Math.round(p.gold + n));
+  saveProfile(p);
+  return p.gold;
+}
+export const hryvni = (): number => loadProfile().gold;
+
+// Стани героя (біль у спині / тривожність) — переживають рівні й сесії.
+export function saveHeroStats(backPain: number, anxiety: number): void {
+  const p = loadProfile();
+  p.backPain = Math.max(0, Math.min(100, backPain));
+  p.anxiety = Math.max(0, Math.min(100, anxiety));
+  saveProfile(p);
+}
+
 export interface RewardLike { gold?: number; xp?: number; itemId?: string; note?: string }
 export function grantReward(r?: RewardLike | null): void {
   if (!r) return;

@@ -7,7 +7,7 @@ import { idbGet, idbSet } from '../store';
 
 interface EdLevel {
   id?: string; name: string; placed: { asset: string }[]; collider: string[];
-  enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number };
+  enemySpawns: string[]; spawnCfg?: Record<string, unknown>; arriveZones?: string[]; neutralSpawns: string[]; spawn: { x: number; y: number };
   spawns: { x: number; y: number }[]; start: number; end: number; grid: number;
   parallax: Record<string, number>; atmosphere?: unknown; camZones?: unknown[];
 }
@@ -48,7 +48,7 @@ export async function stageLevelById(levelId: string | undefined | null): Promis
   const doc: Record<string, unknown> = {
     id: lv.id ?? '', // ціль survive-квестів «протриматись у рівні X»
     name: lv.name, placed: lv.placed, collider: lv.collider,
-    enemySpawns: lv.enemySpawns ?? [], neutralSpawns: lv.neutralSpawns ?? [],
+    enemySpawns: lv.enemySpawns ?? [], spawnCfg: lv.spawnCfg ?? {}, arriveZones: lv.arriveZones ?? [], neutralSpawns: lv.neutralSpawns ?? [],
     grid: lv.grid ?? 32, spawn: lv.spawns?.[0] ?? lv.spawn, spawns: lv.spawns ?? [lv.spawn],
     start: lv.start, end: lv.end, parallax: lv.parallax ?? { ...PARALLAX_DEFAULTS }, assets: used,
   };

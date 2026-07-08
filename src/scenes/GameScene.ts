@@ -5,7 +5,7 @@ import { setTouchUI } from './uiButton';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { CutoutCharacter, type CharDoc } from '../anim/CutoutCharacter';
-import { buildLevelView, animOffset, deformKfAt, deformImgPt, type LevelDoc, type PlacedAnim, type PlacedDeform } from '../level/LevelView';
+import { buildLevelView, animOffset, deformKfAt, deformImgPt, type LevelDoc, type PlacedAnim, type PlacedDeform, type SpawnZoneCfg } from '../level/LevelView';
 import { footprintWorldCells } from '../level/footprint';
 import { saveValue } from '../telegram';
 import { idbGet } from '../store';
@@ -15,15 +15,17 @@ import {
   pushPlayerState, watchGameState, getLobbyPlayers, getChosenChar,
   getPlayerId, getPlayerName, type PlayerState,
   pushEnemies, watchEnemies, pushEnemyHit, watchEnemyHits, pushPlayerDamage, watchMyDamage,
+  pushZonesCleared, watchZonesCleared,
   pushDialog, watchDialog,
   type EnemyNet, type EnemyHit,
 } from '../multiplayer/lobby';
 import { loadCharLibrary, docById, type LibItem } from '../charlib';
 import { myKhorugvaId, cachedLeaderId } from '../khorugva';
-import { reportProgress } from '../story/questState';
+import { reportProgress, takenQuests, questDefById, objectiveDone } from '../story/questState';
+import { loadProfile, saveHeroStats, addHryvni } from '../story/profile';
 import { rewardLabel } from '../story/profile';
 import type { Quest } from '../story/quests';
-import { loadEquip } from '../inventory';
+import { loadEquip, equipVisual, itemById, itemIconTexture, addToBag, loadBag, saveBag, saveEquip, CATALOG, SLOT_ORDER, SLOT_LABELS, type EquipSlot } from '../inventory';
 import { stopAmbience } from '../sound/ambience';
 import type { NodeGraph } from '../node-editor';
 import { type Atmosphere, parseHex, hexToInt, evalSky, evalTod, evalWeather, type LayerKey, type FogLayer, type WeatherState } from '../level/atmosphere';
@@ -38,6 +40,16 @@ interface Remote {
   tx: number; ty: number; tz: number;  // ціль із мережі
   anim: string; facing: number;
   equipSig?: string; // підпис спорядження — перевдягаємо лише при зміні
+}
+
+// Слот спавна (детермінований): netId = 1000 + зона*100 + хвиля*10 + i (i<8, хвиль<8).
+interface SpawnSlot { netId: number; zoneIdx: number; waveIdx: number; gx: number; gy: number; charId: string }
+interface ZoneRt {
+  idx: number; gateX: number; centerX: number;
+  trigger: 'start' | 'near'; gate: boolean;
+  waves: number[][];  // netId-и по хвилях
+  curWave: number;    // -1 = ще не стартувала
+  done: boolean;      // зачищена (усі хвилі вийшли й мертві)
 }
 
 const FIXED_DT = 1 / 60; // фіксований крок симуляції -> детермінізм (multiplayer-ready)
@@ -110,6 +122,26 @@ export class GameScene extends Phaser.Scene {
   private levelMode = false;
   private curLevelId = '';   // id рівня з редактора — ціль survive-квестів
   private surviveAcc = 0;    // накопичені секунди для цілі «протриматись N сек»
+  private statsSaveAcc = 0;  // акумулятор збереження болю/тривоги в профіль
+  // Напис активних квестів під хітбарами: тап — згорнути/розгорнути (памʼятається).
+  private questHudObjs: Phaser.GameObjects.GameObject[] = [];
+  private questHudAcc = 0;
+  private questHudSig = '';
+  // Предмети на землі (дроп із ворогів) + ігровий інвентар (I / кнопка «Сумка»).
+  private groundItems: Array<{ itemId: string; x: number; y: number; img: Phaser.GameObjects.Image }> = [];
+  private invOpen = false;
+  private invObjs: Phaser.GameObjects.GameObject[] = [];
+  private bagFullToastAt = 0;
+  // Спавн v2: детермінована таблиця слотів (netId → слот) однакова на всіх
+  // клієнтах; хост вирішує КОЛИ спавнити (хвилі/наближення), не-хост створює
+  // ворога, щойно його netId зʼявився у знімку хоста.
+  private spawnTable = new Map<number, SpawnSlot>();
+  private spawnZonesRt: ZoneRt[] = [];
+  private camZonesRt: Array<{ x: number; w: number; camX: number }> = [];
+  // Прибуття: зони 'cx,cy' з редактора; гравець у зоні і жодного ворога в кадрі →
+  // рівень пройдено, їдемо в локацію-ціль подорожі (sessionStorage zag_travel_dest).
+  private arriveZonesRt: Array<{ acx: number; acy: number }> = [];
+  private arrived = false;
   private levelStart = 0;
   private levelEnd = WORLD_WIDTH;
   private levelBand: { top: number; bottom: number } | null = null; // прохідна смуга з намальованих колайдерів
@@ -157,6 +189,7 @@ export class GameScene extends Phaser.Scene {
   private netStates: Record<string, PlayerState> = {};
   private remotes: Record<string, Remote> = {};
   private unwatchState: (() => void) | null = null;
+  private unwatchZones: (() => void) | null = null;
   private started = false;
   // Host-authoritative вороги: хост рахує й транслює, решта дзеркалять.
   private amHost = false;
@@ -172,6 +205,8 @@ export class GameScene extends Phaser.Scene {
 
   constructor() {
     super('Game');
+    // Dev-only: доступ до сцени з консолі/headless-тестів (у проді не активний).
+    if (import.meta.env.DEV) (window as unknown as { __gs?: unknown }).__gs = this;
   }
 
   // Логічні розміри кадру (backing у RENDER_SCALE× більший — ділимо, щоб лишити 1280×576).
@@ -267,6 +302,7 @@ export class GameScene extends Phaser.Scene {
     this.remotes = {};
     this.netStates = {};
     this.amHost = false; this.lastEnemyPush = 0; this.netEnemies = {}; this.seenEnemyIds.clear();
+    this.groundItems = []; this.invOpen = false; this.invObjs = []; this.questHudObjs = []; this.questHudSig = '';
     this.coopDialog = null; this.coopDialogNetId = -1;
     this.levelReady = new Promise<void>((res) => { this.resolveLevelReady = res; });
 
@@ -351,9 +387,20 @@ export class GameScene extends Phaser.Scene {
       void this.beginPlay(code);
     };
     window.addEventListener('lobbyStart', onStart);
+    // Інвентар: клавіша I або кнопка «Сумка» на телефоні.
+    const onBagKey = (ev: KeyboardEvent): void => { if (ev.code === 'KeyI') this.toggleInv(); };
+    const onBagBtn = (): void => this.toggleInv();
+    window.addEventListener('keydown', onBagKey);
+    document.getElementById('btn-bag')?.addEventListener('click', onBagBtn);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('keydown', onBagKey);
+      document.getElementById('btn-bag')?.removeEventListener('click', onBagBtn);
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('lobbyStart', onStart);
       this.unwatchState?.();
+      this.unwatchZones?.();
+      if (this.playerSpawned) saveHeroStats(this.player.backPain, this.player.anxiety);
       this.unwatchEnemies?.(); this.unwatchHits?.(); this.unwatchDmg?.(); this.unwatchDialog?.();
       this.unwatchEnemies = this.unwatchHits = this.unwatchDmg = this.unwatchDialog = null;
       this.coopDialog?.close(); this.coopDialog = null;
@@ -520,41 +567,58 @@ export class GameScene extends Phaser.Scene {
       for (const g of this.greenCells) { this.blockedCells.delete(g); if (!this.floorSet.has(g)) this.floorSet.add(g); }
     }
 
-    // Вороги з намальованих зон 3×3: позиція в межах зони — детермінована (однакова
-    // на всіх клієнтах коопу й між перезаходами), щоб не було розсинхрону.
+    // Спавн v2: зони 3×3 з налаштуваннями (хвилі/тригер/ворота). Таблиця слотів
+    // детермінована (позиції/charId/netId однакові на всіх клієнтах і між
+    // перезаходами) — легасі-зони без cfg поводяться як раніше (1 ворог одразу).
+    this.spawnTable.clear(); this.spawnZonesRt = [];
     if (doc.enemySpawns && doc.enemySpawns.length) {
       const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
       const rnd = (a: number, b: number): number => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
-      const toAttach: Array<{ enemy: Enemy; charId: string }> = [];
-      // netId = порядковий індекс: спавн детермінований (однаковий на всіх клієнтах),
-      // тож цей індекс — стабільний ключ синхронізації ворога між гравцями.
-      doc.enemySpawns.forEach((z, idx) => {
+      doc.enemySpawns.forEach((z, zi) => {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
         if (!Number.isFinite(acx) || !Number.isFinite(acy)) return;
-        const rcx = acx + rnd(acx, acy) * 3, rcy = acy + rnd(acy, acx) * 3;
-        const gx = rcx * gs + rcy * k, gy = this.bandBottom + rcy * k;
-        const enemy = new Enemy(this, gx, gy);
-        enemy.netId = idx;
-        if (p[2]) enemy.charKey = p[2];
-        this.enemies.push(enemy);
-        if (p[2]) toAttach.push({ enemy, charId: p[2] });
-      });
-      if (toAttach.length) {
-        void (this.libReady ?? Promise.resolve()).then(async () => {
-          // Опубліковані поведінки з репо (працюють на всіх пристроях/коопі), один раз.
-          const pub = await loadPublishedBehaviors();
-          toAttach.forEach(({ enemy, charId }, i) => {
-            const d = docById(this.lib, charId);
-            if (d) void enemy.attachChar(d, `npc_${i}_`);
-            // нодова поведінка цього ворога (1 крок = 1 клітинка колайдера = gs px):
-            // спершу локальна IDB (свіжі правки автора), фолбек — опублікований граф.
-            void idbGet<NodeGraph>('zag_behavior_' + charId)
-              .then((bg) => enemy.setBehavior(bg ?? pub[charId] ?? null, gs))
-              .catch(() => enemy.setBehavior(pub[charId] ?? null, gs));
-          });
+        const cfg: SpawnZoneCfg = doc.spawnCfg?.[acx + ',' + acy]
+          ?? { waves: [{ charId: p[2] ?? '', count: 1 }], trigger: 'start' };
+        const waves: number[][] = [];
+        cfg.waves.slice(0, 8).forEach((wv, wi) => {
+          const ids: number[] = [];
+          const n = Math.max(1, Math.min(8, wv.count || 1));
+          for (let i = 0; i < n; i++) {
+            const netId = 1000 + zi * 100 + wi * 10 + i;
+            // Позиція в межах зони: детермінований шум від (анкер, хвиля, індекс).
+            const rcx = acx + rnd(acx + wi * 7 + i * 3, acy + i) * 3;
+            const rcy = acy + rnd(acy + i * 5, acx + wi * 11 + i) * 3;
+            this.spawnTable.set(netId, {
+              netId, zoneIdx: zi, waveIdx: wi,
+              gx: rcx * gs + rcy * k, gy: this.bandBottom + rcy * k,
+              charId: wv.charId || '',
+            });
+            ids.push(netId);
+          }
+          waves.push(ids);
         });
+        const centerX = (acx + 1.5) * gs + (acy + 1.5) * k;
+        this.spawnZonesRt.push({
+          idx: zi, centerX,
+          gateX: (acx + 3) * gs + (acy + 1.5) * k + 60, // трохи за правим краєм зони
+          trigger: cfg.trigger === 'near' ? 'near' : 'start',
+          gate: !!cfg.gate, waves, curWave: -1, done: false,
+        });
+      });
+      // 'start'-зони: перша хвиля виходить одразу на ВСІХ клієнтах (детерміновано).
+      for (const zr of this.spawnZonesRt) {
+        if (zr.trigger === 'start' && zr.waves.length) {
+          zr.curWave = 0;
+          for (const id of zr.waves[0]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        }
       }
     }
+    // Камера-зони (фіксований екран): гравець у [x, x+w] → камера стає на camX.
+    this.camZonesRt = (doc.camZones ?? []).map((z) => ({ x: z.x, w: z.w, camX: z.camX }));
+    this.arriveZonesRt = (doc.arriveZones ?? []).map((z) => {
+      const p = z.split(','); return { acx: Number(p[0]), acy: Number(p[1]) };
+    }).filter((z) => Number.isFinite(z.acx) && Number.isFinite(z.acy));
+    this.arrived = false;
 
     // Точки спавна (кооп): або масив doc.spawns, або один doc.spawn (сумісність). До 5.
     this.spawns = (doc.spawns && doc.spawns.length ? doc.spawns : [doc.spawn ?? { x: this.levelStart + 60, y: 0 }]).slice(0, 5);
@@ -761,12 +825,20 @@ export class GameScene extends Phaser.Scene {
     }
     const sp = this.spawnPoint(slot);
     this.player.spawnAt(sp.x, sp.y);
+    // Біль у спині й тривожність — З ПРОФІЛЮ (переживають рівні й сесії).
+    const prof = loadProfile();
+    this.player.backPain = prof.backPain;
+    this.player.anxiety = prof.anxiety;
     // Снеп камери на спавн (без повільного панорамування з 0) — і фіксована точка для анкера паралаксу.
     this.cameras.main.centerOn(sp.x, this.cameras.main.midPoint.y);
     this.playerSpawned = true;
 
     if (this.isMulti) {
       this.unwatchState = watchGameState(code, (states) => { this.netStates = states; });
+      // Зачищені зони від хоста → не-хост відпускає ворота (свій tickZones не крутить).
+      this.unwatchZones = watchZonesCleared(code, (cleared) => {
+        for (const zr of this.spawnZonesRt) if (cleared.includes(zr.idx)) zr.done = true;
+      });
       // Дзеркало ворогів від хоста (застосовуємо лише коли я НЕ хост).
       this.unwatchEnemies = watchEnemies(code, (e) => { this.netEnemies = e; });
       // Шкода від ворогів, яку хост маршрутизував саме мені.
@@ -793,7 +865,7 @@ export class GameScene extends Phaser.Scene {
     this.add.existing(c);
     // Вдягнене в Інвентарі спорядження — видно й у бою (ті самі білі силуети/меч).
     const eq = loadEquip();
-    c.setEquipment({ pants: !!eq.pants, armor: !!eq.armor, helmet: !!eq.helmet, weapon: !!eq.weapon });
+    c.setEquipment(equipVisual(eq)); // кольорові варіанти фарбують силуети
     this.player.setVisible(false);
     if (doc.clips) {
       const hotkeyHandler = (ev: KeyboardEvent): void => {
@@ -914,12 +986,212 @@ export class GameScene extends Phaser.Scene {
     if (e && e.vulnerable(this.simTime) && e.hurt(h.dmg, this.simTime, h.fromX)) this.removeEnemy(e);
   }
 
+  // Створити ворога зі слота таблиці (детерміновано; арт/поведінка — асинхронно).
+  private spawnFromSlot(slot: SpawnSlot): void {
+    if (this.enemies.some((e) => e.netId === slot.netId)) return;
+    const enemy = new Enemy(this, slot.gx, slot.gy);
+    enemy.netId = slot.netId;
+    enemy.zoneIdx = slot.zoneIdx;
+    if (slot.charId) {
+      enemy.charKey = slot.charId;
+      void (this.libReady ?? Promise.resolve()).then(async () => {
+        const pub = await loadPublishedBehaviors();
+        const d = docById(this.lib, slot.charId);
+        if (d) void enemy.attachChar(d, `npc_${slot.netId}_`);
+        void idbGet<NodeGraph>('zag_behavior_' + slot.charId)
+          .then((bg) => enemy.setBehavior(bg ?? pub[slot.charId] ?? null, this.colliderGrid))
+          .catch(() => enemy.setBehavior(pub[slot.charId] ?? null, this.colliderGrid));
+      });
+    }
+    this.enemies.push(enemy);
+  }
+
+  // ХОСТ: життя зон — тригер наближення, хвилі по черзі, зачистка (ворота).
+  private tickZones(): void {
+    for (const zr of this.spawnZonesRt) {
+      if (zr.done || !zr.waves.length) continue;
+      const aliveInZone = this.enemies.some((e) => e.zoneIdx === zr.idx);
+      if (zr.curWave === -1) {
+        // Ще не стартувала ('near'): будь-який гравець близько → перша хвиля.
+        let nearest = Math.abs(this.player.floorX - zr.centerX);
+        for (const r of Object.values(this.remotes)) nearest = Math.min(nearest, Math.abs(r.rx - zr.centerX));
+        if (nearest < 700) {
+          zr.curWave = 0;
+          for (const id of zr.waves[0]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        }
+        continue;
+      }
+      if (!aliveInZone) {
+        if (zr.curWave < zr.waves.length - 1) {
+          zr.curWave++;
+          for (const id of zr.waves[zr.curWave]) this.spawnFromSlot(this.spawnTable.get(id)!);
+        } else {
+          zr.done = true;
+          if (this.isMulti) pushZonesCleared(this.lobbyCode, this.spawnZonesRt.filter((z) => z.done).map((z) => z.idx));
+        }
+      }
+    }
+  }
+
   private removeEnemy(e: Enemy): void {
     const key = e.charKey;
+    const dropX = e.floorX, dropY = e.floorY;
     e.destroy();
     this.enemies = this.enemies.filter((x) => x !== e);
+    // Гривні: з ворога вилітає 1..10 ₴ (летючий підпис) — одразу в профіль.
+    const amount = 1 + Math.floor(Math.random() * 10);
+    addHryvni(amount);
+    const coin = this.add.text(dropX, dropY - 70, '+' + amount + ' ₴', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '22px', color: '#ffd76a',
+    }).setOrigin(0.5).setDepth(9000).setShadow(1, 2, '#000000', 5, false, true);
+    this.tweens.add({ targets: coin, y: coin.y - 80, alpha: 0, duration: 1200, ease: 'Sine.easeOut', onComplete: () => coin.destroy() });
+    // Дроп предмета (40%): випадкова річ з каталогу (з синіми/фіолетовими варіантами).
+    if (Math.random() < 0.4) this.dropItem(dropX, dropY);
     // Ціль квесту «здолати ворогів» (порожня ціль = будь-хто; або конкретний charKey).
     for (const q of reportProgress('kill', key || undefined)) this.questToast(q);
+  }
+
+  // ── Предмети: дроп на землю, підбір у сумку, ігровий інвентар ────────────────
+  private dropItem(x: number, y: number): void {
+    const item = CATALOG[Math.floor(Math.random() * CATALOG.length)];
+    const img = this.add.image(x, y - 26, itemIconTexture(this, item)).setDepth(y + 1).setScale(0.85);
+    this.tweens.add({ targets: img, y, duration: 420, ease: 'Bounce.easeOut' });
+    this.groundItems.push({ itemId: item.id, x, y, img });
+  }
+
+  private pickupTick(time: number): void {
+    if (!this.playerSpawned) return;
+    for (const gi of [...this.groundItems]) {
+      if (Math.abs(this.player.floorX - gi.x) > 46 || Math.abs(this.player.floorY - gi.y) > 42) continue;
+      const idx = addToBag(gi.itemId);
+      if (idx >= 0) {
+        gi.img.destroy();
+        this.groundItems = this.groundItems.filter((g) => g !== gi);
+        this.smallToast('Підняв: ' + (itemById(gi.itemId)?.name ?? 'річ'));
+        if (this.invOpen) this.buildInvUI();
+      } else if (time > this.bagFullToastAt) {
+        this.bagFullToastAt = time + 1600;
+        this.smallToast('Сумка повна');
+      }
+    }
+  }
+
+  private smallToast(msg: string): void {
+    const t = this.add.text(this.logicalW / 2 + this.uiOffX, this.logicalH - 132 + this.uiOffY, msg, {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontSize: '18px',
+      color: '#ffcf8f', backgroundColor: '#000000a0', padding: { x: 9, y: 5 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(11500);
+    this.tweens.add({ targets: t, alpha: 0, delay: 1500, duration: 500, onComplete: () => t.destroy() });
+  }
+
+  // Ігровий інвентар: знизу сумка (5 квадратів), праворуч вертикально — надіто.
+  // Тап по речі в сумці — вдягнути (обмін із вдягненим того ж слота); тап по
+  // надітій — зняти в сумку. Все зберігається (zag_bag / zag_equip).
+  private toggleInv(): void {
+    this.invOpen = !this.invOpen;
+    if (this.invOpen) this.buildInvUI();
+    else { for (const o of this.invObjs) o.destroy(); this.invObjs = []; }
+  }
+
+  private buildInvUI(): void {
+    for (const o of this.invObjs) o.destroy();
+    this.invObjs = [];
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => { this.invObjs.push(o); return o; };
+    const D = 11000;
+    const bag = loadBag();
+    const eq = loadEquip();
+    const cell = (x: number, y: number, size: number): Phaser.GameObjects.Graphics => {
+      const g = add(this.add.graphics().setScrollFactor(0).setDepth(D));
+      g.fillStyle(0x14101a, 0.9).fillRoundedRect(x - size / 2, y - size / 2, size, size, 9);
+      g.lineStyle(2, 0xcbb98a, 0.9).strokeRoundedRect(x - size / 2, y - size / 2, size, size, 9);
+      return g;
+    };
+    // ── Сумка: 5 квадратів по центру внизу ──
+    const S = 64, GAP = 12;
+    const startX = this.logicalW / 2 - (5 * (S + GAP) - GAP) / 2 + S / 2 + this.uiOffX;
+    const bagY = this.logicalH - 64 + this.uiOffY;
+    add(this.add.text(startX - S / 2, bagY - S / 2 - 20, 'Сумка', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '16px', color: '#cbb98a',
+    }).setScrollFactor(0).setDepth(D + 1).setShadow(1, 1, '#000', 4, false, true));
+    bag.forEach((id, i) => {
+      const x = startX + i * (S + GAP);
+      cell(x, bagY, S);
+      const item = itemById(id);
+      if (item) {
+        add(this.add.image(x, bagY, itemIconTexture(this, item)).setScrollFactor(0).setDepth(D + 1).setScale(0.8));
+        const hit = add(this.add.zone(x, bagY, S, S).setScrollFactor(0).setInteractive({ useHandCursor: true }));
+        hit.on('pointerup', () => {
+          // Вдягнути з сумки: попередня річ того ж слота — назад у ЦЕЙ слот сумки.
+          const cur = loadEquip();
+          const prev = cur[item.slot] ?? null;
+          cur[item.slot] = item.id;
+          const b = loadBag(); b[i] = prev; saveBag(b);
+          saveEquip(cur);
+          this.character?.setEquipment(equipVisual(cur));
+          this.smallToast('Вдягнув: ' + item.name);
+          this.buildInvUI();
+        });
+      }
+    });
+    // ── Надіто: вертикальна колонка праворуч ──
+    const ex = this.logicalW - 56 + this.uiOffX;
+    let ey = 132 + this.uiOffY;
+    add(this.add.text(ex, ey - 34, 'Надіто', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '16px', color: '#cbb98a',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1).setShadow(1, 1, '#000', 4, false, true));
+    for (const slot of SLOT_ORDER) {
+      cell(ex, ey, 58);
+      const id = eq[slot];
+      const item = itemById(id);
+      if (item) {
+        add(this.add.image(ex, ey, itemIconTexture(this, item)).setScrollFactor(0).setDepth(D + 1).setScale(0.72));
+        const hit = add(this.add.zone(ex, ey, 58, 58).setScrollFactor(0).setInteractive({ useHandCursor: true }));
+        hit.on('pointerup', () => {
+          // Зняти в сумку (якщо є місце).
+          const idx = addToBag(item.id);
+          if (idx < 0) { this.smallToast('Сумка повна'); return; }
+          const cur = loadEquip(); cur[slot] = null; saveEquip(cur);
+          this.character?.setEquipment(equipVisual(cur));
+          this.smallToast('Зняв: ' + item.name);
+          this.buildInvUI();
+        });
+      } else {
+        add(this.add.text(ex, ey, SLOT_LABELS[slot], {
+          fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '10px', color: '#8a8171',
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1));
+      }
+      ey += 70;
+    }
+  }
+
+  // Рівень пройдено: банер «Дістався…» → локація-ціль подорожі (або карта).
+  private arriveAtDestination(): void {
+    this.arrived = true;
+    saveHeroStats(this.player.backPain, this.player.anxiety);
+    interface TravelDest { nodeId?: string; label?: string; worldId?: string; locationId?: string; icon?: string }
+    let dest: TravelDest | null = null;
+    try {
+      const s = sessionStorage.getItem('zag_travel_dest');
+      if (s) dest = JSON.parse(s) as TravelDest;
+      sessionStorage.removeItem('zag_travel_dest');
+    } catch { /* ignore */ }
+    const label = dest?.label ? `Дістався: ${dest.label}` : 'Шлях пройдено';
+    const t = this.add.text(this.logicalW / 2 + this.uiOffX, this.logicalH / 2 - 30 + this.uiOffY, label, {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '34px',
+      color: '#efe3c8', backgroundColor: '#000000b0', padding: { x: 18, y: 10 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10000).setShadow(2, 3, '#000000', 7, false, true);
+    this.tweens.add({ targets: t, alpha: { from: 0, to: 1 }, duration: 300 });
+    this.time.delayedCall(1400, () => {
+      if (!this.scene.isActive()) return;
+      if (dest?.nodeId) {
+        // Веду хоругву за собою (як у WorldScene) і прибуваю сам.
+        void import('../khorugva').then(({ iAmLeaderCached }) => {
+          if (iAmLeaderCached()) void import('../multiplayer/partyNav').then(({ broadcastNav }) => broadcastNav('Location', { ...dest }));
+        }).finally(() => this.scene.start('Location', dest));
+      } else {
+        this.scene.start('World', { worldId: dest?.worldId });
+      }
+    });
   }
 
   // Тост «Квест виконано» + нагорода (короткочасно вгорі кадру).
@@ -945,6 +1217,15 @@ export class GameScene extends Phaser.Scene {
   // Не-хост: дзеркалимо ворогів. Відсутній netId, який РАНІШЕ бачили → загинув
   // (прибираємо); якого ще не бачили → хост ще не почав слати (лишаємо як є).
   private mirrorEnemies(dt: number): void {
+    // Динамічні хвилі: хост наспавнив нове netId → створюємо його зі своєї
+    // детермінованої таблиці (та сама позиція/charId), стан домалює applyNet.
+    for (const idStr of Object.keys(this.netEnemies)) {
+      const id = Number(idStr);
+      if (!this.enemies.some((e) => e.netId === id)) {
+        const slot = this.spawnTable.get(id);
+        if (slot) this.spawnFromSlot(slot);
+      }
+    }
     for (const id of Object.keys(this.netEnemies)) this.seenEnemyIds.add(Number(id));
     for (const e of [...this.enemies]) {
       const s = e.netId >= 0 ? this.netEnemies[e.netId] : undefined;
@@ -980,6 +1261,45 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── HUD helpers ─────────────────────────────────────────────────────────────
+
+  // ── Активні квести під хітбарами (тап по заголовку — згорнути/розгорнути) ──
+  private buildQuestHud(): void {
+    for (const o of this.questHudObjs) o.destroy();
+    this.questHudObjs = [];
+    const collapsed = localStorage.getItem('zag_qhud_collapsed') === '1';
+    const taken = takenQuests();
+    const act: Array<{ title: string; done: number; total: number }> = [];
+    for (const [id, pq] of Object.entries(taken)) {
+      if (pq.status !== 'active') continue;
+      const q = questDefById(id); if (!q) continue;
+      const objs = q.objectives ?? [];
+      act.push({ title: q.title, done: objs.filter((o) => objectiveDone(o, pq)).length, total: objs.length });
+    }
+    const sig = collapsed + '|' + act.map((a) => a.title + a.done + '/' + a.total).join(';');
+    if (sig === this.questHudSig && this.questHudObjs.length) return;
+    this.questHudSig = sig;
+    if (!act.length) return;
+    const x = 10 + this.uiOffX;
+    let y = 56 + this.uiOffY;
+    const header = this.add.text(x, y, collapsed ? `Квести (${act.length}) ▸` : 'Квести ▾', {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'small-caps', fontSize: '15px', color: '#cbb98a',
+    }).setScrollFactor(0).setDepth(10001).setShadow(1, 1, '#000000', 4, false, true)
+      .setInteractive({ useHandCursor: true });
+    header.on('pointerup', () => {
+      localStorage.setItem('zag_qhud_collapsed', collapsed ? '0' : '1');
+      this.questHudSig = ''; this.buildQuestHud();
+    });
+    this.questHudObjs.push(header);
+    if (!collapsed) {
+      y += 20;
+      for (const a of act.slice(0, 4)) {
+        const line = this.add.text(x, y, `• ${a.title}` + (a.total ? `  ${a.done}/${a.total}` : ''), {
+          fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '14px', color: '#e5d8bcdd',
+        }).setScrollFactor(0).setDepth(10001).setShadow(1, 1, '#000000', 4, false, true);
+        this.questHudObjs.push(line); y += 18;
+      }
+    }
+  }
 
   private buildHudLayout(): void {
     const w = this.logicalW;
@@ -1238,12 +1558,29 @@ export class GameScene extends Phaser.Scene {
     // синхронні, без дрожу. Та сама формула центрування, що й Phaser startFollow:
     // scrollX = target.x − width·0.5 (width — повна ширина камери, zoom застосовується окремо).
     const cam = this.cameras.main;
-    const targetScrollX = this.player.x - cam.width * 0.5;
+    // Камера-зона (редактор Мандр): гравець усередині → кадр фіксується на camX.
+    const cz = this.levelMode
+      ? this.camZonesRt.find((z) => this.player.floorX >= z.x && this.player.floorX <= z.x + z.w)
+      : undefined;
+    const targetScrollX = cz ? cz.camX : this.player.x - cam.width * 0.5;
     cam.scrollX += (targetScrollX - cam.scrollX) * 0.08;
 
     // Кооп: шлемо свою позицію, малюємо інших гравців і обираємо хоста ворогів.
     if (this.isMulti) { this.pushMyState(time); this.syncRemotes(dt); this.electHost(); }
     else this.amHost = true; // соло = сам собі хост
+
+    // Підбір предметів із землі (дроп ворогів → сумка).
+    this.pickupTick(time);
+
+    // Напис активних квестів — оновлюємо раз на ~1с (дешева перевірка підпису).
+    this.questHudAcc += dt;
+    if (this.questHudAcc >= 1) { this.questHudAcc = 0; this.buildQuestHud(); }
+
+    // Стани героя (біль/тривога) — у профіль раз на ~2с (переживають рівень).
+    if (this.playerSpawned) {
+      this.statsSaveAcc += dt;
+      if (this.statsSaveAcc >= 2) { this.statsSaveAcc = 0; saveHeroStats(this.player.backPain, this.player.anxiety); }
+    }
 
     // Ціль «вижити/протриматись N сек» — тікає щосекунди, поки гравець живий у рівні.
     if (this.levelMode && this.playerSpawned && this.player.hp > 0) {
@@ -1284,10 +1621,35 @@ export class GameScene extends Phaser.Scene {
         const dmg = e.think(t, time, dt, band);
         if (dmg > 0) this.applyEnemyDamage(t.victim, dmg, e.floorX, time);
       }
+      this.tickZones(); // хвилі/тригери/зачистка зон — авторитетно в хоста
       if (this.isMulti) this.broadcastEnemies(time);
     } else {
       // Не-хост: дзеркалимо стан ворогів від хоста.
       this.mirrorEnemies(dt);
+    }
+
+    // Ворота зон: поки зона з gate не зачищена — далі за неї не пройти.
+    if (this.levelMode) {
+      let mx = this.levelEnd - 20;
+      for (const zr of this.spawnZonesRt) {
+        if (zr.gate && !zr.done && zr.gateX > this.player.floorX - 60) mx = Math.min(mx, zr.gateX);
+      }
+      this.player.maxX = mx;
+    }
+
+    // Прибуття: гравець у зоні прибуття і жодного ЖИВОГО ворога в кадрі
+    // (нейтралізований діалогом не рахується — повз нього проходимо спокійно).
+    if (this.levelMode && !this.arrived && this.playerSpawned && this.arriveZonesRt.length) {
+      const gs = this.colliderGrid, k = gs * Math.SQRT1_2;
+      const rcy = (this.player.floorY - this.bandBottom) / k;
+      const rcx = (this.player.floorX - rcy * k) / gs;
+      const inZone = this.arriveZonesRt.some((z) => rcx >= z.acx && rcx <= z.acx + 3 && rcy >= z.acy && rcy <= z.acy + 3);
+      if (inZone) {
+        const camL = this.cameras.main.midPoint.x - this.logicalW / 2 - 80;
+        const camR = this.cameras.main.midPoint.x + this.logicalW / 2 + 80;
+        const hostile = this.enemies.some((e) => !e.isNeutralized && e.floorX > camL && e.floorX < camR);
+        if (!hostile) this.arriveAtDestination();
+      }
     }
 
     // Арена зачищена — відкриваємо шлях

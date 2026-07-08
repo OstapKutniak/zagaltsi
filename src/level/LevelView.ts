@@ -140,12 +140,20 @@ export function animOffset(anim: PlacedAnim, t: number): { rot: number; dx: numb
 }
 
 export interface LevelPlaced { cat: string; asset: string; x: number; y: number; rot: number; scale: number; flip: number; scaleW?: number; scaleH?: number; pivotX?: number; pivotY?: number; plan?: number; anim?: PlacedAnim; deform?: PlacedDeform; outline?: OutlineMod }
+// Налаштування зони спавна (дзеркало SpawnZoneCfg редактора): хвилі по черзі,
+// trigger 'near' = при наближенні гравця, gate = не пройти, поки не зачищено.
+export interface SpawnWave { charId: string; count: number }
+export interface SpawnZoneCfg { waves: SpawnWave[]; trigger: 'start' | 'near'; gate?: boolean }
+
 export interface LevelDoc {
   id?: string;   // id рівня з редактора (ціль survive-квестів)
   name?: string;
   placed: LevelPlaced[];
   assets: { id: string; url: string; footprint?: { cells: { dx: number; dy: number }[] } }[];
   spawn: { x: number; y: number };
+  spawnCfg?: Record<string, SpawnZoneCfg>; // налаштування зон спавна ворогів
+  arriveZones?: string[]; // зони прибуття 'cx,cy' (3×3): у зоні без ворогів у кадрі = рівень пройдено
+  camZones?: Array<{ id?: string; x: number; w: number; camX: number; label?: string }>; // фіксований екран
   spawns?: { x: number; y: number }[]; // до 5 точок спавна (кооп); spawn = spawns[0] для сумісності
   start: number;
   end: number;

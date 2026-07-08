@@ -65,6 +65,13 @@
         -webkit-tap-highlight-color: transparent;
       }
       #touch .actions button { width: 70px; height: 70px; border-radius: 50%; }
+      /* Сумка — маленька кнопка над правими діями (відкриває ігровий інвентар) */
+      #btn-bag {
+        position: absolute; right: 20px; bottom: 132px;
+        width: 74px; height: 38px; border-radius: 10px;
+        font-size: 14px; font-family: Georgia, serif;
+        pointer-events: auto;
+      }
       #touch button:active { background: rgba(255, 255, 255, 0.3); }
       /* На десктопі з мишею кнопки приглушуємо — там грають з клавіатури */
       @media (pointer: fine) { #touch { opacity: 0.25; } }
@@ -244,6 +251,7 @@
       <!-- Тач-керування видно ЛИШЕ в бітемап-рівні (GameScene показує/ховає) -->
       <div id="touch" style="display:none">
         <div id="stick"><div id="stickKnob"></div></div>
+        <button id="btn-bag" aria-label="сумка">Сумка</button>
         <div class="actions">
           <button id="btn-attack" aria-label="удар">✊</button>
           <button id="btn-jump" aria-label="стрибок">⤴</button>

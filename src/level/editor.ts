@@ -53,13 +53,18 @@ interface Placed { id: string; cat: string; asset: string; x: number; y: number;
 // Зона блокування камери (бітемап-стиль): при вході гравця в тригерну смугу [x−w/2 .. x+w/2]
 // камера фіксується на camX до виконання умови (битва/діалог/авто/тощо).
 interface CamZone { id: string; x: number; w: number; camX: number; label?: string }
-interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[] }
+// Налаштування зони спавна ворогів (ключ = 'cx,cy' анкера зони). Хвилі йдуть одна
+// за одною після зачистки попередньої; trigger 'near' = спавн при наближенні гравця;
+// gate = «ворота»: далі не пройти, поки зону не зачищено.
+export interface SpawnWave { charId: string; count: number }
+export interface SpawnZoneCfg { waves: SpawnWave[]; trigger: 'start' | 'near'; gate?: boolean }
+interface Level { id?: string; updatedAt?: number; name: string; placed: Placed[]; collider: string[]; enemySpawns: string[]; neutralSpawns: string[]; spawn: { x: number; y: number }; spawns: { x: number; y: number }[]; start: number; end: number; grid: number; parallax: Record<string, number>; atmosphere?: Atmosphere; camZones?: CamZone[]; spawnCfg?: Record<string, SpawnZoneCfg>; arriveZones?: string[] }
 
 const SPAWN_COLORS = ['#ff5555', '#5aa0ff', '#5aff8f', '#ffd000', '#c06aff']; // 5 кольорів точок спавна
 
 export function initLevelEditor(prefix: string): void {
   const $ = <T extends HTMLElement>(id: string): T => document.getElementById(prefix + id) as T;
-  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS } });
+  const newLevel = (name: string): Level => ({ id: 'lv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), updatedAt: Date.now(), name, placed: [], collider: [], enemySpawns: [], neutralSpawns: [], spawn: { x: 120, y: 0 }, spawns: [{ x: 120, y: 0 }], start: 0, end: 2400, grid: 32, parallax: { ...PARALLAX_DEFAULTS }, spawnCfg: {}, arriveZones: [] });
   // Стабільний id для легасі-рівнів без id (на двох компах виводиться однаково з назви,
   // тож ті самі рівні зливаються, а не дублюються). Викликати перед merge-by-id.
   const ensureLevelId = (lv: Level): Level => { if (!lv.id) lv.id = 'L:' + lv.name; return lv; };
@@ -78,7 +83,7 @@ export function initLevelEditor(prefix: string): void {
     mode: null as null | 'G' | 'R' | 'S',
     orig: null as null | { x: number; y: number; rot: number; scale: number; scaleW: number; scaleH: number },
     startAng: 0, startDist: 1, startWx: 0, startWy: 0,
-    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'neutral' | 'neutralErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
+    pathTool: null as null | 'h' | 'v' | 'erase' | 'enemy' | 'enemyErase' | 'neutral' | 'neutralErase' | 'arrive' | 'arriveErase' | 'spawn' | 'raise' | 'lower' | 'flat' | 'walk',
     axisLock: null as null | 'x' | 'z',
     colliderTool: 'paint' as 'paint' | 'erase',
     markerDrag: null as null | 'spawn' | 'start' | 'end',
@@ -109,6 +114,7 @@ export function initLevelEditor(prefix: string): void {
     pendingFlip: 1,   // 1 або -1 (M = дзеркало)
     pendingTransMode: null as null | 'R' | 'S', // активна трансформація ghost
     pendingEnemy: null as string | null,          // id ворога що зараз виставляється
+    selZone: null as string | null,               // вибрана зона спавна ('cx,cy') — панель налаштувань
     pendingNeutral: null as string | null,        // id нейтрала що зараз виставляється
     animLinePid: null as string | null,           // id ассета, для якого зараз малюємо лінію руху
     brushSize: 1, // 1=1×1  2=2×2  3=3×3 …  колесо змінює при активному H/Y/1/2/3
@@ -335,6 +341,8 @@ export function initLevelEditor(prefix: string): void {
     if (!lv.spawns || !lv.spawns.length) lv.spawns = [{ ...lv.spawn }]; // один спавн -> масив
     if (!lv.enemySpawns) lv.enemySpawns = []; // зони спавна ворогів
     if (!lv.neutralSpawns) lv.neutralSpawns = []; // зони спавна нейтралів
+    if (!lv.spawnCfg) lv.spawnCfg = {}; // налаштування зон (хвилі/тригер/ворота)
+    if (!lv.arriveZones) lv.arriveZones = []; // зони прибуття (кінець рівня)
     if (typeof lv.start !== 'number') lv.start = 0;
     if (typeof lv.end !== 'number') lv.end = 2400;
     if (typeof lv.grid !== 'number') lv.grid = 32; // всі рівні на gs=32
@@ -885,6 +893,10 @@ export function initLevelEditor(prefix: string): void {
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
         ctx.fillStyle = hovered ? 'rgba(255,40,40,0.55)' : 'rgba(255,40,40,0.20)'; ctx.fill();
         ctx.strokeStyle = hovered ? 'rgba(255,80,80,1)' : 'rgba(255,40,40,0.9)'; ctx.lineWidth = hovered ? 3 : 2; ctx.stroke();
+        const zoneKey = acx + ',' + acy;
+        if (state.selZone === zoneKey) { // вибрана зона — золота рамка (панель унизу)
+          ctx.strokeStyle = '#ffcf8f'; ctx.lineWidth = 3; ctx.stroke();
+        }
         const ctr = Pf(acx + 1.5, acy + 1.5);
         const tint = enemyId ? npcTinted.get(enemyId) : null;
         if (tint) { // напівпрозоре червоне зображення виставленого ворога, прив'язане до зони
@@ -896,6 +908,35 @@ export function initLevelEditor(prefix: string): void {
         } else {
           ctx.fillStyle = 'rgba(255,40,40,0.95)'; ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI * 2); ctx.fill();
         }
+        // Бейдж налаштувань: «N воїнів / M хвиль», ворота — рискою під бейджем.
+        const zcfg = level().spawnCfg?.[zoneKey];
+        if (zcfg && zcfg.waves.length) {
+          const total = zcfg.waves.reduce((sum, wv) => sum + Math.max(1, wv.count), 0);
+          const label = total + ' у ' + zcfg.waves.length + ' хв.' + (zcfg.trigger === 'near' ? ' · близько' : '') + (zcfg.gate ? ' · ворота' : '');
+          ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+          const tw = ctx.measureText(label).width;
+          ctx.fillStyle = 'rgba(20,10,10,0.82)';
+          ctx.fillRect(ctr.x - tw / 2 - 5, d.y + 4, tw + 10, 16);
+          ctx.fillStyle = '#ffb0a0';
+          ctx.fillText(label, ctr.x, d.y + 16);
+        }
+      }
+    }
+
+    // Зони ПРИБУТТЯ — зелені.
+    if (state.showEnemySpawns) {
+      const gs = state.grid, k2 = gs * Math.SQRT1_2;
+      const Pf = (ix: number, iy: number) => toScreen(ix * gs + iy * k2, iy * k2);
+      for (const z of level().arriveZones ?? []) {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        if (!Number.isFinite(acx) || !Number.isFinite(acy)) continue;
+        const a = Pf(acx, acy), b = Pf(acx + 3, acy), c = Pf(acx + 3, acy + 3), d = Pf(acx, acy + 3);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+        ctx.fillStyle = 'rgba(90,220,140,0.20)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(90,220,140,0.95)'; ctx.lineWidth = 2; ctx.stroke();
+        const ctr = Pf(acx + 1.5, acy + 1.5);
+        ctx.fillStyle = 'rgba(120,230,160,0.95)'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText('прибуття', ctr.x, ctr.y + 4);
       }
     }
 
@@ -964,6 +1005,10 @@ export function initLevelEditor(prefix: string): void {
         const col = SPAWN_COLORS[state.spawnSel % SPAWN_COLORS.length];
         ctx.globalAlpha = 0.35; fillStroke(floorPts(c.cx, c.cy), col, null); ctx.globalAlpha = 1;
         fillStroke(floorPts(c.cx, c.cy), null, col, 2.5);
+      } else if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') {
+        const c = floorCellAt(state.mouse.x, state.mouse.y);
+        if (state.pathTool === 'arrive') fillStroke(floorPts(c.cx - 1, c.cy - 1, 3, 3), 'rgba(90,220,140,0.18)', 'rgba(90,220,140,0.9)', 2);
+        else fillStroke(floorPts(c.cx, c.cy, 1, 1), 'rgba(90,220,140,0.10)', 'rgba(90,220,140,0.7)', 2);
       } else if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') {
         const hit = zoneAt(c.cx, c.cy);
         if (hit) { const p = hit.split(','); fillStroke(floorPts(Number(p[0]), Number(p[1]), 3, 3), 'rgba(255,40,40,0.30)', 'rgba(255,255,255,0.95)', 2.5); }
@@ -1762,7 +1807,7 @@ export function initLevelEditor(prefix: string): void {
   $<HTMLInputElement>('grid')?.addEventListener('input', (e) => { state.grid = Number((e.target as HTMLInputElement).value); const gv = $('gridV'); if (gv) gv.textContent = (e.target as HTMLInputElement).value; draw(); });
   $<HTMLButtonElement>('paintBtn')?.addEventListener('click', () => { state.colliderTool = 'paint'; $('paintBtn').classList.add('on'); $('eraseBtn').classList.remove('on'); });
   $<HTMLButtonElement>('eraseBtn')?.addEventListener('click', () => { state.colliderTool = 'erase'; $('eraseBtn').classList.add('on'); $('paintBtn').classList.remove('on'); });
-  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; draw(); save(); });
+  $<HTMLButtonElement>('clearCollider')?.addEventListener('click', () => { level().collider = []; level().enemySpawns = []; level().neutralSpawns = []; level().spawnCfg = {}; level().arriveZones = []; state.selZone = null; renderZonePanel(); draw(); save(); });
   const pathBtnIds = ['pathHBtn', 'pathVBtn', 'erasePathBtn'] as const;
   const pathBtnTools: Record<string, 'h' | 'v' | 'erase'> = { pathHBtn: 'h', pathVBtn: 'v', erasePathBtn: 'erase' };
   for (const id of pathBtnIds) {
@@ -1827,6 +1872,7 @@ export function initLevelEditor(prefix: string): void {
     $('walkBtn')?.classList.toggle('on', state.pathTool === 'walk');
     $('enemyBtn')?.classList.toggle('on', state.pathTool === 'enemy' || state.pathTool === 'enemyErase');
     $('neutralBtn')?.classList.toggle('on', state.pathTool === 'neutral' || state.pathTool === 'neutralErase');
+    $('arriveBtn')?.classList.toggle('on', state.pathTool === 'arrive' || state.pathTool === 'arriveErase');
     $('spawnBtn')?.classList.toggle('on', state.pathTool === 'spawn');
   }
   $<HTMLButtonElement>('raiseBtn')?.addEventListener('click', () => { state.pathTool = state.pathTool === 'raise' ? null : 'raise'; updatePathBtns(); setStatus(state.pathTool ? 'Підняти: тапни/тягни на клітинку' : ''); draw(); });
@@ -1896,6 +1942,89 @@ export function initLevelEditor(prefix: string): void {
     lv.spawn = lv.spawns[0];
     draw();
   }
+  // ── Панель вибраної зони спавна: хвилі (ворог × кількість), тригер, ворота ──
+  let zonePanelEl: HTMLDivElement | null = null;
+  function zoneCfg(key: string): SpawnZoneCfg {
+    const lv = level();
+    if (!lv.spawnCfg) lv.spawnCfg = {};
+    if (!lv.spawnCfg[key]) {
+      // Дефолт: одна хвиля з ворогом, який уже висить на зоні (легасі 'cx,cy,charId').
+      const legacy = lv.enemySpawns.find((z) => z === key || z.startsWith(key + ','));
+      const charId = legacy ? (legacy.split(',')[2] ?? '') : '';
+      lv.spawnCfg[key] = { waves: [{ charId, count: 1 }], trigger: 'start' };
+    }
+    return lv.spawnCfg[key];
+  }
+  // Перша хвиля дублюється в легасі-рядок зони — щоб картинка ворога на зоні жила.
+  function syncZoneChar(key: string, charId: string): void {
+    const lv = level();
+    const idx = lv.enemySpawns.findIndex((z) => z === key || z.startsWith(key + ','));
+    if (idx >= 0) lv.enemySpawns[idx] = charId ? key + ',' + charId : key;
+  }
+  function renderZonePanel(): void {
+    if (!zonePanelEl) {
+      zonePanelEl = document.createElement('div');
+      zonePanelEl.id = 'lv-zonePanel';
+      zonePanelEl.style.cssText = 'position:absolute;left:10px;bottom:10px;z-index:30;background:#1d1d1f;' +
+        'border:1px solid #3a3a3a;border-radius:10px;padding:10px;min-width:280px;max-width:340px;' +
+        'box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:12px;color:#ddd;display:none';
+      document.getElementById('lv-stageWrap')?.appendChild(zonePanelEl);
+    }
+    const key = state.selZone;
+    if (!key) { zonePanelEl.style.display = 'none'; return; }
+    const cfg = zoneCfg(key);
+    const enemies = npcLib.filter((x) => x.cat === 'enemy');
+    const opts = (cur: string): string => ['<option value="">— ворог —</option>']
+      .concat(enemies.map((e) => '<option value="' + e.id + '"' + (e.id === cur ? ' selected' : '') + '>' + e.name + '</option>')).join('');
+    zonePanelEl.style.display = 'block';
+    zonePanelEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+        '<b style="color:#ffb0a0">Зона спавна</b><span style="flex:1"></span>' +
+        '<button data-zp="close" style="padding:2px 10px">Готово</button></div>' +
+      cfg.waves.map((w, i) => '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+        '<span style="color:#888;flex:0 0 auto">Хвиля ' + (i + 1) + '</span>' +
+        '<select data-zpw="' + i + '" style="flex:1;min-width:0">' + opts(w.charId) + '</select>' +
+        '<input data-zpc="' + i + '" type="number" min="1" max="8" value="' + Math.max(1, w.count) + '" style="width:52px">' +
+        '<button data-zpx="' + i + '" style="color:#d98a6a">✕</button></div>').join('') +
+      '<div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap">' +
+        '<button data-zp="addwave">＋ Хвиля</button>' +
+        '<select data-zp="trigger">' +
+          '<option value="start"' + (cfg.trigger === 'start' ? ' selected' : '') + '>Спавн: одразу</option>' +
+          '<option value="near"' + (cfg.trigger === 'near' ? ' selected' : '') + '>Спавн: при наближенні</option>' +
+        '</select>' +
+        '<label style="display:flex;align-items:center;gap:4px;cursor:pointer">' +
+          '<input data-zp="gate" type="checkbox"' + (cfg.gate ? ' checked' : '') + '>ворота</label></div>' +
+      '<div style="color:#777">Хвилі виходять по черзі після зачистки. Ворота: далі не пройти, поки зону не зачищено.</div>';
+    zonePanelEl.querySelector('[data-zp="close"]')?.addEventListener('click', () => { state.selZone = null; renderZonePanel(); draw(); });
+    zonePanelEl.querySelector('[data-zp="addwave"]')?.addEventListener('click', () => {
+      cfg.waves.push({ charId: cfg.waves[cfg.waves.length - 1]?.charId ?? '', count: 1 });
+      save(); renderZonePanel(); draw();
+    });
+    zonePanelEl.querySelector('[data-zp="trigger"]')?.addEventListener('change', (ev) => {
+      cfg.trigger = (ev.target as HTMLSelectElement).value as 'start' | 'near'; save(); draw();
+    });
+    zonePanelEl.querySelector('[data-zp="gate"]')?.addEventListener('change', (ev) => {
+      cfg.gate = (ev.target as HTMLInputElement).checked; save(); draw();
+    });
+    zonePanelEl.querySelectorAll('[data-zpw]').forEach((el) => el.addEventListener('change', (ev) => {
+      const t = ev.target as HTMLSelectElement; const i = Number(t.getAttribute('data-zpw'));
+      cfg.waves[i].charId = t.value;
+      if (i === 0) syncZoneChar(key, t.value);
+      save(); draw();
+    }));
+    zonePanelEl.querySelectorAll('[data-zpc]').forEach((el) => el.addEventListener('change', (ev) => {
+      const t = ev.target as HTMLInputElement;
+      cfg.waves[Number(t.getAttribute('data-zpc'))].count = Math.max(1, Math.min(8, Number(t.value) || 1));
+      save(); draw();
+    }));
+    zonePanelEl.querySelectorAll('[data-zpx]').forEach((el) => el.addEventListener('click', (ev) => {
+      const t = ev.currentTarget as HTMLButtonElement;
+      cfg.waves.splice(Number(t.getAttribute('data-zpx')), 1);
+      if (!cfg.waves.length) cfg.waves.push({ charId: '', count: 1 });
+      syncZoneChar(key, cfg.waves[0].charId);
+      save(); renderZonePanel(); draw();
+    }));
+  }
+
   // Зона спавна ворогів — 3×3 підлогових клітинки, центровані на клітинці під курсором.
   function enemyAt(sx: number, sy: number): void {
     const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
@@ -1905,11 +2034,28 @@ export function initLevelEditor(prefix: string): void {
     if (state.pathTool === 'enemyErase') {
       lv.enemySpawns = lv.enemySpawns.filter((z) => {
         const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
-        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+        const hit = fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2;
+        if (hit && lv.spawnCfg) delete lv.spawnCfg[acx + ',' + acy]; // чистимо і налаштування
+        return !hit;
       });
+      if (state.selZone && !lv.enemySpawns.some((z) => z.startsWith(state.selZone + ','))
+        && !lv.enemySpawns.includes(state.selZone)) { state.selZone = null; renderZonePanel(); }
     } else {
-      const key = (fcx - 1) + ',' + (fcy - 1); // 3×3 з центром на клітинці курсора
-      if (!lv.enemySpawns.includes(key)) lv.enemySpawns.push(key);
+      // Клік по НАЯВНІЙ зоні = вибрати її (панель хвиль/тригера/воріт унизу);
+      // по порожньому місцю = нова зона (і одразу вибрана).
+      const existing = lv.enemySpawns.find((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2;
+      });
+      if (existing) {
+        const p = existing.split(',');
+        state.selZone = p[0] + ',' + p[1];
+      } else {
+        const key = (fcx - 1) + ',' + (fcy - 1); // 3×3 з центром на клітинці курсора
+        if (!lv.enemySpawns.includes(key)) lv.enemySpawns.push(key);
+        state.selZone = key;
+      }
+      renderZonePanel();
     }
     draw();
   }
@@ -1927,6 +2073,25 @@ export function initLevelEditor(prefix: string): void {
     } else {
       const key = (fcx - 1) + ',' + (fcy - 1);
       if (!lv.neutralSpawns.includes(key)) lv.neutralSpawns.push(key);
+    }
+    draw();
+  }
+  // Зона ПРИБУТТЯ — 3×3, зелена: гравець у зоні і жодного ворога в кадрі → рівень
+  // пройдено (прибуття в локацію-ціль подорожі).
+  function arriveAt(sx: number, sy: number): void {
+    const w = toWorld(sx, sy); const gs = state.grid; const k = gs * Math.SQRT1_2;
+    const fcx = Math.floor((w.x - w.y) / gs), fcy = Math.floor(w.y / k);
+    if (!Number.isFinite(fcx) || !Number.isFinite(fcy)) return;
+    const lv = level();
+    if (!lv.arriveZones) lv.arriveZones = [];
+    if (state.pathTool === 'arriveErase') {
+      lv.arriveZones = lv.arriveZones.filter((z) => {
+        const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]);
+        return !(fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2);
+      });
+    } else {
+      const key = (fcx - 1) + ',' + (fcy - 1);
+      if (!lv.arriveZones.includes(key)) lv.arriveZones.push(key);
     }
     draw();
   }
@@ -1976,6 +2141,8 @@ export function initLevelEditor(prefix: string): void {
         pushUndo();
         const p = lv.enemySpawns[idx].split(',');
         lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${state.pendingEnemy}`;
+        const zc0 = lv.spawnCfg?.[`${Number(p[0])},${Number(p[1])}`];
+        if (zc0?.waves[0]) zc0.waves[0].charId = state.pendingEnemy!;
         save(); draw(); setStatus('Ворога виставлено'); return;
       }
       // клік поза зоною — скасувати
@@ -2036,6 +2203,7 @@ export function initLevelEditor(prefix: string): void {
     if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
     if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
     if (state.pathTool === 'neutral' || state.pathTool === 'neutralErase') { pushUndo(); neutralAt(x, y); save(); return; }
+    if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { pushUndo(); arriveAt(x, y); save(); return; }
     if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
     // Хендли деформації: якщо state.deformEdit → перевіряємо, чи клік потрапив у хендл
     if (state.deformEdit && ev.button === 0) {
@@ -2222,6 +2390,7 @@ export function initLevelEditor(prefix: string): void {
         if (state.mode) return; // touchmove відстежує позицію, touchend підтверджує
         if (state.pathTool === 'spawn') { pushUndo(); placeSpawnAt(x, y); save(); refreshSpawnUI(); return; }
         if (state.pathTool === 'enemy' || state.pathTool === 'enemyErase') { pushUndo(); enemyAt(x, y); save(); return; }
+        if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { pushUndo(); arriveAt(x, y); save(); return; }
         if (state.pathTool) { pushUndo(); painting = true; strokeCells.clear(); paintAt(x, y); return; }
         const hit = hitTest(x, y);
         state.selected = hit; state.multiSel.clear(); if (hit) state.multiSel.add(hit);
@@ -3211,6 +3380,8 @@ export function initLevelEditor(prefix: string): void {
       pushUndo();
       const p = lv.enemySpawns[idx].split(',');
       lv.enemySpawns[idx] = `${Number(p[0])},${Number(p[1])},${enemyId}`;
+      const zc1 = lv.spawnCfg?.[`${Number(p[0])},${Number(p[1])}`];
+      if (zc1?.waves[0]) zc1.waves[0].charId = enemyId;
       save(); draw(); setStatus('Ворога призначено зоні');
     } else if (neutralId) {
       const idx = lv.neutralSpawns.findIndex((z) => { const p = z.split(','); const acx = Number(p[0]), acy = Number(p[1]); return fcx >= acx && fcx <= acx + 2 && fcy >= acy && fcy <= acy + 2; });
@@ -3340,13 +3511,32 @@ export function initLevelEditor(prefix: string): void {
         updatePathBtns();
       });
     }
+    // Arrive button: LMB = act current mode, RMB = toggle add/erase
+    const arriveBtn = $<HTMLButtonElement>('arriveBtn');
+    let _arriveMode: 'add' | 'erase' = 'add';
+    if (arriveBtn) {
+      arriveBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        _arriveMode = _arriveMode === 'add' ? 'erase' : 'add';
+        arriveBtn.textContent = _arriveMode === 'add' ? 'Зона прибуття' : 'Прибрати прибуття';
+        arriveBtn.classList.remove('on');
+        if (state.pathTool === 'arrive' || state.pathTool === 'arriveErase') { state.pathTool = null; updatePathBtns(); draw(); }
+      });
+      arriveBtn.addEventListener('click', () => {
+        const tool: 'arrive' | 'arriveErase' = _arriveMode === 'add' ? 'arrive' : 'arriveErase';
+        state.pathTool = state.pathTool === tool ? null : tool;
+        updatePathBtns();
+        setStatus(state.pathTool ? 'Зона прибуття: гравець у зоні без ворогів у кадрі — рівень пройдено' : '');
+        draw();
+      });
+    }
     refreshSpawnUI();
   }
 
   function buildLevelDoc(): unknown {
     const lv = level();
     const used = state.assets.filter((a) => lv.placed.some((p) => p.asset === a.id));
-    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
+    const doc: Record<string, unknown> = { name: lv.name, placed: lv.placed, collider: lv.collider, enemySpawns: lv.enemySpawns, spawnCfg: lv.spawnCfg ?? {}, arriveZones: lv.arriveZones ?? [], neutralSpawns: lv.neutralSpawns, grid: state.grid, spawn: lv.spawns[0] ?? lv.spawn, spawns: lv.spawns, start: lv.start, end: lv.end, parallax: ensureParallax(lv), assets: used };
     if (lv.atmosphere) doc.atmosphere = lv.atmosphere;
     if (lv.camZones?.length) doc.camZones = lv.camZones;
     return doc;
