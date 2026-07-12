@@ -141,6 +141,7 @@ const CITY_CHAINS = {
   epicentr: epicentrPrice, // завгосп: SSR пошукової видачі
   dobrogo: adduaPrice,     // аптека «Доброго дня»: Magento SSR (add.ua)
   bonus: bonusPrice,       // завгосп «Бонус»: Prom-магазин bonus-market.in.ua
+  podorozhnyk: podorozhnykPrice, // аптека «Подорожник»: JSON autocomplete-API
 };
 async function handlePrices(req, ctx) {
   const body = await req.json().catch(() => ({}));
@@ -282,6 +283,20 @@ function pickRelevant(cands, q) {
   return [];
 }
 const unent = s => s.replace(/&amp;/g, '&').replace(/&#0?39;|&#x27;|&quot;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+// ── ПОДОРОЖНИК (аптека): чистий JSON autocomplete-API ─────────────────────
+// catalogue.l.podorozhnyk.com/api/v2/projections/autocomplete?query= →
+// searchItems[]{name, price:{current,old}, status:{type:'available'}}. Українські назви.
+async function podorozhnykPrice(branch, q) {
+  const r = await fetch(`https://catalogue.l.podorozhnyk.com/api/v2/projections/autocomplete?query=${encodeURIComponent(q)}`,
+    { headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Language': 'uk', Origin: 'https://podorozhnyk.ua', Referer: 'https://podorozhnyk.ua/' } });
+  if (!r.ok) return null;
+  const d = await r.json();
+  const cands = (d.searchItems || [])
+    .filter(i => !i.status || i.status.type === 'available')
+    .map(i => ({ title: i.name, price: num(i.price && i.price.current), oldPrice: num(i.price && i.price.old) }));
+  return represent(pickRelevant(cands, q));
+}
 
 // ── АВРОРА (CS-Cart, avrora.ua): ajax-пошук віддає {text:'<html>'} ────────
 // Назва — в title/alt картинки картки; ціна — у span.ty-price-num (ціле й
