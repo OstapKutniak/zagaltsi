@@ -427,4 +427,105 @@ if (round === '4') {
   await j4('EVA api host', `${W}${encodeURIComponent('https://api.eva.ua/')}`);
 }
 
+// ── РАУНД 5 ────────────────────────────────────────────────────────────────
+if (round === '5') {
+  const j5 = async (name, url, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${r.err || ''}`);
+    if (r.text) console.log(`  body: ${snip(r.text, 1200)}`);
+    return r;
+  };
+  const W = 'https://shopping-price.priko1isf.workers.dev/probe?';
+
+  // 1) ПРОСТОР: multisearch id=12667 наживо + модуль автокомпліта
+  await j5('multisearch id=12667', `https://api.multisearch.io/?id=12667&query=${QG}&lang=uk&uid=aaa1`);
+  const pr = await get('https://prostor.ua/');
+  const base = pr.text && (pr.text.match(/https:\/\/prostor\.ua\/static\/version\d+\/frontend\/[^/]+\/[^/]+\/uk_UA/) || [])[0];
+  console.log(`\n=== Простор static base: ${base || '?'}`);
+  if (base) {
+    const b = await get(`${base}/Prostor_Multisearch/js/view/autocomplete.js`);
+    console.log(`  autocomplete.js → ${b.status}`);
+    printMatches('  ms-url', b.text || '', /https?:\/\/[a-z0-9.-]*multisearch[a-z0-9./?=&${}_'"+-]{0,100}/gi, 8);
+    const a = around(b.text || '', 'multisearch', 700);
+    if (a) console.log(`  ctx: ${a.slice(0, 800)}`);
+  }
+
+  // 2) АВРОРА: повна картка з ajax-видачі (назва+ціна)
+  const avr = await get(`https://avrora.ua/index.php?dispatch=products.search&search_performed=Y&q=${QH}&is_ajax=1`, { 'X-Requested-With': 'XMLHttpRequest' });
+  if (avr.text) {
+    try {
+      const html = JSON.parse(avr.text).text || '';
+      const i = html.indexOf('ty-grid-list__item');
+      const card = html.slice(Math.max(0, i - 100), i + 2600).replace(/\s+/g, ' ');
+      console.log(`\n=== Аврора картка цілком:\n  ${card.slice(0, 2400)}`);
+    } catch (e) { console.log('аврора parse fail', e.message); }
+  }
+
+  // 3) ЕПІЦЕНТР: JSON-LD або назва в широкому контексті перед ціною
+  const ep = await get(`https://epicentrk.ua/search/?q=${QH}`);
+  if (ep.text) {
+    const ld = [...ep.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(m => m[1]);
+    console.log(`\n=== Епіцентр JSON-LD блоків: ${ld.length}`);
+    ld.forEach(x => console.log(`  ld: ${snip(x, 700)}`));
+    const i = ep.text.indexOf('data-product-price-main');
+    if (i > 0) {
+      const pre = ep.text.slice(Math.max(0, i - 4500), i);
+      const titles = [...pre.matchAll(/title="([^"]{6,90})"/g)].map(m => m[1]).slice(-4);
+      console.log(`  titles перед ціною: ${titles.join(' || ')}`);
+    }
+  }
+
+  // 4) ПОДОРОЖНИК: усі скрипти сторінки, шукаємо хост пошуку
+  const pd = await get(`https://podorozhnyk.ua/search?q=${Q}`);
+  if (pd.text) {
+    const srcs = [...new Set([...pd.text.matchAll(/src="([^"]*_next\/static[^"]+\.js)"/g)].map(m => m[1]))];
+    console.log(`\n=== Подорожник скриптів усього: ${srcs.length}`);
+    for (const s of srcs) {
+      const u = s.startsWith('http') ? s : `https://podorozhnyk.ua${s}`;
+      const b = await get(u);
+      if ((b.text || '').includes('search.l') || (b.text || '').includes('getSearchServiceHost')) {
+        console.log(`  ЧАНК: ${u}`);
+        const a = around(b.text, 'search.l', 800) || around(b.text, 'getSearchServiceHost', 800);
+        console.log(`  ctx: ${a.slice(0, 900)}`);
+        printMatches('  path', b.text, /["'`][a-z0-9/_.-]*search[a-z0-9/_.?=&{}$-]*["'`]/gi, 12);
+        break;
+      }
+    }
+  }
+
+  // 5) АНЦ: всі hosts зі сторінки + entry-чанк
+  const anc = await get(`https://anc.ua/search?q=${Q}`);
+  if (anc.text) {
+    printMatches('АНЦ host', anc.text, /https?:\/\/[a-z0-9.-]+\.[a-z]{2,10}/gi, 25);
+    const entry = [...anc.text.matchAll(/src="(\/_nuxt\/[^"]+\.js)"/g)].map(m => m[1]);
+    console.log(`  nuxt-чанків: ${entry.length}`);
+    for (const s of entry.slice(0, 6)) {
+      const b = await get(`https://anc.ua${s}`);
+      const hit = (b.text || '').match(/["']\/api\/[a-z0-9./_-]{2,60}["']|https?:\/\/[a-z0-9.-]*anc[a-z0-9.-]*\/[a-z0-9./_-]{1,50}/gi);
+      if (hit && hit.length) { console.log(`  чанк ${s}: ${[...new Set(hit)].slice(0, 10).join(' | ')}`); }
+    }
+  }
+
+  // 6) WATSONS: правильні параметри results json
+  await j5('Watsons q relevance', `https://www.watsons.ua/search/results?q=${QG}%3Arelevance&page=0&format=json`);
+  await j5('Watsons q простий', `https://www.watsons.ua/search/results?q=${QG}&format=json`);
+
+  // 7) БЖ: маркери у видачі
+  const bzr = await get(`https://apteka.net.ua/search/result?search=${Q}`);
+  if (bzr.text) {
+    console.log(`\n=== БЖ маркери: ₴=${(bzr.text.match(/₴/g) || []).length} uah=${(bzr.text.match(/uah/gi) || []).length} price=${(bzr.text.match(/price/gi) || []).length} views\\/ajax=${(bzr.text.match(/views\/ajax/g) || []).length}`);
+    const a = around(bzr.text, 'product-teaser', 700) || around(bzr.text, 'card-product', 700) || around(bzr.text, '₴', 700);
+    if (a) console.log(`  ctx: ${a.slice(0, 800)}`);
+    printMatches('  drupal-view', bzr.text, /view[-_][a-z-]{3,30}/gi, 10);
+  }
+
+  // 8) ADD.UA: SSR-ціни через find-контексти
+  await j5('add.ua price-amount', `${W}find=data-price-amount&span=700&url=${encodeURIComponent('https://www.add.ua/catalogsearch/result/?q=' + Q)}`);
+  await j5('add.ua item-link', `${W}find=product-item-link&span=500&url=${encodeURIComponent('https://www.add.ua/catalogsearch/result/?q=' + Q)}`);
+
+  // 9) EVA: пара здогадок по api-хосту
+  await j5('EVA api v2', `${W}url=${encodeURIComponent('https://api.eva.ua/api/v2/')}`);
+  await j5('EVA api search', `${W}url=${encodeURIComponent('https://api.eva.ua/api/v2/products/search?q=' + QG)}`);
+}
+
 console.log('\nPROBE DONE round=' + round);

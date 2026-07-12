@@ -66,6 +66,16 @@ async function handleProbe(url) {
   if (!PROBE_HOSTS.has(tu.hostname)) return json({ error: 'host not allowed' }, 403);
   const r = await fetch(tu.href, { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' } });
   const text = await r.text();
+  // find=маркер → замість початку сторінки віддати контексти навколо збігів
+  const find = url.searchParams.get('find');
+  if (find) {
+    const span = Math.min(+(url.searchParams.get('span') || 600), 1500);
+    const ctxs = [];
+    let i = -1;
+    while (ctxs.length < 5 && (i = text.indexOf(find, i + 1)) >= 0)
+      ctxs.push(text.slice(Math.max(0, i - span / 3), i + span).replace(/\s+/g, ' '));
+    return json({ status: r.status, ct: r.headers.get('content-type') || '', matches: ctxs.length, ctxs });
+  }
   return json({ status: r.status, ct: r.headers.get('content-type') || '', body: text.slice(0, 5000) });
 }
 
