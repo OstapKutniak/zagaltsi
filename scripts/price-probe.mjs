@@ -526,6 +526,29 @@ if (round === '5') {
   // 9) EVA: пара здогадок по api-хосту
   await j5('EVA api v2', `${W}url=${encodeURIComponent('https://api.eva.ua/api/v2/')}`);
   await j5('EVA api search', `${W}url=${encodeURIComponent('https://api.eva.ua/api/v2/products/search?q=' + QG)}`);
+
+  // 10) БОНУС: bonus-market.in.ua (схоже на Prom-платформу, SSR)
+  const bn = await get('https://bonus-market.in.ua/');
+  console.log(`\n=== Бонус home → ${bn.status} ${bn.err || ''}`);
+  if (bn.text) {
+    const { hints, apis } = htmlHints(bn.text);
+    console.log(`  hints: ${hints.join(', ') || '-'}`);
+    apis.forEach(a => console.log(`  api-in-html: ${a}`));
+    printMatches('  form', bn.text, /<form[^>]{0,180}/gi, 4);
+  }
+  for (const su of [
+    `https://bonus-market.in.ua/product_list?search_term=${QH}`,
+    `https://bonus-market.in.ua/search?search_term=${QH}`,
+  ]) {
+    const r = await get(su);
+    console.log(`Бонус SEARCH ${r.status} ${su} ${r.err || ''}`);
+    if (r.text) {
+      const cnt = (r.text.match(/грн/g) || []).length;
+      console.log(`  "грн": ${cnt}`);
+      const a = around(r.text, 'data-qaid="product_block"', 800) || around(r.text, 'грн', 800);
+      if (a) console.log(`  card-ctx: ${a.slice(0, 900)}`);
+    }
+  }
 }
 
 console.log('\nPROBE DONE round=' + round);
