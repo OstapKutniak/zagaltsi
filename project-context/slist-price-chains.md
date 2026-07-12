@@ -46,6 +46,28 @@
 Інструкція для HAR: відкрити сайт → F12 → Network → зробити пошук товару →
 ПКМ у списку запитів → «Save all as HAR with content» → кинути файл у чат.
 
+## Як продовжити з нової сесії
+
+1. **Прочитай цей файл і воркер** `workers/shopping-price/src/index.js` —
+   там 4 робочі скрейпери (avroraPrice/epicentrPrice/bonusPrice/adduaPrice),
+   хелпери `pickRelevant` (каскад релевантності) і `represent` (медіана).
+2. **Зонд**: додай у `scripts/price-probe.mjs` новий блок `if (round === 'N')`,
+   пушни в main, запусти workflow «Price API probe» через GitHub API
+   (`actions_run_trigger`, workflow_id `price-probe.yml`, inputs `{round:'N'}`),
+   лог читай через `get_job_logs`. Воркер автодеплоїться на push у
+   `workers/shopping-price/**` (~40 с).
+3. **Отримав HAR від Остапа** → знайди в ньому запит пошуку (фільтруй по
+   слову, яке він шукав): URL, метод, заголовки, тіло, форма відповіді.
+   Реалізуй `<chain>Price(branch, q)` у воркері за зразком наявних:
+   кандидати {title, price, oldPrice} → `represent(pickRelevant(cands, q))`,
+   зареєструй у `CITY_CHAINS` під ключем ІЗ ДОДАТКА (STORE_SETS в
+   public/shopping/app.js: podorozhnyk/anc/bzh/eva/watsons/prostor).
+   Верифікуй раундом зонда: POST на воркер `/prices` з 2-3 запитами.
+4. **Додаток міняти не треба** — ключі збігаються, branch дефолтиться.
+   Якщо мережа так і лишиться без цін — можна прибрати її зі STORE_SETS.
+5. Коли все добито: прибрати `/probe` з воркера і (за бажанням)
+   price-probe.yml + scripts/price-probe.mjs.
+
 ## Тупики (не повторювати)
 
 - tabletki.ua як агрегатор: сайт за жорстким антиботом (челендж навіть з CF);
