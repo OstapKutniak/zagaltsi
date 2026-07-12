@@ -136,7 +136,8 @@ async function handleSuggest(url) {
 // ── ЦІНИ ПО СПИСКУ ТОВАРІВ ДЛЯ ОДНОГО МАГАЗИНУ ──────────────────────────
 // Мережі без вибору філії (ціни онлайн єдині по місту) — branch не потрібен
 const CITY_CHAINS = {
-  avrora: avroraPrice,     // завгосп: CS-Cart, ajax-пошук
+  aurora: avroraPrice,     // завгосп «Аврора»: CS-Cart, ajax-пошук (ключ як у додатку)
+  avrora: avroraPrice,     // аліас про всяк випадок
   epicentr: epicentrPrice, // завгосп: SSR пошукової видачі
   dobrogo: adduaPrice,     // аптека «Доброго дня»: Magento SSR (add.ua)
 };
@@ -248,7 +249,13 @@ async function foraPrice(branch, q) {
 }
 
 const num = v => (v == null || v === '' || isNaN(+v)) ? null : +v;
-const wroot = q => q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5); // корінь першого слова для фільтра релевантності
+// Корінь першого слова для фільтра релевантності. slice(0,5) зрізав українські
+// закінчення («губки» не матчило «Губка») — тому коротким словам лишаємо все,
+// а від 5 літер відкидаємо закінчення (2 літери), але не коротше 4.
+const wroot = q => {
+  const w = q.toLowerCase().trim().split(/\s+/)[0];
+  return w.length <= 4 ? w : w.slice(0, Math.max(4, Math.min(6, w.length - 2)));
+};
 const unent = s => s.replace(/&amp;/g, '&').replace(/&#0?39;|&#x27;|&quot;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
 
 // ── АВРОРА (CS-Cart, avrora.ua): ajax-пошук віддає {text:'<html>'} ────────

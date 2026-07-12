@@ -637,4 +637,72 @@ if (round === '6') {
   await j6('EVA api v2 POST', `https://shopping-price.priko1isf.workers.dev/probe?url=${encodeURIComponent('https://api.eva.ua/api/v2/')}&body=${encodeURIComponent('{}')}`);
 }
 
+// ── РАУНД 7: ре-верифікація + Простор/Бонус/АНЦ/Watsons/БЖ ─────────────────
+if (round === '7') {
+  const WORKER = 'https://shopping-price.priko1isf.workers.dev';
+  const post7 = async (name, url, body, extra = {}) => {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json', ...extra }, body: JSON.stringify(body), signal: ctl.signal });
+      console.log(`\n=== ${name} → ${r.status}`);
+      console.log(`  body: ${snip(await r.text(), 900)}`);
+    } catch (e) { console.log(`\n=== ${name} → ERR ${e.message}`); } finally { clearTimeout(t); }
+  };
+
+  // 1) ре-верифікація з м'яким коренем (губки → Губка) і ключем aurora
+  await post7('worker aurora', `${WORKER}/prices`, { chain: 'aurora', queries: ['губки', 'серветки вологі'] });
+  await post7('worker epicentr', `${WORKER}/prices`, { chain: 'epicentr', queries: ['губки', 'лампочка'] });
+
+  // 2) ПРОСТОР: дістати бандл автокомпліта і з нього — endpoint multisearch
+  const pr = await get('https://prostor.ua/');
+  if (pr.text) {
+    const base = (pr.text.match(/\/static\/version\d+\/frontend\/[^"']+?\/uk_UA/) || [])[0];
+    console.log(`\n=== Простор base: ${base || '?'}`);
+    if (base) {
+      for (const p of ['/Prostor_Multisearch/js/view/autocomplete.js', '/Prostor_Multisearch/js/view/autocomplete.min.js']) {
+        const b = await get(`https://prostor.ua${base}${p}`);
+        console.log(`  ${p} → ${b.status}`);
+        if (b.status === 200 && b.text) {
+          printMatches('  url', b.text, /https?:\/\/[a-z0-9.-]*multisearch[^"'`\s]{0,100}/gi, 8);
+          const a = around(b.text, 'api', 600); if (a) console.log(`  ctx: ${a.slice(0, 700)}`);
+          break;
+        }
+      }
+    }
+  }
+
+  // 3) БОНУС: де саме ціна в картці (контексти навколо ₴)
+  const bn = await get(`https://bonus-market.in.ua/site_search?search_term=${QH}`);
+  if (bn.text) {
+    console.log(`\n=== Бонус ₴-контексти:`);
+    let i = -1, n = 0;
+    while (n < 3 && (i = bn.text.indexOf('₴', i + 1)) >= 0) {
+      console.log(`  [${n}]: ${squash(bn.text.slice(Math.max(0, i - 450), i + 60)).slice(0, 520)}`);
+      n++;
+    }
+  }
+
+  // 4) АНЦ: батарея same-origin api-шляхів
+  for (const p of [`/api/search?q=${Q}`, `/api/v1/products/search?q=${Q}`, `/api/catalog/search?q=${Q}`, `/api/products?search=${Q}`, `/api/v2/search?q=${Q}`])
+    await (async () => { const r = await get(`https://anc.ua${p}`); console.log(`АНЦ ${p} → ${r.status} ${r.ct.split(';')[0]} ${r.ct.includes('json') ? snip(r.text, 250) : ''}`); })();
+
+  // 5) WATSONS: конфіг сервісів у пошуковій сторінці
+  const wt = await get(`https://www.watsons.ua/search?text=${QG}`);
+  if (wt.text) {
+    console.log(`\n=== Watsons WUA-конфіг:`);
+    for (const n of ['services', 'endpoint', 'searchUrl', 'productSearch', 'ajaxUrl']) {
+      const a = around(wt.text, n, 500);
+      if (a) console.log(`  around(${n}): ${a.slice(0, 550)}`);
+    }
+    printMatches('  urlpath', wt.text, /["']\/[a-z][a-z0-9/_-]{2,40}\.json["']|url\s*:\s*["'][^"']{3,60}["']/gi, 15);
+  }
+
+  // 6) БЖ: продукти під'їжджають окремим запитом — глянемо, чи є js-api в сторінці
+  const bz = await get(`https://apteka.net.ua/search/result?search=${Q}`);
+  if (bz.text) {
+    printMatches('БЖ data-url', bz.text, /data-[a-z-]*url="[^"]{3,80}"/gi, 12);
+    printMatches('БЖ fetch-path', bz.text, /["']\/[a-z0-9/_-]*(?:ajax|api|json|search)[a-z0-9/_-]{0,40}["']/gi, 12);
+  }
+}
+
 console.log('\nPROBE DONE round=' + round);
