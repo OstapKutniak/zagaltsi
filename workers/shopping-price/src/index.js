@@ -43,12 +43,31 @@ export default {
       if (url.pathname === '/stores') return await handleStores(url);
       if (url.pathname === '/suggest') return await handleSuggest(url);
       if (url.pathname === '/prices') return await handlePrices(req, ctx);
+      if (url.pathname === '/probe') return await handleProbe(url);
       return json({ ok: true, service: 'shopping-price', chains: ['silpo', 'fora', ...ZAKAZ_CHAINS] });
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }
   },
 };
+
+// ── ТИМЧАСОВЕ (розвідка API мереж): /probe?url=… ─────────────────────────
+// Деякі сайти (EVA, add.ua, tabletki.ua) блокують IP раннерів GitHub —
+// фетчимо їх з IP Cloudflare. Хости лише з allowlist. Прибрати після розвідки.
+const PROBE_HOSTS = new Set([
+  'eva.ua', 'www.eva.ua', 'api.eva.ua',
+  'add.ua', 'www.add.ua',
+  'tabletki.ua', 'www.tabletki.ua', 'api.tabletki.ua',
+]);
+async function handleProbe(url) {
+  const target = url.searchParams.get('url') || '';
+  let tu;
+  try { tu = new URL(target); } catch { return json({ error: 'bad url' }, 400); }
+  if (!PROBE_HOSTS.has(tu.hostname)) return json({ error: 'host not allowed' }, 403);
+  const r = await fetch(tu.href, { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' } });
+  const text = await r.text();
+  return json({ status: r.status, ct: r.headers.get('content-type') || '', body: text.slice(0, 5000) });
+}
 
 // ── СПИСОК МАГАЗИНІВ (для вибору «свого» магазину один раз) ──────────────
 async function handleStores(url) {

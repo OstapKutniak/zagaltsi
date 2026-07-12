@@ -243,4 +243,92 @@ if (round === '2') {
   await dump('add.ua desktop-UA', 'https://add.ua/', [], { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', Accept: 'text/html,application/xhtml+xml' });
 }
 
+// ── РАУНД 3: multisearch наживо, SSR-скрейпи, Next-дані, воркер-проксі ──────
+if (round === '3') {
+  const j = async (name, url, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${r.err || ''}`);
+    if (r.text) console.log(`  body: ${snip(r.text, 1200)}`);
+    return r;
+  };
+
+  // 1) MULTISEARCH наживо: Простор (id відомий) і Епіцентр (id=10468)
+  await j('multisearch Простор', `https://api.multisearch.io/?id=750361578745447&query=${QG}&lang=uk&uid=probe1`);
+  await j('multisearch Епіцентр', `https://api.multisearch.io/?id=10468&query=${QH}&lang=uk&uid=probe1`);
+
+  // 2) АВРОРА: шукаємо ms-id ширше (пошукова сторінка + бандли)
+  const av = await get(`https://avrora.ua/index.php?route=product/search&search=${QH}`);
+  console.log(`\n=== Аврора search SSR → ${av.status} size=${(av.text || '').length}`);
+  if (av.text) {
+    const p = around(av.text, 'product-thumb', 600) || around(av.text, 'price', 600);
+    if (p) console.log(`  card-ctx: ${p.slice(0, 700)}`);
+    printMatches('ms-widget', av.text, /multisearch[^"'\s]{0,120}/gi, 8);
+    printMatches('ms-num', av.text, /id["']?\s*[:=]\s*["']?\d{6,}/gi, 8);
+    // скрипти — пошук id у бандлі
+    const srcs = [...av.text.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]).filter(s => /multi|search|main|theme/i.test(s)).slice(0, 4);
+    for (const s of srcs) {
+      const u = s.startsWith('http') ? s : `https://avrora.ua${s.startsWith('/') ? '' : '/'}${s}`;
+      const b = await get(u);
+      const hit = (b.text || '').match(/multisearch[^"'\s]{0,120}|[?&]id=\d{6,}/gi);
+      console.log(`  bundle ${u} → ${b.status} ms-hits: ${(hit || []).slice(0, 5).join(' | ')}`);
+    }
+  }
+
+  // 3) ЕПІЦЕНТР: приклад картки з SSR (назва+ціна поруч) для регекспа
+  const ep = await get(`https://epicentrk.ua/search/?q=${QH}`);
+  console.log(`\n=== Епіцентр SSR карти → ${ep.status}`);
+  if (ep.text) {
+    const names = [...ep.text.matchAll(/itemprop="name"[^>]*>([^<]{5,90})</g)].map(m => squash(m[1])).slice(0, 6);
+    names.forEach(n => console.log(`  name: ${n}`));
+    const a = around(ep.text, 'itemprop="name"', 900);
+    if (a) console.log(`  card-ctx: ${a.slice(0, 1000)}`);
+  }
+
+  // 4) ПОДОРОЖНИК: живий buildId → Next-дані; батарея шляхів search-сервісу
+  const pd = await get(`https://podorozhnyk.ua/search?q=${Q}`);
+  const bid = pd.text && (pd.text.match(/"buildId":"([^"]+)"/) || [])[1];
+  console.log(`\n=== Подорожник buildId=${bid || '?'}`);
+  if (bid) await j('Подорожник next-data', `https://podorozhnyk.ua/_next/data/${bid}/Search.json?q=${Q}`);
+  for (const p of [`/api/v1/search?query=${Q}`, `/v2/search?query=${Q}`, `/search/v1?query=${Q}`, `/products/search?query=${Q}`, `/?query=${Q}`])
+    await j(`Подорожник search.l ${p.split('?')[0]}`, `https://search.l.podorozhnyk.com${p}`);
+
+  // 5) АНЦ: nuxt-payload і бандли
+  await j('АНЦ payload', `https://anc.ua/search/_payload.json?q=${Q}`);
+  const anc = await get(`https://anc.ua/search?q=${Q}`);
+  if (anc.text) {
+    const a = around(anc.text, '__NUXT__', 500); if (a) console.log(`  nuxt-ctx: ${a.slice(0, 600)}`);
+    printMatches('api-host', anc.text, /https?:\/\/[a-z0-9.-]+\.(?:anc|storage)[a-z0-9.-]*\/[^"'\s]{0,50}/gi, 8);
+    const srcs = [...anc.text.matchAll(/<script[^>]+src="(\/_nuxt\/[^"]+\.js)"/g)].map(m => m[1]).slice(0, 2);
+    for (const s of srcs) {
+      const b = await get(`https://anc.ua${s}`);
+      printMatches(`bundle-api ${s.slice(0, 30)}`, b.text || '', /https?:\/\/[a-z0-9.-]*(?:api|backend|catalog)[a-z0-9.-]*\.[a-z]{2,6}\/[a-z0-9./_-]{0,40}/gi, 8);
+      printMatches(`bundle-path ${s.slice(0, 30)}`, b.text || '', /["']\/api\/[a-z0-9./_-]{3,50}["']/gi, 8);
+    }
+  }
+
+  // 6) WATSONS: чи SSR видача; ajax-кандидати
+  const wt = await get(`https://www.watsons.ua/search?text=${QG}`);
+  console.log(`\n=== Watsons SSR? → ${wt.status}`);
+  if (wt.text) {
+    const cnt = (wt.text.match(/₴/g) || []).length;
+    console.log(`  ₴ у HTML: ${cnt}`);
+    const a = around(wt.text, 'data-price', 500) || around(wt.text, 'product__', 500) || around(wt.text, 'productName', 500);
+    if (a) console.log(`  card-ctx: ${a.slice(0, 700)}`);
+    printMatches('ajax', wt.text, /["'][^"']*(?:ajax|json|api)[^"']{0,60}["']/gi, 12);
+  }
+
+  // 7) БЖ: форма /search/result + /search/list
+  const bzh = await get('https://apteka.net.ua/');
+  const inputName = bzh.text && (bzh.text.match(/search__form[\s\S]{0,400}?name="([^"]+)"/) || [])[1];
+  console.log(`\n=== БЖ input name=${inputName || '?'}`);
+  await j('БЖ result', `https://apteka.net.ua/search/result?${inputName || 'q'}=${Q}`);
+  await j('БЖ list', `https://apteka.net.ua/search/list?${inputName || 'q'}=${Q}`);
+
+  // 8) EVA / add.ua / tabletki через Cloudflare-воркер
+  const W = 'https://shopping-price.priko1isf.workers.dev/probe?url=';
+  await j('EVA via CF', `${W}${encodeURIComponent('https://eva.ua/')}`);
+  await j('add.ua via CF', `${W}${encodeURIComponent('https://add.ua/')}`);
+  await j('tabletki via CF', `${W}${encodeURIComponent('https://tabletki.ua/uk/search/' + Q + '/')}`);
+}
+
 console.log('\nPROBE DONE round=' + round);
