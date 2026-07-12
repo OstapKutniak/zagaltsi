@@ -551,4 +551,90 @@ if (round === '5') {
   }
 }
 
+// ── РАУНД 6: верифікація готових мереж через воркер + добивання решти ──────
+if (round === '6') {
+  const WORKER = 'https://shopping-price.priko1isf.workers.dev';
+  const post = async (name, url, body, extra = {}) => {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json', ...extra }, body: JSON.stringify(body), signal: ctl.signal });
+      const text = await r.text();
+      console.log(`\n=== ${name} → ${r.status}`);
+      console.log(`  body: ${snip(text, 1000)}`);
+      return { status: r.status, text };
+    } catch (e) { console.log(`\n=== ${name} → ERR ${e.message}`); return {}; } finally { clearTimeout(t); }
+  };
+  const j6 = async (name, url, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${r.err || ''}`);
+    if (r.text) console.log(`  body: ${snip(r.text, 1000)}`);
+    return r;
+  };
+
+  // 1) ВЕРИФІКАЦІЯ нових мереж через воркер
+  await post('worker avrora', `${WORKER}/prices`, { chain: 'avrora', queries: ['губки', 'пакети для сміття', 'лампочка'] });
+  await post('worker epicentr', `${WORKER}/prices`, { chain: 'epicentr', queries: ['губки', 'лампочка', 'батарейки'] });
+  await post('worker dobrogo', `${WORKER}/prices`, { chain: 'dobrogo', queries: ['парацетамол', 'вітаміни', 'пластир'] });
+
+  // 2) ПРОСТОР: Magento — та сама SSR-видача, що в add.ua?
+  const ps = await get(`https://prostor.ua/catalogsearch/result/?q=${QG}`);
+  console.log(`\n=== Простор catalogsearch → ${ps.status} size=${(ps.text || '').length}`);
+  if (ps.text) {
+    console.log(`  price-amount: ${(ps.text.match(/data-price-amount/g) || []).length} | item-link: ${(ps.text.match(/product-item-link/g) || []).length}`);
+    const a = around(ps.text, 'product-item-link', 500);
+    if (a) console.log(`  ctx: ${a.slice(0, 600)}`);
+    const b = around(ps.text, 'data-price-amount', 400);
+    if (b) console.log(`  price-ctx: ${b.slice(0, 500)}`);
+  }
+
+  // 3) БОНУС: site_search і ціни Prom
+  const bn = await get(`https://bonus-market.in.ua/site_search?search_term=${QH}`);
+  console.log(`\n=== Бонус site_search → ${bn.status} size=${(bn.text || '').length}`);
+  if (bn.text) {
+    console.log(`  ₴: ${(bn.text.match(/₴/g) || []).length} | product_price: ${(bn.text.match(/product_price/g) || []).length} | product_block: ${(bn.text.match(/data-qaid="product_block"/g) || []).length}`);
+    const a = around(bn.text, 'product_price', 600);
+    if (a) console.log(`  price-ctx: ${a.slice(0, 700)}`);
+    const nm = around(bn.text, 'product_name', 500) || around(bn.text, 'product_link', 500);
+    if (nm) console.log(`  name-ctx: ${nm.slice(0, 600)}`);
+  }
+
+  // 4) АНЦ: чанки через modulepreload href
+  const anc = await get(`https://anc.ua/search?q=${Q}`);
+  if (anc.text) {
+    const links = [...new Set([...anc.text.matchAll(/href="(\/_nuxt\/[^"]+\.js)"/g)].map(m => m[1]))];
+    console.log(`\n=== АНЦ modulepreload-чанків: ${links.length}`);
+    let found = 0;
+    for (const s of links.slice(0, 20)) {
+      const b = await get(`https://anc.ua${s}`);
+      const hit = [...new Set((b.text || '').match(/["'`]\/api\/[a-z0-9./_${}-]{2,60}["'`]|https?:\/\/[a-z0-9.-]*anc[a-z0-9.-]*\.[a-z]{2,6}[a-z0-9./_-]{0,50}/gi) || [])].filter(x => !x.includes('static.anc'));
+      if (hit.length) { console.log(`  ${s}: ${hit.slice(0, 12).join(' | ')}`); if (++found >= 4) break; }
+    }
+  }
+
+  // 5) WATSONS: mobileapi (стандарт A.S. Watson OCC)
+  await j6('Watsons mobileapi', `https://mobileapi.watsons.ua/api/v2/wtcua/products/search?query=${QG}&lang=uk&curr=UAH`);
+  await j6('Watsons api host', `https://api.watsons.ua/`);
+
+  // 6) БЖ: drupal-settings (де їхній ajax) + сторінка категорії SSR?
+  const bz = await get(`https://apteka.net.ua/search/result?search=${Q}`);
+  if (bz.text) {
+    const a = around(bz.text, 'drupal-settings-json', 1200);
+    console.log(`\n=== БЖ drupal-settings: ${a ? a.slice(0, 1200) : 'нема'}`);
+  }
+  const bzc = await get('https://apteka.net.ua/medykamenty/znebolyuyuchi-ta-protyzapalni');
+  console.log(`=== БЖ категорія SSR: ₴=${((bzc.text || '').match(/₴/g) || []).length} грн=${((bzc.text || '').match(/грн/g) || []).length} status=${bzc.status}`);
+
+  // 7) ПОДОРОЖНИК: POST-батарея на search.l
+  for (const [p, b] of [
+    ['/api/v1/search', { query: 'парацетамол' }],
+    ['/search', { query: 'парацетамол' }],
+    ['/api/search', { query: 'парацетамол', page: 1 }],
+    ['/v1/search', { text: 'парацетамол' }],
+  ]) await post(`Подорожник POST ${p}`, `https://search.l.podorozhnyk.com${p}`, b, { Origin: 'https://podorozhnyk.ua', Referer: 'https://podorozhnyk.ua/' });
+
+  // 8) EVA: POST graphql через CF-проксі
+  await j6('EVA graphql intro', `https://shopping-price.priko1isf.workers.dev/probe?url=${encodeURIComponent('https://api.eva.ua/graphql')}&body=${encodeURIComponent('{"query":"{__typename}"}')}`);
+  await j6('EVA api v2 POST', `https://shopping-price.priko1isf.workers.dev/probe?url=${encodeURIComponent('https://api.eva.ua/api/v2/')}&body=${encodeURIComponent('{}')}`);
+}
+
 console.log('\nPROBE DONE round=' + round);

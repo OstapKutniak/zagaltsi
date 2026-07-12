@@ -44,7 +44,7 @@ export default {
       if (url.pathname === '/suggest') return await handleSuggest(url);
       if (url.pathname === '/prices') return await handlePrices(req, ctx);
       if (url.pathname === '/probe') return await handleProbe(url);
-      return json({ ok: true, service: 'shopping-price', chains: ['silpo', 'fora', ...ZAKAZ_CHAINS] });
+      return json({ ok: true, service: 'shopping-price', chains: ['silpo', 'fora', ...ZAKAZ_CHAINS, ...Object.keys(CITY_CHAINS)] });
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }
@@ -64,7 +64,16 @@ async function handleProbe(url) {
   let tu;
   try { tu = new URL(target); } catch { return json({ error: 'bad url' }, 400); }
   if (!PROBE_HOSTS.has(tu.hostname)) return json({ error: 'host not allowed' }, 403);
-  const r = await fetch(tu.href, { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' } });
+  const postBody = url.searchParams.get('body');
+  const r = await fetch(tu.href, {
+    method: postBody != null ? 'POST' : 'GET',
+    headers: {
+      'User-Agent': UA, 'Accept-Language': 'uk',
+      Accept: 'text/html,application/json;q=0.9,*/*;q=0.8',
+      ...(postBody != null ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: postBody != null ? postBody : undefined,
+  });
   const text = await r.text();
   // find=маркер → замість початку сторінки віддати контексти навколо збігів
   const find = url.searchParams.get('find');
@@ -125,17 +134,23 @@ async function handleSuggest(url) {
 }
 
 // ── ЦІНИ ПО СПИСКУ ТОВАРІВ ДЛЯ ОДНОГО МАГАЗИНУ ──────────────────────────
+// Мережі без вибору філії (ціни онлайн єдині по місту) — branch не потрібен
+const CITY_CHAINS = {
+  avrora: avroraPrice,     // завгосп: CS-Cart, ajax-пошук
+  epicentr: epicentrPrice, // завгосп: SSR пошукової видачі
+  dobrogo: adduaPrice,     // аптека «Доброго дня»: Magento SSR (add.ua)
+};
 async function handlePrices(req, ctx) {
   const body = await req.json().catch(() => ({}));
   const chain = String(body.chain || '').toLowerCase();
-  const branch = String(body.branch || '');
   const queries = Array.isArray(body.queries) ? body.queries.slice(0, MAX_QUERIES) : [];
+  const branch = String(body.branch || (CITY_CHAINS[chain] ? 'city' : ''));
   if (!branch || !queries.length) return json({ error: 'need branch and queries' }, 400);
 
   const lookup = chain === 'silpo' ? silpoPrice
     : chain === 'fora' ? foraPrice
     : ZAKAZ_CHAINS.has(chain) ? zakazPrice
-    : null;
+    : CITY_CHAINS[chain] || null;
   if (!lookup) return json({ error: 'unknown chain' }, 400);
 
   const results = {};
@@ -233,3 +248,72 @@ async function foraPrice(branch, q) {
 }
 
 const num = v => (v == null || v === '' || isNaN(+v)) ? null : +v;
+const wroot = q => q.toLowerCase().trim().split(/\s+/)[0].slice(0, 5); // корінь першого слова для фільтра релевантності
+const unent = s => s.replace(/&amp;/g, '&').replace(/&#0?39;|&#x27;|&quot;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+// ── АВРОРА (CS-Cart, avrora.ua): ajax-пошук віддає {text:'<html>'} ────────
+// Назва — в title/alt картинки картки; ціна — у span.ty-price-num (ціле й
+// копійки можуть бути окремими span-ами, тому текст усіх ty-price-num
+// у картці склеюється).
+async function avroraPrice(branch, q) {
+  const u = `https://avrora.ua/index.php?dispatch=products.search&search_performed=Y&q=${encodeURIComponent(q)}&is_ajax=1`;
+  const r = await fetch(u, { headers: { 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'uk', 'X-Requested-With': 'XMLHttpRequest' } });
+  if (!r.ok) return null;
+  const d = await r.json().catch(() => null);
+  const html = (d && d.text) || '';
+  const w = wroot(q);
+  const cands = [];
+  for (const seg of html.split('ty-grid-list__item ').slice(1, 40)) {
+    const name = (seg.match(/title="([^"]{3,140})"/) || [])[1];
+    const priceTxt = [...seg.matchAll(/ty-price-num[^>]*>([\d\s.,]*)</g)].map(m => m[1]).join('').replace(/\s+/g, '').replace(',', '.');
+    const price = num(priceTxt);
+    if (name && price != null && unent(name).toLowerCase().includes(w))
+      cands.push({ title: unent(name), price, oldPrice: null });
+  }
+  return represent(cands);
+}
+
+// ── ЕПІЦЕНТР (epicentrk.ua): SSR пошукової сторінки ──────────────────────
+// Картка: …title="НАЗВА"… [data-product-price-old <data content="70.00">]
+// <div title="ціна: 49 ₴" data-product-price-main …><data value="49.00">
+// Сплітимо по маркеру ціни; назва = останній title перед ним, що не є
+// підписом «цена/ціна: …».
+async function epicentrPrice(branch, q) {
+  const r = await fetch(`https://epicentrk.ua/search/?q=${encodeURIComponent(q)}`,
+    { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html' } });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const w = wroot(q);
+  const cands = [];
+  const parts = html.split('data-product-price-main');
+  for (let i = 0; i < parts.length - 1 && cands.length < 40; i++) {
+    const pre = parts[i];
+    const titles = [...pre.matchAll(/title="([^"]{4,140})"/g)].map(m => m[1]).filter(t => !/^\s*(цена|ціна)/i.test(t));
+    const name = titles[titles.length - 1];
+    const price = num((parts[i + 1].match(/<data value="([\d.]+)"/) || [])[1]);
+    const old = num((pre.slice(-1600).match(/data-product-price-old[^>]*>\s*<data content="([\d.]+)"/) || [])[1]);
+    if (name && price != null && unent(name).toLowerCase().includes(w))
+      cands.push({ title: unent(name), price, oldPrice: old });
+  }
+  return represent(cands);
+}
+
+// ── ДОБРОГО ДНЯ (add.ua): Magento, SSR видачі ─────────────────────────────
+// Пари: <a class="product-item-link" href>НАЗВА</a> … data-price-amount="35.1"
+// (раннери GitHub сайт блокує, але з IP Cloudflare — 200.)
+async function adduaPrice(branch, q) {
+  const r = await fetch(`https://www.add.ua/catalogsearch/result/?q=${encodeURIComponent(q)}`,
+    { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html' } });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const w = wroot(q);
+  const cands = [];
+  const parts = html.split('product-item-link');
+  for (let i = 1; i < parts.length && cands.length < 40; i++) {
+    const name = (parts[i].match(/^[^>]*>([^<]{4,160})</) || [])[1];
+    const price = num((parts[i].match(/data-price-amount="([\d.]+)"/) || [])[1]);
+    if (name && price != null && unent(name).toLowerCase().includes(w))
+      cands.push({ title: unent(name), price, oldPrice: null });
+  }
+  return represent(cands);
+}
