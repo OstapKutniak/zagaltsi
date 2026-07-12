@@ -758,4 +758,28 @@ if (round === '9') {
   } catch (e) { console.log('worker bonus ERR', e.message); } finally { clearTimeout(t); }
 }
 
+// ── РАУНД 10: останні спроби Подорожник/АНЦ/БЖ ─────────────────────────────
+if (round === '10') {
+  const j10 = async (name, url, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${r.err || ''}`);
+    if (r.text && (r.ct.includes('json') || r.text.trim().startsWith('{') || r.text.trim().startsWith('['))) console.log(`  json: ${snip(r.text, 700)}`);
+    return r;
+  };
+  // Подорожник: same-origin next-api і catalogue-сервіс
+  await j10('Подорожник /api/search', `https://podorozhnyk.ua/api/search?q=${Q}`);
+  await j10('Подорожник /api/v1/search', `https://podorozhnyk.ua/api/v1/search?query=${Q}`);
+  await j10('Подорожник catalogue root', 'https://catalogue.l.podorozhnyk.com/');
+  await j10('Подорожник catalogue search', `https://catalogue.l.podorozhnyk.com/api/v1/products?search=${Q}`);
+  // АНЦ: content negotiation і мобільні хости
+  await j10('АНЦ search Accept-json', `https://anc.ua/search?q=${Q}`, { Accept: 'application/json' });
+  for (const h of ['mobile-api.anc.ua', 'api.anc.com.ua', 'gateway.anc.ua']) {
+    const r = await get(`https://${h}/`);
+    console.log(`АНЦ host ${h} → ${r.status} ${r.err || ''}`);
+  }
+  // БЖ: json-спроби
+  await j10('БЖ search Accept-json', `https://apteka.net.ua/search/result?search=${Q}`, { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' });
+  await j10('БЖ autocomplete', `https://apteka.net.ua/autocomplete/search?q=${Q}`);
+}
+
 console.log('\nPROBE DONE round=' + round);
