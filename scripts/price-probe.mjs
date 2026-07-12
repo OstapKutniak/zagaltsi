@@ -705,4 +705,32 @@ if (round === '7') {
   }
 }
 
+// ── РАУНД 8: tabletki.ua — мобільний API (одне джерело для всіх аптек) ─────
+if (round === '8') {
+  const W8 = 'https://shopping-price.priko1isf.workers.dev/probe?';
+  const j8 = async (name, url, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${r.err || ''}`);
+    if (r.text) console.log(`  body: ${snip(r.text, 800)}`);
+    return r;
+  };
+  // прямо з раннера
+  await j8('api.tabletki.ua root', 'https://api.tabletki.ua/');
+  await j8('api.tabletki.ua search v1', `https://api.tabletki.ua/api/v1/search?text=${Q}`);
+  await j8('api.tabletki.ua Search', `https://api.tabletki.ua/Search?text=${Q}`);
+  // через CF-воркер
+  for (const u of [
+    'https://api.tabletki.ua/',
+    `https://api.tabletki.ua/api/v1/search?text=${Q}`,
+    `https://api.tabletki.ua/api/search?query=${Q}`,
+  ]) await j8(`via CF: ${u.slice(24, 70)}`, `${W8}url=${encodeURIComponent(u)}`);
+  // мобільна версія сайту
+  await j8('m.tabletki.ua', `https://m.tabletki.ua/uk/search/${Q}/`);
+  // застосунок tabletki: типові хости
+  for (const h of ['app.tabletki.ua', 'mobile.tabletki.ua', 'api2.tabletki.ua']) {
+    const r = await get(`https://${h}/`);
+    console.log(`host ${h} → ${r.status} ${r.err || ''}`);
+  }
+}
+
 console.log('\nPROBE DONE round=' + round);
