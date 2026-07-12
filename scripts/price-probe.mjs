@@ -733,4 +733,29 @@ if (round === '8') {
   }
 }
 
+// ── РАУНД 9: документація api.tabletki.ua + верифікація Бонуса ─────────────
+if (round === '9') {
+  const WORKER = 'https://shopping-price.priko1isf.workers.dev';
+  // 1) повна вітальна сторінка API — там перелік сервісів і, ймовірно, лінки
+  for (const u of ['https://api.tabletki.ua/', 'https://api2.tabletki.ua/']) {
+    const r = await get(u);
+    console.log(`\n=== ${u} → ${r.status}`);
+    if (r.text) {
+      console.log(`  FULL: ${squash(r.text).slice(0, 3500)}`);
+      printMatches('  href', r.text, /href="[^"]{2,80}"/g, 20);
+    }
+  }
+  // 2) типові ASP.NET точки
+  for (const p of ['/Help', '/help', '/api', '/swagger', '/Reserve.asmx', '/Search.asmx', '/api/Search', '/odata']) {
+    const r = await get(`https://api.tabletki.ua${p}`);
+    console.log(`api.tabletki${p} → ${r.status} ${r.ct.split(';')[0]}${r.ct.includes('json') || r.ct.includes('xml') ? ' | ' + snip(r.text, 200) : ''}`);
+  }
+  // 3) верифікація Бонуса через воркер
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const r = await fetch(`${WORKER}/prices`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain: 'bonus', queries: ['губки', 'пакети для сміття', 'батарейки'] }), signal: ctl.signal });
+    console.log(`\n=== worker bonus → ${r.status}\n  body: ${snip(await r.text(), 900)}`);
+  } catch (e) { console.log('worker bonus ERR', e.message); } finally { clearTimeout(t); }
+}
+
 console.log('\nPROBE DONE round=' + round);

@@ -140,6 +140,7 @@ const CITY_CHAINS = {
   avrora: avroraPrice,     // аліас про всяк випадок
   epicentr: epicentrPrice, // завгосп: SSR пошукової видачі
   dobrogo: adduaPrice,     // аптека «Доброго дня»: Magento SSR (add.ua)
+  bonus: bonusPrice,       // завгосп «Бонус»: Prom-магазин bonus-market.in.ua
 };
 async function handlePrices(req, ctx) {
   const body = await req.json().catch(() => ({}));
@@ -249,13 +250,37 @@ async function foraPrice(branch, q) {
 }
 
 const num = v => (v == null || v === '' || isNaN(+v)) ? null : +v;
-// Корінь першого слова для фільтра релевантності. slice(0,5) зрізав українські
-// закінчення («губки» не матчило «Губка») — тому коротким словам лишаємо все,
-// а від 5 літер відкидаємо закінчення (2 літери), але не коротше 4.
-const wroot = q => {
+
+// ── БОНУС (bonus-market.in.ua, платформа Prom): SSR site_search ───────────
+// Картка data-qaid="product_block": назва в data-qaid="product_name",
+// ціна в data-qaid="price-field" (<span>119</span> ₴), стара — line-through.
+async function bonusPrice(branch, q) {
+  const r = await fetch(`https://bonus-market.in.ua/site_search?search_term=${encodeURIComponent(q)}`,
+    { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html' } });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const cands = [];
+  for (const seg of html.split('data-qaid="product_block"').slice(1, 40)) {
+    const name = (seg.match(/data-qaid="product_name"[^>]*>([^<]{3,180})</) || [])[1];
+    const priceTxt = ((seg.match(/data-qaid="price-field"[^>]*>\s*(?:<span[^>]*>)?([\d\s]+(?:[.,]\d+)?)/) || [])[1] || '').replace(/\s+/g, '').replace(',', '.');
+    const price = num(priceTxt);
+    const old = num(((seg.match(/line-through[^>]*>([\d\s]+(?:[.,]\d+)?)\s*₴/) || [])[1] || '').replace(/\s+/g, '').replace(',', '.'));
+    if (name && price != null) cands.push({ title: unent(name), price, oldPrice: old });
+  }
+  return represent(pickRelevant(cands, q));
+}
+// Каскад релевантності: спершу точний перший корінь, далі 5 і 4 літери —
+// строгіший збіг у пріоритеті, але українські закінчення («губки»→«Губка»,
+// «лампочка»→«Лампа») не валять пошук у нуль.
+function pickRelevant(cands, q) {
   const w = q.toLowerCase().trim().split(/\s+/)[0];
-  return w.length <= 4 ? w : w.slice(0, Math.max(4, Math.min(6, w.length - 2)));
-};
+  for (const root of [...new Set([w, w.slice(0, 5), w.slice(0, 4)])]) {
+    if (root.length < 3) break;
+    const hit = cands.filter(c => (c.title || '').toLowerCase().includes(root));
+    if (hit.length) return hit;
+  }
+  return [];
+}
 const unent = s => s.replace(/&amp;/g, '&').replace(/&#0?39;|&#x27;|&quot;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
 
 // ── АВРОРА (CS-Cart, avrora.ua): ajax-пошук віддає {text:'<html>'} ────────
@@ -268,16 +293,14 @@ async function avroraPrice(branch, q) {
   if (!r.ok) return null;
   const d = await r.json().catch(() => null);
   const html = (d && d.text) || '';
-  const w = wroot(q);
   const cands = [];
   for (const seg of html.split('ty-grid-list__item ').slice(1, 40)) {
     const name = (seg.match(/title="([^"]{3,140})"/) || [])[1];
     const priceTxt = [...seg.matchAll(/ty-price-num[^>]*>([\d\s.,]*)</g)].map(m => m[1]).join('').replace(/\s+/g, '').replace(',', '.');
     const price = num(priceTxt);
-    if (name && price != null && unent(name).toLowerCase().includes(w))
-      cands.push({ title: unent(name), price, oldPrice: null });
+    if (name && price != null) cands.push({ title: unent(name), price, oldPrice: null });
   }
-  return represent(cands);
+  return represent(pickRelevant(cands, q));
 }
 
 // ── ЕПІЦЕНТР (epicentrk.ua): SSR пошукової сторінки ──────────────────────
@@ -290,7 +313,6 @@ async function epicentrPrice(branch, q) {
     { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html' } });
   if (!r.ok) return null;
   const html = await r.text();
-  const w = wroot(q);
   const cands = [];
   const parts = html.split('data-product-price-main');
   for (let i = 0; i < parts.length - 1 && cands.length < 40; i++) {
@@ -299,10 +321,9 @@ async function epicentrPrice(branch, q) {
     const name = titles[titles.length - 1];
     const price = num((parts[i + 1].match(/<data value="([\d.]+)"/) || [])[1]);
     const old = num((pre.slice(-1600).match(/data-product-price-old[^>]*>\s*<data content="([\d.]+)"/) || [])[1]);
-    if (name && price != null && unent(name).toLowerCase().includes(w))
-      cands.push({ title: unent(name), price, oldPrice: old });
+    if (name && price != null) cands.push({ title: unent(name), price, oldPrice: old });
   }
-  return represent(cands);
+  return represent(pickRelevant(cands, q));
 }
 
 // ── ДОБРОГО ДНЯ (add.ua): Magento, SSR видачі ─────────────────────────────
@@ -313,14 +334,12 @@ async function adduaPrice(branch, q) {
     { headers: { 'User-Agent': UA, 'Accept-Language': 'uk', Accept: 'text/html' } });
   if (!r.ok) return null;
   const html = await r.text();
-  const w = wroot(q);
   const cands = [];
   const parts = html.split('product-item-link');
   for (let i = 1; i < parts.length && cands.length < 40; i++) {
     const name = (parts[i].match(/^[^>]*>([^<]{4,160})</) || [])[1];
     const price = num((parts[i].match(/data-price-amount="([\d.]+)"/) || [])[1]);
-    if (name && price != null && unent(name).toLowerCase().includes(w))
-      cands.push({ title: unent(name), price, oldPrice: null });
+    if (name && price != null) cands.push({ title: unent(name), price, oldPrice: null });
   }
-  return represent(cands);
+  return represent(pickRelevant(cands, q));
 }
