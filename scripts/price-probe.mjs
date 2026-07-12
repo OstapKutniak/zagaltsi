@@ -130,4 +130,117 @@ if (round === '1') {
   ], []);
 }
 
+// ── РАУНД 2: цілеспрямовано по знахідках раунду 1 ───────────────────────────
+function around(text, needle, span = 500) {
+  const i = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (i < 0) return null;
+  return squash(text.slice(Math.max(0, i - span / 2), i + span));
+}
+function printMatches(label, text, re, max = 10) {
+  const m = [...new Set((text.match(re) || []).map(squash))].slice(0, max);
+  m.forEach(x => console.log(`  ${label}: ${x}`));
+  return m;
+}
+
+if (round === '2') {
+  const dump = async (name, url, needles, extra = {}) => {
+    const r = await get(url, extra);
+    console.log(`\n=== ${name} → ${r.status} ${r.ct.split(';')[0]} ${url} ${r.err || ''}`);
+    if (!r.text) return r;
+    if (r.ct.includes('json') || r.text.trim().startsWith('{') || r.text.trim().startsWith('[')) {
+      console.log(`  json: ${snip(r.text, 900)}`);
+      return r;
+    }
+    for (const n of needles) {
+      const a = around(r.text, n, 600);
+      if (a) console.log(`  around("${n}"): ${a.slice(0, 700)}`);
+    }
+    return r;
+  };
+
+  // 1) MULTISEARCH: дістати id із сайтів Аврори/Простору/Епіцентра і спитати api.multisearch.io
+  for (const [nm, u] of [['Аврора', 'https://avrora.ua/'], ['Простор', 'https://prostor.ua/'], ['Епіцентр(404стор)', 'https://epicentrk.ua/api/nonexistent']]) {
+    const r = await get(u);
+    console.log(`\n=== multisearch-id @ ${nm} → ${r.status}`);
+    printMatches('ms', r.text || '', /multisearch[^"'\s)]{0,100}/gi, 8);
+    printMatches('ms-id', r.text || '', /[?&"'](?:id|uid|ms_id|msid)["']?\s*[:=]\s*["']?\d{3,}/gi, 8);
+  }
+  // спроба класичного виклику multisearch без id і з підозрілими id — щоб бачити формат помилки
+  await dump('multisearch-noid', `https://api.multisearch.io/?query=${QH}&lang=uk`, []);
+
+  // 2) ЕПІЦЕНТР: suggest + пошукова сторінка зсередини
+  await dump('Епіцентр suggest', `https://api.epicentrk.ua/api/v1/suggest?q=${QH}`, []);
+  await dump('Епіцентр suggest2', `https://api.epicentrk.ua/api/v1/suggest?query=${QH}&lang=ua`, []);
+  const ep = await get(`https://epicentrk.ua/search/?q=${QH}`);
+  console.log(`\n=== Епіцентр search HTML → ${ep.status}`);
+  if (ep.text) {
+    const a = around(ep.text, '"price"', 700) || around(ep.text, 'price', 700);
+    if (a) console.log(`  price-ctx: ${a.slice(0, 800)}`);
+    printMatches('nuxt-api', ep.text, /https?:\/\/api\.epicentrk\.ua[a-z0-9./_?=&-]{0,80}/gi, 10);
+  }
+
+  // 3) ПОДОРОЖНИК: __NEXT_DATA__ і search-домен
+  const pd = await get(`https://podorozhnyk.ua/search?q=${Q}`);
+  console.log(`\n=== Подорожник search HTML → ${pd.status}`);
+  if (pd.text) {
+    const nd = pd.text.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (nd) {
+      const j = nd[1];
+      console.log(`  next-data size=${j.length}`);
+      const a = around(j, 'price', 700); if (a) console.log(`  price-ctx: ${a.slice(0, 800)}`);
+      const b = around(j, 'search.l', 400); if (b) console.log(`  searchdom-ctx: ${b.slice(0, 500)}`);
+      const c = around(j, 'buildId', 200); if (c) console.log(`  buildId-ctx: ${c.slice(0, 250)}`);
+    }
+  }
+  await dump('Подорожник search-api v1', `https://search.l.podorozhnyk.com/search?query=${Q}`, []);
+  await dump('Подорожник search-api v2', `https://search.l.podorozhnyk.com/api/search?query=${Q}`, []);
+  await dump('Подорожник search-api v3', `https://search.l.podorozhnyk.com/v1/search?q=${Q}`, []);
+
+  // 4) АНЦ: __NUXT__ / api-кандидати
+  const anc = await get(`https://anc.ua/search?q=${Q}`);
+  console.log(`\n=== АНЦ search HTML → ${anc.status} size=${(anc.text || '').length}`);
+  if (anc.text) {
+    const a = around(anc.text, '"price"', 700) || around(anc.text, 'price', 700);
+    if (a) console.log(`  price-ctx: ${a.slice(0, 800)}`);
+    printMatches('api', anc.text, /https?:\/\/[a-z0-9.-]*anc[a-z0-9.-]*\/[a-z0-9./_?=&-]{0,60}/gi, 10);
+    printMatches('fetchpath', anc.text, /["'](\/(?:api|graphql)[a-z0-9./_-]{0,60})["']/gi, 10);
+  }
+  await dump('АНЦ api search', `https://anc.ua/api/v1/search?q=${Q}`, []);
+  await dump('АНЦ graphql?', `https://anc.ua/graphql`, []);
+
+  // 5) WATSONS: знайти OCC-базу
+  const wt = await get(`https://www.watsons.ua/search?text=${QG}`);
+  console.log(`\n=== Watsons search HTML → ${wt.status} size=${(wt.text || '').length}`);
+  if (wt.text) {
+    printMatches('occ', wt.text, /[a-z0-9.:/-]*occ[a-z0-9./_-]{0,60}/gi, 10);
+    printMatches('api2', wt.text, /["'][^"']*api\/v2[^"']{0,60}["']/gi, 10);
+    printMatches('wtcua', wt.text, /[^"'\s]{0,60}wtcua[^"'\s]{0,40}/gi, 10);
+    const price = around(wt.text, '₴', 300) || around(wt.text, 'грн', 300);
+    if (price) console.log(`  price-ctx: ${price.slice(0, 400)}`);
+  }
+  await dump('Watsons OCC v2 watsonsua', `https://www.watsons.ua/api/v2/watsonsua/products/search?query=${QG}&lang=uk&curr=UAH`, []);
+  await dump('Watsons occ path', `https://www.watsons.ua/occ/v2/wtcua/products/search?query=${QG}&lang=uk&curr=UAH`, []);
+  await dump('Watsons rest v2', `https://www.watsons.ua/rest/v2/wtcua/products/search?query=${QG}&lang=uk&curr=UAH`, []);
+
+  // 6) БАЖАЄМО ЗДОРОВ'Я: справжній шлях пошуку з форми
+  const bz = await get('https://apteka.net.ua/');
+  console.log(`\n=== apteka.net.ua HTML → ${bz.status}`);
+  if (bz.text) {
+    printMatches('form', bz.text, /<form[^>]{0,200}/gi, 6);
+    printMatches('api', bz.text, /["'](\/[a-z0-9./_-]*(?:search|api)[a-z0-9./_-]{0,50})["']/gi, 10);
+  }
+  await dump('БЖ search?text', `https://apteka.net.ua/search?text=${Q}`, []);
+  await dump('БЖ uk/search', `https://apteka.net.ua/uk/search?q=${Q}`, []);
+
+  // 7) БОНУС: пошук правильного домену
+  for (const d of ['bonus.ua', 'bonus-market.com.ua', 'bonusmarket.ua', 'tovary-bonus.com.ua', 'bonus.kiev.ua']) {
+    const r = await get(`https://${d}/`);
+    console.log(`bonus? ${d} → ${r.status} ${r.err || ''} ${r.finalUrl || ''}`);
+  }
+
+  // 8) EVA/add.ua/tabletki з іншими заголовками (раптом пускає без бот-виклику)
+  await dump('EVA desktop-UA', 'https://eva.ua/', [], { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', Accept: 'text/html,application/xhtml+xml' });
+  await dump('add.ua desktop-UA', 'https://add.ua/', [], { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', Accept: 'text/html,application/xhtml+xml' });
+}
+
 console.log('\nPROBE DONE round=' + round);
