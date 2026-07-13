@@ -58,6 +58,7 @@ const PROBE_HOSTS = new Set([
   'eva.ua', 'www.eva.ua', 'api.eva.ua',
   'add.ua', 'www.add.ua',
   'tabletki.ua', 'www.tabletki.ua', 'api.tabletki.ua',
+  'www.watsons.ua',
 ]);
 async function handleProbe(url) {
   const target = url.searchParams.get('url') || '';
@@ -142,6 +143,11 @@ const CITY_CHAINS = {
   dobrogo: adduaPrice,     // аптека «Доброго дня»: Magento SSR (add.ua)
   bonus: bonusPrice,       // завгосп «Бонус»: Prom-магазин bonus-market.in.ua
   podorozhnyk: podorozhnykPrice, // аптека «Подорожник»: JSON autocomplete-API
+  anc: ancPrice,           // аптека «АНЦ»: JSON POST-пошук (city=5 Київ)
+  eva: evaPrice,           // гігієна EVA: Multisearch (search.eva.ua, id 10779)
+  prostor: prostorPrice,   // гігієна «Простор»: Multisearch (id 12667)
+  // watsons — Akamai блокує серверні/CF IP (403 Access Denied), як АТБ; функція
+  // watsonsPrice лишена для довідки, але з воркера недосяжна.
 };
 async function handlePrices(req, ctx) {
   const body = await req.json().catch(() => ({}));
@@ -283,6 +289,65 @@ function pickRelevant(cands, q) {
   return [];
 }
 const unent = s => s.replace(/&amp;/g, '&').replace(/&#0?39;|&#x27;|&quot;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+// ── АНЦ (аптека): JSON POST-пошук (з HAR) ─────────────────────────────────
+// anc.ua/productbrowser/v3/ua/search/query, body {city:5(Київ),query,…} →
+// products.items[]{name, price, promotion{discount}}. Українські назви.
+async function ancPrice(branch, q) {
+  const r = await fetch('https://anc.ua/productbrowser/v3/ua/search/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': UA, Origin: 'https://anc.ua', Referer: 'https://anc.ua/' },
+    body: JSON.stringify({ city: 5, query: q, includeCategory: false, pharmacyPrice: true, source: 'webApp' }),
+  });
+  if (!r.ok) return null;
+  const d = await r.json();
+  const cands = ((d.products && d.products.items) || [])
+    .map(i => ({ title: i.name, price: num(i.price), oldPrice: null }));
+  return represent(pickRelevant(cands, q));
+}
+
+// ── MULTISEARCH (платформа EVA і Простору, з HAR) ─────────────────────────
+// GET {host}/?id={id}&query=&lang=uk&autocomplete=true&group=true →
+// results.items[] = групи {category, items[]}; товар {name, price, oldprice, is_presence}.
+async function multisearchPrice(host, id, q) {
+  const u = `https://${host}/?id=${id}&query=${encodeURIComponent(q)}&lang=uk&autocomplete=true&group=true&uid=00000000-0000-4000-8000-000000000000`;
+  const r = await fetch(u, { headers: { 'User-Agent': UA, Accept: 'application/json', 'Accept-Language': 'uk' } });
+  if (!r.ok) return null;
+  const d = await r.json();
+  const groups = (d.results && d.results.items) || [];
+  const cands = groups.flatMap(g => g.items || [])
+    .filter(i => i.is_presence !== false)
+    .map(i => ({ title: i.name, price: num(i.price), oldPrice: num(i.oldprice) }));
+  return represent(pickRelevant(cands, q));
+}
+// function-оголошення (не const): CITY_CHAINS вище посилається на них при
+// ініціалізації модуля — const у бандлі стає var і був би ще undefined
+async function evaPrice(branch, q) { return multisearchPrice('search.eva.ua', 10779, q); }
+async function prostorPrice(branch, q) { return multisearchPrice('multisearch.prostor.ua', 12667, q); }
+
+// ── WATSONS (hybris, з HAR): autocompleteSecure ────────────────────────────
+// watsons.ua/solrimprovements/search/autocompleteSecure?term=&ln=uk →
+// searchProducts (вкладені масиви) → {name, price:{value}}.
+async function watsonsPrice(branch, q) {
+  const r = await fetch(`https://www.watsons.ua/solrimprovements/search/autocompleteSecure?term=${encodeURIComponent(q)}&ln=uk`,
+    { headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      Accept: 'application/json, text/plain, */*', 'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
+      Referer: 'https://www.watsons.ua/uk/search?text=' + encodeURIComponent(q),
+      'X-Requested-With': 'XMLHttpRequest',
+      'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+      'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-origin',
+    } });
+  if (!r.ok) return null;
+  const d = await r.json();
+  let sp = d.searchProducts || [];
+  while (Array.isArray(sp) && sp.length === 1 && Array.isArray(sp[0])) sp = sp[0];
+  const cands = (Array.isArray(sp) ? sp : [])
+    .filter(i => i && i.purchasable !== false)
+    .map(i => ({ title: i.name, price: num(i.price && i.price.value), oldPrice: null }));
+  return represent(pickRelevant(cands, q));
+}
 
 // ── ПОДОРОЖНИК (аптека): чистий JSON autocomplete-API ─────────────────────
 // catalogue.l.podorozhnyk.com/api/v2/projections/autocomplete?query= →
