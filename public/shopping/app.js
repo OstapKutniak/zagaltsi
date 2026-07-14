@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 21; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 23; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -808,13 +808,11 @@ const STORE_SETS = {
     { key: 'podorozhnyk', name: 'Подорожник',       color: '#F39200', chain: 'podorozhnyk' },
     { key: 'anc',         name: 'АНЦ',              color: '#0071BC', chain: 'anc' },
     { key: 'dobrogo',     name: 'Доброго дня',      color: '#E6007E', chain: 'dobrogo' },
-    { key: 'bzh',         name: 'Бажаємо здоров’я', color: '#8DC63F', chain: 'bzh' },
     { key: 'algofarm',    name: 'Альгофарм',        color: '#00A651', chain: 'algofarm' },
   ],
   hygiene: [
     AVG,
     { key: 'eva',     name: 'EVA',     color: '#EC008C', chain: 'eva' },
-    { key: 'watsons', name: 'Watsons', color: '#00A94F', chain: 'watsons' },
     { key: 'prostor', name: 'Простор', color: '#00AEEF', chain: 'prostor' },
   ],
 };

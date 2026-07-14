@@ -1,0 +1,25 @@
+# Тимчасовий «зонд» для розвідки API мереж (аптеки/завгосп/гігієна).
+# Раннер GitHub має відкритий інтернет, тож Claude запускає цей workflow,
+# скрипт обмацує сайти мереж і друкує знахідки в лог — Claude читає лог
+# через GitHub API і пише реалізацію в workers/shopping-price.
+# Після завершення розвідки файл можна видалити.
+name: Price API probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      round:
+        description: 'Номер раунду розвідки (який блок скрипта запускати)'
+        required: false
+        default: '1'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/price-probe.mjs "${{ github.event.inputs.round }}"
