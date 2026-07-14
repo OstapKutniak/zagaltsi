@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Bretwalda · Вкладиші українською</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root { --bg:#3b3b3b; --panel:#2d2d2d; --rail:#232323; --line:#4a4a4a; --ink:#e8e8e8; --muted:#9a9a9a; --accent:#ff9a1f; }
+      html, body { height: 100%; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); overflow: hidden; }
+      button { background: #4a4a4a; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+      button:hover { background: #565656; }
+      button.accent { background: var(--accent); color: #1b1b1b; font-weight: 600; }
+      button:disabled { opacity: .4; cursor: default; }
+      input, textarea, select { background: #1f1f1f; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; font-family: inherit; }
+      textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
+      input[type=range] { padding: 0; }
+      input[type=color] { padding: 2px; height: 32px; width: 46px; cursor: pointer; }
+      * { scrollbar-width: none; }
+      *::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+      #app { display: flex; height: 100vh; gap: 8px; padding: 8px; }
+      .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
+      .header { font-size: 12px; text-align: center; padding: 10px; background: var(--rail); border-radius: 11px 11px 0 0; font-weight: 600; }
+      .body { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+
+      #left { width: 250px; flex: 0 0 auto; }
+      #cardList { display: flex; flex-direction: column; gap: 4px; }
+      .cardItem { padding: 8px 10px; border-radius: 8px; background: #383838; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+      .cardItem:hover { background: #424242; }
+      .cardItem.sel { background: #55452a; outline: 1px solid var(--accent); }
+      .cardItem .num { color: var(--muted); flex: 0 0 auto; }
+
+      #center { flex: 1; align-items: center; justify-content: center; overflow: auto; }
+      #center .body { align-items: center; justify-content: center; flex: 1; }
+      #preview { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 6px 30px rgba(0,0,0,.5); image-rendering: auto; }
+
+      #right { width: 320px; flex: 0 0 auto; }
+      .row { display: flex; align-items: center; gap: 8px; }
+      .row label { font-size: 12px; color: var(--muted); flex: 1; }
+      .row .val { font-size: 11px; color: var(--muted); width: 34px; text-align: right; }
+      .sect { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-top: 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+      .hint { font-size: 11px; color: var(--muted); line-height: 1.4; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="left" class="pane">
+        <div class="header">Картки</div>
+        <div class="body">
+          <div class="grid2">
+            <button id="addCard" class="accent">Додати</button>
+            <button id="dupCard">Дублювати</button>
+          </div>
+          <div id="cardList"></div>
+          <div style="margin-top:auto; display:flex; flex-direction:column; gap:6px">
+            <hr style="border-color:var(--line)" />
+            <button id="exportPdf" class="accent">PDF аркуші (всі картки)</button>
+            <button id="exportJson">Зберегти набір у файл</button>
+            <button id="importJson">Відкрити набір з файлу</button>
+            <input id="importFile" type="file" accept=".json" style="display:none" />
+            <div id="statusBar" class="hint"></div>
+          </div>
+        </div>
+      </aside>
+
+      <main id="center" class="pane">
+        <div class="header">Перегляд вкладиша</div>
+        <div class="body"><canvas id="preview"></canvas></div>
+      </main>
+
+      <aside id="right" class="pane">
+        <div class="header">Налаштування</div>
+        <div class="body">
+          <div class="sect">Картка</div>
+          <div class="row"><label>Номер (напр. VK5)</label><input id="cNumber" style="width:110px" /></div>
+          <div class="row"><label>Доповнення</label>
+            <select id="cPreset" style="width:170px"></select>
+          </div>
+          <div class="row"><label>Висота смужки, мм</label><input id="cHeight" type="range" min="25" max="60" step="0.5" style="flex:1.2" /><span class="val" id="cHeightVal"></span></div>
+
+          <div class="sect">Текст</div>
+          <div class="row"><label>Рядок-тригер</label><input id="cTrigger" style="width:170px" /></div>
+          <textarea id="cBody" spellcheck="false"></textarea>
+          <div class="hint">Кожен рядок — окремий рядок на картці. Значки: {монета} {кубик} {меч}</div>
+          <div class="row"><label>Кегль тексту</label><input id="cBodySize" type="range" min="30" max="60" style="flex:1.2" /><span class="val" id="cBodySizeVal"></span></div>
+          <div class="row"><label>Міжряддя</label><input id="cLineGap" type="range" min="34" max="70" style="flex:1.2" /><span class="val" id="cLineGapVal"></span></div>
+          <div class="row"><label>Зсув тексту вгору/вниз</label><input id="cTextY" type="range" min="-60" max="120" style="flex:1.2" /><span class="val" id="cTextYVal"></span></div>
+          <div class="row"><label>Колір чорнила</label><input id="cInk" type="color" /><label>Колір тригера</label><input id="cRed" type="color" /></div>
+
+          <div class="sect">Рамка (для всього доповнення)</div>
+          <div class="row"><label>Перефарбувати рамку</label><input id="pFrameOn" type="checkbox" /></div>
+          <div class="row"><label>Колір рамки</label><input id="pFrameColor" type="color" /></div>
+          <div class="row"><label>Насиченість</label><input id="pFrameStrength" type="range" min="0" max="100" style="flex:1.2" /><span class="val" id="pFrameStrengthVal"></span></div>
+          <div class="row"><label>Межа маски, px</label><input id="pFrameInset" type="range" min="-8" max="12" style="flex:1.2" /><span class="val" id="pFrameInsetVal"></span></div>
+          <div class="row"><label>Тон пергаменту</label><input id="pParchWarm" type="range" min="0" max="100" style="flex:1.2" /><span class="val" id="pParchWarmVal"></span></div>
+
+          <div class="sect">Значок доповнення</div>
+          <div class="row">
+            <select id="pIconMode" style="flex:1">
+              <option value="none">Без значка</option>
+              <option value="danelag">Рідний (Danelag)</option>
+              <option value="custom">Свій (фото/картинка)</option>
+            </select>
+            <button id="pIconUpload">Завантажити</button>
+            <input id="pIconFile" type="file" accept="image/*" style="display:none" />
+          </div>
+          <div class="row"><label>Розмір</label><input id="pIconSize" type="range" min="40" max="160" style="flex:1.2" /><span class="val" id="pIconSizeVal"></span></div>
+          <div class="row"><label>Зсув X</label><input id="pIconX" type="range" min="-120" max="120" style="flex:1.2" /><span class="val" id="pIconXVal"></span></div>
+          <div class="row"><label>Зсув Y</label><input id="pIconY" type="range" min="-60" max="60" style="flex:1.2" /><span class="val" id="pIconYVal"></span></div>
+          <div class="row"><label>Кругла маска</label><input id="pIconRound" type="checkbox" /></div>
+          <div class="hint">Свій значок: сфотографуй/виріж квадратик зі справжньої карти і завантаж — він стане на місце значка внизу по центру. Налаштування значка і рамки спільні для всіх карток цього доповнення.</div>
+
+          <div class="sect">Аркуш</div>
+          <div class="row"><label>Ширина карти, мм</label><input id="gWidth" type="number" min="50" max="70" step="0.5" style="width:80px" /></div>
+          <div style="margin-top:6px"><button id="delCard" style="width:100%">Видалити картку</button></div>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="/src/bretwalda/main.ts"></script>
+  </body>
+</html>

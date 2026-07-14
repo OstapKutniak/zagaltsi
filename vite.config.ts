@@ -100,6 +100,7 @@ export default defineConfig({
         studio: 'studio.html',
         rig: 'rig.html',
         level: 'level.html',
+        bretwalda: 'bretwalda.html',
       },
     },
   },
