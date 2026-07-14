@@ -27,12 +27,16 @@
       .header { font-size: 12px; text-align: center; padding: 10px; background: var(--rail); border-radius: 11px 11px 0 0; font-weight: 600; }
       .body { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 
-      #left { width: 250px; flex: 0 0 auto; }
-      #cardList { display: flex; flex-direction: column; gap: 4px; }
-      .cardItem { padding: 8px 10px; border-radius: 8px; background: #383838; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+      #left { width: 380px; flex: 0 0 auto; }
+      #cardList { display: flex; flex-direction: column; gap: 10px; }
+      .groupTitle { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+      .groupGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .cardItem { border-radius: 10px; background: #383838; cursor: pointer; overflow: hidden; border: 2px solid transparent; }
       .cardItem:hover { background: #424242; }
-      .cardItem.sel { background: #55452a; outline: 1px solid var(--accent); }
-      .cardItem .num { color: var(--muted); flex: 0 0 auto; }
+      .cardItem.sel { border-color: var(--accent); background: #4a3d24; }
+      .cardItem img { display: block; width: 100%; height: auto; }
+      .cardItem .cap { font-size: 11px; color: var(--muted); padding: 4px 8px 6px; display: flex; justify-content: space-between; gap: 4px; }
+      .cardItem .cap b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
       #center { flex: 1; align-items: center; justify-content: center; overflow: auto; }
       #center .body { align-items: center; justify-content: center; flex: 1; }
@@ -60,6 +64,7 @@
           <div style="margin-top:auto; display:flex; flex-direction:column; gap:6px">
             <hr style="border-color:var(--line)" />
             <button id="exportPdf" class="accent">PDF аркуші (всі картки)</button>
+            <button id="loadServer">Завантажити набір з сайту</button>
             <button id="exportJson">Зберегти набір у файл</button>
             <button id="importJson">Відкрити набір з файлу</button>
             <input id="importFile" type="file" accept=".json" style="display:none" />

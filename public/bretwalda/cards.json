@@ -1,0 +1,39 @@
+{
+ "version": 1,
+ "cardWidthMm": 57,
+ "presets": {
+  "base": { "name": "Базова гра", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "none", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
+  "danelag": { "name": "Danelag", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "danelag", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
+  "vk": { "name": "Vanished Kingdoms", "frameOn": true, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "custom", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
+  "artefacts": { "name": "Artefacts", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "none", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true }
+ },
+ "cards": [
+  {
+   "id": "vk5-treason",
+   "presetId": "vk",
+   "number": "VK5",
+   "trigger": "Перед битвою.",
+   "body": "Перед сухопутною битвою\nсплати {монета} 1 ворожого\nпідрозділу (не Правителя),\nі суперник кладе його\nдо свого запасу.",
+   "bodySize": 46,
+   "lineGap": 49,
+   "textY": 0,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
+  },
+  {
+   "id": "d33-boar",
+   "presetId": "danelag",
+   "number": "D33",
+   "trigger": "Перед битвою.",
+   "body": "Якщо ти нападник\nу Сільській місцевості,\nу першому раунді битви\nвважай грані {кубик} на своїх\nбойових кубах за {меч}.",
+   "bodySize": 44,
+   "lineGap": 48,
+   "textY": 0,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
+  }
+ ],
+ "selId": "vk5-treason"
+}

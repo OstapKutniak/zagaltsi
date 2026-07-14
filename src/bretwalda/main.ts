@@ -158,6 +158,14 @@ function hexRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+// Кеш перефарбованого фону: текст правиться щосимвольно, і ганяти піксельний
+// прохід на кожне натискання марно — фон залежить лише від пресета і висоти.
+const baseCache = new Map<string, HTMLCanvasElement>();
+
+function baseKey(p: Preset, heightMm: number): string {
+  return [p.frameOn, p.frameColor, p.frameStrength, p.frameInset, p.parchWarm, heightMm].join('|');
+}
+
 function recolor(ctx: CanvasRenderingContext2D, w: number, h: number, stripTop: number, p: Preset): void {
   if (!p.frameOn && p.parchWarm <= 0) return;
   const img = ctx.getImageData(0, 0, w, h);
@@ -191,6 +199,24 @@ function recolor(ctx: CanvasRenderingContext2D, w: number, h: number, stripTop: 
   ctx.putImageData(img, 0, 0);
 }
 
+function baseStrip(p: Preset, heightMm: number): HTMLCanvasElement {
+  const key = baseKey(p, heightMm);
+  const hit = baseCache.get(key);
+  if (hit) return hit;
+  const hPx = Math.round(heightMm * PXMM);
+  const stripTop = CARD_Y1 - hPx;
+  const cv = document.createElement('canvas');
+  cv.width = CARD_W; cv.height = hPx;
+  const ctx = cv.getContext('2d');
+  if (ctx) {
+    ctx.drawImage(bgImg, CARD_X0, stripTop, CARD_W, hPx, 0, 0, CARD_W, hPx);
+    recolor(ctx, CARD_W, hPx, stripTop, p);
+  }
+  if (baseCache.size > 24) baseCache.clear();
+  baseCache.set(key, cv);
+  return cv;
+}
+
 interface Seg { text?: string; icon?: HTMLImageElement }
 
 function parseLine(line: string): Seg[] {
@@ -206,29 +232,15 @@ function parseLine(line: string): Seg[] {
   return segs;
 }
 
-function iconInlineW(icon: HTMLImageElement, size: number): number {
-  const hgt = size * (icon === inlineIcons['меч'] ? 1.15 : 0.95);
-  return hgt * icon.width / icon.height;
-}
-
-function drawCardStrip(card: Card, scale = 1): HTMLCanvasElement {
+function drawCardStrip(card: Card): HTMLCanvasElement {
   const p = state.presets[card.presetId] ?? defaultPreset('?');
   const hPx = Math.round(card.heightMm * PXMM);
   const stripTop = CARD_Y1 - hPx;
   const cv = document.createElement('canvas');
-  cv.width = CARD_W * scale; cv.height = hPx * scale;
+  cv.width = CARD_W; cv.height = hPx;
   const ctx = cv.getContext('2d');
   if (!ctx) return cv;
-  ctx.scale(scale, scale);
-  ctx.drawImage(bgImg, CARD_X0, stripTop, CARD_W, hPx, 0, 0, CARD_W, hPx);
-
-  if (scale === 1) recolor(ctx, CARD_W, hPx, stripTop, p);
-  else { // для масштабованого прев'ю перефарбовуємо на тимчасовому полотні 1:1
-    const tmp = drawCardStrip(card, 1);
-    ctx.clearRect(0, 0, CARD_W, hPx);
-    ctx.drawImage(tmp, 0, 0);
-    return cv;
-  }
+  ctx.drawImage(baseStrip(p, card.heightMm), 0, 0);
 
   // значок доповнення
   if (p.iconMode !== 'none') {
@@ -270,7 +282,10 @@ function drawCardStrip(card: Card, scale = 1): HTMLCanvasElement {
     let total = 0;
     for (const s of segs) {
       if (s.text) total += ctx.measureText(s.text).width;
-      else if (s.icon) total += iconInlineW(s.icon, card.bodySize) + 6;
+      else if (s.icon) {
+        const hgt = card.bodySize * (s.icon === inlineIcons['меч'] ? 1.15 : 0.95);
+        total += hgt * s.icon.width / s.icon.height + 6;
+      }
     }
     let x = (CARD_W - total) / 2;
     for (const s of segs) {
@@ -306,7 +321,7 @@ function requestRender(): void {
 function renderPreview(): void {
   const card = selCard();
   if (!card || !bgImg) return;
-  const cv = drawCardStrip(card, 1);
+  const cv = drawCardStrip(card);
   preview.width = cv.width; preview.height = cv.height;
   const ctx = preview.getContext('2d');
   if (ctx) ctx.drawImage(cv, 0, 0);
@@ -317,22 +332,76 @@ function selCard(): Card | null {
   return state.cards.find(c => c.id === state.selId) ?? state.cards[0] ?? null;
 }
 
-// ---- список карток ----
+// ---- бібліотека з мініатюрами, згрупована за доповненнями ----
+const thumbImgs = new Map<string, HTMLImageElement>(); // card.id -> <img>
+
+function makeThumb(card: Card): string {
+  const cv = drawCardStrip(card);
+  const t = document.createElement('canvas');
+  const k = 320 / cv.width;
+  t.width = 320; t.height = Math.round(cv.height * k);
+  const ctx = t.getContext('2d');
+  if (ctx) ctx.drawImage(cv, 0, 0, t.width, t.height);
+  return t.toDataURL('image/jpeg', 0.75);
+}
+
 function renderList(): void {
   const list = el<HTMLDivElement>('cardList');
   list.innerHTML = '';
-  for (const c of state.cards) {
-    const item = document.createElement('div');
-    item.className = 'cardItem' + (c.id === state.selId ? ' sel' : '');
-    const title = document.createElement('span');
-    title.textContent = (c.body.split('\n')[0] || c.trigger || 'без тексту').slice(0, 22);
-    const num = document.createElement('span');
-    num.className = 'num';
-    num.textContent = c.number;
-    item.append(title, num);
-    item.onclick = () => { state.selId = c.id; renderList(); syncControls(); requestRender(); save(); };
-    list.appendChild(item);
+  thumbImgs.clear();
+  for (const [pid, preset] of Object.entries(state.presets)) {
+    const cards = state.cards.filter(c => c.presetId === pid);
+    if (!cards.length) continue;
+    const title = document.createElement('div');
+    title.className = 'groupTitle';
+    title.textContent = preset.name + ' · ' + cards.length;
+    list.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'groupGrid';
+    for (const c of cards) {
+      const item = document.createElement('div');
+      item.className = 'cardItem' + (c.id === state.selId ? ' sel' : '');
+      item.dataset.cardId = c.id;
+      const img = document.createElement('img');
+      img.src = makeThumb(c);
+      img.alt = c.number;
+      thumbImgs.set(c.id, img);
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      const name = document.createElement('b');
+      name.textContent = c.trigger || c.body.split('\n')[0] || 'без тексту';
+      const num = document.createElement('span');
+      num.textContent = c.number;
+      cap.append(name, num);
+      item.append(img, cap);
+      item.onclick = () => { state.selId = c.id; markSelected(); syncControls(); requestRender(); save(); };
+      grid.appendChild(item);
+    }
+    list.appendChild(grid);
   }
+}
+
+function markSelected(): void {
+  for (const n of document.querySelectorAll<HTMLElement>('.cardItem')) {
+    n.classList.toggle('sel', n.dataset.cardId === state.selId);
+  }
+}
+
+// оновлення мініатюр без перебудови всього списку
+let thumbTimer = 0;
+function refreshThumbs(scope: 'sel' | 'preset'): void {
+  window.clearTimeout(thumbTimer);
+  thumbTimer = window.setTimeout(() => {
+    const cur = selCard();
+    if (!cur) return;
+    const targets = scope === 'sel'
+      ? [cur]
+      : state.cards.filter(c => c.presetId === cur.presetId);
+    for (const c of targets) {
+      const img = thumbImgs.get(c.id);
+      if (img) img.src = makeThumb(c);
+    }
+  }, 250);
 }
 
 // ---- контроли ----
@@ -340,7 +409,8 @@ interface Bind {
   id: string;
   get: (c: Card, p: Preset) => string | number | boolean;
   set: (c: Card, p: Preset, v: string) => void;
-  kind: 'text' | 'range' | 'color' | 'check' | 'number';
+  kind: 'text' | 'range' | 'color' | 'check';
+  presetLevel?: boolean;
 }
 
 const binds: Bind[] = [
@@ -353,15 +423,15 @@ const binds: Bind[] = [
   { id: 'cTextY', kind: 'range', get: c => c.textY, set: (c, _p, v) => { c.textY = Number(v); } },
   { id: 'cInk', kind: 'color', get: c => c.ink, set: (c, _p, v) => { c.ink = v; } },
   { id: 'cRed', kind: 'color', get: c => c.red, set: (c, _p, v) => { c.red = v; } },
-  { id: 'pFrameOn', kind: 'check', get: (_c, p) => p.frameOn, set: (_c, p, v) => { p.frameOn = v === 'true'; } },
-  { id: 'pFrameColor', kind: 'color', get: (_c, p) => p.frameColor, set: (_c, p, v) => { p.frameColor = v; } },
-  { id: 'pFrameStrength', kind: 'range', get: (_c, p) => Math.round(p.frameStrength * 100), set: (_c, p, v) => { p.frameStrength = Number(v) / 100; } },
-  { id: 'pFrameInset', kind: 'range', get: (_c, p) => p.frameInset, set: (_c, p, v) => { p.frameInset = Number(v); } },
-  { id: 'pParchWarm', kind: 'range', get: (_c, p) => Math.round(p.parchWarm * 100), set: (_c, p, v) => { p.parchWarm = Number(v) / 100; } },
-  { id: 'pIconSize', kind: 'range', get: (_c, p) => p.iconSize, set: (_c, p, v) => { p.iconSize = Number(v); } },
-  { id: 'pIconX', kind: 'range', get: (_c, p) => p.iconX, set: (_c, p, v) => { p.iconX = Number(v); } },
-  { id: 'pIconY', kind: 'range', get: (_c, p) => p.iconY, set: (_c, p, v) => { p.iconY = Number(v); } },
-  { id: 'pIconRound', kind: 'check', get: (_c, p) => p.iconRound, set: (_c, p, v) => { p.iconRound = v === 'true'; } },
+  { id: 'pFrameOn', kind: 'check', presetLevel: true, get: (_c, p) => p.frameOn, set: (_c, p, v) => { p.frameOn = v === 'true'; } },
+  { id: 'pFrameColor', kind: 'color', presetLevel: true, get: (_c, p) => p.frameColor, set: (_c, p, v) => { p.frameColor = v; } },
+  { id: 'pFrameStrength', kind: 'range', presetLevel: true, get: (_c, p) => Math.round(p.frameStrength * 100), set: (_c, p, v) => { p.frameStrength = Number(v) / 100; } },
+  { id: 'pFrameInset', kind: 'range', presetLevel: true, get: (_c, p) => p.frameInset, set: (_c, p, v) => { p.frameInset = Number(v); } },
+  { id: 'pParchWarm', kind: 'range', presetLevel: true, get: (_c, p) => Math.round(p.parchWarm * 100), set: (_c, p, v) => { p.parchWarm = Number(v) / 100; } },
+  { id: 'pIconSize', kind: 'range', presetLevel: true, get: (_c, p) => p.iconSize, set: (_c, p, v) => { p.iconSize = Number(v); } },
+  { id: 'pIconX', kind: 'range', presetLevel: true, get: (_c, p) => p.iconX, set: (_c, p, v) => { p.iconX = Number(v); } },
+  { id: 'pIconY', kind: 'range', presetLevel: true, get: (_c, p) => p.iconY, set: (_c, p, v) => { p.iconY = Number(v); } },
+  { id: 'pIconRound', kind: 'check', presetLevel: true, get: (_c, p) => p.iconRound, set: (_c, p, v) => { p.iconRound = v === 'true'; } },
 ];
 
 function syncControls(): void {
@@ -391,7 +461,8 @@ function syncControls(): void {
 function hookControls(): void {
   for (const b of binds) {
     const input = el<HTMLInputElement>(b.id);
-    const ev = b.kind === 'text' ? 'input' : b.kind === 'range' ? 'input' : 'change';
+    // усе живе: range/color/text — 'input', чекбокси — 'change'
+    const ev = b.kind === 'check' ? 'change' : 'input';
     input.addEventListener(ev, () => {
       const c = selCard();
       if (!c) return;
@@ -400,7 +471,16 @@ function hookControls(): void {
       b.set(c, p, b.kind === 'check' ? String(input.checked) : input.value);
       const val = document.getElementById(b.id + 'Val');
       if (val) val.textContent = input.value;
-      if (b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') renderList();
+      if (b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') {
+        const img = thumbImgs.get(c.id);
+        const cap = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap b`);
+        if (cap) cap.textContent = c.trigger || c.body.split('\n')[0] || 'без тексту';
+        const num = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap span`);
+        if (num) num.textContent = c.number;
+        if (img) refreshThumbs('sel');
+      } else {
+        refreshThumbs(b.presetLevel ? 'preset' : 'sel');
+      }
       requestRender(); save();
     });
   }
@@ -408,14 +488,14 @@ function hookControls(): void {
   el<HTMLSelectElement>('cPreset').addEventListener('change', e => {
     const c = selCard(); if (!c) return;
     c.presetId = (e.target as HTMLSelectElement).value;
-    syncControls(); requestRender(); save();
+    renderList(); syncControls(); requestRender(); save();
   });
 
   el<HTMLSelectElement>('pIconMode').addEventListener('change', e => {
     const c = selCard(); if (!c) return;
     const p = state.presets[c.presetId]; if (!p) return;
     p.iconMode = (e.target as HTMLSelectElement).value as Preset['iconMode'];
-    requestRender(); save();
+    refreshThumbs('preset'); requestRender(); save();
   });
 
   el<HTMLInputElement>('gWidth').addEventListener('change', e => {
@@ -433,7 +513,7 @@ function hookControls(): void {
     p.iconData = data;
     p.iconMode = 'custom';
     await ensureCustomIcon(data);
-    syncControls(); requestRender(); save();
+    syncControls(); refreshThumbs('preset'); requestRender(); save();
     setStatus('Значок завантажено');
   });
 
@@ -474,19 +554,35 @@ function hookControls(): void {
     const f = (e.target as HTMLInputElement).files?.[0];
     if (!f) return;
     try {
-      const s = JSON.parse(await f.text()) as State;
-      if (s.version !== 1 || !Array.isArray(s.cards)) throw new Error('не той формат');
-      state = s;
-      state.selId = state.cards[0]?.id ?? null;
-      await preloadCustomIcons();
-      renderList(); syncControls(); requestRender(); save();
+      await applyState(JSON.parse(await f.text()) as State);
       setStatus('Набір відкрито: ' + state.cards.length + ' карток');
     } catch {
       setStatus('Не вдалося прочитати файл набору');
     }
   });
 
+  el<HTMLButtonElement>('loadServer').onclick = async () => {
+    if (!confirm('Замінити поточний набір набором із сайту? Локальні зміни зникнуть (можеш спершу зберегти їх у файл).')) return;
+    try {
+      const r = await fetch('./bretwalda/cards.json?cb=' + Date.now());
+      if (!r.ok) throw new Error(String(r.status));
+      await applyState(await r.json() as State);
+      setStatus('Набір із сайту завантажено: ' + state.cards.length + ' карток');
+    } catch {
+      setStatus('Не вдалося завантажити набір із сайту');
+    }
+  };
+
   el<HTMLButtonElement>('exportPdf').onclick = exportPdf;
+}
+
+async function applyState(s: State): Promise<void> {
+  if (!s || s.version !== 1 || !Array.isArray(s.cards)) throw new Error('не той формат');
+  state = s;
+  state.selId = state.cards[0]?.id ?? null;
+  baseCache.clear();
+  await preloadCustomIcons();
+  renderList(); syncControls(); requestRender(); save();
 }
 
 function downscaleImage(file: File, maxSide: number): Promise<string> {
@@ -527,7 +623,6 @@ function exportPdf(): void {
   const margin = 15, gapX = 15, gapY = 9;
   const cols = [margin, margin + wMm + gapX];
   const colY = [20, 20];
-  let pageHasContent = false;
 
   const cut = (x: number, y: number, w: number, h: number): void => {
     pdf.setDrawColor(0); pdf.setLineWidth(0.2);
@@ -549,7 +644,7 @@ function exportPdf(): void {
   ruler();
 
   for (const card of state.cards) {
-    const cv = drawCardStrip(card, 1);
+    const cv = drawCardStrip(card);
     const hMm = card.heightMm * (wMm / 57);
     let col = colY[0] <= colY[1] ? 0 : 1;
     if (colY[col] + hMm > 278) {
@@ -562,9 +657,8 @@ function exportPdf(): void {
     pdf.addImage(cv.toDataURL('image/jpeg', 0.93), 'JPEG', x, y, wMm, hMm);
     cut(x, y, wMm, hMm);
     colY[col] += hMm + gapY;
-    pageHasContent = true;
   }
-  if (pageHasContent) pdf.save('bretwalda-vkladyshi.pdf');
+  pdf.save('bretwalda-vkladyshi.pdf');
   setStatus('PDF збережено: ' + state.cards.length + ' карток');
 }
 
@@ -577,6 +671,14 @@ async function main(): Promise<void> {
   } catch (e) {
     setStatus('Помилка завантаження ассетів: ' + (e as Error).message);
     return;
+  }
+  // якщо локального збереження ще нема — пробуємо стандартний набір із сайту
+  if (!localStorage.getItem(LS_KEY)) {
+    try {
+      const r = await fetch('./bretwalda/cards.json?cb=' + Date.now());
+      if (r.ok) state = await r.json() as State;
+      if (state.cards.length) state.selId = state.cards[0].id;
+    } catch { /* нема — лишаємо початковий */ }
   }
   renderList();
   syncControls();
