@@ -1176,10 +1176,13 @@ function initSwipeLayout() {
     const s = document.getElementById(t + '-screen');
     if (s) s.style.visibility = v ? 'hidden' : '';
   });
+  // На цих вкладках свайп періоду вимкнено (рахунки не залежать від
+  // місяця, щомісячне гортається стрілками)
+  const NO_SWIPE = ['accounts', 'recurring'];
   let swX = 0, swY = 0, swActive = false, swLocked = false;
 
   wrap.addEventListener('touchstart', e => {
-    if (periodSliding) { swActive = false; return; }
+    if (periodSliding || NO_SWIPE.includes(state.tab)) { swActive = false; return; }
     swX = e.touches[0].clientX;
     swY = e.touches[0].clientY;
     swActive = true;
