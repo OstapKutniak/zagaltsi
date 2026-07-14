@@ -168,7 +168,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator)
     navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/' }).catch(() => {});
   initSwipeLayout();
-  initMonthSwipe();
   bindEvents();
   subscribe();
   renderAll();
@@ -945,13 +944,20 @@ function generalTotal() {
   if (!accountsList.length) { let n = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') n -= +t.amount; else if (t.type === 'income') n += +t.amount; }); return n; }
   return accountsList.filter(a => !a.archived && accIncluded(a)).reduce((s, a) => s + accUah(a), 0);
 }
+// Щомісячне показує обраний місяць (state.cursor): минулі місяці — всі
+// операції з галочкою, поточний/майбутні — по факту оплати (r.paid[mk]).
+function viewedMonthPast() {
+  const c = state.cursor, now = new Date();
+  return new Date(c.getFullYear(), c.getMonth(), 1) < new Date(now.getFullYear(), now.getMonth(), 1);
+}
 function renderRecurring() {
   const el = document.getElementById('rec-mon-list');
   const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r })).sort((a, b) => a.day - b.day);
-  const now = new Date(), mk = monthKey(now), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const c = state.cursor, mk = monthKey(c), dim = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
+  const isPast = viewedMonthPast();
   let allExp = 0, remExp = 0, remNet = 0;
   const rows = items.map(r => {
-    const paid = !!(r.paid && r.paid[mk]);
+    const paid = isPast || !!(r.paid && r.paid[mk]);
     const day = Math.min(r.day, dim);
     const st = catStyle(r.category);
     const sign = r.type === 'income' ? '+' : '−';
@@ -990,11 +996,12 @@ function renderRecurring() {
 }
 async function payRecurring(id) {
   const r = recurringMap[id]; if (!r) return;
-  const now = new Date(), mk = monthKey(now);
+  if (viewedMonthPast()) return; // минулі місяці вже показані як оплачені
+  const c = state.cursor, mk = monthKey(c);
   if (r.paid && r.paid[mk]) return;
-  const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const dim = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
   const day = Math.min(r.day, dim);
-  const date = new Date(now.getFullYear(), now.getMonth(), day, 12, 0, 0).toISOString();
+  const date = new Date(c.getFullYear(), c.getMonth(), day, 12, 0, 0).toISOString();
   try {
     await saveTx({ type: r.type, amount: r.amount, account: r.account, category: r.category, date, note: r.note || null });
     await update(ref(db, `${REC_PATH}/${id}/paid`), { [mk]: true });
@@ -1152,6 +1159,8 @@ function syncTabs() {
 }
 
 // ── SWIPE LAYOUT INIT ──────────────────────────────────────
+// Горизонтальний свайп по екрану гортає ПЕРІОД (місяць/день/тиждень/рік —
+// що зараз обрано), а не вкладки. Вкладки — тільки через таб-бар.
 function initSwipeLayout() {
   const wrap = document.createElement('div');
   wrap.id = 'screen-wrap';
@@ -1161,9 +1170,16 @@ function initSwipeLayout() {
   SWIPE_TABS.forEach(t => wrap.appendChild(document.getElementById(t + '-screen')));
   syncTabs();
 
+  const activeScreen = () => document.getElementById(state.tab + '-screen');
+  const hideOthers = v => SWIPE_TABS.forEach(t => {
+    if (t === state.tab) return;
+    const s = document.getElementById(t + '-screen');
+    if (s) s.style.visibility = v ? 'hidden' : '';
+  });
   let swX = 0, swY = 0, swActive = false, swLocked = false;
 
   wrap.addEventListener('touchstart', e => {
+    if (periodSliding) { swActive = false; return; }
     swX = e.touches[0].clientX;
     swY = e.touches[0].clientY;
     swActive = true;
@@ -1178,28 +1194,28 @@ function initSwipeLayout() {
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
       if (Math.abs(dy) >= Math.abs(dx)) { swActive = false; return; }
       swLocked = true;
+      hideOthers(true);
     }
     e.preventDefault();
-    const cur = SWIPE_TABS.indexOf(state.tab);
-    const W = wrap.offsetWidth;
-    SWIPE_TABS.forEach((t, i) => {
-      const s = document.getElementById(t + '-screen');
-      s.style.transition = 'none';
-      s.style.transform = `translateX(${(i - cur) * W + dx}px)`;
-    });
+    const s = activeScreen();
+    s.style.transition = 'none';
+    s.style.transform = `translateX(${dx}px)`;
   }, { passive: false });
 
   wrap.addEventListener('touchend', e => {
     if (!swActive || !swLocked) { swActive = false; return; }
     swActive = false;
     const dx = e.changedTouches[0].clientX - swX;
-    const threshold = wrap.offsetWidth * 0.28;
-    const cur = SWIPE_TABS.indexOf(state.tab);
-    let next = cur;
-    if (dx < -threshold && cur < SWIPE_TABS.length - 1) next = cur + 1;
-    else if (dx > threshold && cur > 0) next = cur - 1;
-    if (next !== cur) { state.tab = SWIPE_TABS[next]; renderAll(); }
-    syncTabs();
+    const threshold = Math.min(90, wrap.offsetWidth * 0.22);
+    const canShift = state.period !== 'all' && state.period !== 'range';
+    if (Math.abs(dx) > threshold && canShift) {
+      slidePeriod(dx < 0 ? 1 : -1);
+    } else {
+      const s = activeScreen();
+      s.style.transition = '';
+      s.style.transform = 'translateX(0px)';
+      hideOthers(false);
+    }
   }, { passive: true });
 }
 
@@ -1593,8 +1609,8 @@ function parseLine(line) {
 function bindEvents() {
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => { state.tab = t.dataset.tab; syncTabs(); renderAll(); });
 
-  document.getElementById('prev-month').onclick = () => shiftWithAnim(-1);
-  document.getElementById('next-month').onclick = () => shiftWithAnim(1);
+  document.getElementById('prev-month').onclick = () => slidePeriod(-1);
+  document.getElementById('next-month').onclick = () => slidePeriod(1);
 
   document.getElementById('fab').onclick = () =>
     state.tab === 'accounts' ? openAccForm()
@@ -1712,42 +1728,41 @@ function shift(d) {
   else state.cursor = new Date(c.getFullYear(), c.getMonth() + d, 1);
   renderAll();
 }
-function shiftWithAnim(d) {
-  if (state.period === 'all') return;
+// Гортання періоду з анімацією: активний екран виїжджає за край,
+// новий (уже з даними іншого періоду) заїжджає з протилежного боку.
+let periodSliding = false;
+function slidePeriod(d) {
+  if (state.period === 'all' || state.period === 'range') return;
+  const s = document.getElementById(state.tab + '-screen');
+  if (!s || periodSliding) return;
+  periodSliding = true;
+  const others = SWIPE_TABS.filter(t => t !== state.tab)
+    .map(t => document.getElementById(t + '-screen')).filter(Boolean);
+  others.forEach(o => o.style.visibility = 'hidden');
+  const W = s.offsetWidth || window.innerWidth;
   const inner = document.getElementById('month-inner');
-  if (!inner) { shift(d); return; }
-  inner.style.animation = d > 0 ? 'monthOutLeft 0.15s ease-in both' : 'monthOutRight 0.15s ease-in both';
+  if (inner) inner.style.animation = d > 0 ? 'monthOutLeft 0.15s ease-in both' : 'monthOutRight 0.15s ease-in both';
+  s.style.transition = 'transform 0.18s ease-in';
+  s.style.transform = `translateX(${d > 0 ? -W : W}px)`;
   setTimeout(() => {
     shift(d);
-    inner.style.animation = 'none';
-    inner.offsetWidth;
-    inner.style.animation = d > 0 ? 'monthInLeft 0.2s ease-out both' : 'monthInRight 0.2s ease-out both';
-    setTimeout(() => { inner.style.animation = ''; }, 220);
-  }, 150);
-}
-function initMonthSwipe() {
-  const row = document.querySelector('.month-row');
-  let sx = 0, sy = 0, active = false, locked = false;
-  row.addEventListener('touchstart', e => {
-    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
-    active = true; locked = false;
-  }, { passive: true });
-  row.addEventListener('touchmove', e => {
-    if (!active) return;
-    const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
-    if (!locked) {
-      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-      if (Math.abs(dy) >= Math.abs(dx)) { active = false; return; }
-      locked = true;
+    if (inner) {
+      inner.style.animation = 'none';
+      inner.offsetWidth;
+      inner.style.animation = d > 0 ? 'monthInLeft 0.2s ease-out both' : 'monthInRight 0.2s ease-out both';
+      setTimeout(() => { inner.style.animation = ''; }, 220);
     }
-    e.preventDefault();
-  }, { passive: false });
-  row.addEventListener('touchend', e => {
-    if (!active || !locked) { active = false; return; }
-    active = false;
-    const dx = e.changedTouches[0].clientX - sx;
-    if (Math.abs(dx) > 30) shiftWithAnim(dx > 0 ? -1 : 1);
-  }, { passive: true });
+    s.style.transition = 'none';
+    s.style.transform = `translateX(${d > 0 ? W : -W}px)`;
+    s.offsetWidth;
+    s.style.transition = 'transform 0.26s cubic-bezier(0.22,1,0.36,1)';
+    s.style.transform = 'translateX(0px)';
+    setTimeout(() => {
+      s.style.transition = '';
+      others.forEach(o => o.style.visibility = '');
+      periodSliding = false;
+    }, 280);
+  }, 180);
 }
 let filterTemp = null;
 function filterNames() { return accountsList.length ? accountsList.map(a => a.name) : [...accountsAll]; }
