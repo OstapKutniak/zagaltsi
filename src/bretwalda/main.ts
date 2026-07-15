@@ -24,7 +24,7 @@ interface Preset {
   frameStrength: number; // 0..1
   frameInset: number;    // px, зсув межі маски всередину(+)/назовні(-)
   parchWarm: number;     // 0..1 підтеплення пергаменту
-  iconMode: 'none' | 'danelag' | 'custom';
+  iconMode: 'none' | 'danelag' | 'vk' | 'custom';
   iconData: string | null; // dataURL свого значка
   iconSize: number;      // px на 300dpi полотні
   iconX: number;
@@ -35,6 +35,7 @@ interface Preset {
 interface Card {
   id: string;
   presetId: string;
+  name: string;   // назва карти, як надрукована (англійською)
   number: string;
   trigger: string;
   body: string;
@@ -67,19 +68,20 @@ function defaultPreset(name: string, over: Partial<Preset> = {}): Preset {
 function defaultCard(presetId: string): Card {
   return {
     id: 'c' + Math.random().toString(36).slice(2, 9),
-    presetId, number: '', trigger: '', body: '',
+    presetId, name: '', number: '', trigger: '', body: '',
     bodySize: 46, lineGap: 49, textY: 0, ink: '#2e1e14', red: '#7a1b16', heightMm: 42,
   };
 }
 
 function initialState(): State {
   const presets: Record<string, Preset> = {
-    base: defaultPreset('Базова гра'),
+    base: defaultPreset('Базова гра', { frameOn: true, frameColor: '#7e1d12' }),
     danelag: defaultPreset('Danelag', { iconMode: 'danelag' }),
-    vk: defaultPreset('Vanished Kingdoms', { frameOn: true, frameColor: '#7e1d12', iconMode: 'custom' }),
+    vk: defaultPreset('Vanished Kingdoms', { frameOn: true, frameColor: '#7e1d12', iconMode: 'vk' }),
     artefacts: defaultPreset('Artefacts'),
   };
   const demo = defaultCard('vk');
+  demo.name = 'Treason';
   demo.number = 'VK5';
   demo.trigger = 'Перед битвою.';
   demo.body = 'Перед сухопутною битвою\nсплати {монета} 1 ворожого\nпідрозділу (не Правителя),\nі суперник кладе його\nдо свого запасу.';
@@ -136,6 +138,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 let bgImg: HTMLImageElement;
 let danelagIcon: HTMLImageElement;
+let vkIcon: HTMLImageElement;
 const inlineIcons: Record<string, HTMLImageElement> = {};
 const customIconCache = new Map<string, HTMLImageElement>();
 
@@ -143,12 +146,15 @@ async function loadAssets(): Promise<void> {
   const font = new FontFace('Monomakh', 'url(./bretwalda/MonomakhUnicode.otf)');
   await font.load();
   document.fonts.add(font);
-  [bgImg, danelagIcon, inlineIcons['монета'], inlineIcons['кубик'], inlineIcons['меч']] = await Promise.all([
+  [bgImg, danelagIcon, vkIcon, inlineIcons['монета'], inlineIcons['кубик'], inlineIcons['меч'], inlineIcons['товар'], inlineIcons['рух']] = await Promise.all([
     loadImage('./bretwalda/bg-clean.png'),
     loadImage('./bretwalda/icon-danelag.png'),
+    loadImage('./bretwalda/icon-vk.png'),
     loadImage('./bretwalda/coin.png'),
     loadImage('./bretwalda/dice.png'),
     loadImage('./bretwalda/sword.png'),
+    loadImage('./bretwalda/goods.png'),
+    loadImage('./bretwalda/move.png'),
   ]);
 }
 
@@ -221,7 +227,7 @@ interface Seg { text?: string; icon?: HTMLImageElement }
 
 function parseLine(line: string): Seg[] {
   const segs: Seg[] = [];
-  const re = /\{(монета|кубик|меч)\}/g;
+  const re = /\{(монета|кубик|меч|товар|рух)\}/g;
   let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(line))) {
     if (m.index > last) segs.push({ text: line.slice(last, m.index) });
@@ -245,6 +251,7 @@ function drawCardStrip(card: Card): HTMLCanvasElement {
   // значок доповнення
   if (p.iconMode !== 'none') {
     const img = p.iconMode === 'danelag' ? danelagIcon
+      : p.iconMode === 'vk' ? vkIcon
       : (p.iconData ? customIconCache.get(p.iconData) : undefined);
     if (img) {
       const s = p.iconSize;
@@ -369,7 +376,7 @@ function renderList(): void {
       const cap = document.createElement('div');
       cap.className = 'cap';
       const name = document.createElement('b');
-      name.textContent = c.trigger || c.body.split('\n')[0] || 'без тексту';
+      name.textContent = c.name || c.trigger || 'без назви';
       const num = document.createElement('span');
       num.textContent = c.number;
       cap.append(name, num);
@@ -414,6 +421,7 @@ interface Bind {
 }
 
 const binds: Bind[] = [
+  { id: 'cName', kind: 'text', get: c => c.name ?? '', set: (c, _p, v) => { c.name = v; } },
   { id: 'cNumber', kind: 'text', get: c => c.number, set: (c, _p, v) => { c.number = v; } },
   { id: 'cTrigger', kind: 'text', get: c => c.trigger, set: (c, _p, v) => { c.trigger = v; } },
   { id: 'cBody', kind: 'text', get: c => c.body, set: (c, _p, v) => { c.body = v; } },
@@ -471,10 +479,10 @@ function hookControls(): void {
       b.set(c, p, b.kind === 'check' ? String(input.checked) : input.value);
       const val = document.getElementById(b.id + 'Val');
       if (val) val.textContent = input.value;
-      if (b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') {
+      if (b.id === 'cName' || b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') {
         const img = thumbImgs.get(c.id);
         const cap = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap b`);
-        if (cap) cap.textContent = c.trigger || c.body.split('\n')[0] || 'без тексту';
+        if (cap) cap.textContent = c.name || c.trigger || 'без назви';
         const num = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap span`);
         if (num) num.textContent = c.number;
         if (img) refreshThumbs('sel');
@@ -534,7 +542,7 @@ function hookControls(): void {
 
   el<HTMLButtonElement>('delCard').onclick = () => {
     const cur = selCard(); if (!cur) return;
-    if (!confirm('Видалити картку «' + (cur.number || cur.trigger || 'без назви') + '»?')) return;
+    if (!confirm('Видалити картку «' + (cur.name || cur.number || 'без назви') + '»?')) return;
     state.cards = state.cards.filter(c => c.id !== cur.id);
     state.selId = state.cards[0]?.id ?? null;
     renderList(); syncControls(); requestRender(); save();

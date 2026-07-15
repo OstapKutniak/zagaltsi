@@ -2,38 +2,114 @@
  "version": 1,
  "cardWidthMm": 57,
  "presets": {
-  "base": { "name": "Базова гра", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "none", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
+  "base": { "name": "Базова гра", "frameOn": true, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "none", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
   "danelag": { "name": "Danelag", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "danelag", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
-  "vk": { "name": "Vanished Kingdoms", "frameOn": true, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "custom", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true },
+  "vk": { "name": "Vanished Kingdoms", "frameOn": true, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "vk", "iconData": null, "iconSize": 76, "iconX": 0, "iconY": 0, "iconRound": true },
   "artefacts": { "name": "Artefacts", "frameOn": false, "frameColor": "#7e1d12", "frameStrength": 1, "frameInset": 0, "parchWarm": 0, "iconMode": "none", "iconData": null, "iconSize": 84, "iconX": 0, "iconY": 0, "iconRound": true }
  },
  "cards": [
   {
-   "id": "vk5-treason",
-   "presetId": "vk",
-   "number": "VK5",
-   "trigger": "Перед битвою.",
-   "body": "Перед сухопутною битвою\nсплати {монета} 1 ворожого\nпідрозділу (не Правителя),\nі суперник кладе його\nдо свого запасу.",
-   "bodySize": 46,
-   "lineGap": 49,
-   "textY": 0,
-   "ink": "#2e1e14",
-   "red": "#7a1b16",
-   "heightMm": 42
+   "id": "b37-prayers-answered", "presetId": "base", "name": "Prayers Answered", "number": "37",
+   "trigger": "Будь-коли.",
+   "body": "Переверни до 2 своїх кубів\nна протилежну грань.",
+   "bodySize": 46, "lineGap": 50, "textY": 55, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
   },
   {
-   "id": "d33-boar",
-   "presetId": "danelag",
-   "number": "D33",
+   "id": "b66-ramming", "presetId": "base", "name": "Ramming", "number": "66",
+   "trigger": "Перед битвою.",
+   "body": "Якщо ти нападник\nу морській битві, отримай\n+2 {меч} у першому\nраунді битви.",
+   "bodySize": 46, "lineGap": 49, "textY": 20, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b67-raid", "presetId": "base", "name": "Raid", "number": "67",
+   "trigger": "У свій хід.",
+   "body": "Візьми до 2 {товар} з області,\nсуміжної з областю з твоїми\nпідрозділами, і поклади\nїх у ту область.",
+   "bodySize": 44, "lineGap": 48, "textY": 20, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b70-pledge-of-fealty", "presetId": "base", "name": "Pledge of Fealty", "number": "70",
+   "trigger": "Після битви.",
+   "body": "Якщо ти виграв битву і вбив\nнейтральні підрозділи, візьми\nзі свого запасу підрозділи\nтого ж типу, що вбиті,\nі постав їх в область битви.",
+   "bodySize": 42, "lineGap": 47, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b72-wolf-pits", "presetId": "base", "name": "Wolf Pits", "number": "72",
+   "trigger": "Перед битвою.",
+   "body": "Перед сухопутною битвою,\nде ти захисник, суперник\nзавдає 1 рану будь-якому\nзі своїх підрозділів,\nщо атакують.",
+   "bodySize": 44, "lineGap": 48, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b73-battle-at-the-ford", "presetId": "base", "name": "Battle at the Ford", "number": "73",
+   "trigger": "Перед битвою.",
+   "body": "Якщо захищаєшся в Сільській\nмісцевості, суперник кидає\nна 1 бойовий куб менше\nв кожному раунді битви\n(мінімум 1).",
+   "bodySize": 43, "lineGap": 48, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk5-treason", "presetId": "vk", "name": "Treason", "number": "VK5",
+   "trigger": "Перед битвою.",
+   "body": "Перед сухопутною битвою\nсплати {монета} 1 ворожого\nпідрозділу (не Правителя),\nі суперник кладе його\nдо свого запасу.",
+   "bodySize": 46, "lineGap": 49, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk6-bribe", "presetId": "vk", "name": "Bribe", "number": "VK6",
+   "trigger": "Перед битвою.",
+   "body": "Якщо тебе атакують нейтральні\nпідрозділи чи підрозділи данів,\nвідведи їх назад в область,\nз якої вони атакували.",
+   "bodySize": 42, "lineGap": 48, "textY": 15, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk8-arsonists", "presetId": "vk", "name": "Arsonists", "number": "VK8",
+   "trigger": "У свій хід.",
+   "body": "Знищ 1 будівлю в області,\nсуміжній з будь-яким твоїм\nсухопутним підрозділом.",
+   "bodySize": 44, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk9-knowledge-sharing", "presetId": "vk", "name": "Knowledge Sharing", "number": "VK9",
+   "trigger": "У свій хід.",
+   "body": "Візьми 3 карти Володінь,\n2 залиш собі, а 1, що лишилась,\nвіддай будь-якому супернику.",
+   "bodySize": 43, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk10-local-guides", "presetId": "vk", "name": "Local Guides", "number": "VK10",
+   "trigger": "У свій хід.",
+   "body": "Під час твого Руху підрозділи\nв 1 області можуть рухатися\nчерез Дикі землі за 0 {рух}.",
+   "bodySize": 43, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk11-swords-to-ploughshares", "presetId": "vk", "name": "Swords to Ploughshares", "number": "VK11",
+   "trigger": "У свій хід.",
+   "body": "Скинь цю карту і будь-які інші\nкарти Володінь та отримай\n2 {монета} за кожну скинуту\nкарту (разом із цією).",
+   "bodySize": 42, "lineGap": 48, "textY": 15, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk12-sleeping-sentries", "presetId": "vk", "name": "Sleeping Sentries", "number": "VK12",
+   "trigger": "У свій хід.",
+   "body": "Під час твого Руху перемісти\n1 підрозділ крізь область\nз ворожими підрозділами,\nне починаючи битву.",
+   "bodySize": 44, "lineGap": 48, "textY": 15, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk13-collusion", "presetId": "vk", "name": "Collusion", "number": "VK13",
+   "trigger": "У свій хід.",
+   "body": "Під час дії Руху заплати\n1 {монета}, щоб перемістити\n1 нейтральний підрозділ.",
+   "bodySize": 44, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk14-storm", "presetId": "vk", "name": "Storm", "number": "VK14",
+   "trigger": "Фаза сезону.",
+   "body": "Зіграй під час Набігу.\nТи обираєш область, суміжну\nз поставленим драккаром,\nкуди стають підрозділи данів,\nщо йдуть у набіг.",
+   "bodySize": 42, "lineGap": 47, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "vk15-glory-to-the-fallen", "presetId": "vk", "name": "Glory to the Fallen", "number": "VK15",
+   "trigger": "Після битви.",
+   "body": "Якщо ти програв битву,\nвізьми +2 карти Володінь.",
+   "bodySize": 46, "lineGap": 50, "textY": 55, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "d33-boar", "presetId": "danelag", "name": "Boar Formation", "number": "D33",
    "trigger": "Перед битвою.",
    "body": "Якщо ти нападник\nу Сільській місцевості,\nу першому раунді битви\nвважай грані {кубик} на своїх\nбойових кубах за {меч}.",
-   "bodySize": 44,
-   "lineGap": 48,
-   "textY": 0,
-   "ink": "#2e1e14",
-   "red": "#7a1b16",
-   "heightMm": 42
+   "bodySize": 44, "lineGap": 48, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
   }
  ],
- "selId": "vk5-treason"
+ "selId": "b37-prayers-answered"
 }

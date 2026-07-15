@@ -82,6 +82,7 @@
         <div class="header">Налаштування</div>
         <div class="body">
           <div class="sect">Картка</div>
+          <div class="row"><label>Назва (як на карті)</label><input id="cName" style="width:170px" /></div>
           <div class="row"><label>Номер (напр. VK5)</label><input id="cNumber" style="width:110px" /></div>
           <div class="row"><label>Доповнення</label>
             <select id="cPreset" style="width:170px"></select>
@@ -91,7 +92,7 @@
           <div class="sect">Текст</div>
           <div class="row"><label>Рядок-тригер</label><input id="cTrigger" style="width:170px" /></div>
           <textarea id="cBody" spellcheck="false"></textarea>
-          <div class="hint">Кожен рядок — окремий рядок на картці. Значки: {монета} {кубик} {меч}</div>
+          <div class="hint">Кожен рядок — окремий рядок на картці. Значки: {монета} {кубик} {меч} {товар} {рух}</div>
           <div class="row"><label>Кегль тексту</label><input id="cBodySize" type="range" min="30" max="60" style="flex:1.2" /><span class="val" id="cBodySizeVal"></span></div>
           <div class="row"><label>Міжряддя</label><input id="cLineGap" type="range" min="34" max="70" style="flex:1.2" /><span class="val" id="cLineGapVal"></span></div>
           <div class="row"><label>Зсув тексту вгору/вниз</label><input id="cTextY" type="range" min="-60" max="120" style="flex:1.2" /><span class="val" id="cTextYVal"></span></div>
@@ -109,6 +110,7 @@
             <select id="pIconMode" style="flex:1">
               <option value="none">Без значка</option>
               <option value="danelag">Рідний (Danelag)</option>
+              <option value="vk">Рідний (Vanished Kingdoms)</option>
               <option value="custom">Свій (фото/картинка)</option>
             </select>
             <button id="pIconUpload">Завантажити</button>
