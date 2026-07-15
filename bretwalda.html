@@ -85,10 +85,11 @@
         <div class="body">
           <div class="sect">Картка</div>
           <div class="row"><label>Назва (як на карті)</label><input id="cName" style="width:170px" /></div>
+          <div class="row" id="rowTitle"><label>Назва українською</label><input id="cTitle" style="width:170px" /></div>
           <div class="row"><label>Номер (напр. VK5)</label><input id="cNumber" style="width:110px" /></div>
           <div class="row"><label>Розділ</label>
             <select id="cDeck" style="width:170px">
-              <option value="lordship">Карти володарювання</option>
+              <option value="lordship">Карти володінь</option>
               <option value="chronicle">Карти хроніки</option>
             </select>
           </div>
@@ -98,7 +99,7 @@
           <div class="row"><label>Висота смужки, мм</label><input id="cHeight" type="range" min="25" max="60" step="0.5" style="flex:1.2" /><span class="val" id="cHeightVal"></span></div>
 
           <div class="sect">Текст</div>
-          <div class="row"><label>Рядок-тригер</label><input id="cTrigger" style="width:170px" /></div>
+          <div class="row" id="rowTrigger"><label>Рядок-тригер</label><input id="cTrigger" style="width:170px" /></div>
           <textarea id="cBody" spellcheck="false"></textarea>
           <div class="hint">Кожен рядок — окремий рядок на картці. Значки: {монета} {кубик} {меч} {товар} {рух}</div>
           <div class="row"><label>Кегль тексту</label><input id="cBodySize" type="range" min="30" max="60" style="flex:1.2" /><span class="val" id="cBodySizeVal"></span></div>
@@ -131,7 +132,8 @@
           <div class="hint">Свій значок: сфотографуй/виріж квадратик зі справжньої карти і завантаж — він стане на місце значка внизу по центру. Налаштування значка і рамки спільні для всіх карток цього доповнення.</div>
 
           <div class="sect">Аркуш</div>
-          <div class="row"><label>Ширина карти, мм</label><input id="gWidth" type="number" min="50" max="70" step="0.5" style="width:80px" /></div>
+          <div class="row"><label>Ширина карт Володінь, мм</label><input id="gWidth" type="number" min="50" max="70" step="0.5" style="width:80px" /></div>
+          <div class="row"><label>Ширина карт Хроніки, мм</label><input id="gWidthChron" type="number" min="70" max="100" step="0.5" style="width:80px" /></div>
           <div style="margin-top:6px"><button id="delCard" style="width:100%">Видалити картку</button></div>
         </div>
       </aside>

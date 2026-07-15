@@ -35,8 +35,9 @@ interface Preset {
 type Deck = 'lordship' | 'chronicle';
 
 // Розділи колоди у грі: Lordship cards і Chronicle cards.
+// Назви узгоджені з текстами перекладених карток («карти Володінь», «колода Хронік»).
 const DECKS: Record<Deck, string> = {
-  lordship: 'Карти володарювання',
+  lordship: 'Карти володінь',
   chronicle: 'Карти хроніки',
 };
 
@@ -44,7 +45,8 @@ interface Card {
   id: string;
   presetId: string;
   deck: Deck;
-  name: string;   // назва карти, як надрукована (англійською)
+  name: string;    // назва карти, як надрукована (англійською)
+  titleUk: string; // назва українською — друкується на вкладиші карт Хроніки
   number: string;
   trigger: string;
   body: string;
@@ -58,7 +60,8 @@ interface Card {
 
 interface State {
   version: 1;
-  cardWidthMm: number;
+  cardWidthMm: number;          // ширина вертикальних карт (Володіння), мм
+  chronicleWidthMm: number;     // ширина горизонтальних карт Хроніки, мм
   presets: Record<string, Preset>;
   cards: Card[];
   selId: string | null;
@@ -77,7 +80,7 @@ function defaultPreset(name: string, over: Partial<Preset> = {}): Preset {
 function defaultCard(presetId: string, deck: Deck = 'lordship'): Card {
   return {
     id: 'c' + Math.random().toString(36).slice(2, 9),
-    presetId, deck, name: '', number: '', trigger: '', body: '',
+    presetId, deck, name: '', titleUk: '', number: '', trigger: '', body: '',
     bodySize: 46, lineGap: 49, textY: 0, ink: '#2e1e14', red: '#7a1b16', heightMm: 42,
   };
 }
@@ -94,17 +97,19 @@ function initialState(): State {
   demo.number = 'VK5';
   demo.trigger = 'Перед битвою.';
   demo.body = 'Перед сухопутною битвою\nсплати {монета} 1 ворожого\nпідрозділу (не Правителя),\nі суперник кладе його\nдо свого запасу.';
-  return { version: 1, cardWidthMm: 57, presets, cards: [demo], selId: demo.id };
+  return { version: 1, cardWidthMm: 57, chronicleWidthMm: 88, presets, cards: [demo], selId: demo.id };
 }
 
 // ---- стан + збереження ----
 const LS_KEY = 'bretwalda-tool-v1';
 let state: State = loadState();
 
-// Старі збереження/набори без поля deck — вважаємо їх картами володарювання.
+// Старі збереження/набори: без поля deck — це карти Володінь, без нових полів — типові значення.
 function normalizeState(s: State): State {
+  if (!s.chronicleWidthMm) s.chronicleWidthMm = 88;
   for (const c of s.cards) {
     if (c.deck !== 'lordship' && c.deck !== 'chronicle') c.deck = 'lordship';
+    if (typeof c.titleUk !== 'string') c.titleUk = '';
   }
   return s;
 }
@@ -256,6 +261,7 @@ function parseLine(line: string): Seg[] {
 }
 
 function drawCardStrip(card: Card): HTMLCanvasElement {
+  if (card.deck === 'chronicle') return drawChronicleStrip(card);
   const p = state.presets[card.presetId] ?? defaultPreset('?');
   const hPx = Math.round(card.heightMm * PXMM);
   const stripTop = CARD_Y1 - hPx;
@@ -298,9 +304,22 @@ function drawCardStrip(card: Card): HTMLCanvasElement {
   }
 
   // основний текст
+  drawBodyLines(ctx, card, CARD_W, BODY_Y0 - stripTop + card.textY + card.bodySize * 0.8);
+
+  // номер картки
+  if (card.number) {
+    ctx.font = '30px Monomakh';
+    ctx.fillStyle = '#3c2d1e';
+    ctx.fillText(card.number, NUMBER_POS.x - CARD_X0, NUMBER_POS.y - stripTop + 24);
+  }
+  return cv;
+}
+
+// центровані рядки тексту зі значками {монета} {кубик} ... — спільне для обох розділів
+function drawBodyLines(ctx: CanvasRenderingContext2D, card: Card, areaW: number, startY: number): void {
   ctx.font = `${card.bodySize}px Monomakh`;
   ctx.fillStyle = card.ink;
-  let y = BODY_Y0 - stripTop + card.textY + card.bodySize * 0.8;
+  let y = startY;
   for (const line of card.body.split('\n')) {
     const segs = parseLine(line);
     let total = 0;
@@ -311,7 +330,7 @@ function drawCardStrip(card: Card): HTMLCanvasElement {
         total += hgt * s.icon.width / s.icon.height + 6;
       }
     }
-    let x = (CARD_W - total) / 2;
+    let x = (areaW - total) / 2;
     for (const s of segs) {
       if (s.text) {
         ctx.fillText(s.text, x, y);
@@ -325,12 +344,57 @@ function drawCardStrip(card: Card): HTMLCanvasElement {
     }
     y += card.lineGap;
   }
+}
 
-  // номер картки
+// ---- вкладиш карти Хроніки (горизонтальна) ----
+// Поки без рідного шаблону: тимчасовий пергаментний фон, розміщення приблизне.
+// Смужка — низ карти від верху стрічки з назвою, на всю ширину карти.
+function drawChronicleStrip(card: Card): HTMLCanvasElement {
+  const w = Math.round(state.chronicleWidthMm * PXMM);
+  const h = Math.round(card.heightMm * PXMM);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return cv;
+
+  // тимчасовий пергамент (замінимо шаблоном, коли знайдеться скан)
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#eee1c3');
+  g.addColorStop(1, '#ddcca4');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(110, 82, 45, 0.28)';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(6, 6, w - 12, h - 12);
+
+  ctx.textBaseline = 'alphabetic';
+
+  // назва (українською), як у стрічці назви на карті
+  const titleSize = card.bodySize + 10;
+  let sepY = 0;
+  if (card.titleUk) {
+    ctx.font = `${titleSize}px Monomakh`;
+    ctx.fillStyle = card.red;
+    const tw = ctx.measureText(card.titleUk).width;
+    const ty = h * 0.08 + titleSize * 0.8;
+    ctx.fillText(card.titleUk, (w - tw) / 2, ty);
+    sepY = ty + titleSize * 0.35;
+    // пунктирна лінія-роздільник, як на оригіналі
+    ctx.fillStyle = card.red;
+    ctx.globalAlpha = 0.65;
+    for (let x = w * 0.14; x < w * 0.86; x += 12) ctx.fillRect(x, sepY, 5, 4);
+    ctx.globalAlpha = 1;
+  }
+
+  // текст умови
+  const bodyStart = (sepY || h * 0.12) + card.bodySize * 1.25 + card.textY;
+  drawBodyLines(ctx, card, w, bodyStart);
+
+  // номер зліва внизу
   if (card.number) {
     ctx.font = '30px Monomakh';
     ctx.fillStyle = '#3c2d1e';
-    ctx.fillText(card.number, NUMBER_POS.x - CARD_X0, NUMBER_POS.y - stripTop + 24);
+    ctx.fillText(card.number, 44, h - 26);
   }
   return cv;
 }
@@ -400,7 +464,7 @@ function renderList(): void {
         const cap = document.createElement('div');
         cap.className = 'cap';
         const name = document.createElement('b');
-        name.textContent = c.name || c.trigger || 'без назви';
+        name.textContent = c.name || c.titleUk || c.trigger || 'без назви';
         const num = document.createElement('span');
         num.textContent = c.number;
         cap.append(name, num);
@@ -447,6 +511,7 @@ interface Bind {
 
 const binds: Bind[] = [
   { id: 'cName', kind: 'text', get: c => c.name ?? '', set: (c, _p, v) => { c.name = v; } },
+  { id: 'cTitle', kind: 'text', get: c => c.titleUk ?? '', set: (c, _p, v) => { c.titleUk = v; } },
   { id: 'cNumber', kind: 'text', get: c => c.number, set: (c, _p, v) => { c.number = v; } },
   { id: 'cTrigger', kind: 'text', get: c => c.trigger, set: (c, _p, v) => { c.trigger = v; } },
   { id: 'cBody', kind: 'text', get: c => c.body, set: (c, _p, v) => { c.body = v; } },
@@ -490,6 +555,11 @@ function syncControls(): void {
   el<HTMLSelectElement>('cDeck').value = c.deck;
   el<HTMLSelectElement>('pIconMode').value = p.iconMode;
   el<HTMLInputElement>('gWidth').value = String(state.cardWidthMm);
+  el<HTMLInputElement>('gWidthChron').value = String(state.chronicleWidthMm);
+  // Хроніки: є назва українською, нема рядка-тригера (і навпаки для Володінь)
+  const chron = c.deck === 'chronicle';
+  el<HTMLDivElement>('rowTitle').style.display = chron ? '' : 'none';
+  el<HTMLDivElement>('rowTrigger').style.display = chron ? 'none' : '';
 }
 
 function hookControls(): void {
@@ -505,10 +575,10 @@ function hookControls(): void {
       b.set(c, p, b.kind === 'check' ? String(input.checked) : input.value);
       const val = document.getElementById(b.id + 'Val');
       if (val) val.textContent = input.value;
-      if (b.id === 'cName' || b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') {
+      if (b.id === 'cName' || b.id === 'cTitle' || b.id === 'cNumber' || b.id === 'cBody' || b.id === 'cTrigger') {
         const img = thumbImgs.get(c.id);
         const cap = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap b`);
-        if (cap) cap.textContent = c.name || c.trigger || 'без назви';
+        if (cap) cap.textContent = c.name || c.titleUk || c.trigger || 'без назви';
         const num = document.querySelector(`.cardItem[data-card-id="${c.id}"] .cap span`);
         if (num) num.textContent = c.number;
         if (img) refreshThumbs('sel');
@@ -528,7 +598,7 @@ function hookControls(): void {
   el<HTMLSelectElement>('cDeck').addEventListener('change', e => {
     const c = selCard(); if (!c) return;
     c.deck = (e.target as HTMLSelectElement).value as Deck;
-    renderList(); syncControls(); save();
+    renderList(); syncControls(); requestRender(); save();
   });
 
   el<HTMLSelectElement>('pIconMode').addEventListener('change', e => {
@@ -541,6 +611,11 @@ function hookControls(): void {
   el<HTMLInputElement>('gWidth').addEventListener('change', e => {
     state.cardWidthMm = Number((e.target as HTMLInputElement).value) || 57;
     save();
+  });
+
+  el<HTMLInputElement>('gWidthChron').addEventListener('change', e => {
+    state.chronicleWidthMm = Number((e.target as HTMLInputElement).value) || 88;
+    renderList(); requestRender(); save();
   });
 
   el<HTMLButtonElement>('pIconUpload').onclick = () => el<HTMLInputElement>('pIconFile').click();
@@ -683,10 +758,23 @@ function exportPdf(): void {
   };
   ruler();
 
-  // на аркушах картки йдуть за розділами: спершу володарювання, потім хроніка
+  // на аркушах картки йдуть за розділами: спершу Володіння, потім Хроніки
   const ordered = (Object.keys(DECKS) as Deck[]).flatMap(d => state.cards.filter(c => c.deck === d));
   for (const card of ordered) {
     const cv = drawCardStrip(card);
+    if (card.deck === 'chronicle') {
+      // горизонтальна смужка — ширша за колонку, кладемо на всю ширину аркуша
+      const cw = state.chronicleWidthMm;
+      const hMm = card.heightMm;
+      let y = Math.max(colY[0], colY[1]);
+      if (y + hMm > 278) {
+        pdf.addPage(); colY[0] = 20; colY[1] = 20; y = 20; ruler();
+      }
+      pdf.addImage(cv.toDataURL('image/jpeg', 0.93), 'JPEG', margin, y, cw, hMm);
+      cut(margin, y, cw, hMm);
+      colY[0] = colY[1] = y + hMm + gapY;
+      continue;
+    }
     const hMm = card.heightMm * (wMm / 57);
     let col = colY[0] <= colY[1] ? 0 : 1;
     if (colY[col] + hMm > 278) {
