@@ -32,9 +32,18 @@ interface Preset {
   iconRound: boolean;
 }
 
+type Deck = 'lordship' | 'chronicle';
+
+// Розділи колоди у грі: Lordship cards і Chronicle cards.
+const DECKS: Record<Deck, string> = {
+  lordship: 'Карти володарювання',
+  chronicle: 'Карти хроніки',
+};
+
 interface Card {
   id: string;
   presetId: string;
+  deck: Deck;
   name: string;   // назва карти, як надрукована (англійською)
   number: string;
   trigger: string;
@@ -65,10 +74,10 @@ function defaultPreset(name: string, over: Partial<Preset> = {}): Preset {
   };
 }
 
-function defaultCard(presetId: string): Card {
+function defaultCard(presetId: string, deck: Deck = 'lordship'): Card {
   return {
     id: 'c' + Math.random().toString(36).slice(2, 9),
-    presetId, name: '', number: '', trigger: '', body: '',
+    presetId, deck, name: '', number: '', trigger: '', body: '',
     bodySize: 46, lineGap: 49, textY: 0, ink: '#2e1e14', red: '#7a1b16', heightMm: 42,
   };
 }
@@ -92,12 +101,20 @@ function initialState(): State {
 const LS_KEY = 'bretwalda-tool-v1';
 let state: State = loadState();
 
+// Старі збереження/набори без поля deck — вважаємо їх картами володарювання.
+function normalizeState(s: State): State {
+  for (const c of s.cards) {
+    if (c.deck !== 'lordship' && c.deck !== 'chronicle') c.deck = 'lordship';
+  }
+  return s;
+}
+
 function loadState(): State {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const s = JSON.parse(raw) as State;
-      if (s && s.version === 1 && Array.isArray(s.cards)) return s;
+      if (s && s.version === 1 && Array.isArray(s.cards)) return normalizeState(s);
     }
   } catch { /* зіпсоване збереження — стартуємо заново */ }
   return initialState();
@@ -356,35 +373,43 @@ function renderList(): void {
   const list = el<HTMLDivElement>('cardList');
   list.innerHTML = '';
   thumbImgs.clear();
-  for (const [pid, preset] of Object.entries(state.presets)) {
-    const cards = state.cards.filter(c => c.presetId === pid);
-    if (!cards.length) continue;
-    const title = document.createElement('div');
-    title.className = 'groupTitle';
-    title.textContent = preset.name + ' · ' + cards.length;
-    list.appendChild(title);
-    const grid = document.createElement('div');
-    grid.className = 'groupGrid';
-    for (const c of cards) {
-      const item = document.createElement('div');
-      item.className = 'cardItem' + (c.id === state.selId ? ' sel' : '');
-      item.dataset.cardId = c.id;
-      const img = document.createElement('img');
-      img.src = makeThumb(c);
-      img.alt = c.number;
-      thumbImgs.set(c.id, img);
-      const cap = document.createElement('div');
-      cap.className = 'cap';
-      const name = document.createElement('b');
-      name.textContent = c.name || c.trigger || 'без назви';
-      const num = document.createElement('span');
-      num.textContent = c.number;
-      cap.append(name, num);
-      item.append(img, cap);
-      item.onclick = () => { state.selId = c.id; markSelected(); syncControls(); requestRender(); save(); };
-      grid.appendChild(item);
+  for (const [deck, deckName] of Object.entries(DECKS) as [Deck, string][]) {
+    const deckCards = state.cards.filter(c => c.deck === deck);
+    if (!deckCards.length) continue;
+    const deckTitle = document.createElement('div');
+    deckTitle.className = 'deckTitle';
+    deckTitle.textContent = deckName + ' · ' + deckCards.length;
+    list.appendChild(deckTitle);
+    for (const [pid, preset] of Object.entries(state.presets)) {
+      const cards = deckCards.filter(c => c.presetId === pid);
+      if (!cards.length) continue;
+      const title = document.createElement('div');
+      title.className = 'groupTitle';
+      title.textContent = preset.name + ' · ' + cards.length;
+      list.appendChild(title);
+      const grid = document.createElement('div');
+      grid.className = 'groupGrid';
+      for (const c of cards) {
+        const item = document.createElement('div');
+        item.className = 'cardItem' + (c.id === state.selId ? ' sel' : '');
+        item.dataset.cardId = c.id;
+        const img = document.createElement('img');
+        img.src = makeThumb(c);
+        img.alt = c.number;
+        thumbImgs.set(c.id, img);
+        const cap = document.createElement('div');
+        cap.className = 'cap';
+        const name = document.createElement('b');
+        name.textContent = c.name || c.trigger || 'без назви';
+        const num = document.createElement('span');
+        num.textContent = c.number;
+        cap.append(name, num);
+        item.append(img, cap);
+        item.onclick = () => { state.selId = c.id; markSelected(); syncControls(); requestRender(); save(); };
+        grid.appendChild(item);
+      }
+      list.appendChild(grid);
     }
-    list.appendChild(grid);
   }
 }
 
@@ -462,6 +487,7 @@ function syncControls(): void {
     presetSel.appendChild(o);
   }
   presetSel.value = c.presetId;
+  el<HTMLSelectElement>('cDeck').value = c.deck;
   el<HTMLSelectElement>('pIconMode').value = p.iconMode;
   el<HTMLInputElement>('gWidth').value = String(state.cardWidthMm);
 }
@@ -499,6 +525,12 @@ function hookControls(): void {
     renderList(); syncControls(); requestRender(); save();
   });
 
+  el<HTMLSelectElement>('cDeck').addEventListener('change', e => {
+    const c = selCard(); if (!c) return;
+    c.deck = (e.target as HTMLSelectElement).value as Deck;
+    renderList(); syncControls(); save();
+  });
+
   el<HTMLSelectElement>('pIconMode').addEventListener('change', e => {
     const c = selCard(); if (!c) return;
     const p = state.presets[c.presetId]; if (!p) return;
@@ -527,7 +559,7 @@ function hookControls(): void {
 
   el<HTMLButtonElement>('addCard').onclick = () => {
     const cur = selCard();
-    const c = defaultCard(cur ? cur.presetId : 'base');
+    const c = defaultCard(cur ? cur.presetId : 'base', cur ? cur.deck : 'lordship');
     if (cur) { c.trigger = cur.trigger; c.heightMm = cur.heightMm; }
     state.cards.push(c); state.selId = c.id;
     renderList(); syncControls(); requestRender(); save();
@@ -586,7 +618,7 @@ function hookControls(): void {
 
 async function applyState(s: State): Promise<void> {
   if (!s || s.version !== 1 || !Array.isArray(s.cards)) throw new Error('не той формат');
-  state = s;
+  state = normalizeState(s);
   state.selId = state.cards[0]?.id ?? null;
   baseCache.clear();
   await preloadCustomIcons();
@@ -651,7 +683,9 @@ function exportPdf(): void {
   };
   ruler();
 
-  for (const card of state.cards) {
+  // на аркушах картки йдуть за розділами: спершу володарювання, потім хроніка
+  const ordered = (Object.keys(DECKS) as Deck[]).flatMap(d => state.cards.filter(c => c.deck === d));
+  for (const card of ordered) {
     const cv = drawCardStrip(card);
     const hMm = card.heightMm * (wMm / 57);
     let col = colY[0] <= colY[1] ? 0 : 1;
@@ -684,7 +718,7 @@ async function main(): Promise<void> {
   if (!localStorage.getItem(LS_KEY)) {
     try {
       const r = await fetch('./bretwalda/cards.json?cb=' + Date.now());
-      if (r.ok) state = await r.json() as State;
+      if (r.ok) state = normalizeState(await r.json() as State);
       if (state.cards.length) state.selId = state.cards[0].id;
     } catch { /* нема — лишаємо початковий */ }
   }

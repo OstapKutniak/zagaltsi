@@ -29,6 +29,8 @@
 
       #left { width: 380px; flex: 0 0 auto; }
       #cardList { display: flex; flex-direction: column; gap: 10px; }
+      .deckTitle { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 5px; margin-top: 6px; }
+      .deckTitle:first-child { margin-top: 0; }
       .groupTitle { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
       .groupGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       .cardItem { border-radius: 10px; background: #383838; cursor: pointer; overflow: hidden; border: 2px solid transparent; }
@@ -84,6 +86,12 @@
           <div class="sect">Картка</div>
           <div class="row"><label>Назва (як на карті)</label><input id="cName" style="width:170px" /></div>
           <div class="row"><label>Номер (напр. VK5)</label><input id="cNumber" style="width:110px" /></div>
+          <div class="row"><label>Розділ</label>
+            <select id="cDeck" style="width:170px">
+              <option value="lordship">Карти володарювання</option>
+              <option value="chronicle">Карти хроніки</option>
+            </select>
+          </div>
           <div class="row"><label>Доповнення</label>
             <select id="cPreset" style="width:170px"></select>
           </div>

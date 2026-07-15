@@ -63,6 +63,7 @@
   {
    "id": "b37-prayers-answered",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Prayers Answered",
    "number": "37",
    "trigger": "Будь-коли.",
@@ -77,6 +78,7 @@
   {
    "id": "b39-gods-grace",
    "presetId": "base",
+   "deck": "lordship",
    "name": "God's Grace",
    "number": "39",
    "trigger": "Фаза сезону.",
@@ -91,6 +93,7 @@
   {
    "id": "b40-fate-intervenes",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Fate Intervenes",
    "number": "40",
    "trigger": "Будь-коли.",
@@ -105,6 +108,7 @@
   {
    "id": "b41-lesson-learnt",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Lesson Learnt",
    "number": "41",
    "trigger": "У свій хід.",
@@ -119,6 +123,7 @@
   {
    "id": "b44-intrigue",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Intrigue",
    "number": "44",
    "trigger": "Фаза черговості.",
@@ -133,6 +138,7 @@
   {
    "id": "b49-ambush",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Ambush",
    "number": "49",
    "trigger": "Перед битвою.",
@@ -147,6 +153,7 @@
   {
    "id": "b50-reinforcements",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Reinforcements",
    "number": "50",
    "trigger": "Перед битвою.",
@@ -161,6 +168,7 @@
   {
    "id": "b51-evade",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Evade",
    "number": "51",
    "trigger": "Перед битвою.",
@@ -175,6 +183,7 @@
   {
    "id": "b52-flee-to-the-marshes",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Flee to the Marshes",
    "number": "52",
    "trigger": "Під час битви.",
@@ -189,6 +198,7 @@
   {
    "id": "b53-conversion",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Conversion",
    "number": "53",
    "trigger": "Після битви.",
@@ -203,6 +213,7 @@
   {
    "id": "b54-spy-behind-the-walls",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Spy Behind the Walls",
    "number": "54",
    "trigger": "Перед битвою.",
@@ -217,6 +228,7 @@
   {
    "id": "b55-skirmishers",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Skirmishers",
    "number": "55",
    "trigger": "У свій хід.",
@@ -231,6 +243,7 @@
   {
    "id": "b38-blind-luck",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Blind Luck",
    "number": "38",
    "trigger": "Будь-коли.",
@@ -245,6 +258,7 @@
   {
    "id": "b71-levy",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Levy",
    "number": "71",
    "trigger": "У свій хід.",
@@ -259,6 +273,7 @@
   {
    "id": "b82-caedmons-hymn",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Caedmon's Hymn",
    "number": "82",
    "trigger": "Перед битвою.",
@@ -273,6 +288,7 @@
   {
    "id": "b83-the-ruin-poem",
    "presetId": "base",
+   "deck": "lordship",
    "name": "The Ruin Poem",
    "number": "83",
    "trigger": "У свій хід.",
@@ -285,38 +301,84 @@
    "heightMm": 42
   },
   {
-   "id": "b59-arrival-of-the-saint", "presetId": "base", "name": "Arrival of the Saint", "number": "59",
+   "id": "b59-arrival-of-the-saint",
+   "presetId": "base",
+   "deck": "lordship",
+   "name": "Arrival of the Saint",
+   "number": "59",
    "trigger": "У свій хід.",
    "body": "Постав Абатство в Сільській\nмісцевості, яку ти контролюєш,\nбезкоштовно.",
-   "bodySize": 44, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+   "bodySize": 44,
+   "lineGap": 49,
+   "textY": 40,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
   },
   {
-   "id": "b60-old-sentiment", "presetId": "base", "name": "Old Sentiment", "number": "60",
+   "id": "b60-old-sentiment",
+   "presetId": "base",
+   "deck": "lordship",
+   "name": "Old Sentiment",
+   "number": "60",
    "trigger": "Фаза сезону.",
    "body": "Отримай +3 {монета}\nна початку Літа або Осені.",
-   "bodySize": 46, "lineGap": 50, "textY": 55, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+   "bodySize": 46,
+   "lineGap": 50,
+   "textY": 55,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
   },
   {
-   "id": "b79-deadly-precision", "presetId": "base", "name": "Deadly Precision", "number": "79",
+   "id": "b79-deadly-precision",
+   "presetId": "base",
+   "deck": "lordship",
+   "name": "Deadly Precision",
+   "number": "79",
    "trigger": "Перед битвою.",
    "body": "Обирай порядок, у якому рани\nрозподіляються між ворожими\nтипами підрозділів у кожному\nраунді битви.",
-   "bodySize": 43, "lineGap": 48, "textY": 15, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+   "bodySize": 43,
+   "lineGap": 48,
+   "textY": 15,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
   },
   {
-   "id": "b80-beowulfs-song", "presetId": "base", "name": "Beowulf's Song", "number": "80",
+   "id": "b80-beowulfs-song",
+   "presetId": "base",
+   "deck": "lordship",
+   "name": "Beowulf's Song",
+   "number": "80",
    "trigger": "Перед битвою.",
    "body": "Додай 1 {кубик} до своїх\nбойових кубів у першому\nраунді битви.",
-   "bodySize": 45, "lineGap": 50, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+   "bodySize": 45,
+   "lineGap": 50,
+   "textY": 40,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
   },
   {
-   "id": "b81-money-for-loyalty", "presetId": "base", "name": "Money for Loyalty", "number": "81",
+   "id": "b81-money-for-loyalty",
+   "presetId": "base",
+   "deck": "lordship",
+   "name": "Money for Loyalty",
+   "number": "81",
    "trigger": "У свій хід.",
    "body": "Сплати 3 {монета}, щоб замінити\nнейтрального тана таном зі свого\nзапасу. Тоді перемісти цього\nтана в найближчу область,\nяку ти контролюєш.",
-   "bodySize": 41, "lineGap": 46, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+   "bodySize": 41,
+   "lineGap": 46,
+   "textY": 0,
+   "ink": "#2e1e14",
+   "red": "#7a1b16",
+   "heightMm": 42
   },
   {
    "id": "b57-success-recognised",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Success Recognised",
    "number": "57",
    "trigger": "Після битви.",
@@ -331,6 +393,7 @@
   {
    "id": "b58-burwaran",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Burwaran",
    "number": "58",
    "trigger": "Перед битвою.",
@@ -345,6 +408,7 @@
   {
    "id": "b42-spoils-of-war",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Spoils of War",
    "number": "42",
    "trigger": "Після битви.",
@@ -359,6 +423,7 @@
   {
    "id": "b43-plunder",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Plunder",
    "number": "43",
    "trigger": "У свій хід.",
@@ -373,6 +438,7 @@
   {
    "id": "b66-ramming",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Ramming",
    "number": "66",
    "trigger": "Перед битвою.",
@@ -387,6 +453,7 @@
   {
    "id": "b67-raid",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Raid",
    "number": "67",
    "trigger": "У свій хід.",
@@ -401,6 +468,7 @@
   {
    "id": "b70-pledge-of-fealty",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Pledge of Fealty",
    "number": "70",
    "trigger": "Після битви.",
@@ -415,6 +483,7 @@
   {
    "id": "b72-wolf-pits",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Wolf Pits",
    "number": "72",
    "trigger": "Перед битвою.",
@@ -429,6 +498,7 @@
   {
    "id": "b73-battle-at-the-ford",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Battle at the Ford",
    "number": "73",
    "trigger": "Перед битвою.",
@@ -443,6 +513,7 @@
   {
    "id": "b74-roman-fortifications",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Roman Fortifications",
    "number": "74",
    "trigger": "Перед битвою.",
@@ -457,6 +528,7 @@
   {
    "id": "b75-witan-council",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Witan Council",
    "number": "75",
    "trigger": "У свій хід.",
@@ -471,6 +543,7 @@
   {
    "id": "b76-peasant-riot",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Peasant Riot",
    "number": "76",
    "trigger": "У свій хід.",
@@ -485,6 +558,7 @@
   {
    "id": "b77-treacherous-court",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Treacherous Court",
    "number": "77",
    "trigger": "У свій хід.",
@@ -499,6 +573,7 @@
   {
    "id": "b78-smugglers",
    "presetId": "base",
+   "deck": "lordship",
    "name": "Smugglers",
    "number": "78",
    "trigger": "У свій хід.",
@@ -513,6 +588,7 @@
   {
    "id": "vk5-treason",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Treason",
    "number": "VK5",
    "trigger": "Перед битвою.",
@@ -527,6 +603,7 @@
   {
    "id": "vk6-bribe",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Bribe",
    "number": "VK6",
    "trigger": "Перед битвою.",
@@ -541,6 +618,7 @@
   {
    "id": "vk8-arsonists",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Arsonists",
    "number": "VK8",
    "trigger": "У свій хід.",
@@ -555,6 +633,7 @@
   {
    "id": "vk9-knowledge-sharing",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Knowledge Sharing",
    "number": "VK9",
    "trigger": "У свій хід.",
@@ -569,6 +648,7 @@
   {
    "id": "vk10-local-guides",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Local Guides",
    "number": "VK10",
    "trigger": "У свій хід.",
@@ -583,6 +663,7 @@
   {
    "id": "vk11-swords-to-ploughshares",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Swords to Ploughshares",
    "number": "VK11",
    "trigger": "У свій хід.",
@@ -597,6 +678,7 @@
   {
    "id": "vk12-sleeping-sentries",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Sleeping Sentries",
    "number": "VK12",
    "trigger": "У свій хід.",
@@ -611,6 +693,7 @@
   {
    "id": "vk13-collusion",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Collusion",
    "number": "VK13",
    "trigger": "У свій хід.",
@@ -625,6 +708,7 @@
   {
    "id": "vk14-storm",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Storm",
    "number": "VK14",
    "trigger": "Фаза сезону.",
@@ -639,6 +723,7 @@
   {
    "id": "vk15-glory-to-the-fallen",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "Glory to the Fallen",
    "number": "VK15",
    "trigger": "Після битви.",
@@ -653,6 +738,7 @@
   {
    "id": "vk16-war-tax",
    "presetId": "vk",
+   "deck": "lordship",
    "name": "War Tax",
    "number": "VK16",
    "trigger": "У свій хід.",
