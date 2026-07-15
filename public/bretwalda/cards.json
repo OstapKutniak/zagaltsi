@@ -285,6 +285,36 @@
    "heightMm": 42
   },
   {
+   "id": "b59-arrival-of-the-saint", "presetId": "base", "name": "Arrival of the Saint", "number": "59",
+   "trigger": "У свій хід.",
+   "body": "Постав Абатство в Сільській\nмісцевості, яку ти контролюєш,\nбезкоштовно.",
+   "bodySize": 44, "lineGap": 49, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b60-old-sentiment", "presetId": "base", "name": "Old Sentiment", "number": "60",
+   "trigger": "Фаза сезону.",
+   "body": "Отримай +3 {монета}\nна початку Літа або Осені.",
+   "bodySize": 46, "lineGap": 50, "textY": 55, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b79-deadly-precision", "presetId": "base", "name": "Deadly Precision", "number": "79",
+   "trigger": "Перед битвою.",
+   "body": "Обирай порядок, у якому рани\nрозподіляються між ворожими\nтипами підрозділів у кожному\nраунді битви.",
+   "bodySize": 43, "lineGap": 48, "textY": 15, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b80-beowulfs-song", "presetId": "base", "name": "Beowulf's Song", "number": "80",
+   "trigger": "Перед битвою.",
+   "body": "Додай 1 {кубик} до своїх\nбойових кубів у першому\nраунді битви.",
+   "bodySize": 45, "lineGap": 50, "textY": 40, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
+   "id": "b81-money-for-loyalty", "presetId": "base", "name": "Money for Loyalty", "number": "81",
+   "trigger": "У свій хід.",
+   "body": "Сплати 3 {монета}, щоб замінити\nнейтрального тана таном зі свого\nзапасу. Тоді перемісти цього\nтана в найближчу область,\nяку ти контролюєш.",
+   "bodySize": 41, "lineGap": 46, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
+  },
+  {
    "id": "b57-success-recognised",
    "presetId": "base",
    "name": "Success Recognised",
