@@ -103,12 +103,6 @@
    "trigger": "Після битви.",
    "body": "Якщо ти програв битву,\nвізьми +2 карти Володінь.",
    "bodySize": 46, "lineGap": 50, "textY": 55, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
-  },
-  {
-   "id": "d33-boar", "presetId": "danelag", "name": "Boar Formation", "number": "D33",
-   "trigger": "Перед битвою.",
-   "body": "Якщо ти нападник\nу Сільській місцевості,\nу першому раунді битви\nвважай грані {кубик} на своїх\nбойових кубах за {меч}.",
-   "bodySize": 44, "lineGap": 48, "textY": 0, "ink": "#2e1e14", "red": "#7a1b16", "heightMm": 42
   }
  ],
  "selId": "b37-prayers-answered"
