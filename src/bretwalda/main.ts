@@ -35,10 +35,11 @@ interface Preset {
 type Deck = 'lordship' | 'chronicle';
 
 // Розділи колоди у грі: Lordship cards і Chronicle cards.
-// Назви узгоджені з текстами перекладених карток («карти Володінь», «колода Хронік»).
+// «Карти Влади» — як в українському перекладі правил із BGG, щоб вкладиші
+// говорили однією мовою з правилами, які читатимуть гравці.
 const DECKS: Record<Deck, string> = {
-  lordship: 'Карти володінь',
-  chronicle: 'Карти хроніки',
+  lordship: 'Карти Влади',
+  chronicle: 'Карти Хроніки',
 };
 
 interface Card {
@@ -60,7 +61,7 @@ interface Card {
 
 interface State {
   version: 1;
-  cardWidthMm: number;          // ширина вертикальних карт (Володіння), мм
+  cardWidthMm: number;          // ширина вертикальних карт (Влада), мм
   chronicleWidthMm: number;     // ширина горизонтальних карт Хроніки, мм
   presets: Record<string, Preset>;
   cards: Card[];
@@ -104,7 +105,7 @@ function initialState(): State {
 const LS_KEY = 'bretwalda-tool-v1';
 let state: State = loadState();
 
-// Старі збереження/набори: без поля deck — це карти Володінь, без нових полів — типові значення.
+// Старі збереження/набори: без поля deck — це карти Влади, без нових полів — типові значення.
 function normalizeState(s: State): State {
   if (!s.chronicleWidthMm) s.chronicleWidthMm = 88;
   for (const c of s.cards) {
@@ -556,7 +557,7 @@ function syncControls(): void {
   el<HTMLSelectElement>('pIconMode').value = p.iconMode;
   el<HTMLInputElement>('gWidth').value = String(state.cardWidthMm);
   el<HTMLInputElement>('gWidthChron').value = String(state.chronicleWidthMm);
-  // Хроніки: є назва українською, нема рядка-тригера (і навпаки для Володінь)
+  // Хроніки: є назва українською, нема рядка-тригера (і навпаки для карт Влади)
   const chron = c.deck === 'chronicle';
   el<HTMLDivElement>('rowTitle').style.display = chron ? '' : 'none';
   el<HTMLDivElement>('rowTrigger').style.display = chron ? 'none' : '';
@@ -758,7 +759,7 @@ function exportPdf(): void {
   };
   ruler();
 
-  // на аркушах картки йдуть за розділами: спершу Володіння, потім Хроніки
+  // на аркушах картки йдуть за розділами: спершу Влада, потім Хроніки
   const ordered = (Object.keys(DECKS) as Deck[]).flatMap(d => state.cards.filter(c => c.deck === d));
   for (const card of ordered) {
     const cv = drawCardStrip(card);
