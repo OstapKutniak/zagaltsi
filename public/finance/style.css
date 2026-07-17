@@ -217,6 +217,7 @@ html, body {
 .aab { background: #f4f4f6; border: none; border-radius: 14px; padding: 16px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text); text-align: center; }
 .aab:active { background: #e0e0e8; }
 .aab-wide { grid-column: 1 / -1; }
+.mas-remove { color: var(--exp); }
 
 /* ── CATEGORY DETAIL SHEET ── */
 .cas-sheet { max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }

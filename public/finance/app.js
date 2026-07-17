@@ -988,12 +988,47 @@ function renderRecurring() {
       </div>
       <button class="mon-add" id="mon-add">+</button>
     </div>`;
+  // Короткий тап — редагування; затискання — шит «Прибрати зі списку»
   el.querySelectorAll('.mon-item').forEach(it => {
-    it.onclick = e => { if (e.target.closest('.mon-check')) return; openRecurringForm({ id: it.dataset.id, ...recurringMap[it.dataset.id] }); };
+    let lpTimer = null, lpFired = false;
+    const startLP = e => {
+      if (e.target.closest('.mon-check')) return;
+      lpFired = false;
+      lpTimer = setTimeout(() => { lpFired = true; openMonAction(it.dataset.id); }, 500);
+    };
+    const cancelLP = () => clearTimeout(lpTimer);
+    it.addEventListener('touchstart', startLP, { passive: true });
+    it.addEventListener('touchend', cancelLP, { passive: true });
+    it.addEventListener('touchmove', cancelLP, { passive: true });
+    it.addEventListener('mousedown', startLP);
+    it.addEventListener('mouseup', cancelLP);
+    it.addEventListener('mouseleave', cancelLP);
+    it.onclick = e => {
+      if (e.target.closest('.mon-check')) return;
+      if (lpFired) { lpFired = false; return; }
+      openRecurringForm({ id: it.dataset.id, ...recurringMap[it.dataset.id] });
+    };
   });
   el.querySelectorAll('.mon-check').forEach(b => { b.onclick = async e => { e.stopPropagation(); await payRecurring(b.dataset.check); }; });
   document.getElementById('mon-add').onclick = () => openRecurringForm();
 }
+// Шит «Прибрати зі списку»: видаляє тільки запис із finance/recurring —
+// проведені операції у finance/transactions не чіпає.
+let monActionCurrent = null;
+function openMonAction(id) {
+  const r = recurringMap[id]; if (!r) return;
+  monActionCurrent = id;
+  const st = catStyle(r.category);
+  const ic = document.getElementById('mas-ic');
+  ic.style.background = st.color;
+  ic.innerHTML = st.icon;
+  document.getElementById('mas-name').textContent = r.category;
+  const amt = document.getElementById('mas-amt');
+  amt.innerHTML = `${r.type === 'income' ? '+' : '−'}${fmt(r.amount)} <span>UAH</span> · щомісяця ${r.day}-го`;
+  amt.style.color = r.type === 'income' ? 'var(--inc)' : 'var(--exp)';
+  document.getElementById('mon-action-overlay').classList.add('open');
+}
+
 async function payRecurring(id) {
   const r = recurringMap[id]; if (!r) return;
   if (viewedMonthPast()) return; // минулі місяці вже показані як оплачені
@@ -1720,6 +1755,18 @@ function bindEvents() {
   // Category detail sheet
   document.getElementById('cat-action-overlay').onclick = e => { if (e.target.id === 'cat-action-overlay') closeCatSheet(); };
   document.getElementById('cas-close').onclick = closeCatSheet;
+
+  // Recurring item action sheet
+  document.getElementById('mon-action-overlay').onclick = e => { if (e.target.id === 'mon-action-overlay') e.currentTarget.classList.remove('open'); };
+  document.getElementById('mas-remove').onclick = async () => {
+    document.getElementById('mon-action-overlay').classList.remove('open');
+    if (!monActionCurrent) return;
+    try {
+      await remove(ref(db, `${REC_PATH}/${monActionCurrent}`));
+      toast('Прибрано зі списку');
+    } catch (e) { toast('Помилка: ' + e.message); }
+    monActionCurrent = null;
+  };
 }
 
 function shift(d) {
