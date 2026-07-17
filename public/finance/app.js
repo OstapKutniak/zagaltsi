@@ -135,7 +135,7 @@ let accountsList = [];
 let recurringMap = {};
 let catMeta = { icons: {}, subs: {}, colors: {}, archived: {}, cats: {} };
 let selectedAccounts = null;
-let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date(), catShowPct: false, showArchived: false };
+let state = { tab: 'categories', catDir: 'expense', ovDir: 'expense', period: 'month', cursor: new Date(), catShowPct: false, showArchived: false, monFilter: null };
 let catsByDir = { expense: [], income: [] };
 let catsParent = { expense: [], income: [] };
 let subsByDir = { expense: new Map(), income: new Map() };
@@ -950,9 +950,21 @@ function viewedMonthPast() {
   const c = state.cursor, now = new Date();
   return new Date(c.getFullYear(), c.getMonth(), 1) < new Date(now.getFullYear(), now.getMonth(), 1);
 }
+// Затиск на кружечку пункту вмикає фільтр по його батьківській категорії
+// (список і підсумки рахують тільки її); повторний затиск — знімає.
+function toggleMonFilter(id) {
+  const r = recurringMap[id]; if (!r) return;
+  const p = parentCat(r.category);
+  state.monFilter = state.monFilter === p ? null : p;
+  renderRecurring();
+}
 function renderRecurring() {
   const el = document.getElementById('rec-mon-list');
-  const items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r })).sort((a, b) => a.day - b.day);
+  let items = Object.entries(recurringMap).map(([id, r]) => ({ id, ...r })).sort((a, b) => a.day - b.day);
+  if (state.monFilter) {
+    const f = items.filter(r => parentCat(r.category) === state.monFilter);
+    if (f.length) items = f; else state.monFilter = null;
+  }
   const c = state.cursor, mk = monthKey(c), dim = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
   const isPast = viewedMonthPast();
   let allExp = 0, remExp = 0, remNet = 0;
@@ -978,8 +990,11 @@ function renderRecurring() {
   const listHTML = items.length ? `<div class="mon-list">${rows}</div>`
     : `<div class="empty" style="padding:60px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M12 12.5v3l2 1"/></svg></div>Немає щомісячних операцій.<br>Тисни + щоб додати.</div>`;
   const expected = generalTotal() + remNet;
+  const chip = state.monFilter
+    ? `<button class="mon-filter-chip" id="mon-filter-chip"><span class="dot" style="background:${catStyle(state.monFilter).color}"></span>${esc(state.monFilter)}<span class="x">✕</span></button>`
+    : '';
   el.innerHTML = `
-    <div class="mon-scroll">${listHTML}</div>
+    <div class="mon-scroll">${chip}${listHTML}</div>
     <div class="mon-panel">
       <div class="mon-panel-nums">
         <div class="mp-row"><span>Разом щомісячне</span><span style="color:var(--exp)">−${fmt(allExp)} UAH</span></div>
@@ -1008,9 +1023,27 @@ function renderRecurring() {
       if (lpFired) { lpFired = false; return; }
       openRecurringForm({ id: it.dataset.id, ...recurringMap[it.dataset.id] });
     };
+    // Затиск на кружечку — фільтр категорії (перехоплює затиск пункту)
+    const icEl = it.querySelector('.mon-ic');
+    let icTimer = null, icFired = false;
+    const icStart = e => {
+      e.stopPropagation();
+      icFired = false;
+      icTimer = setTimeout(() => { icFired = true; toggleMonFilter(it.dataset.id); }, 500);
+    };
+    const icCancel = () => clearTimeout(icTimer);
+    icEl.addEventListener('touchstart', icStart, { passive: true });
+    icEl.addEventListener('touchend', icCancel, { passive: true });
+    icEl.addEventListener('touchmove', icCancel, { passive: true });
+    icEl.addEventListener('mousedown', icStart);
+    icEl.addEventListener('mouseup', icCancel);
+    icEl.addEventListener('mouseleave', icCancel);
+    icEl.addEventListener('click', e => { if (icFired) { icFired = false; e.stopPropagation(); } });
   });
   el.querySelectorAll('.mon-check').forEach(b => { b.onclick = async e => { e.stopPropagation(); await payRecurring(b.dataset.check); }; });
   document.getElementById('mon-add').onclick = () => openRecurringForm();
+  const chipEl = document.getElementById('mon-filter-chip');
+  if (chipEl) chipEl.onclick = () => { state.monFilter = null; renderRecurring(); };
 }
 // Шит «Прибрати зі списку»: видаляє тільки запис із finance/recurring —
 // проведені операції у finance/transactions не чіпає.
