@@ -449,3 +449,90 @@ html, body {
 .empty { text-align: center; padding: 70px 30px; color: var(--text2); font-size: 15px; line-height: 1.5; }
 .empty svg { width: 46px; height: 46px; fill: none; stroke: var(--text3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 12px; }
 .empty .fill { fill: var(--text3); stroke: none; }
+
+/* ── РЕЦЕПТИ ── */
+.rcp-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px 14px;
+  padding: 16px 16px calc(var(--bottom) + 100px);
+}
+.rcp-card { background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; padding: 0; }
+.rcp-circle {
+  position: relative; width: 100%; aspect-ratio: 1; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--c) 14%, #fff);
+  border: 2px solid color-mix(in srgb, var(--c) 38%, #fff);
+}
+.rcp-circle img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.rcp-circle-ic svg { width: 44%; height: 44%; fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.rcp-card-title { margin-top: 9px; font-size: 14.5px; font-weight: 700; color: var(--text); text-align: center; line-height: 1.25; }
+.rcp-card-time { margin-top: 2px; font-size: 12.5px; color: var(--text2); }
+
+/* деталі рецепту — повноекранна шторка */
+.rcp-overlay {
+  position: fixed; inset: 0; z-index: 300; background: var(--bg);
+  transform: translateY(100%); transition: transform 0.34s cubic-bezier(0.25,0.46,0.45,0.94);
+  overflow: hidden;
+}
+.rcp-overlay.open { transform: translateY(0); }
+.rcp-sheet { height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(var(--bottom) + 92px); }
+.rcp-sheet::-webkit-scrollbar { display: none; }
+.rcp-back {
+  position: sticky; top: 0; z-index: 2; width: 100%; text-align: left;
+  background: var(--bg); border: none; border-bottom: 1px solid var(--line);
+  padding: calc(var(--top) + 12px) 16px 12px; font-size: 15px; font-weight: 600; color: var(--active-ink); cursor: pointer;
+}
+.rcp-hero { display: flex; flex-direction: column; align-items: center; padding: 20px 20px 6px; text-align: center; }
+.rcp-hero-circle {
+  position: relative; width: 168px; height: 168px; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--c) 14%, #fff);
+  border: 2px solid color-mix(in srgb, var(--c) 38%, #fff);
+}
+.rcp-hero-circle img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.rcp-hero-title { margin-top: 14px; font-size: 23px; font-weight: 800; color: var(--text); }
+.rcp-hero-meta { margin-top: 4px; font-size: 13.5px; color: var(--text2); }
+.rcp-hero-cost { margin-top: 8px; font-size: 18px; font-weight: 800; color: var(--text); }
+.rcp-ing-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 6px; font-size: 15px; font-weight: 700; color: var(--text); }
+.rcp-addall { background: var(--active); color: var(--active-ink); border: none; border-radius: 100px; padding: 8px 16px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.rcp-addall:active { opacity: 0.7; }
+.rcp-ings { padding: 4px 0 8px; }
+.rcp-ing { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: none; border-bottom: 1px solid var(--line); padding: 11px 18px; cursor: pointer; text-align: left; }
+.rcp-ing-ic { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--c) 16%, #fff); }
+.rcp-ing-ic svg { width: 19px; height: 19px; fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.rcp-ing-name { flex: 1; font-size: 15px; font-weight: 600; color: var(--text); }
+.rcp-ing-qty { display: block; font-size: 12.5px; font-weight: 500; color: var(--text2); margin-top: 1px; }
+.rcp-ing-add { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line); color: var(--text2); display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; }
+.rcp-ing.added .rcp-ing-add { background: var(--done); border-color: var(--done); color: #fff; }
+.rcp-ing.added .rcp-ing-name { color: var(--text2); }
+.rcp-cook-btn {
+  position: fixed; left: 16px; right: 16px; bottom: calc(var(--bottom) + 16px); z-index: 3;
+  background: var(--active-ink); color: #fff; border: none; border-radius: 16px;
+  padding: 16px; font-size: 16px; font-weight: 800; cursor: pointer; box-shadow: 0 6px 20px rgba(106,90,224,0.35);
+}
+.rcp-overlay:not(.open) .rcp-cook-btn { display: none; }
+.rcp-cook-btn:active { opacity: 0.85; }
+
+/* режим «Приготувати» */
+.cook-overlay {
+  position: fixed; inset: 0; z-index: 400; background: var(--bg); display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform 0.34s cubic-bezier(0.25,0.46,0.45,0.94);
+}
+.cook-overlay.open { transform: translateY(0); }
+.cook-top { display: flex; align-items: center; gap: 14px; padding: calc(var(--top) + 12px) 16px 10px; border-bottom: 1px solid var(--line); }
+.cook-close { background: none; border: none; font-size: 22px; color: var(--text2); cursor: pointer; line-height: 1; padding: 0 4px; }
+.cook-progress { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+.cook-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); transition: all 0.2s; }
+.cook-dot.done { background: var(--done); }
+.cook-dot.cur { background: var(--active-ink); width: 22px; border-radius: 4px; }
+.cook-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 30px 26px calc(var(--bottom) + 40px); gap: 22px; }
+.cook-step-n { font-size: 14px; font-weight: 700; color: var(--text2); letter-spacing: 0.03em; }
+.cook-step-text { font-size: 21px; font-weight: 600; line-height: 1.45; color: var(--text); max-width: 460px; }
+.cook-act { border: none; border-radius: 16px; padding: 16px 30px; font-size: 17px; font-weight: 800; cursor: pointer; min-width: 200px; }
+.cook-check { background: var(--active-ink); color: #fff; }
+.cook-timer-btn { background: var(--active); color: var(--active-ink); }
+.cook-stop { background: none; border: 1.5px solid var(--danger); color: var(--danger); }
+.cook-act:active { opacity: 0.85; }
+.cook-timer { font-size: 52px; font-weight: 800; color: var(--active-ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.cook-prev { background: none; border: none; color: var(--text2); font-size: 14.5px; font-weight: 600; cursor: pointer; }
+.cook-done { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.cook-done-t { font-size: 24px; font-weight: 800; color: var(--text); }

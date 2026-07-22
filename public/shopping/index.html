@@ -58,6 +58,11 @@
     <div class="screen" id="archive-screen">
       <div class="arch-wrap" id="arch-wrap"></div>
     </div>
+
+    <!-- RECIPES -->
+    <div class="screen" id="recipes-screen">
+      <div class="rcp-grid" id="rcp-grid"></div>
+    </div>
   </div>
 
   <!-- PRICE PANEL (порівняння цін, лише на вкладці «Список») -->
@@ -82,6 +87,10 @@
     <button class="tab" data-tab="archive">
       <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></span>
       Архів
+    </button>
+    <button class="tab" data-tab="recipes">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M5 3h9a3 3 0 013 3v15H8a3 3 0 01-3-3z"/><path d="M17 8h1a2 2 0 012 2v3a2 2 0 01-2 2h-1"/><path d="M8 7h6M8 11h6"/></svg></span>
+      Рецепти
     </button>
   </div>
 
@@ -214,6 +223,34 @@
       <input class="sheet-search" id="storepick-search" type="text" placeholder="Пошук за містом чи адресою…">
       <div class="sheet-list" id="storepick-list"></div>
     </div>
+  </div>
+
+  <!-- RECIPE DETAIL (повноекранна шторка) -->
+  <div class="rcp-overlay" id="recipe-overlay">
+    <div class="rcp-sheet">
+      <button class="rcp-back" id="recipe-back">‹ Рецепти</button>
+      <div class="rcp-hero">
+        <div class="rcp-hero-circle" id="recipe-hero"></div>
+        <div class="rcp-hero-title" id="recipe-title"></div>
+        <div class="rcp-hero-meta" id="recipe-meta"></div>
+        <div class="rcp-hero-cost" id="recipe-cost">≈ —</div>
+      </div>
+      <div class="rcp-ing-head">
+        <span>Інгредієнти</span>
+        <button class="rcp-addall" id="recipe-addall">Додати всі</button>
+      </div>
+      <div class="rcp-ings" id="recipe-ings"></div>
+      <button class="rcp-cook-btn" id="recipe-cook">Приготувати</button>
+    </div>
+  </div>
+
+  <!-- COOK MODE (повноекранний покроковий режим) -->
+  <div class="cook-overlay" id="cook-overlay">
+    <div class="cook-top">
+      <button class="cook-close" id="cook-close">✕</button>
+      <div class="cook-progress" id="cook-progress"></div>
+    </div>
+    <div class="cook-body" id="cook-body"></div>
   </div>
 
   <div class="toast" id="toast"></div>
