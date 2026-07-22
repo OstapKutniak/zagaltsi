@@ -451,23 +451,24 @@ html, body {
 .empty .fill { fill: var(--text3); stroke: none; }
 
 /* ── РЕЦЕПТИ: вертикальний барабан страв ── */
-#recipes-screen { scroll-snap-type: y proximity; }
-.rcp-grid { display: flex; flex-direction: column; gap: 14px; padding: 42vh 20px 42vh; }
+#recipes-screen { scroll-snap-type: y proximity; overflow-x: hidden; }
+.rcp-grid { display: flex; flex-direction: column; gap: 12px; padding: 40vh 16px 40vh; }
 .rcp-row {
   scroll-snap-align: center;
-  display: flex; align-items: center; gap: 16px; width: 100%; text-align: left;
-  background: none; border: none; cursor: pointer; padding: 4px;
-  transform-origin: center center; transition: opacity 0.12s linear; will-change: transform;
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer; padding: 2px 0;
+  /* масштаб від лівого краю: кружечок стоїть на місці, нема горизонтального руху */
+  transform-origin: left center; transition: opacity 0.12s linear; will-change: transform;
 }
 .rcp-row-circle {
-  position: relative; width: 66px; height: 66px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
+  position: relative; width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--c) 14%, #fff);
   border: 2px solid color-mix(in srgb, var(--c) 38%, #fff);
 }
 .rcp-row-circle img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-.rcp-row-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.rcp-row-title { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.15; }
+.rcp-row-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rcp-row-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.15; white-space: nowrap; }
 .rcp-row-time { font-size: 13px; color: var(--text2); }
 /* спільна іконка-заглушка кружечка (барабан + шторка) */
 .rcp-circle-ic svg { width: 46%; height: 46%; fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 25; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 26; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1574,9 +1574,10 @@ function updateRcpScale() {
   const mid = screen.scrollTop + screen.clientHeight / 2;
   rows.forEach(row => {
     const rc = row.offsetTop + row.offsetHeight / 2;
-    const t = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.42));
-    row.style.transform = `scale(${(1 + 0.42 * t).toFixed(3)})`;
-    row.style.opacity = (0.4 + 0.6 * t).toFixed(3);
+    const t = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.5));
+    // центр — найбільший, що далі — то помітно менший (0.68 на краю → 1.45 у центрі)
+    row.style.transform = `scale(${(0.68 + 0.77 * t).toFixed(3)})`;
+    row.style.opacity = (0.3 + 0.7 * t).toFixed(3);
     row.style.zIndex = Math.round(t * 100);
   });
 }
