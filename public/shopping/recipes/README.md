@@ -14,3 +14,11 @@
 | burger.jpg | Домашній бургер |
 | shakshuka.jpg | Шакшука |
 | quinoabowl.jpg | Боул з кіноа |
+| ramen.jpg | Рамен |
+| pizza.jpg | Піца Маргарита |
+| caesar.jpg | Цезар з куркою |
+| pancakes.jpg | Панкейки |
+| salmon.jpg | Лосось на грилі |
+| tacos.jpg | Тако з яловичиною |
+| risotto.jpg | Ризото з грибами |
+| hummus.jpg | Хумус |

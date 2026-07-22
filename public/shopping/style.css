@@ -452,7 +452,7 @@ html, body {
 
 /* ── РЕЦЕПТИ: вертикальний барабан страв ── */
 #recipes-screen { scroll-snap-type: y proximity; overflow-x: hidden; }
-.rcp-grid { display: flex; flex-direction: column; gap: 12px; padding: 40vh 16px 40vh; }
+.rcp-grid { display: flex; flex-direction: column; gap: 12px; padding: 10px 16px calc(var(--bottom) + 90px); }
 .rcp-row {
   scroll-snap-align: center;
   display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;

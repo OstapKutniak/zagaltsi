@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 26; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 27; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -292,6 +292,142 @@ const RECIPES = [
       { short: 'Нарізка', text: 'Наріжте авокадо, огірок і чері.' },
       { short: 'Збірка', text: 'Викладіть у миску кіноа, нут і овочі секторами.' },
       { short: 'Заправка', text: 'Заправте олією з лимонним соком, приправте сіллю.' },
+    ],
+  },
+  {
+    id: 'ramen', title: 'Рамен', color: '#F2994A', icon: 'bowl', time: 40, servings: 2,
+    ingredients: [
+      { name: 'Локшина рамен', qty: '200 г', icon: 'pasta' },
+      { name: 'Курячий бульйон', qty: '1 л', icon: 'jar' },
+      { name: 'Яйця', qty: '2 шт', icon: 'egg' },
+      { name: 'Куряче філе', qty: '200 г', icon: 'chicken' },
+      { name: 'Соєвий соус', qty: '3 ст. л.', icon: 'sauce' },
+      { name: 'Зелена цибуля', qty: '1 пучок', icon: 'onion' },
+      { name: 'Гриби', qty: '100 г', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Бульйон', text: 'Прогрійте курячий бульйон із соєвим соусом.' },
+      { short: 'Яйця', text: 'Відваріть яйця некруто й почистіть.', t: 7 },
+      { short: 'Курка', text: 'Обсмажте куряче філе й наріжте смужками.' },
+      { short: 'Локшина', text: 'Відваріть локшину рамен.', t: 4 },
+      { short: 'Збірка', text: 'Викладіть локшину, залийте бульйоном, додайте курку, яйце, гриби й цибулю.' },
+    ],
+  },
+  {
+    id: 'pizza', title: 'Піца Маргарита', color: '#EB5757', icon: 'bread', time: 40, servings: 2,
+    ingredients: [
+      { name: 'Тісто для піци', qty: '1 шт', icon: 'sack' },
+      { name: 'Томатний соус', qty: '100 г', icon: 'sauce' },
+      { name: 'Моцарела', qty: '150 г', icon: 'cheese' },
+      { name: 'Помідори', qty: '2 шт', icon: 'tomato' },
+      { name: 'Базилік', qty: 'кілька листків', icon: 'tag' },
+      { name: 'Оливкова олія', qty: '1 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Основа', text: 'Розкачайте тісто в тонкий круг.' },
+      { short: 'Соус', text: 'Змастіть томатним соусом, лишивши бортик.' },
+      { short: 'Сир', text: 'Викладіть моцарелу й скибочки помідорів.' },
+      { short: 'Випікання', text: 'Випікайте в добре розігрітій духовці до рум\'яності.', t: 15 },
+      { short: 'Подача', text: 'Прикрасьте базиліком і збризніть олією.' },
+    ],
+  },
+  {
+    id: 'caesar', title: 'Цезар з куркою', color: '#27AE60', icon: 'chicken', time: 25, servings: 2,
+    ingredients: [
+      { name: 'Куряче філе', qty: '300 г', icon: 'chicken' },
+      { name: 'Салат ромен', qty: '1 шт', icon: 'tag' },
+      { name: 'Пармезан', qty: '50 г', icon: 'cheese' },
+      { name: 'Сухарики', qty: '100 г', icon: 'bread' },
+      { name: 'Соус цезар', qty: '4 ст. л.', icon: 'sauce' },
+      { name: 'Помідори чері', qty: '100 г', icon: 'tomato' },
+    ],
+    steps: [
+      { short: 'Курка', text: 'Обсмажте філе до готовності й наріжте.', t: 10 },
+      { short: 'Салат', text: 'Наріжте ромен великими шматками.' },
+      { short: 'Змішати', text: 'З\'єднайте салат із соусом, куркою, чері й сухариками.' },
+      { short: 'Подача', text: 'Притрусіть тертим пармезаном.' },
+    ],
+  },
+  {
+    id: 'pancakes', title: 'Панкейки', color: '#F2C94C', icon: 'cookie', time: 20, servings: 2,
+    ingredients: [
+      { name: 'Борошно', qty: '200 г', icon: 'sack' },
+      { name: 'Молоко', qty: '250 мл', icon: 'milk' },
+      { name: 'Яйця', qty: '2 шт', icon: 'egg' },
+      { name: 'Цукор', qty: '2 ст. л.', icon: 'sugar' },
+      { name: 'Розпушувач', qty: '1 ч. л.', icon: 'tag' },
+      { name: 'Масло', qty: 'для подачі', icon: 'butter' },
+    ],
+    steps: [
+      { short: 'Тісто', text: 'Змішайте борошно, молоко, яйця, цукор і розпушувач до гладкості.' },
+      { short: 'Смаження', text: 'Смажте невеликі млинці на сухій сковороді до бульбашок.', t: 8 },
+      { short: 'Подача', text: 'Подавайте стосом із маслом і сиропом.' },
+    ],
+  },
+  {
+    id: 'salmon', title: 'Лосось на грилі', color: '#EB5C8B', icon: 'fish', time: 25, servings: 2,
+    ingredients: [
+      { name: 'Стейк лосося', qty: '2 шт', icon: 'fish' },
+      { name: 'Лимон', qty: '1 шт', icon: 'tag' },
+      { name: 'Оливкова олія', qty: '2 ст. л.', icon: 'oil' },
+      { name: 'Часник', qty: '2 зубчики', icon: 'garlic' },
+      { name: 'Спаржа', qty: '200 г', icon: 'tag' },
+      { name: 'Сіль і перець', qty: 'до смаку', icon: 'salt' },
+    ],
+    steps: [
+      { short: 'Маринад', text: 'Збризніть лосось олією й лимоном, натріть часником, посоліть.' },
+      { short: 'Гриль', text: 'Обсмажте лосось на грилі по 4 хв з боку.', t: 8 },
+      { short: 'Спаржа', text: 'Підсмажте спаржу до м\'якості.', t: 5 },
+      { short: 'Подача', text: 'Подавайте лосось зі спаржею й часточкою лимона.' },
+    ],
+  },
+  {
+    id: 'tacos', title: 'Тако з яловичиною', color: '#F2994A', icon: 'meat', time: 30, servings: 2,
+    ingredients: [
+      { name: 'Тортильї', qty: '4 шт', icon: 'bread' },
+      { name: 'Яловичий фарш', qty: '300 г', icon: 'meat' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+      { name: 'Сир', qty: '100 г', icon: 'cheese' },
+      { name: 'Помідори', qty: '1 шт', icon: 'tomato' },
+      { name: 'Салат листовий', qty: 'кілька листків', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Фарш', text: 'Обсмажте фарш із цибулею та спеціями для тако.', t: 10 },
+      { short: 'Начинка', text: 'Наріжте помідори й салат, натріть сир.' },
+      { short: 'Прогрів', text: 'Прогрійте тортильї на сухій сковороді.' },
+      { short: 'Збірка', text: 'Наповніть тортильї фаршем і овочами, притрусіть сиром.' },
+    ],
+  },
+  {
+    id: 'risotto', title: 'Ризото з грибами', color: '#5D4037', icon: 'sack', time: 35, servings: 2,
+    ingredients: [
+      { name: 'Рис арборіо', qty: '200 г', icon: 'sack' },
+      { name: 'Гриби', qty: '250 г', icon: 'tag' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+      { name: 'Овочевий бульйон', qty: '700 мл', icon: 'jar' },
+      { name: 'Пармезан', qty: '50 г', icon: 'cheese' },
+      { name: 'Масло', qty: '30 г', icon: 'butter' },
+    ],
+    steps: [
+      { short: 'Гриби', text: 'Обсмажте гриби до золотистого й відкладіть.' },
+      { short: 'Основа', text: 'Спасеруйте цибулю, додайте рис і прогрійте.' },
+      { short: 'Варіння', text: 'Підливайте бульйон порціями, помішуючи, до кремовості.', t: 18 },
+      { short: 'Фініш', text: 'Вмішайте гриби, масло й пармезан.' },
+    ],
+  },
+  {
+    id: 'hummus', title: 'Хумус', color: '#1ABC9C', icon: 'grain', time: 15, servings: 3,
+    ingredients: [
+      { name: 'Нут', qty: '1 банка', icon: 'grain' },
+      { name: 'Тахіні', qty: '2 ст. л.', icon: 'jar' },
+      { name: 'Часник', qty: '1 зубчик', icon: 'garlic' },
+      { name: 'Лимон', qty: '1/2 шт', icon: 'tag' },
+      { name: 'Оливкова олія', qty: '3 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Пюре', text: 'Збийте нут, тахіні, часник, лимон і олію в блендері.' },
+      { short: 'Смак', text: 'Приправте кмином і сіллю, за потреби додайте трохи води.' },
+      { short: 'Подача', text: 'Викладіть, збризніть олією, подавайте з пітою.' },
     ],
   },
 ];
@@ -1574,10 +1710,11 @@ function updateRcpScale() {
   const mid = screen.scrollTop + screen.clientHeight / 2;
   rows.forEach(row => {
     const rc = row.offsetTop + row.offsetHeight / 2;
-    const t = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.5));
-    // центр — найбільший, що далі — то помітно менший (0.68 на краю → 1.45 у центрі)
-    row.style.transform = `scale(${(0.68 + 0.77 * t).toFixed(3)})`;
-    row.style.opacity = (0.3 + 0.7 * t).toFixed(3);
+    const lin = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.5));
+    const t = lin * lin * (3 - 2 * lin); // smoothstep — плавна крива росту
+    // база 1.0 (не меншає нижче списку), плавно більшає до центру
+    row.style.transform = `scale(${(1 + 0.45 * t).toFixed(3)})`;
+    row.style.opacity = (0.72 + 0.28 * t).toFixed(3);
     row.style.zIndex = Math.round(t * 100);
   });
 }
