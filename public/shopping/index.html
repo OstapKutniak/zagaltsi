@@ -34,6 +34,9 @@
       <button class="icon-btn" id="btn-calendar" title="Місяць і рік" style="display:none">
         <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
       </button>
+      <button class="icon-btn" id="btn-add-recipe" title="Новий рецепт" style="display:none">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
     </div>
   </div>
 
@@ -225,31 +228,32 @@
     </div>
   </div>
 
-  <!-- RECIPE DETAIL (повноекранна шторка) -->
-  <div class="rcp-overlay" id="recipe-overlay">
-    <div class="rcp-sheet">
-      <button class="rcp-back" id="recipe-back">‹ Рецепти</button>
-      <div class="rcp-hero">
-        <div class="rcp-hero-circle" id="recipe-hero"></div>
-        <div class="rcp-hero-title" id="recipe-title"></div>
-        <div class="rcp-hero-meta" id="recipe-meta"></div>
-        <div class="rcp-hero-cost" id="recipe-cost">≈ —</div>
+  <!-- RECIPE DETAIL (шторка знизу, перекриває список рецептів) -->
+  <div class="sheet-overlay rcp-sheet-overlay" id="recipe-overlay">
+    <div class="sheet rcp-sheet">
+      <div class="sheet-handle"></div>
+      <div class="rcp-sheet-head">
+        <div class="rcp-sheet-circle" id="recipe-hero"></div>
+        <div class="rcp-sheet-tx">
+          <div class="rcp-sheet-title" id="recipe-title"></div>
+          <div class="rcp-sheet-meta" id="recipe-meta"></div>
+        </div>
       </div>
-      <div class="rcp-ing-head">
-        <span>Інгредієнти</span>
-        <button class="rcp-addall" id="recipe-addall">Додати всі</button>
+      <div class="rcp-ing-grid-wrap"><div class="add-grid" id="recipe-ings"></div></div>
+      <div class="rcp-sheet-foot">
+        <button class="rcp-addall" id="recipe-addall">Додати всі в список</button>
+        <button class="rcp-cook-btn" id="recipe-cook">Приготувати</button>
       </div>
-      <div class="rcp-ings" id="recipe-ings"></div>
-      <button class="rcp-cook-btn" id="recipe-cook">Приготувати</button>
     </div>
   </div>
 
   <!-- COOK MODE (повноекранний покроковий режим) -->
   <div class="cook-overlay" id="cook-overlay">
-    <div class="cook-top">
+    <div class="cook-head">
       <button class="cook-close" id="cook-close">✕</button>
-      <div class="cook-progress" id="cook-progress"></div>
+      <div class="cook-title" id="cook-title"></div>
     </div>
+    <div class="cook-toc" id="cook-toc"></div>
     <div class="cook-body" id="cook-body"></div>
   </div>
 

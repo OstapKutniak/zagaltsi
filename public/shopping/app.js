@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 24; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 25; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -165,12 +165,12 @@ const RECIPES = [
       { name: 'Чорний перець', qty: 'до смаку', icon: 'tag' },
     ],
     steps: [
-      { text: 'Закип\'ятіть каструлю підсоленої води для пасти.' },
-      { text: 'Наріжте бекон кубиками й обсмажте з роздавленим часником до хрусткої скоринки.' },
-      { text: 'Відваріть спагеті до al dente.', t: 9 },
-      { text: 'Збийте яйця з тертим пармезаном і чорним перцем.' },
-      { text: 'Гарячу пасту вмішайте до бекону, зніміть з вогню й додайте яєчну суміш — від тепла соус стане кремовим.' },
-      { text: 'Подавайте одразу, присипавши пармезаном і перцем.' },
+      { short: 'Вода', text: 'Закип\'ятіть каструлю підсоленої води для пасти.' },
+      { short: 'Бекон', text: 'Наріжте бекон кубиками й обсмажте з роздавленим часником до хрусткої скоринки.' },
+      { short: 'Спагеті', text: 'Відваріть спагеті до al dente.', t: 9 },
+      { short: 'Соус', text: 'Збийте яйця з тертим пармезаном і чорним перцем.' },
+      { short: 'Змішати', text: 'Гарячу пасту вмішайте до бекону, зніміть з вогню й додайте яєчну суміш — від тепла соус стане кремовим.' },
+      { short: 'Подача', text: 'Подавайте одразу, присипавши пармезаном і перцем.' },
     ],
   },
   {
@@ -184,10 +184,10 @@ const RECIPES = [
       { name: 'Кунжут', qty: '1 ст. л.', icon: 'tag' },
     ],
     steps: [
-      { text: 'Відваріть рис до готовності.', t: 15 },
-      { text: 'Наріжте філе смужками й обсмажте на сильному вогні до золотистого.' },
-      { text: 'Додайте соєвий соус, мед і часник, тушкуйте до карамельної глазурі.', t: 6 },
-      { text: 'Подавайте курку на рисі, притрусивши кунжутом.' },
+      { short: 'Рис', text: 'Відваріть рис до готовності.', t: 15 },
+      { short: 'Курка', text: 'Наріжте філе смужками й обсмажте на сильному вогні до золотистого.' },
+      { short: 'Глазур', text: 'Додайте соєвий соус, мед і часник, тушкуйте до карамельної глазурі.', t: 6 },
+      { short: 'Подача', text: 'Подавайте курку на рисі, притрусивши кунжутом.' },
     ],
   },
   {
@@ -200,10 +200,10 @@ const RECIPES = [
       { name: 'Олія', qty: 'для смаження', icon: 'oil' },
     ],
     steps: [
-      { text: 'Розімніть сир з яйцями, цукром і борошном у гладке тісто.' },
-      { text: 'Сформуйте кружечки й обваляйте в борошні.' },
-      { text: 'Смажте на олії з обох боків до рум\'яної скоринки.', t: 8 },
-      { text: 'Подавайте зі сметаною або згущеним молоком.' },
+      { short: 'Тісто', text: 'Розімніть сир з яйцями, цукром і борошном у гладке тісто.' },
+      { short: 'Формувати', text: 'Сформуйте кружечки й обваляйте в борошні.' },
+      { short: 'Смаження', text: 'Смажте на олії з обох боків до рум\'яної скоринки.', t: 8 },
+      { short: 'Подача', text: 'Подавайте зі сметаною або згущеним молоком.' },
     ],
   },
   {
@@ -217,9 +217,9 @@ const RECIPES = [
       { name: 'Оливкова олія', qty: '3 ст. л.', icon: 'oil' },
     ],
     steps: [
-      { text: 'Наріжте помідори й огірки великими шматками, цибулю — півкільцями.' },
-      { text: 'Додайте маслини та фету, поламану кубиками.' },
-      { text: 'Полийте оливковою олією, приправте орегано, обережно перемішайте.' },
+      { short: 'Нарізка', text: 'Наріжте помідори й огірки великими шматками, цибулю — півкільцями.' },
+      { short: 'Фета', text: 'Додайте маслини та фету, поламану кубиками.' },
+      { short: 'Заправка', text: 'Полийте оливковою олією, приправте орегано, обережно перемішайте.' },
     ],
   },
   {
@@ -233,11 +233,11 @@ const RECIPES = [
       { name: 'Олія', qty: '2 ст. л.', icon: 'oil' },
     ],
     steps: [
-      { text: 'Наріжте гарбуз, картоплю й цибулю кубиками.' },
-      { text: 'Обсмажте цибулю з часником, додайте гарбуз і картоплю.' },
-      { text: 'Залийте водою й варіть до м\'якості овочів.', t: 20 },
-      { text: 'Збийте блендером у пюре, влийте вершки, прогрійте.', t: 3 },
-      { text: 'Подавайте з насінням і грінками.' },
+      { short: 'Нарізка', text: 'Наріжте гарбуз, картоплю й цибулю кубиками.' },
+      { short: 'Обсмажити', text: 'Обсмажте цибулю з часником, додайте гарбуз і картоплю.' },
+      { short: 'Варіння', text: 'Залийте водою й варіть до м\'якості овочів.', t: 20 },
+      { short: 'Пюре', text: 'Збийте блендером у пюре, влийте вершки, прогрійте.', t: 3 },
+      { short: 'Подача', text: 'Подавайте з насінням і грінками.' },
     ],
   },
   {
@@ -251,11 +251,11 @@ const RECIPES = [
       { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
     ],
     steps: [
-      { text: 'Сформуйте з фаршу дві котлети, посоліть і поперчіть.' },
-      { text: 'Обсмажте котлети на сильному вогні по 3–4 хв з боку.', t: 8 },
-      { text: 'На гарячу котлету покладіть сир, щоб розтанув.' },
-      { text: 'Підпечіть булочки зрізом на сухій сковороді.' },
-      { text: 'Зберіть бургер: салат, котлета з сиром, помідор, цибуля, соус.' },
+      { short: 'Котлети', text: 'Сформуйте з фаршу дві котлети, посоліть і поперчіть.' },
+      { short: 'Смаження', text: 'Обсмажте котлети на сильному вогні по 3–4 хв з боку.', t: 8 },
+      { short: 'Сир', text: 'На гарячу котлету покладіть сир, щоб розтанув.' },
+      { short: 'Булочки', text: 'Підпечіть булочки зрізом на сухій сковороді.' },
+      { short: 'Збірка', text: 'Зберіть бургер: салат, котлета з сиром, помідор, цибуля, соус.' },
     ],
   },
   {
@@ -269,11 +269,11 @@ const RECIPES = [
       { name: 'Олія', qty: '2 ст. л.', icon: 'oil' },
     ],
     steps: [
-      { text: 'Обсмажте цибулю, перець і часник до м\'якості.' },
-      { text: 'Додайте подрібнені помідори, паприку, тушкуйте до густого соусу.', t: 8 },
-      { text: 'Зробіть заглибини й вбийте туди яйця.' },
-      { text: 'Накрийте кришкою й готуйте, поки білок схопиться.', t: 6 },
-      { text: 'Притрусіть зеленню, подавайте з хлібом.' },
+      { short: 'Овочі', text: 'Обсмажте цибулю, перець і часник до м\'якості.' },
+      { short: 'Соус', text: 'Додайте подрібнені помідори, паприку, тушкуйте до густого соусу.', t: 8 },
+      { short: 'Яйця', text: 'Зробіть заглибини й вбийте туди яйця.' },
+      { short: 'Томління', text: 'Накрийте кришкою й готуйте, поки білок схопиться.', t: 6 },
+      { short: 'Подача', text: 'Притрусіть зеленню, подавайте з хлібом.' },
     ],
   },
   {
@@ -288,10 +288,10 @@ const RECIPES = [
       { name: 'Оливкова олія', qty: '2 ст. л.', icon: 'oil' },
     ],
     steps: [
-      { text: 'Відваріть кіноа до готовності й дайте охолонути.', t: 15 },
-      { text: 'Наріжте авокадо, огірок і чері.' },
-      { text: 'Викладіть у миску кіноа, нут і овочі секторами.' },
-      { text: 'Заправте олією з лимонним соком, приправте сіллю.' },
+      { short: 'Кіноа', text: 'Відваріть кіноа до готовності й дайте охолонути.', t: 15 },
+      { short: 'Нарізка', text: 'Наріжте авокадо, огірок і чері.' },
+      { short: 'Збірка', text: 'Викладіть у миску кіноа, нут і овочі секторами.' },
+      { short: 'Заправка', text: 'Заправте олією з лимонним соком, приправте сіллю.' },
     ],
   },
 ];
@@ -1425,7 +1425,7 @@ function bindEvents() {
     tab.addEventListener('click', () => setTab(tab.dataset.tab)));
 
   // рецепти
-  $('recipe-back').addEventListener('click', closeRecipe);
+  $('btn-add-recipe').addEventListener('click', () => toast('Додавання своїх рецептів — скоро'));
   $('recipe-addall').addEventListener('click', addAllIngredients);
   $('recipe-cook').addEventListener('click', openCook);
   $('cook-close').addEventListener('click', closeCook);
@@ -1450,6 +1450,8 @@ function updateTabs() {
   $('btn-cats').style.display = state.tab === 'list' ? '' : 'none';
   $('btn-edit-prods').style.display = state.tab === 'add' ? '' : 'none';
   $('btn-calendar').style.display = state.tab === 'archive' ? '' : 'none';
+  $('btn-add-recipe').style.display = state.tab === 'recipes' ? '' : 'none';
+  if (state.tab === 'recipes') requestAnimationFrame(updateRcpScale);
   // цінова панель — лише на «Списку»
   $('price-panel').style.display = state.tab === 'list' ? '' : 'none';
   if (state.tab === 'list') { if (!ppPositioned) { ppStart(); ppPositioned = true; } refreshPrices(); }
@@ -1539,21 +1541,44 @@ const hhmm = m => m >= 60 ? `${Math.floor(m / 60)} год${m % 60 ? ' ' + (m % 6
 const fmtMMSS = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const ingInList = name => Object.values(listMap).some(it => !it.done && it.name.toLowerCase() === name.toLowerCase());
 
-// сітка страв — великі кружечки-прев'ю (фото або кольорова заглушка з іконкою)
+// вертикальний барабан страв: рядок як у списку, а що ближче до центру екрана —
+// то більший кружечок-прев'ю (фото або кольорова заглушка з іконкою)
 function renderRecipes() {
   const grid = $('rcp-grid');
   if (!grid) return;
   grid.innerHTML = RECIPES.map(r => `
-    <button class="rcp-card" data-id="${r.id}">
-      <span class="rcp-circle" style="--c:${r.color}">
+    <button class="rcp-row" data-id="${r.id}">
+      <span class="rcp-row-circle" style="--c:${r.color}">
         <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
         <span class="rcp-circle-ic">${ic(r.icon)}</span>
       </span>
-      <span class="rcp-card-title">${esc(r.title)}</span>
-      <span class="rcp-card-time">${hhmm(r.time)}</span>
+      <span class="rcp-row-tx">
+        <span class="rcp-row-title">${esc(r.title)}</span>
+        <span class="rcp-row-time">${hhmm(r.time)}</span>
+      </span>
     </button>`).join('');
-  grid.querySelectorAll('.rcp-card').forEach(el =>
+  grid.querySelectorAll('.rcp-row').forEach(el =>
     el.addEventListener('click', () => openRecipe(el.dataset.id)));
+  const screen = $('recipes-screen');
+  if (!screen.dataset.scaleBound) {
+    screen.addEventListener('scroll', () => requestAnimationFrame(updateRcpScale), { passive: true });
+    screen.dataset.scaleBound = '1';
+  }
+  requestAnimationFrame(updateRcpScale);
+}
+// масштаб рядка за відстанню від центру екрана (ефект барабана)
+function updateRcpScale() {
+  const screen = $('recipes-screen');
+  const rows = screen && screen.querySelectorAll('.rcp-row');
+  if (!rows || !rows.length || !screen.clientHeight) return;
+  const mid = screen.scrollTop + screen.clientHeight / 2;
+  rows.forEach(row => {
+    const rc = row.offsetTop + row.offsetHeight / 2;
+    const t = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.42));
+    row.style.transform = `scale(${(1 + 0.42 * t).toFixed(3)})`;
+    row.style.opacity = (0.4 + 0.6 * t).toFixed(3);
+    row.style.zIndex = Math.round(t * 100);
+  });
 }
 
 function openRecipe(id) {
@@ -1565,34 +1590,33 @@ function openRecipe(id) {
   hero.innerHTML = `<img src="${recipeImg(r)}" alt="" onerror="this.remove()"><span class="rcp-circle-ic">${ic(r.icon)}</span>`;
   $('recipe-title').textContent = r.title;
   $('recipe-meta').textContent = `${hhmm(r.time)} · ${r.servings} порц. · ${r.ingredients.length} інгр.`;
-  $('recipe-cost').textContent = '≈ …';
   renderRecipeIngs();
   $('recipe-overlay').classList.add('open');
-  loadRecipeCost(r);
 }
 function closeRecipe() { curRecipe = null; $('recipe-overlay').classList.remove('open'); }
 
+// інгредієнти сіткою в 4 колонки (як у додаванні); тик = додати/прибрати зі списку
 function renderRecipeIngs() {
   const r = curRecipe;
   if (!r) return;
   $('recipe-ings').innerHTML = r.ingredients.map((ing, i) => {
     const added = ingInList(ing.name);
-    return `<button class="rcp-ing ${added ? 'added' : ''}" data-i="${i}">
-      <span class="rcp-ing-ic" style="--c:${r.color}">${ic(ing.icon || 'tag')}</span>
-      <span class="rcp-ing-name">${esc(ing.name)}${ing.qty ? `<span class="rcp-ing-qty">${esc(ing.qty)}</span>` : ''}</span>
-      <span class="rcp-ing-add">${added ? '✓' : '+'}</span>
+    return `<button class="ptile ${added ? 'sel' : ''}" data-i="${i}">
+      <div class="ptile-circle" style="--c:${r.color}">${ic(ing.icon || 'tag')}
+        <span class="ptile-badge"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+      </div>
+      <div class="ptile-name">${esc(ing.name)}</div>
+      <div class="rcp-tile-qty">${esc(ing.qty || '')}</div>
     </button>`;
   }).join('');
-  $('recipe-ings').querySelectorAll('.rcp-ing').forEach(el =>
+  $('recipe-ings').querySelectorAll('.ptile[data-i]').forEach(el =>
     el.addEventListener('click', () => toggleIngredient(el, r.ingredients[+el.dataset.i])));
 }
-
-// тик по інгредієнту — додати/прибрати зі списку покупок (оптимістичний відгук)
+// тик по інгредієнту — додати/прибрати зі списку (оптимістичний відгук)
 function toggleIngredient(el, ing) {
   const existing = Object.entries(listMap).find(([, it]) => !it.done && it.name.toLowerCase() === ing.name.toLowerCase());
   const willAdd = !existing;
-  el.classList.toggle('added', willAdd);
-  el.querySelector('.rcp-ing-add').textContent = willAdd ? '✓' : '+';
+  el.classList.toggle('sel', willAdd);
   if (willAdd) addNamedToList(ing);
   else removeFromList(existing[0]);
 }
@@ -1612,70 +1636,63 @@ function addAllIngredients() {
   toast(n ? `Додано ${n} ${plural(n, 'інгредієнт', 'інгредієнти', 'інгредієнтів')}` : 'Усе вже у списку');
 }
 
-// приблизна ціна страви: сума середніх цін інгредієнтів по продуктових мережах
-async function loadRecipeCost(r) {
-  const names = [...new Set(r.ingredients.map(i => i.name))];
-  const foods = STORE_SETS.food.filter(s => s.chain);
-  const acc = {}; // nameLower → [ціни по мережах]
-  await Promise.all(foods.map(async s => {
-    try {
-      const resp = await fetch(`${WORKER_PRICE}/prices`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chain: s.chain, branch: branchOf(s), queries: names }),
-      });
-      const j = await resp.json();
-      Object.entries(j.results || {}).forEach(([n, v]) => { if (v && v.price != null) (acc[n.toLowerCase()] ||= []).push(v.price); });
-    } catch { /* мережа не відповіла — пропускаємо */ }
-  }));
-  if (curRecipe !== r) return; // рецепт уже перемкнули
-  let total = 0, known = 0;
-  names.forEach(n => { const a = acc[n.toLowerCase()]; if (a && a.length) { total += a.reduce((x, y) => x + y, 0) / a.length; known++; } });
-  $('recipe-cost').textContent = known
-    ? `≈ ${Math.round(total)} ₴${known < names.length ? ` · ${known}/${names.length} з цінами` : ''}`
-    : '≈ —';
-}
-
-// ── РЕЖИМ «ПРИГОТУВАТИ» (покроково + таймери) ───────────────
+// ── РЕЖИМ «ПРИГОТУВАТИ» (покроково + «зміст» усіх кроків згори) ──
 function openCook() {
   if (!curRecipe) return;
   cookStep = 0;
   clearCookTimer();
   ensureNotifyPerm();
+  $('cook-title').textContent = curRecipe.title;
   $('cook-overlay').classList.add('open');
-  renderCookStep();
+  renderCook();
 }
 function closeCook() { clearCookTimer(); $('cook-overlay').classList.remove('open'); }
 function clearCookTimer() { if (cookTimer) { clearInterval(cookTimer.id); cookTimer = null; } }
 
-function renderCookStep() {
+// «зміст» усіх кроків згори: поточний підсвічений, пройдені — з галочкою
+function renderCookToc() {
+  const r = curRecipe;
+  const finished = cookStep >= r.steps.length;
+  $('cook-toc').innerHTML = r.steps.map((st, i) => {
+    const isDone = i < cookStep || finished;
+    const isCur = i === cookStep && !finished;
+    return `<button class="ctoc ${isDone ? 'done' : ''} ${isCur ? 'cur' : ''}" data-i="${i}">
+      <span class="ctoc-num">${isDone ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>' : (i + 1)}</span>
+      <span class="ctoc-lbl">${esc(st.short || ('Крок ' + (i + 1)))}${st.t ? ' · ' + st.t + '′' : ''}</span>
+    </button>`;
+  }).join('');
+  $('cook-toc').querySelectorAll('.ctoc').forEach(el =>
+    el.addEventListener('click', () => { clearCookTimer(); cookStep = +el.dataset.i; renderCook(); }));
+  const cur = $('cook-toc').querySelector('.ctoc.cur') || $('cook-toc').querySelector('.ctoc:last-child');
+  if (cur) cur.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+}
+
+function renderCook() {
   const r = curRecipe;
   if (!r) return;
+  renderCookToc();
   const steps = r.steps, n = steps.length;
   if (cookStep >= n) return renderCookDone();
   const st = steps[cookStep];
-  $('cook-progress').innerHTML = steps.map((_, i) =>
-    `<span class="cook-dot ${i < cookStep ? 'done' : ''} ${i === cookStep ? 'cur' : ''}"></span>`).join('');
   const running = cookTimer && cookTimer.step === cookStep;
   $('cook-body').innerHTML = `
-    <div class="cook-step-n">Крок ${cookStep + 1} з ${n}</div>
+    <div class="cook-step-n">Крок ${cookStep + 1} з ${n}${st.short ? ' · ' + esc(st.short) : ''}</div>
     <div class="cook-step-text">${esc(st.text)}</div>
     ${st.t
       ? (running
         ? `<div class="cook-timer" id="cook-timer">${fmtMMSS(cookTimer.endTs - Date.now())}</div>
            <button class="cook-act cook-stop" id="cook-timer-stop">Зупинити</button>`
         : `<button class="cook-act cook-timer-btn" id="cook-timer-start">Почати таймер · ${st.t} хв</button>`)
-      : `<button class="cook-act cook-check" id="cook-check">Готово</button>`}
-    ${cookStep > 0 ? `<button class="cook-prev" id="cook-prev">‹ Попередній крок</button>` : ''}`;
+      : `<button class="cook-act cook-check" id="cook-check">Готово</button>`}`;
   const bind = (id, fn) => { const e = $(id); if (e) e.addEventListener('click', fn); };
   bind('cook-check', nextCookStep);
   bind('cook-timer-start', () => startCookTimer(st.t));
-  bind('cook-timer-stop', () => { clearCookTimer(); renderCookStep(); });
-  bind('cook-prev', () => { clearCookTimer(); cookStep = Math.max(0, cookStep - 1); renderCookStep(); });
+  bind('cook-timer-stop', () => { clearCookTimer(); renderCook(); });
 }
 function startCookTimer(min) {
   clearCookTimer();
   cookTimer = { step: cookStep, endTs: Date.now() + min * 60000, id: setInterval(tickCookTimer, 250) };
-  renderCookStep();
+  renderCook();
 }
 function tickCookTimer() {
   if (!cookTimer) return;
@@ -1690,10 +1707,9 @@ function tickCookTimer() {
     nextCookStep(); // крок стає виконаним і переходимо далі
   }
 }
-function nextCookStep() { clearCookTimer(); cookStep++; renderCookStep(); }
+function nextCookStep() { clearCookTimer(); cookStep++; renderCook(); }
 function renderCookDone() {
   clearCookTimer();
-  $('cook-progress').innerHTML = '';
   $('cook-body').innerHTML = `
     <div class="cook-done">
       <div class="cook-done-t">Готово! Смачного</div>
