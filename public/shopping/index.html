@@ -228,33 +228,35 @@
     </div>
   </div>
 
-  <!-- RECIPE DETAIL (шторка знизу, перекриває список рецептів) -->
+  <!-- RECIPE SHEET (склад ↔ приготування — все в одній шторці знизу) -->
   <div class="sheet-overlay rcp-sheet-overlay" id="recipe-overlay">
     <div class="sheet rcp-sheet">
       <div class="sheet-handle"></div>
-      <div class="rcp-sheet-head">
-        <div class="rcp-sheet-circle" id="recipe-hero"></div>
-        <div class="rcp-sheet-tx">
-          <div class="rcp-sheet-title" id="recipe-title"></div>
-          <div class="rcp-sheet-meta" id="recipe-meta"></div>
+      <!-- вигляд 1: склад -->
+      <div id="recipe-view">
+        <div class="rcp-sheet-head">
+          <div class="rcp-sheet-circle" id="recipe-hero"></div>
+          <div class="rcp-sheet-tx">
+            <div class="rcp-sheet-title" id="recipe-title"></div>
+            <div class="rcp-sheet-meta" id="recipe-meta"></div>
+          </div>
+        </div>
+        <div class="rcp-ing-grid-wrap"><div class="add-grid" id="recipe-ings"></div></div>
+        <div class="rcp-sheet-foot">
+          <button class="rcp-addall" id="recipe-addall">Додати всі в список</button>
+          <button class="rcp-cook-btn" id="recipe-cook">Приготувати</button>
         </div>
       </div>
-      <div class="rcp-ing-grid-wrap"><div class="add-grid" id="recipe-ings"></div></div>
-      <div class="rcp-sheet-foot">
-        <button class="rcp-addall" id="recipe-addall">Додати всі в список</button>
-        <button class="rcp-cook-btn" id="recipe-cook">Приготувати</button>
+      <!-- вигляд 2: приготування -->
+      <div id="cook-view" style="display:none">
+        <div class="cook-head">
+          <button class="cook-back" id="cook-back">‹ Склад</button>
+          <div class="cook-title" id="cook-title"></div>
+        </div>
+        <div class="cook-toc" id="cook-toc"></div>
+        <div class="cook-body" id="cook-body"></div>
       </div>
     </div>
-  </div>
-
-  <!-- COOK MODE (повноекранний покроковий режим) -->
-  <div class="cook-overlay" id="cook-overlay">
-    <div class="cook-head">
-      <button class="cook-close" id="cook-close">✕</button>
-      <div class="cook-title" id="cook-title"></div>
-    </div>
-    <div class="cook-toc" id="cook-toc"></div>
-    <div class="cook-body" id="cook-body"></div>
   </div>
 
   <div class="toast" id="toast"></div>

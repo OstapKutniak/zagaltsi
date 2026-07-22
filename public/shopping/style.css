@@ -450,18 +450,17 @@ html, body {
 .empty svg { width: 46px; height: 46px; fill: none; stroke: var(--text3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 12px; }
 .empty .fill { fill: var(--text3); stroke: none; }
 
-/* ── РЕЦЕПТИ: вертикальний барабан страв ── */
-#recipes-screen { scroll-snap-type: y proximity; overflow-x: hidden; }
-.rcp-grid { display: flex; flex-direction: column; gap: 12px; padding: 10px 16px calc(var(--bottom) + 90px); }
+/* ── РЕЦЕПТИ: вертикальний зациклений барабан ── */
+#recipes-screen { overflow-x: hidden; }
+.rcp-grid { display: flex; flex-direction: column; gap: 16px; padding: 10px 16px calc(var(--bottom) + 90px); }
 .rcp-row {
-  scroll-snap-align: center;
   display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-  background: none; border: none; cursor: pointer; padding: 2px 0;
-  /* масштаб від лівого краю: кружечок стоїть на місці, нема горизонтального руху */
+  background: none; border: none; cursor: pointer; padding: 0;
+  /* масштаб від лівого краю — кружечок на місці, нема горизонтального руху */
   transform-origin: left center; transition: opacity 0.12s linear; will-change: transform;
 }
 .rcp-row-circle {
-  position: relative; width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
+  position: relative; width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--c) 14%, #fff);
   border: 2px solid color-mix(in srgb, var(--c) 38%, #fff);
@@ -470,11 +469,11 @@ html, body {
 .rcp-row-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .rcp-row-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.15; white-space: nowrap; }
 .rcp-row-time { font-size: 13px; color: var(--text2); }
-/* спільна іконка-заглушка кружечка (барабан + шторка) */
 .rcp-circle-ic svg { width: 46%; height: 46%; fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
-/* деталі рецепту — шторка знизу (перекриває список) */
-.rcp-sheet { max-height: 78vh; }
+/* шторка рецепту (склад ↔ приготування) — розмір по вмісту */
+.rcp-sheet { max-height: 85vh; }
+#recipe-view, #cook-view { display: flex; flex-direction: column; min-height: 0; }
 .rcp-sheet-head { display: flex; align-items: center; gap: 14px; padding: 2px 20px 14px; flex-shrink: 0; }
 .rcp-sheet-circle {
   position: relative; width: 62px; height: 62px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
@@ -485,7 +484,7 @@ html, body {
 .rcp-sheet-circle img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
 .rcp-sheet-title { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1.15; }
 .rcp-sheet-meta { font-size: 13px; color: var(--text2); margin-top: 3px; }
-.rcp-ing-grid-wrap { overflow-y: auto; flex: 1; overscroll-behavior: contain; min-height: 60px; }
+.rcp-ing-grid-wrap { overflow-y: auto; max-height: 44vh; overscroll-behavior: contain; }
 .rcp-ing-grid-wrap::-webkit-scrollbar { display: none; }
 .rcp-tile-qty { font-size: 10.5px; color: var(--text3); text-align: center; line-height: 1.1; margin-top: 1px; }
 .rcp-sheet-foot { display: flex; gap: 10px; padding: 12px 16px calc(var(--bottom) + 6px); flex-shrink: 0; border-top: 1px solid var(--line); }
@@ -493,17 +492,11 @@ html, body {
 .rcp-cook-btn { flex: 1; background: var(--active-ink); color: #fff; border: none; border-radius: 14px; padding: 15px; font-size: 15px; font-weight: 800; cursor: pointer; }
 .rcp-addall:active, .rcp-cook-btn:active { opacity: 0.85; }
 
-/* режим «Приготувати» */
-.cook-overlay {
-  position: fixed; inset: 0; z-index: 400; background: var(--bg); display: flex; flex-direction: column;
-  transform: translateY(100%); transition: transform 0.34s cubic-bezier(0.25,0.46,0.45,0.94);
-}
-.cook-overlay.open { transform: translateY(0); }
-.cook-head { display: flex; align-items: center; gap: 12px; padding: calc(var(--top) + 12px) 16px 10px; }
-.cook-close { background: none; border: none; font-size: 22px; color: var(--text2); cursor: pointer; line-height: 1; padding: 0 4px; }
+/* приготування у шторці */
+.cook-head { display: flex; align-items: center; gap: 12px; padding: 0 16px 10px; flex-shrink: 0; }
+.cook-back { background: none; border: none; font-size: 15px; font-weight: 600; color: var(--active-ink); cursor: pointer; padding: 0; }
 .cook-title { font-size: 16px; font-weight: 700; color: var(--text); }
-/* «зміст» усіх кроків — горизонтальна стрічка */
-.cook-toc { display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.cook-toc { display: flex; gap: 8px; overflow-x: auto; padding: 0 16px 12px; flex-shrink: 0; }
 .cook-toc::-webkit-scrollbar { display: none; }
 .ctoc {
   display: flex; align-items: center; gap: 7px; flex-shrink: 0;
@@ -519,14 +512,18 @@ html, body {
 .ctoc.cur { background: var(--active); }
 .ctoc.cur .ctoc-num { background: var(--active-ink); }
 .ctoc.cur .ctoc-lbl { color: var(--active-ink); font-weight: 700; }
-.cook-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 30px 26px calc(var(--bottom) + 40px); gap: 24px; }
+.cook-body {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 20px;
+  padding: 16px 24px calc(var(--bottom) + 22px); overflow-y: auto; max-height: 54vh;
+}
+.cook-body::-webkit-scrollbar { display: none; }
 .cook-step-n { font-size: 14px; font-weight: 700; color: var(--text2); letter-spacing: 0.02em; }
-.cook-step-text { font-size: 21px; font-weight: 600; line-height: 1.45; color: var(--text); max-width: 460px; }
-.cook-act { border: none; border-radius: 16px; padding: 16px 30px; font-size: 17px; font-weight: 800; cursor: pointer; min-width: 200px; }
+.cook-step-text { font-size: 20px; font-weight: 600; line-height: 1.4; color: var(--text); max-width: 460px; }
+.cook-act { border: none; border-radius: 16px; padding: 15px 30px; font-size: 17px; font-weight: 800; cursor: pointer; min-width: 200px; }
 .cook-check { background: var(--active-ink); color: #fff; }
 .cook-timer-btn { background: var(--active); color: var(--active-ink); }
 .cook-stop { background: none; border: 1.5px solid var(--danger); color: var(--danger); }
 .cook-act:active { opacity: 0.85; }
-.cook-timer { font-size: 52px; font-weight: 800; color: var(--active-ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
-.cook-done { display: flex; flex-direction: column; align-items: center; gap: 22px; }
-.cook-done-t { font-size: 24px; font-weight: 800; color: var(--text); }
+.cook-timer { font-size: 48px; font-weight: 800; color: var(--active-ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.cook-done { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 10px 0; }
+.cook-done-t { font-size: 22px; font-weight: 800; color: var(--text); }

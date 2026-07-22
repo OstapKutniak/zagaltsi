@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 27; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 28; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1564,7 +1564,7 @@ function bindEvents() {
   $('btn-add-recipe').addEventListener('click', () => toast('Додавання своїх рецептів — скоро'));
   $('recipe-addall').addEventListener('click', addAllIngredients);
   $('recipe-cook').addEventListener('click', openCook);
-  $('cook-close').addEventListener('click', closeCook);
+  $('cook-back').addEventListener('click', closeCook);
 
   document.querySelectorAll('.sheet-overlay').forEach(ov =>
     ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
@@ -1677,43 +1677,75 @@ const hhmm = m => m >= 60 ? `${Math.floor(m / 60)} год${m % 60 ? ' ' + (m % 6
 const fmtMMSS = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const ingInList = name => Object.values(listMap).some(it => !it.done && it.name.toLowerCase() === name.toLowerCase());
 
-// вертикальний барабан страв: рядок як у списку, а що ближче до центру екрана —
-// то більший кружечок-прев'ю (фото або кольорова заглушка з іконкою)
+// страви в алфавітному порядку
+const recipesSorted = () => [...RECIPES].sort((a, b) => a.title.localeCompare(b.title, 'uk'));
+const LOOP_COPIES = 9; // копій списку для безшовного зациклення барабана
+let rcpLoopTimer = null;
+const rcpRowHtml = r => `<button class="rcp-row" data-id="${r.id}">
+    <span class="rcp-row-circle" style="--c:${r.color}">
+      <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
+      <span class="rcp-circle-ic">${ic(r.icon)}</span>
+    </span>
+    <span class="rcp-row-tx">
+      <span class="rcp-row-title">${esc(r.title)}</span>
+      <span class="rcp-row-time">${hhmm(r.time)}</span>
+    </span>
+  </button>`;
+
+// вертикальний зациклений барабан: база — як рядок списку, лише ~5 центральних
+// страв плавно більшають до центру екрана
 function renderRecipes() {
   const grid = $('rcp-grid');
   if (!grid) return;
-  grid.innerHTML = RECIPES.map(r => `
-    <button class="rcp-row" data-id="${r.id}">
-      <span class="rcp-row-circle" style="--c:${r.color}">
-        <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
-        <span class="rcp-circle-ic">${ic(r.icon)}</span>
-      </span>
-      <span class="rcp-row-tx">
-        <span class="rcp-row-title">${esc(r.title)}</span>
-        <span class="rcp-row-time">${hhmm(r.time)}</span>
-      </span>
-    </button>`).join('');
+  grid.innerHTML = recipesSorted().map(rcpRowHtml).join('').repeat(LOOP_COPIES);
   grid.querySelectorAll('.rcp-row').forEach(el =>
     el.addEventListener('click', () => openRecipe(el.dataset.id)));
   const screen = $('recipes-screen');
-  if (!screen.dataset.scaleBound) {
-    screen.addEventListener('scroll', () => requestAnimationFrame(updateRcpScale), { passive: true });
-    screen.dataset.scaleBound = '1';
+  if (!screen.dataset.rcpBound) {
+    screen.addEventListener('scroll', () => {
+      requestAnimationFrame(updateRcpScale);
+      clearTimeout(rcpLoopTimer);
+      rcpLoopTimer = setTimeout(loopRecenter, 120);
+    }, { passive: true });
+    screen.dataset.rcpBound = '1';
   }
-  requestAnimationFrame(updateRcpScale);
+  requestAnimationFrame(() => { centerLoop(); updateRcpScale(); });
 }
-// масштаб рядка за відстанню від центру екрана (ефект барабана)
+const rcpStride = () => {
+  const rows = $('recipes-screen').querySelectorAll('.rcp-row');
+  return rows.length > 1 ? (rows[1].offsetTop - rows[0].offsetTop) : 0;
+};
+function centerLoop() {
+  const sc = $('recipes-screen');
+  const lh = rcpStride() * RECIPES.length;
+  if (lh) sc.scrollTop = lh * Math.floor(LOOP_COPIES / 2);
+}
+// зациклення: біля країв безшовно телепортуємо в центральну копію (та сама картинка)
+function loopRecenter() {
+  const sc = $('recipes-screen');
+  const lh = rcpStride() * RECIPES.length;
+  if (!lh) return;
+  if (sc.scrollTop < lh || sc.scrollTop > lh * (LOOP_COPIES - 2)) {
+    const phase = ((sc.scrollTop % lh) + lh) % lh;
+    const prev = sc.style.scrollBehavior;
+    sc.style.scrollBehavior = 'auto';
+    sc.scrollTop = lh * Math.floor(LOOP_COPIES / 2) + phase;
+    sc.style.scrollBehavior = prev;
+    updateRcpScale();
+  }
+}
+// масштаб: лише вузька зона біля центру (≈5 страв), решта — база 1.0 (розмір списку)
 function updateRcpScale() {
   const screen = $('recipes-screen');
   const rows = screen && screen.querySelectorAll('.rcp-row');
   if (!rows || !rows.length || !screen.clientHeight) return;
   const mid = screen.scrollTop + screen.clientHeight / 2;
+  const stride = rcpStride() || 58;
   rows.forEach(row => {
     const rc = row.offsetTop + row.offsetHeight / 2;
-    const lin = Math.max(0, 1 - Math.abs(rc - mid) / (screen.clientHeight * 0.5));
-    const t = lin * lin * (3 - 2 * lin); // smoothstep — плавна крива росту
-    // база 1.0 (не меншає нижче списку), плавно більшає до центру
-    row.style.transform = `scale(${(1 + 0.45 * t).toFixed(3)})`;
+    const lin = Math.max(0, 1 - Math.abs(rc - mid) / (stride * 2.5));
+    const t = lin * lin * (3 - 2 * lin); // smoothstep
+    row.style.transform = `scale(${(1 + 0.28 * t).toFixed(3)})`;
     row.style.opacity = (0.72 + 0.28 * t).toFixed(3);
     row.style.zIndex = Math.round(t * 100);
   });
@@ -1729,6 +1761,8 @@ function openRecipe(id) {
   $('recipe-title').textContent = r.title;
   $('recipe-meta').textContent = `${hhmm(r.time)} · ${r.servings} порц. · ${r.ingredients.length} інгр.`;
   renderRecipeIngs();
+  $('recipe-view').style.display = '';   // завжди відкриваємо на складі
+  $('cook-view').style.display = 'none';
   $('recipe-overlay').classList.add('open');
 }
 function closeRecipe() { curRecipe = null; $('recipe-overlay').classList.remove('open'); }
@@ -1781,10 +1815,12 @@ function openCook() {
   clearCookTimer();
   ensureNotifyPerm();
   $('cook-title').textContent = curRecipe.title;
-  $('cook-overlay').classList.add('open');
+  $('recipe-view').style.display = 'none'; // приготування — у тій самій шторці
+  $('cook-view').style.display = '';
   renderCook();
 }
-function closeCook() { clearCookTimer(); $('cook-overlay').classList.remove('open'); }
+// «назад» із приготування — повертаємось на склад у тій самій шторці
+function closeCook() { clearCookTimer(); $('cook-view').style.display = 'none'; $('recipe-view').style.display = ''; }
 function clearCookTimer() { if (cookTimer) { clearInterval(cookTimer.id); cookTimer = null; } }
 
 // «зміст» усіх кроків згори: поточний підсвічений, пройдені — з галочкою
