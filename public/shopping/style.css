@@ -469,7 +469,9 @@ html, body {
 .rcp-row-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .rcp-row-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.15; white-space: nowrap; }
 .rcp-row-time { font-size: 13px; color: var(--text2); }
-.rcp-circle-ic svg { width: 46%; height: 46%; fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.rcp-circle-ic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.rcp-circle-ic svg { width: 54%; height: 54%; fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.rcp-circle-ic svg .fill { fill: var(--c); stroke: none; }
 
 /* шторка рецепту (склад ↔ приготування) — розмір по вмісту */
 .rcp-sheet { max-height: 85vh; }

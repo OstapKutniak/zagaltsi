@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 28; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 29; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -108,6 +108,18 @@ const ICONS = {
   pads:'<rect x="8" y="3" width="8" height="18" rx="4"/><path d="M8 9H5.5a1.5 1.5 0 000 3H8M16 12h2.5a1.5 1.5 0 000-3H16"/>',
   cream:'<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M5 13h14"/><path d="M7 10V8.5A1.5 1.5 0 018.5 7h7A1.5 1.5 0 0117 8.5V10"/>',
   perfume:'<rect x="7.5" y="10" width="9" height="11" rx="2.5"/><path d="M10.5 10V8h3v2"/><path d="M10.5 5.5h3"/><path d="M17.5 6.5l2-1M18 9l2.2.3"/>',
+  // ── страви ──
+  spaghetti:'<path d="M3 13a9 9 0 0018 0z"/><path d="M2.5 13h19"/><path d="M6 10.5c1.5-1.5 3 .3 4.5-1.2s3 .3 4.5-1.2"/><path d="M6.5 8c1.5-1.5 3 .3 4.5-1.2s3 .3 4.5-1.2"/>',
+  ricebowl:'<path d="M3 13a9 9 0 0018 0z"/><path d="M2.5 13h19"/><path d="M13.5 4l6.5 3.5M15.5 3l5 4.5"/><circle cx="8" cy="11" r=".7" class="fill"/><circle cx="11" cy="11.6" r=".7" class="fill"/><circle cx="14" cy="11" r=".7" class="fill"/>',
+  ramenbowl:'<path d="M3 13a9 9 0 0018 0z"/><path d="M2.5 13h19"/><path d="M13.5 4l6.5 3.5M15.5 3l5 4.5"/><path d="M6.5 10.5c1.4-1.3 2.8 .3 4.2-1s2.8 .3 4.2-1"/>',
+  soup:'<path d="M4 13a8 8 0 0016 0z"/><path d="M2.5 13h19"/><path d="M9 4.5c-.9.9.9 1.8 0 2.7M14 4.5c-.9.9.9 1.8 0 2.7"/>',
+  pancakes:'<ellipse cx="12" cy="9" rx="7" ry="2.3"/><path d="M5 9v2.4c0 1.3 3.1 2.3 7 2.3s7-1 7-2.3V9"/><path d="M5 12.4v2.4c0 1.3 3.1 2.3 7 2.3s7-1 7-2.3v-2.4"/><path d="M12 6.7V5"/><circle cx="12" cy="4.2" r="1.1" class="fill"/>',
+  salad:'<path d="M3 11a9 9 0 0018 0z"/><path d="M2.5 11h19"/><path d="M8 9.5c-1.2-1.8 .6-3.6 2.4-2.8M13.2 9.5c.2-2 2.2-2.8 4-1.8M11 9.5c-.2-2-2.2-2.8-4-1.8"/>',
+  burger:'<path d="M4 9.5c0-3 3.6-5 8-5s8 2 8 5z"/><path d="M4.5 12.5h15"/><path d="M4 15h16a4 4 0 01-4 3.2H8a4 4 0 01-4-3.2z"/><circle cx="9" cy="7.2" r=".55" class="fill"/><circle cx="12.5" cy="6.6" r=".55" class="fill"/><circle cx="15.5" cy="7.4" r=".55" class="fill"/>',
+  friedegg:'<path d="M6.5 12.5a5 5 0 017.6-4.2 4 4 0 013.2 6.1 5 5 0 01-10.8-1.9z"/><circle cx="11" cy="12" r="2.4" class="fill"/>',
+  pizza:'<path d="M12 3.5l8.5 15.5H3.5z"/><path d="M5.5 14.5h13"/><circle cx="10" cy="11.5" r="1" class="fill"/><circle cx="14" cy="12.5" r="1" class="fill"/><circle cx="12" cy="16" r="1" class="fill"/>',
+  taco:'<path d="M3.5 16a8.5 8.5 0 0117 0z"/><path d="M3.5 16a8.5 8.5 0 0117 0"/><path d="M7.5 14c1.1-1.6 3.1-1.6 4.2 0M12.3 14c1.1-1.6 3.1-1.6 4.2 0"/>',
+  dip:'<path d="M4 12a8 8 0 0016 0z"/><path d="M2.5 12h19"/><path d="M8 10c1.2-1 2.4 0 3.6-.6s2.4.6 3.6-.4"/><circle cx="12" cy="8.5" r="1" class="fill"/>',
 };
 const ic = k => `<svg viewBox="0 0 24 24">${ICONS[k] || ICONS.tag}</svg>`;
 
@@ -155,7 +167,7 @@ const DEFAULT_PRODS = [
 //   step:       { text, t? }                      — t (хв) → крок із таймером
 const RECIPES = [
   {
-    id: 'carbonara', title: 'Паста Карбонара', color: '#F2C94C', icon: 'pasta', time: 25, servings: 2,
+    id: 'carbonara', title: 'Паста Карбонара', color: '#F2C94C', icon: 'spaghetti', time: 25, servings: 2,
     ingredients: [
       { name: 'Спагеті', qty: '200 г', icon: 'pasta' },
       { name: 'Бекон', qty: '150 г', icon: 'meat' },
@@ -174,7 +186,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'teriyaki', title: 'Курка теріякі з рисом', color: '#EB5C8B', icon: 'chicken', time: 30, servings: 2,
+    id: 'teriyaki', title: 'Курка теріякі з рисом', color: '#EB5C8B', icon: 'ricebowl', time: 30, servings: 2,
     ingredients: [
       { name: 'Куряче філе', qty: '400 г', icon: 'chicken' },
       { name: 'Рис', qty: '150 г', icon: 'sack' },
@@ -191,7 +203,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'syrnyky', title: 'Сирники', color: '#F2C94C', icon: 'cheese', time: 20, servings: 2,
+    id: 'syrnyky', title: 'Сирники', color: '#F2C94C', icon: 'pancakes', time: 20, servings: 2,
     ingredients: [
       { name: 'Сир кисломолочний', qty: '400 г', icon: 'cheese' },
       { name: 'Яйця', qty: '2 шт', icon: 'egg' },
@@ -207,7 +219,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'greeksalad', title: 'Грецький салат', color: '#27AE60', icon: 'cucumber', time: 15, servings: 2,
+    id: 'greeksalad', title: 'Грецький салат', color: '#27AE60', icon: 'salad', time: 15, servings: 2,
     ingredients: [
       { name: 'Помідори', qty: '3 шт', icon: 'tomato' },
       { name: 'Огірки', qty: '2 шт', icon: 'cucumber' },
@@ -223,7 +235,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pumpkinsoup', title: 'Крем-суп з гарбуза', color: '#F2994A', icon: 'bowl', time: 35, servings: 3,
+    id: 'pumpkinsoup', title: 'Крем-суп з гарбуза', color: '#F2994A', icon: 'soup', time: 35, servings: 3,
     ingredients: [
       { name: 'Гарбуз', qty: '600 г', icon: 'tag' },
       { name: 'Картопля', qty: '2 шт', icon: 'potato' },
@@ -241,7 +253,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'burger', title: 'Домашній бургер', color: '#5D4037', icon: 'meat', time: 30, servings: 2,
+    id: 'burger', title: 'Домашній бургер', color: '#5D4037', icon: 'burger', time: 30, servings: 2,
     ingredients: [
       { name: 'Яловичий фарш', qty: '400 г', icon: 'meat' },
       { name: 'Булочки для бургера', qty: '2 шт', icon: 'bread' },
@@ -259,7 +271,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'shakshuka', title: 'Шакшука', color: '#EB5757', icon: 'egg', time: 20, servings: 2,
+    id: 'shakshuka', title: 'Шакшука', color: '#EB5757', icon: 'friedegg', time: 20, servings: 2,
     ingredients: [
       { name: 'Яйця', qty: '4 шт', icon: 'egg' },
       { name: 'Помідори', qty: '4 шт', icon: 'tomato' },
@@ -277,7 +289,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'quinoabowl', title: 'Боул з кіноа', color: '#1ABC9C', icon: 'bowl', time: 25, servings: 2,
+    id: 'quinoabowl', title: 'Боул з кіноа', color: '#1ABC9C', icon: 'salad', time: 25, servings: 2,
     ingredients: [
       { name: 'Кіноа', qty: '150 г', icon: 'grain' },
       { name: 'Нут', qty: '1 банка', icon: 'grain' },
@@ -295,7 +307,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'ramen', title: 'Рамен', color: '#F2994A', icon: 'bowl', time: 40, servings: 2,
+    id: 'ramen', title: 'Рамен', color: '#F2994A', icon: 'ramenbowl', time: 40, servings: 2,
     ingredients: [
       { name: 'Локшина рамен', qty: '200 г', icon: 'pasta' },
       { name: 'Курячий бульйон', qty: '1 л', icon: 'jar' },
@@ -314,7 +326,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pizza', title: 'Піца Маргарита', color: '#EB5757', icon: 'bread', time: 40, servings: 2,
+    id: 'pizza', title: 'Піца Маргарита', color: '#EB5757', icon: 'pizza', time: 40, servings: 2,
     ingredients: [
       { name: 'Тісто для піци', qty: '1 шт', icon: 'sack' },
       { name: 'Томатний соус', qty: '100 г', icon: 'sauce' },
@@ -332,7 +344,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'caesar', title: 'Цезар з куркою', color: '#27AE60', icon: 'chicken', time: 25, servings: 2,
+    id: 'caesar', title: 'Цезар з куркою', color: '#27AE60', icon: 'salad', time: 25, servings: 2,
     ingredients: [
       { name: 'Куряче філе', qty: '300 г', icon: 'chicken' },
       { name: 'Салат ромен', qty: '1 шт', icon: 'tag' },
@@ -349,7 +361,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pancakes', title: 'Панкейки', color: '#F2C94C', icon: 'cookie', time: 20, servings: 2,
+    id: 'pancakes', title: 'Панкейки', color: '#F2C94C', icon: 'pancakes', time: 20, servings: 2,
     ingredients: [
       { name: 'Борошно', qty: '200 г', icon: 'sack' },
       { name: 'Молоко', qty: '250 мл', icon: 'milk' },
@@ -382,7 +394,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'tacos', title: 'Тако з яловичиною', color: '#F2994A', icon: 'meat', time: 30, servings: 2,
+    id: 'tacos', title: 'Тако з яловичиною', color: '#F2994A', icon: 'taco', time: 30, servings: 2,
     ingredients: [
       { name: 'Тортильї', qty: '4 шт', icon: 'bread' },
       { name: 'Яловичий фарш', qty: '300 г', icon: 'meat' },
@@ -399,7 +411,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'risotto', title: 'Ризото з грибами', color: '#5D4037', icon: 'sack', time: 35, servings: 2,
+    id: 'risotto', title: 'Ризото з грибами', color: '#5D4037', icon: 'ricebowl', time: 35, servings: 2,
     ingredients: [
       { name: 'Рис арборіо', qty: '200 г', icon: 'sack' },
       { name: 'Гриби', qty: '250 г', icon: 'tag' },
@@ -416,7 +428,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'hummus', title: 'Хумус', color: '#1ABC9C', icon: 'grain', time: 15, servings: 3,
+    id: 'hummus', title: 'Хумус', color: '#1ABC9C', icon: 'dip', time: 15, servings: 3,
     ingredients: [
       { name: 'Нут', qty: '1 банка', icon: 'grain' },
       { name: 'Тахіні', qty: '2 ст. л.', icon: 'jar' },
