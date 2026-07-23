@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 34; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 35; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1506,7 +1506,9 @@ function bindPpInput(track) {
     }
     const dx = e.clientX - lastX;
     if (Math.abs(e.clientX - startX) > 5) ppMoved = true;
-    ppOffset -= dx; ppVel = -dx; lastX = e.clientX; ppLayout(); e.preventDefault();
+    ppOffset -= dx;
+    ppVel = ppVel * 0.6 + (-dx) * 0.4; // згладжена швидкість для флику
+    lastX = e.clientX; ppLayout(); e.preventDefault();
   });
   const end = () => { if (!dragging) return; dragging = false; startPpInertia(); };
   track.addEventListener('pointerup', end);
@@ -1520,9 +1522,9 @@ function bindPpInput(track) {
   track.addEventListener('wheel', e => { stopPpInertia(); ppOffset += (e.deltaX || e.deltaY); ppLayout(); ppSnapSoon(); e.preventDefault(); }, { passive: false });
 }
 function startPpInertia() {
-  stopPpInertia();
+  if (ppRaf) cancelAnimationFrame(ppRaf); // скасувати кадр, але НЕ обнуляти швидкість
   const step = () => {
-    ppOffset -= ppVel; ppVel *= 0.9; ppLayout();
+    ppOffset += ppVel; ppVel *= 0.92; ppLayout(); // той самий напрям, що й драг
     if (Math.abs(ppVel) > 0.4) ppRaf = requestAnimationFrame(step);
     else { ppRaf = null; ppSnap(); }
   };
@@ -2167,7 +2169,9 @@ function bindWheelInput(wheel) {
     }
     const dy = e.clientY - lastY;
     if (Math.abs(e.clientY - startY) > 6) rcpMoved = true;
-    rcpOffset -= dy; rcpVel = -dy; lastY = e.clientY;
+    rcpOffset -= dy;
+    rcpVel = rcpVel * 0.6 + (-dy) * 0.4; // згладжена нещодавня швидкість (для флику)
+    lastY = e.clientY;
     layoutWheel();
     e.preventDefault();
   });
@@ -2183,9 +2187,9 @@ function bindWheelInput(wheel) {
   wheel.addEventListener('wheel', e => { stopInertia(); rcpOffset += e.deltaY; layoutWheel(); e.preventDefault(); }, { passive: false });
 }
 function startInertia() {
-  stopInertia();
+  if (rcpRaf) cancelAnimationFrame(rcpRaf); // скасувати кадр, але НЕ обнуляти швидкість
   const step = () => {
-    rcpOffset -= rcpVel; rcpVel *= 0.94;
+    rcpOffset += rcpVel; rcpVel *= 0.95; // той самий напрям, що й драг
     layoutWheel();
     rcpRaf = Math.abs(rcpVel) > 0.15 ? requestAnimationFrame(step) : null;
   };
