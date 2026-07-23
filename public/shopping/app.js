@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 33; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 34; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -755,9 +755,16 @@ let curRecipe = null;       // відкритий рецепт (у шторці 
 let cookStep = 0;           // поточний крок у режимі «Приготувати»
 let cookTimer = null;       // { id, endTs } активного таймера кроку
 let rcpCat = 'all';         // активний фільтр-розділ на сторінці рецептів
-let customRecipes = {};      // власні рецепти (Firebase ${SPACE}/recipes)
+let customRecipes = {};      // власні рецепти + override/приховування вбудованих (Firebase)
 const RECIPES_PATH = `${SPACE}/recipes`;
-const allRecipes = () => [...RECIPES, ...Object.values(customRecipes).filter(r => r && r.id)];
+// вбудовані + власні: власний запис за тим самим id перекриває вбудований;
+// { hidden:true } ховає рецепт (так «видаляються» вбудовані)
+const allRecipes = () => {
+  const map = {};
+  RECIPES.forEach(r => { map[r.id] = r; });
+  Object.values(customRecipes).forEach(r => { if (r && r.id) map[r.id] = r; });
+  return Object.values(map).filter(r => r && !r.hidden);
+};
 let editRecipe = null;       // чернетка в редакторі рецепта
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
 const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
@@ -1919,13 +1926,14 @@ function bindEvents() {
     tab.addEventListener('click', () => setTab(tab.dataset.tab)));
 
   // рецепти
-  $('btn-add-recipe').addEventListener('click', openRecipeEdit);
+  $('btn-add-recipe').addEventListener('click', () => openRecipeEdit());
   $('recipe-addall').addEventListener('click', addAllIngredients);
   $('recipe-cook').addEventListener('click', openCook);
   $('cook-back').addEventListener('click', closeCook);
   // редактор власних рецептів
   $('redit-cancel').addEventListener('click', closeRecipeEdit);
   $('redit-save').addEventListener('click', saveRecipe);
+  $('redit-delete').addEventListener('click', deleteRecipe);
   $('redit-add-ing').addEventListener('click', () => { editRecipe.ingredients.push({ name: '', qty: '' }); renderEditIngs(); });
   $('redit-add-step').addEventListener('click', () => { editRecipe.steps.push({ short: '', text: '', t: null }); renderEditSteps(); });
 
@@ -2130,20 +2138,30 @@ function layoutWheel(force) {
   });
 }
 
-// драг + інерція (Pointer Events — і миша, і тач); горизонталь віддаємо свайпу вкладок
+// драг + інерція (Pointer Events — і миша, і тач); горизонталь віддаємо свайпу
+// вкладок; затиск (~450 мс без руху) → редагування страви під пальцем
 function bindWheelInput(wheel) {
-  let dragging = false, lastY = 0, startX = 0, startY = 0, axisV = false, pid = null;
+  let dragging = false, lastY = 0, startX = 0, startY = 0, axisV = false, pid = null, lpTimer = null;
+  const clearLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
   wheel.addEventListener('pointerdown', e => {
     stopInertia();
     dragging = true; axisV = false; rcpMoved = false;
     lastY = startY = e.clientY; startX = e.clientX; pid = e.pointerId;
+    const row = e.target.closest('.rcp-row');
+    clearLp();
+    lpTimer = setTimeout(() => {
+      lpTimer = null; dragging = false; rcpMoved = true; // затиск: не тап і не драг
+      const r = row && allRecipes().find(x => x.id === row.dataset.rid);
+      if (r) openRecipeEdit(r);
+    }, 450);
   });
   wheel.addEventListener('pointermove', e => {
     if (!dragging) return;
     if (!axisV) {
       const tX = Math.abs(e.clientX - startX), tY = Math.abs(e.clientY - startY);
       if (tX < 6 && tY < 6) return;
-      if (tX > tY) { dragging = false; return; } // це горизонтальний свайп вкладок
+      clearLp();                                  // почався рух — не затиск
+      if (tX > tY) { dragging = false; return; }  // це горизонтальний свайп вкладок
       axisV = true;
       try { wheel.setPointerCapture(pid); } catch (_) {}
     }
@@ -2154,6 +2172,7 @@ function bindWheelInput(wheel) {
     e.preventDefault();
   });
   const end = () => {
+    clearLp();
     if (!dragging) return;
     dragging = false;
     if (Math.abs(rcpVel) > 1) startInertia();
@@ -2349,11 +2368,26 @@ function localNotify(title, body) {
 const DISH_ICONS = ['salad', 'soup', 'spaghetti', 'ricebowl', 'ramenbowl', 'pancakes', 'burger',
   'friedegg', 'pizza', 'taco', 'dip', 'steak', 'shrimp', 'cake', 'toast', 'fish', 'chicken', 'meat', 'bowl'];
 
-function openRecipeEdit() {
-  editRecipe = { title: '', cat: 'meat', icon: 'salad', time: '', servings: '', ingredients: [{ name: '', qty: '' }], steps: [{ short: '', text: '', t: null }] };
-  $('redit-title').value = '';
-  $('redit-time').value = '';
-  $('redit-serv').value = '';
+// src=undefined → новий рецепт (кнопка «+»); src=рецепт → редагування (затиск)
+function openRecipeEdit(src) {
+  if (src) {
+    editRecipe = {
+      id: src.id, editing: true, color: src.color,
+      title: src.title, cat: src.cat || 'meat', icon: src.icon || 'salad',
+      time: src.time || '', servings: src.servings || '',
+      ingredients: (src.ingredients || []).map(x => ({ name: x.name, qty: x.qty || '', icon: x.icon })),
+      steps: (src.steps || []).map(x => ({ short: x.short || '', text: x.text || '', t: x.t || null })),
+    };
+    if (!editRecipe.ingredients.length) editRecipe.ingredients = [{ name: '', qty: '' }];
+    if (!editRecipe.steps.length) editRecipe.steps = [{ short: '', text: '', t: null }];
+  } else {
+    editRecipe = { editing: false, title: '', cat: 'meat', icon: 'salad', time: '', servings: '', ingredients: [{ name: '', qty: '' }], steps: [{ short: '', text: '', t: null }] };
+  }
+  $('redit-htitle').textContent = editRecipe.editing ? 'Редагувати рецепт' : 'Новий рецепт';
+  $('redit-title').value = editRecipe.title;
+  $('redit-time').value = editRecipe.time;
+  $('redit-serv').value = editRecipe.servings;
+  $('redit-delete').style.display = editRecipe.editing ? '' : 'none';
   renderEditCats();
   renderEditIcons();
   renderEditIngs();
@@ -2433,16 +2467,27 @@ function saveRecipe() {
     .map(x => { const s = { short: x.short.trim(), text: x.text.trim() }; if (+x.t > 0) s.t = +x.t; return s; });
   if (!ings.length) { toast('Додай хоч один інгредієнт'); return; }
   if (!steps.length) { toast('Додай хоч один крок'); return; }
-  const id = 'my_' + Date.now().toString(36);
+  const id = editRecipe.editing ? editRecipe.id : ('my_' + Date.now().toString(36));
+  const builtin = RECIPES.find(r => r.id === id);
   const rec = {
-    id, title, color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    id, title,
+    color: editRecipe.color || (builtin && builtin.color) || COLORS[Math.floor(Math.random() * COLORS.length)],
     icon: editRecipe.icon, cat: editRecipe.cat,
     time: +$('redit-time').value || 0, servings: +$('redit-serv').value || 1,
     ingredients: ings, steps, custom: true,
   };
   set(ref(db, `${RECIPES_PATH}/${id}`), rec).catch(() => {});
   closeRecipeEdit();
-  toast('Рецепт додано');
+  toast(editRecipe.editing ? 'Рецепт оновлено' : 'Рецепт додано');
+}
+// видалення: власний — прибираємо з бази; вбудований — ховаємо через override
+function deleteRecipe() {
+  const id = editRecipe && editRecipe.id;
+  if (!id) return;
+  if (RECIPES.find(r => r.id === id)) set(ref(db, `${RECIPES_PATH}/${id}`), { id, hidden: true }).catch(() => {});
+  else remove(ref(db, `${RECIPES_PATH}/${id}`)).catch(() => {});
+  closeRecipeEdit();
+  toast('Рецепт видалено');
 }
 
 // ── HELPERS ────────────────────────────────────────────────

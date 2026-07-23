@@ -573,3 +573,5 @@ textarea.edit-input { resize: none; line-height: 1.35; }
 .edit-timer-btn.on { background: var(--active); border-color: var(--active); }
 .edit-step .step-min { width: 80px; margin: 0; background: #fff; }
 .edit-min-lbl { font-size: 13.5px; color: var(--text2); }
+.edit-delete { display: block; width: calc(100% - 32px); margin: 26px 16px 6px; background: #fde7ef; color: var(--danger); border: none; border-radius: 12px; padding: 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.edit-delete:active { opacity: 0.8; }
