@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 30; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 31; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1992,9 +1992,10 @@ const ingInList = name => Object.values(listMap).some(it => !it.done && it.name.
 // страви в алфавітному порядку
 const recipesSorted = () => allRecipes().sort((a, b) => a.title.localeCompare(b.title, 'uk'));
 const recipesFiltered = () => recipesSorted().filter(r => rcpCat === 'all' || r.cat === rcpCat);
-const LOOP_COPIES = 9; // копій списку для безшовного зациклення барабана
+const LOOP_COPIES = 9; // мінімум копій списку для зациклення барабана
 let rcpLoopTimer = null;
 let rcpDrumCount = 0;   // скільки страв у поточному (відфільтрованому) барабані
+let rcpCopies = LOOP_COPIES; // фактична к-сть копій (адаптивна під фільтр/екран)
 const rcpRowHtml = r => `<button class="rcp-row" data-id="${r.id}">
     <span class="rcp-row-circle" style="--c:${r.color || '#9E9E9E'}">
       <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
@@ -2027,39 +2028,56 @@ function renderRecipes() {
   renderRcpCats();
   const list = recipesFiltered();
   rcpDrumCount = list.length;
-  grid.innerHTML = list.map(rcpRowHtml).join('').repeat(LOOP_COPIES);
-  grid.querySelectorAll('.rcp-row').forEach(el =>
-    el.addEventListener('click', () => openRecipe(el.dataset.id)));
+  const one = list.map(rcpRowHtml).join('');
   const screen = $('recipes-screen');
+  // 1) рендер однієї копії, щоб виміряти висоту рядка
+  grid.innerHTML = one;
   if (!screen.dataset.rcpBound) {
     screen.addEventListener('scroll', () => {
       requestAnimationFrame(updateRcpScale);
       clearTimeout(rcpLoopTimer);
-      rcpLoopTimer = setTimeout(loopRecenter, 120);
+      rcpLoopTimer = setTimeout(loopRecenter, 100);
     }, { passive: true });
     screen.dataset.rcpBound = '1';
   }
-  requestAnimationFrame(() => { centerLoop(); updateRcpScale(); });
+  requestAnimationFrame(() => {
+    // 2) копій має бути стільки, щоб контенту було ~12 екранів (для будь-якого фільтра)
+    const stride = rcpStride() || 58;
+    const lh = stride * rcpDrumCount;
+    const vp = screen.clientHeight || 700;
+    let copies = Math.max(LOOP_COPIES, Math.ceil(12 * vp / lh));
+    if (copies % 2 === 0) copies++;
+    rcpCopies = copies;
+    grid.innerHTML = one.repeat(copies);
+    grid.querySelectorAll('.rcp-row').forEach(el =>
+      el.addEventListener('click', () => openRecipe(el.dataset.id)));
+    centerLoop();
+    updateRcpScale();
+  });
 }
 const rcpStride = () => {
   const rows = $('recipes-screen').querySelectorAll('.rcp-row');
-  return rows.length > 1 ? (rows[1].offsetTop - rows[0].offsetTop) : 0;
+  if (rows.length > 1) return rows[1].offsetTop - rows[0].offsetTop;
+  if (rows.length === 1) return rows[0].offsetHeight + 16; // + gap
+  return 0;
 };
 function centerLoop() {
   const sc = $('recipes-screen');
   const lh = rcpStride() * rcpDrumCount;
-  if (lh) sc.scrollTop = lh * Math.floor(LOOP_COPIES / 2);
+  if (lh) sc.scrollTop = lh * Math.floor(rcpCopies / 2);
 }
-// зациклення: біля країв безшовно телепортуємо в центральну копію (та сама картинка)
+// зациклення: після скролу підсовуємо scrollTop до центральної копії на ціле
+// число копій (картинка ідентична кожні lh, тож стрибка не видно)
 function loopRecenter() {
   const sc = $('recipes-screen');
   const lh = rcpStride() * rcpDrumCount;
   if (!lh) return;
-  if (sc.scrollTop < lh || sc.scrollTop > lh * (LOOP_COPIES - 2)) {
-    const phase = ((sc.scrollTop % lh) + lh) % lh;
+  const mid = lh * Math.floor(rcpCopies / 2);
+  const d = sc.scrollTop - mid;
+  if (Math.abs(d) >= lh) {
     const prev = sc.style.scrollBehavior;
     sc.style.scrollBehavior = 'auto';
-    sc.scrollTop = lh * Math.floor(LOOP_COPIES / 2) + phase;
+    sc.scrollTop = mid + (d - Math.round(d / lh) * lh);
     sc.style.scrollBehavior = prev;
     updateRcpScale();
   }
