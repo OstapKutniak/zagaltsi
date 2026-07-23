@@ -64,6 +64,7 @@
 
     <!-- RECIPES -->
     <div class="screen" id="recipes-screen">
+      <div class="rcp-cats" id="rcp-cats"></div>
       <div class="rcp-grid" id="rcp-grid"></div>
     </div>
   </div>
@@ -256,6 +257,32 @@
         <div class="cook-toc" id="cook-toc"></div>
         <div class="cook-body" id="cook-body"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- RECIPE EDITOR (додати свій рецепт) -->
+  <div class="edit-overlay" id="recipe-edit-overlay">
+    <div class="edit-head">
+      <button class="edit-cancel" id="redit-cancel">Скасувати</button>
+      <div class="edit-title">Новий рецепт</div>
+      <button class="edit-save" id="redit-save">Зберегти</button>
+    </div>
+    <div class="edit-body">
+      <input class="edit-input" id="redit-title" placeholder="Назва страви">
+      <div class="edit-sub">Категорія</div>
+      <div class="add-chips form-chips" id="redit-cats"></div>
+      <div class="edit-sub">Іконка</div>
+      <div class="icon-grid" id="redit-icons"></div>
+      <div class="edit-row2">
+        <label>Час, хв<input class="edit-input" id="redit-time" type="number" inputmode="numeric" placeholder="30"></label>
+        <label>Порції<input class="edit-input" id="redit-serv" type="number" inputmode="numeric" placeholder="2"></label>
+      </div>
+      <div class="edit-sub">Інгредієнти</div>
+      <div id="redit-ings"></div>
+      <button class="edit-add" id="redit-add-ing">+ Інгредієнт</button>
+      <div class="edit-sub">Кроки приготування</div>
+      <div id="redit-steps"></div>
+      <button class="edit-add" id="redit-add-step">+ Крок</button>
     </div>
   </div>
 

@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 29; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 30; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -120,6 +120,10 @@ const ICONS = {
   pizza:'<path d="M12 3.5l8.5 15.5H3.5z"/><path d="M5.5 14.5h13"/><circle cx="10" cy="11.5" r="1" class="fill"/><circle cx="14" cy="12.5" r="1" class="fill"/><circle cx="12" cy="16" r="1" class="fill"/>',
   taco:'<path d="M3.5 16a8.5 8.5 0 0117 0z"/><path d="M3.5 16a8.5 8.5 0 0117 0"/><path d="M7.5 14c1.1-1.6 3.1-1.6 4.2 0M12.3 14c1.1-1.6 3.1-1.6 4.2 0"/>',
   dip:'<path d="M4 12a8 8 0 0016 0z"/><path d="M2.5 12h19"/><path d="M8 10c1.2-1 2.4 0 3.6-.6s2.4.6 3.6-.4"/><circle cx="12" cy="8.5" r="1" class="fill"/>',
+  steak:'<path d="M4 12a6 5 0 019-4.3A5 5 0 0119 11a5 5 0 01-8 4A6 5 0 014 12z"/><path d="M15.5 10.5c-1 .6-1.5 1.6-1.3 2.8"/>',
+  shrimp:'<path d="M17 6c-5 0-9 3-9 7a4 4 0 004 4h5"/><path d="M17 6c1.5 0 2.5 1 2.5 2.5S18.5 11 17 11"/><path d="M8 13c-2 0-3.5-1-4-3M9 10.5c-2 0-3-1-3.5-2.5"/>',
+  cake:'<path d="M4 20h16V11H4z"/><path d="M4 14h16"/><path d="M12 11V6"/><path d="M12 5c-1 0-1.5-.8-1.5-1.5S12 2 12 2s1.5.8 1.5 1.5S13 5 12 5z" class="fill"/>',
+  toast:'<path d="M5 10c0-3 3-4 7-4s7 1 7 4v9a1 1 0 01-1 1H6a1 1 0 01-1-1z"/><path d="M8.5 12.5l2 2 4-4"/>',
 };
 const ic = k => `<svg viewBox="0 0 24 24">${ICONS[k] || ICONS.tag}</svg>`;
 
@@ -161,13 +165,27 @@ const DEFAULT_PRODS = [
   ['hygiene','Крем','cream'],
 ];
 
+// категорії страв для фільтра на сторінці «Рецепти»
+const DISH_CATS = [
+  { key: 'all',       name: 'Всі страви' },
+  { key: 'meat',      name: 'М\'ясні' },
+  { key: 'fish',      name: 'Риба' },
+  { key: 'soup',      name: 'Супи' },
+  { key: 'salad',     name: 'Салати' },
+  { key: 'pasta',     name: 'Паста' },
+  { key: 'asian',     name: 'Азійські' },
+  { key: 'breakfast', name: 'Сніданки' },
+  { key: 'baking',    name: 'Випічка' },
+  { key: 'veg',       name: 'Вегетаріанські' },
+  { key: 'dessert',   name: 'Десерти' },
+];
 // ── РЕЦЕПТИ (куроване, статичне; фото Остапа кладуться в recipes/<id>.jpg) ──
 // recipe: { id, title, color, icon, time(хв), servings, ingredients[], steps[] }
 //   ingredient: { name, qty, icon, cat? }        — ціна/додавання йдуть за назвою
 //   step:       { text, t? }                      — t (хв) → крок із таймером
 const RECIPES = [
   {
-    id: 'carbonara', title: 'Паста Карбонара', color: '#F2C94C', icon: 'spaghetti', time: 25, servings: 2,
+    id: 'carbonara', title: 'Паста Карбонара', color: '#F2C94C', icon: 'spaghetti', cat: 'pasta', time: 25, servings: 2,
     ingredients: [
       { name: 'Спагеті', qty: '200 г', icon: 'pasta' },
       { name: 'Бекон', qty: '150 г', icon: 'meat' },
@@ -186,7 +204,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'teriyaki', title: 'Курка теріякі з рисом', color: '#EB5C8B', icon: 'ricebowl', time: 30, servings: 2,
+    id: 'teriyaki', title: 'Курка теріякі з рисом', color: '#EB5C8B', icon: 'ricebowl', cat: 'asian', time: 30, servings: 2,
     ingredients: [
       { name: 'Куряче філе', qty: '400 г', icon: 'chicken' },
       { name: 'Рис', qty: '150 г', icon: 'sack' },
@@ -203,7 +221,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'syrnyky', title: 'Сирники', color: '#F2C94C', icon: 'pancakes', time: 20, servings: 2,
+    id: 'syrnyky', title: 'Сирники', color: '#F2C94C', icon: 'pancakes', cat: 'breakfast', time: 20, servings: 2,
     ingredients: [
       { name: 'Сир кисломолочний', qty: '400 г', icon: 'cheese' },
       { name: 'Яйця', qty: '2 шт', icon: 'egg' },
@@ -219,7 +237,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'greeksalad', title: 'Грецький салат', color: '#27AE60', icon: 'salad', time: 15, servings: 2,
+    id: 'greeksalad', title: 'Грецький салат', color: '#27AE60', icon: 'salad', cat: 'salad', time: 15, servings: 2,
     ingredients: [
       { name: 'Помідори', qty: '3 шт', icon: 'tomato' },
       { name: 'Огірки', qty: '2 шт', icon: 'cucumber' },
@@ -235,7 +253,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pumpkinsoup', title: 'Крем-суп з гарбуза', color: '#F2994A', icon: 'soup', time: 35, servings: 3,
+    id: 'pumpkinsoup', title: 'Крем-суп з гарбуза', color: '#F2994A', icon: 'soup', cat: 'soup', time: 35, servings: 3,
     ingredients: [
       { name: 'Гарбуз', qty: '600 г', icon: 'tag' },
       { name: 'Картопля', qty: '2 шт', icon: 'potato' },
@@ -253,7 +271,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'burger', title: 'Домашній бургер', color: '#5D4037', icon: 'burger', time: 30, servings: 2,
+    id: 'burger', title: 'Домашній бургер', color: '#5D4037', icon: 'burger', cat: 'meat', time: 30, servings: 2,
     ingredients: [
       { name: 'Яловичий фарш', qty: '400 г', icon: 'meat' },
       { name: 'Булочки для бургера', qty: '2 шт', icon: 'bread' },
@@ -271,7 +289,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'shakshuka', title: 'Шакшука', color: '#EB5757', icon: 'friedegg', time: 20, servings: 2,
+    id: 'shakshuka', title: 'Шакшука', color: '#EB5757', icon: 'friedegg', cat: 'breakfast', time: 20, servings: 2,
     ingredients: [
       { name: 'Яйця', qty: '4 шт', icon: 'egg' },
       { name: 'Помідори', qty: '4 шт', icon: 'tomato' },
@@ -289,7 +307,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'quinoabowl', title: 'Боул з кіноа', color: '#1ABC9C', icon: 'salad', time: 25, servings: 2,
+    id: 'quinoabowl', title: 'Боул з кіноа', color: '#1ABC9C', icon: 'salad', cat: 'veg', time: 25, servings: 2,
     ingredients: [
       { name: 'Кіноа', qty: '150 г', icon: 'grain' },
       { name: 'Нут', qty: '1 банка', icon: 'grain' },
@@ -307,7 +325,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'ramen', title: 'Рамен', color: '#F2994A', icon: 'ramenbowl', time: 40, servings: 2,
+    id: 'ramen', title: 'Рамен', color: '#F2994A', icon: 'ramenbowl', cat: 'asian', time: 40, servings: 2,
     ingredients: [
       { name: 'Локшина рамен', qty: '200 г', icon: 'pasta' },
       { name: 'Курячий бульйон', qty: '1 л', icon: 'jar' },
@@ -326,7 +344,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pizza', title: 'Піца Маргарита', color: '#EB5757', icon: 'pizza', time: 40, servings: 2,
+    id: 'pizza', title: 'Піца Маргарита', color: '#EB5757', icon: 'pizza', cat: 'baking', time: 40, servings: 2,
     ingredients: [
       { name: 'Тісто для піци', qty: '1 шт', icon: 'sack' },
       { name: 'Томатний соус', qty: '100 г', icon: 'sauce' },
@@ -344,7 +362,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'caesar', title: 'Цезар з куркою', color: '#27AE60', icon: 'salad', time: 25, servings: 2,
+    id: 'caesar', title: 'Цезар з куркою', color: '#27AE60', icon: 'salad', cat: 'salad', time: 25, servings: 2,
     ingredients: [
       { name: 'Куряче філе', qty: '300 г', icon: 'chicken' },
       { name: 'Салат ромен', qty: '1 шт', icon: 'tag' },
@@ -361,7 +379,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'pancakes', title: 'Панкейки', color: '#F2C94C', icon: 'pancakes', time: 20, servings: 2,
+    id: 'pancakes', title: 'Панкейки', color: '#F2C94C', icon: 'pancakes', cat: 'breakfast', time: 20, servings: 2,
     ingredients: [
       { name: 'Борошно', qty: '200 г', icon: 'sack' },
       { name: 'Молоко', qty: '250 мл', icon: 'milk' },
@@ -377,7 +395,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'salmon', title: 'Лосось на грилі', color: '#EB5C8B', icon: 'fish', time: 25, servings: 2,
+    id: 'salmon', title: 'Лосось на грилі', color: '#EB5C8B', icon: 'fish', cat: 'fish', time: 25, servings: 2,
     ingredients: [
       { name: 'Стейк лосося', qty: '2 шт', icon: 'fish' },
       { name: 'Лимон', qty: '1 шт', icon: 'tag' },
@@ -394,7 +412,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'tacos', title: 'Тако з яловичиною', color: '#F2994A', icon: 'taco', time: 30, servings: 2,
+    id: 'tacos', title: 'Тако з яловичиною', color: '#F2994A', icon: 'taco', cat: 'meat', time: 30, servings: 2,
     ingredients: [
       { name: 'Тортильї', qty: '4 шт', icon: 'bread' },
       { name: 'Яловичий фарш', qty: '300 г', icon: 'meat' },
@@ -411,7 +429,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'risotto', title: 'Ризото з грибами', color: '#5D4037', icon: 'ricebowl', time: 35, servings: 2,
+    id: 'risotto', title: 'Ризото з грибами', color: '#5D4037', icon: 'ricebowl', cat: 'pasta', time: 35, servings: 2,
     ingredients: [
       { name: 'Рис арборіо', qty: '200 г', icon: 'sack' },
       { name: 'Гриби', qty: '250 г', icon: 'tag' },
@@ -428,7 +446,7 @@ const RECIPES = [
     ],
   },
   {
-    id: 'hummus', title: 'Хумус', color: '#1ABC9C', icon: 'dip', time: 15, servings: 3,
+    id: 'hummus', title: 'Хумус', color: '#1ABC9C', icon: 'dip', cat: 'veg', time: 15, servings: 3,
     ingredients: [
       { name: 'Нут', qty: '1 банка', icon: 'grain' },
       { name: 'Тахіні', qty: '2 ст. л.', icon: 'jar' },
@@ -440,6 +458,277 @@ const RECIPES = [
       { short: 'Пюре', text: 'Збийте нут, тахіні, часник, лимон і олію в блендері.' },
       { short: 'Смак', text: 'Приправте кмином і сіллю, за потреби додайте трохи води.' },
       { short: 'Подача', text: 'Викладіть, збризніть олією, подавайте з пітою.' },
+    ],
+  },
+  {
+    id: 'borscht', title: 'Борщ', color: '#EB5757', icon: 'soup', cat: 'soup', time: 90, servings: 4,
+    ingredients: [
+      { name: 'Буряк', qty: '2 шт', icon: 'tag' }, { name: 'Капуста', qty: '300 г', icon: 'tag' },
+      { name: 'Картопля', qty: '3 шт', icon: 'potato' }, { name: 'Морква', qty: '1 шт', icon: 'tag' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' }, { name: 'Томатна паста', qty: '2 ст. л.', icon: 'sauce' },
+    ],
+    steps: [
+      { short: 'Бульйон', text: 'Зваріть м\'ясний або овочевий бульйон.', t: 40 },
+      { short: 'Засмажка', text: 'Спасеруйте цибулю, моркву й буряк із томатною пастою.', t: 10 },
+      { short: 'Овочі', text: 'Додайте картоплю й капусту, варіть до м\'якості.', t: 15 },
+      { short: 'З\'єднати', text: 'Вкиньте засмажку, доваріть, дайте настоятися.', t: 5 },
+      { short: 'Подача', text: 'Подавайте зі сметаною й зеленню.' },
+    ],
+  },
+  {
+    id: 'olivier', title: 'Олів\'є', color: '#F2C94C', icon: 'salad', cat: 'salad', time: 40, servings: 4,
+    ingredients: [
+      { name: 'Картопля', qty: '4 шт', icon: 'potato' }, { name: 'Яйця', qty: '4 шт', icon: 'egg' },
+      { name: 'Ковбаса варена', qty: '300 г', icon: 'sausage' }, { name: 'Огірки солоні', qty: '3 шт', icon: 'cucumber' },
+      { name: 'Горошок', qty: '1 банка', icon: 'grain' }, { name: 'Майонез', qty: '200 г', icon: 'sauce' },
+    ],
+    steps: [
+      { short: 'Відварити', text: 'Відваріть картоплю та яйця, остудіть.', t: 20 },
+      { short: 'Нарізка', text: 'Наріжте все дрібними кубиками.' },
+      { short: 'Змішати', text: 'Додайте горошок, заправте майонезом, посоліть.' },
+    ],
+  },
+  {
+    id: 'plov', title: 'Плов', color: '#F2994A', icon: 'ricebowl', cat: 'meat', time: 70, servings: 4,
+    ingredients: [
+      { name: 'Рис', qty: '400 г', icon: 'sack' }, { name: 'Баранина', qty: '500 г', icon: 'meat' },
+      { name: 'Морква', qty: '3 шт', icon: 'tag' }, { name: 'Цибуля', qty: '2 шт', icon: 'onion' },
+      { name: 'Часник', qty: '1 головка', icon: 'garlic' }, { name: 'Олія', qty: '100 мл', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'М\'ясо', text: 'Обсмажте м\'ясо в казані до скоринки.', t: 10 },
+      { short: 'Зірвак', text: 'Додайте цибулю й моркву, спеції, обсмажте.', t: 10 },
+      { short: 'Тушкувати', text: 'Залийте водою, тушкуйте м\'ясо до м\'якості.', t: 30 },
+      { short: 'Рис', text: 'Викладіть рис, доваріть під кришкою до готовності.', t: 20 },
+    ],
+  },
+  {
+    id: 'bolognese', title: 'Паста Болоньєзе', color: '#EB5757', icon: 'spaghetti', cat: 'pasta', time: 45, servings: 3,
+    ingredients: [
+      { name: 'Спагеті', qty: '300 г', icon: 'pasta' }, { name: 'Яловичий фарш', qty: '400 г', icon: 'meat' },
+      { name: 'Помідори в соку', qty: '400 г', icon: 'tomato' }, { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+      { name: 'Морква', qty: '1 шт', icon: 'tag' }, { name: 'Часник', qty: '2 зубчики', icon: 'garlic' },
+    ],
+    steps: [
+      { short: 'Овочі', text: 'Обсмажте цибулю, моркву й часник.' },
+      { short: 'Фарш', text: 'Додайте фарш, обсмажте до рум\'яності.', t: 8 },
+      { short: 'Соус', text: 'Влийте помідори, тушкуйте соус.', t: 25 },
+      { short: 'Паста', text: 'Відваріть спагеті аль денте.', t: 9 },
+      { short: 'Подача', text: 'Подавайте пасту з соусом і пармезаном.' },
+    ],
+  },
+  {
+    id: 'padthai', title: 'Пад Тай', color: '#F2994A', icon: 'ramenbowl', cat: 'asian', time: 30, servings: 2,
+    ingredients: [
+      { name: 'Рисова локшина', qty: '200 г', icon: 'pasta' }, { name: 'Креветки', qty: '200 г', icon: 'shrimp' },
+      { name: 'Яйця', qty: '2 шт', icon: 'egg' }, { name: 'Арахіс', qty: '50 г', icon: 'tag' },
+      { name: 'Соус тамаринд', qty: '3 ст. л.', icon: 'sauce' }, { name: 'Паростки квасолі', qty: '100 г', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Локшина', text: 'Замочіть рисову локшину в гарячій воді.', t: 8 },
+      { short: 'Вок', text: 'Обсмажте креветки, відсуньте, вбийте яйця.' },
+      { short: 'Змішати', text: 'Додайте локшину, соус, паростки, прогрійте.', t: 4 },
+      { short: 'Подача', text: 'Притрусіть арахісом і лаймом.' },
+    ],
+  },
+  {
+    id: 'omelette', title: 'Омлет', color: '#F2C94C', icon: 'friedegg', cat: 'breakfast', time: 12, servings: 1,
+    ingredients: [
+      { name: 'Яйця', qty: '3 шт', icon: 'egg' }, { name: 'Молоко', qty: '50 мл', icon: 'milk' },
+      { name: 'Сир', qty: '50 г', icon: 'cheese' }, { name: 'Масло', qty: '10 г', icon: 'butter' },
+    ],
+    steps: [
+      { short: 'Збити', text: 'Збийте яйця з молоком і сіллю.' },
+      { short: 'Смаження', text: 'Вилийте на розігріту сковороду з маслом.', t: 5 },
+      { short: 'Сир', text: 'Притрусіть сиром, складіть навпіл, подавайте.' },
+    ],
+  },
+  {
+    id: 'lasagna', title: 'Лазанья', color: '#EB5757', icon: 'spaghetti', cat: 'pasta', time: 70, servings: 4,
+    ingredients: [
+      { name: 'Листи лазаньї', qty: '250 г', icon: 'sack' }, { name: 'Яловичий фарш', qty: '500 г', icon: 'meat' },
+      { name: 'Соус бешамель', qty: '400 мл', icon: 'sauce' }, { name: 'Помідори в соку', qty: '400 г', icon: 'tomato' },
+      { name: 'Пармезан', qty: '100 г', icon: 'cheese' }, { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+    ],
+    steps: [
+      { short: 'Соус', text: 'Приготуйте м\'ясний соус із фаршем і помідорами.', t: 25 },
+      { short: 'Шари', text: 'Викладайте шарами: соус, листи, бешамель, сир.' },
+      { short: 'Випікання', text: 'Запікайте до золотистої скоринки.', t: 30 },
+      { short: 'Подача', text: 'Дайте настоятися 10 хв і нарізайте.' },
+    ],
+  },
+  {
+    id: 'tomyam', title: 'Том Ям', color: '#F2994A', icon: 'soup', cat: 'soup', time: 35, servings: 2,
+    ingredients: [
+      { name: 'Креветки', qty: '250 г', icon: 'shrimp' }, { name: 'Гриби', qty: '150 г', icon: 'tag' },
+      { name: 'Кокосове молоко', qty: '200 мл', icon: 'milk' }, { name: 'Паста том ям', qty: '2 ст. л.', icon: 'sauce' },
+      { name: 'Лайм', qty: '1 шт', icon: 'tag' }, { name: 'Лемонграс', qty: '2 стебла', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'База', text: 'Прокип\'ятіть воду з пастою том ям і лемонграсом.', t: 8 },
+      { short: 'Гриби', text: 'Додайте гриби, влийте кокосове молоко.', t: 5 },
+      { short: 'Креветки', text: 'Вкиньте креветки, варіть до готовності.', t: 4 },
+      { short: 'Подача', text: 'Приправте соком лайма й зеленню.' },
+    ],
+  },
+  {
+    id: 'kyivcutlet', title: 'Котлета по-київськи', color: '#F2C94C', icon: 'steak', cat: 'meat', time: 45, servings: 2,
+    ingredients: [
+      { name: 'Куряче філе', qty: '2 шт', icon: 'chicken' }, { name: 'Масло', qty: '80 г', icon: 'butter' },
+      { name: 'Яйця', qty: '2 шт', icon: 'egg' }, { name: 'Панірувальні сухарі', qty: '150 г', icon: 'bread' },
+      { name: 'Часник', qty: '2 зубчики', icon: 'garlic' }, { name: 'Зелень', qty: 'пучок', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Масло', text: 'Змішайте масло з часником і зеленню, заморозьте.', t: 15 },
+      { short: 'Загорнути', text: 'Відбийте філе, загорніть у нього масло.' },
+      { short: 'Паніровка', text: 'Обваляйте в борошні, яйці й сухарях двічі.' },
+      { short: 'Смаження', text: 'Обсмажте й доведіть у духовці до готовності.', t: 15 },
+    ],
+  },
+  {
+    id: 'caprese', title: 'Капрезе', color: '#27AE60', icon: 'salad', cat: 'salad', time: 10, servings: 2,
+    ingredients: [
+      { name: 'Помідори', qty: '3 шт', icon: 'tomato' }, { name: 'Моцарела', qty: '200 г', icon: 'cheese' },
+      { name: 'Базилік', qty: 'пучок', icon: 'tag' }, { name: 'Оливкова олія', qty: '2 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Нарізка', text: 'Наріжте помідори й моцарелу кружальцями.' },
+      { short: 'Викласти', text: 'Чергуйте з листками базиліку на тарілці.' },
+      { short: 'Заправка', text: 'Збризніть олією й бальзаміком, посоліть.' },
+    ],
+  },
+  {
+    id: 'garlicshrimp', title: 'Креветки в часнику', color: '#EB5C8B', icon: 'shrimp', cat: 'fish', time: 20, servings: 2,
+    ingredients: [
+      { name: 'Креветки', qty: '400 г', icon: 'shrimp' }, { name: 'Часник', qty: '4 зубчики', icon: 'garlic' },
+      { name: 'Вершкове масло', qty: '50 г', icon: 'butter' }, { name: 'Лимон', qty: '1 шт', icon: 'tag' },
+      { name: 'Петрушка', qty: 'пучок', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Часник', text: 'Розтопіть масло, обсмажте подрібнений часник.' },
+      { short: 'Креветки', text: 'Додайте креветки, смажте до рожевого.', t: 5 },
+      { short: 'Фініш', text: 'Влийте сік лимона, притрусіть петрушкою.' },
+    ],
+  },
+  {
+    id: 'goulash', title: 'Гуляш', color: '#5D4037', icon: 'steak', cat: 'meat', time: 90, servings: 4,
+    ingredients: [
+      { name: 'Яловичина', qty: '600 г', icon: 'meat' }, { name: 'Цибуля', qty: '2 шт', icon: 'onion' },
+      { name: 'Паприка', qty: '2 ст. л.', icon: 'tag' }, { name: 'Томатна паста', qty: '2 ст. л.', icon: 'sauce' },
+      { name: 'Перець солодкий', qty: '2 шт', icon: 'tag' }, { name: 'Часник', qty: '3 зубчики', icon: 'garlic' },
+    ],
+    steps: [
+      { short: 'М\'ясо', text: 'Обсмажте яловичину кубиками до скоринки.', t: 10 },
+      { short: 'Цибуля', text: 'Додайте цибулю й паприку, обсмажте.' },
+      { short: 'Тушкувати', text: 'Влийте воду з томатом, тушкуйте до м\'якості.', t: 60 },
+      { short: 'Подача', text: 'Подавайте з картоплею чи галушками.' },
+    ],
+  },
+  {
+    id: 'ratatouille', title: 'Рататуй', color: '#EB5757', icon: 'salad', cat: 'veg', time: 60, servings: 3,
+    ingredients: [
+      { name: 'Баклажан', qty: '1 шт', icon: 'tag' }, { name: 'Кабачок', qty: '1 шт', icon: 'tag' },
+      { name: 'Помідори', qty: '3 шт', icon: 'tomato' }, { name: 'Перець солодкий', qty: '1 шт', icon: 'tag' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' }, { name: 'Оливкова олія', qty: '3 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Соус', text: 'Приготуйте основу з цибулі, перцю й помідорів.', t: 15 },
+      { short: 'Нарізка', text: 'Наріжте овочі тонкими кружальцями.' },
+      { short: 'Викласти', text: 'Викладіть овочі віялом на соус, збризніть олією.' },
+      { short: 'Запікання', text: 'Запікайте під фольгою до м\'якості.', t: 40 },
+    ],
+  },
+  {
+    id: 'falafel', title: 'Фалафель', color: '#9E9D24', icon: 'dip', cat: 'veg', time: 40, servings: 3,
+    ingredients: [
+      { name: 'Нут', qty: '250 г', icon: 'grain' }, { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+      { name: 'Часник', qty: '3 зубчики', icon: 'garlic' }, { name: 'Зелень', qty: 'пучок', icon: 'tag' },
+      { name: 'Кмин', qty: '1 ч. л.', icon: 'tag' }, { name: 'Олія', qty: 'для смаження', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Пюре', text: 'Замочений нут збийте з цибулею, часником і спеціями.' },
+      { short: 'Кульки', text: 'Сформуйте невеликі кульки.' },
+      { short: 'Смаження', text: 'Обсмажте у фритюрі до золотистого.', t: 6 },
+      { short: 'Подача', text: 'Подавайте з пітою й соусом тахіні.' },
+    ],
+  },
+  {
+    id: 'tiramisu', title: 'Тірамісу', color: '#5D4037', icon: 'cake', cat: 'dessert', time: 30, servings: 4,
+    ingredients: [
+      { name: 'Маскарпоне', qty: '250 г', icon: 'cheese' }, { name: 'Печиво савоярді', qty: '200 г', icon: 'cookie' },
+      { name: 'Яйця', qty: '3 шт', icon: 'egg' }, { name: 'Кава еспресо', qty: '200 мл', icon: 'coffee' },
+      { name: 'Цукор', qty: '80 г', icon: 'sugar' }, { name: 'Какао', qty: '2 ст. л.', icon: 'chocolate' },
+    ],
+    steps: [
+      { short: 'Крем', text: 'Збийте жовтки з цукром, вмішайте маскарпоне й білки.' },
+      { short: 'Просочити', text: 'Вмочіть печиво в каву, викладіть шаром.' },
+      { short: 'Шари', text: 'Чергуйте печиво з кремом, притрусіть какао.' },
+      { short: 'Холод', text: 'Поставте в холодильник настоятися.', t: 15 },
+    ],
+  },
+  {
+    id: 'sharlotka', title: 'Шарлотка', color: '#F2994A', icon: 'cake', cat: 'dessert', time: 55, servings: 6,
+    ingredients: [
+      { name: 'Яблука', qty: '4 шт', icon: 'apple' }, { name: 'Яйця', qty: '4 шт', icon: 'egg' },
+      { name: 'Борошно', qty: '200 г', icon: 'sack' }, { name: 'Цукор', qty: '200 г', icon: 'sugar' },
+    ],
+    steps: [
+      { short: 'Тісто', text: 'Збийте яйця з цукром, вмішайте борошно.' },
+      { short: 'Яблука', text: 'Наріжте яблука, викладіть у форму.' },
+      { short: 'Випікання', text: 'Залийте тістом, випікайте до сухої шпажки.', t: 40 },
+    ],
+  },
+  {
+    id: 'avocadotoast', title: 'Тост з авокадо', color: '#27AE60', icon: 'toast', cat: 'breakfast', time: 10, servings: 1,
+    ingredients: [
+      { name: 'Хліб', qty: '2 скибки', icon: 'bread' }, { name: 'Авокадо', qty: '1 шт', icon: 'tag' },
+      { name: 'Яйця', qty: '2 шт', icon: 'egg' }, { name: 'Лимон', qty: '1/2 шт', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Тост', text: 'Підсмажте хліб до хрусткості.' },
+      { short: 'Авокадо', text: 'Розімніть авокадо з лимоном і сіллю, намастіть.' },
+      { short: 'Яйце', text: 'Додайте яйце-пашот або смажене зверху.', t: 4 },
+    ],
+  },
+  {
+    id: 'chickensoup', title: 'Курячий суп з локшиною', color: '#F2C94C', icon: 'soup', cat: 'soup', time: 45, servings: 4,
+    ingredients: [
+      { name: 'Куряче філе', qty: '400 г', icon: 'chicken' }, { name: 'Локшина', qty: '150 г', icon: 'pasta' },
+      { name: 'Картопля', qty: '2 шт', icon: 'potato' }, { name: 'Морква', qty: '1 шт', icon: 'tag' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' },
+    ],
+    steps: [
+      { short: 'Бульйон', text: 'Зваріть курячий бульйон.', t: 25 },
+      { short: 'Овочі', text: 'Додайте картоплю й моркву, варіть.', t: 12 },
+      { short: 'Локшина', text: 'Вкиньте локшину, доваріть.', t: 5 },
+      { short: 'Подача', text: 'Притрусіть зеленню.' },
+    ],
+  },
+  {
+    id: 'pesto', title: 'Паста Песто', color: '#27AE60', icon: 'spaghetti', cat: 'pasta', time: 20, servings: 2,
+    ingredients: [
+      { name: 'Паста', qty: '250 г', icon: 'pasta' }, { name: 'Базилік', qty: 'пучок', icon: 'tag' },
+      { name: 'Пармезан', qty: '50 г', icon: 'cheese' }, { name: 'Кедрові горіхи', qty: '30 г', icon: 'tag' },
+      { name: 'Часник', qty: '1 зубчик', icon: 'garlic' }, { name: 'Оливкова олія', qty: '80 мл', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Песто', text: 'Збийте базилік, горіхи, часник, пармезан і олію.' },
+      { short: 'Паста', text: 'Відваріть пасту аль денте.', t: 9 },
+      { short: 'Змішати', text: 'Змішайте гарячу пасту з песто, подавайте.' },
+    ],
+  },
+  {
+    id: 'steakveg', title: 'Стейк з овочами', color: '#5D4037', icon: 'steak', cat: 'meat', time: 30, servings: 2,
+    ingredients: [
+      { name: 'Стейк яловичий', qty: '2 шт', icon: 'meat' }, { name: 'Броколі', qty: '200 г', icon: 'tag' },
+      { name: 'Картопля', qty: '3 шт', icon: 'potato' }, { name: 'Часник', qty: '2 зубчики', icon: 'garlic' },
+      { name: 'Розмарин', qty: '2 гілки', icon: 'tag' }, { name: 'Олія', qty: '2 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Стейк', text: 'Обсмажте стейк по 3-4 хв з боку до потрібної прожарки.', t: 8 },
+      { short: 'Відпочинок', text: 'Дайте стейку відпочити під фольгою.', t: 5 },
+      { short: 'Овочі', text: 'Підсмажте броколі й картоплю з часником і розмарином.', t: 10 },
+      { short: 'Подача', text: 'Подавайте стейк з гарніром.' },
     ],
   },
 ];
@@ -465,6 +754,11 @@ const SWIPE_TABS = ['list', 'add', 'archive', 'recipes'];
 let curRecipe = null;       // відкритий рецепт (у шторці деталей)
 let cookStep = 0;           // поточний крок у режимі «Приготувати»
 let cookTimer = null;       // { id, endTs } активного таймера кроку
+let rcpCat = 'all';         // активний фільтр-розділ на сторінці рецептів
+let customRecipes = {};      // власні рецепти (Firebase ${SPACE}/recipes)
+const RECIPES_PATH = `${SPACE}/recipes`;
+const allRecipes = () => [...RECIPES, ...Object.values(customRecipes).filter(r => r && r.id)];
+let editRecipe = null;       // чернетка в редакторі рецепта
 const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
 const MONTHS_GEN = ['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
 const WEEKDAYS_SHORT = ['нд','пн','вт','ср','чт','пт','сб'];
@@ -537,6 +831,7 @@ function subscribe() {
   });
   onValue(ref(db, ARCH_PATH), s => { archMap = s.val() || {}; scheduleRender(); });
   onValue(ref(db, STORES_PATH), s => { storeSel = s.val() || {}; renderStoresSheet(); ppFetchKey = ''; refreshPrices(); });
+  onValue(ref(db, RECIPES_PATH), s => { customRecipes = s.val() || {}; renderRecipes(); });
   // індикатор з'єднання з базою (зелена/червона крапка в налаштуваннях)
   onValue(ref(db, '.info/connected'), s => {
     const ok = !!s.val();
@@ -1573,10 +1868,15 @@ function bindEvents() {
     tab.addEventListener('click', () => setTab(tab.dataset.tab)));
 
   // рецепти
-  $('btn-add-recipe').addEventListener('click', () => toast('Додавання своїх рецептів — скоро'));
+  $('btn-add-recipe').addEventListener('click', openRecipeEdit);
   $('recipe-addall').addEventListener('click', addAllIngredients);
   $('recipe-cook').addEventListener('click', openCook);
   $('cook-back').addEventListener('click', closeCook);
+  // редактор власних рецептів
+  $('redit-cancel').addEventListener('click', closeRecipeEdit);
+  $('redit-save').addEventListener('click', saveRecipe);
+  $('redit-add-ing').addEventListener('click', () => { editRecipe.ingredients.push({ name: '', qty: '' }); renderEditIngs(); });
+  $('redit-add-step').addEventListener('click', () => { editRecipe.steps.push({ short: '', text: '', t: null }); renderEditSteps(); });
 
   document.querySelectorAll('.sheet-overlay').forEach(ov =>
     ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
@@ -1690,11 +1990,13 @@ const fmtMMSS = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${S
 const ingInList = name => Object.values(listMap).some(it => !it.done && it.name.toLowerCase() === name.toLowerCase());
 
 // страви в алфавітному порядку
-const recipesSorted = () => [...RECIPES].sort((a, b) => a.title.localeCompare(b.title, 'uk'));
+const recipesSorted = () => allRecipes().sort((a, b) => a.title.localeCompare(b.title, 'uk'));
+const recipesFiltered = () => recipesSorted().filter(r => rcpCat === 'all' || r.cat === rcpCat);
 const LOOP_COPIES = 9; // копій списку для безшовного зациклення барабана
 let rcpLoopTimer = null;
+let rcpDrumCount = 0;   // скільки страв у поточному (відфільтрованому) барабані
 const rcpRowHtml = r => `<button class="rcp-row" data-id="${r.id}">
-    <span class="rcp-row-circle" style="--c:${r.color}">
+    <span class="rcp-row-circle" style="--c:${r.color || '#9E9E9E'}">
       <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
       <span class="rcp-circle-ic">${ic(r.icon)}</span>
     </span>
@@ -1704,12 +2006,28 @@ const rcpRowHtml = r => `<button class="rcp-row" data-id="${r.id}">
     </span>
   </button>`;
 
+// чипси-розділи над барабаном (лише категорії, де є страви)
+function renderRcpCats() {
+  const el = $('rcp-cats');
+  if (!el) return;
+  const present = new Set(allRecipes().map(r => r.cat));
+  el.innerHTML = DISH_CATS.filter(c => c.key === 'all' || present.has(c.key)).map(c =>
+    `<button class="chip ${c.key === rcpCat ? 'on' : ''}" data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+  el.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    rcpCat = b.dataset.cat;
+    renderRecipes();
+  }));
+}
+
 // вертикальний зациклений барабан: база — як рядок списку, лише ~5 центральних
-// страв плавно більшають до центру екрана
+// страв плавно більшають до центру екрана й стають жирними
 function renderRecipes() {
   const grid = $('rcp-grid');
   if (!grid) return;
-  grid.innerHTML = recipesSorted().map(rcpRowHtml).join('').repeat(LOOP_COPIES);
+  renderRcpCats();
+  const list = recipesFiltered();
+  rcpDrumCount = list.length;
+  grid.innerHTML = list.map(rcpRowHtml).join('').repeat(LOOP_COPIES);
   grid.querySelectorAll('.rcp-row').forEach(el =>
     el.addEventListener('click', () => openRecipe(el.dataset.id)));
   const screen = $('recipes-screen');
@@ -1729,13 +2047,13 @@ const rcpStride = () => {
 };
 function centerLoop() {
   const sc = $('recipes-screen');
-  const lh = rcpStride() * RECIPES.length;
+  const lh = rcpStride() * rcpDrumCount;
   if (lh) sc.scrollTop = lh * Math.floor(LOOP_COPIES / 2);
 }
 // зациклення: біля країв безшовно телепортуємо в центральну копію (та сама картинка)
 function loopRecenter() {
   const sc = $('recipes-screen');
-  const lh = rcpStride() * RECIPES.length;
+  const lh = rcpStride() * rcpDrumCount;
   if (!lh) return;
   if (sc.scrollTop < lh || sc.scrollTop > lh * (LOOP_COPIES - 2)) {
     const phase = ((sc.scrollTop % lh) + lh) % lh;
@@ -1746,7 +2064,8 @@ function loopRecenter() {
     updateRcpScale();
   }
 }
-// масштаб: лише вузька зона біля центру (≈5 страв), решта — база 1.0 (розмір списку)
+// масштаб: лише вузька зона біля центру (≈5 страв), решта — база 1.0 (розмір
+// списку); центральні також стають жирними (клас .big)
 function updateRcpScale() {
   const screen = $('recipes-screen');
   const rows = screen && screen.querySelectorAll('.rcp-row');
@@ -1758,13 +2077,14 @@ function updateRcpScale() {
     const lin = Math.max(0, 1 - Math.abs(rc - mid) / (stride * 2.5));
     const t = lin * lin * (3 - 2 * lin); // smoothstep
     row.style.transform = `scale(${(1 + 0.28 * t).toFixed(3)})`;
-    row.style.opacity = (0.72 + 0.28 * t).toFixed(3);
+    row.style.opacity = (0.78 + 0.22 * t).toFixed(3);
     row.style.zIndex = Math.round(t * 100);
+    row.classList.toggle('big', t > 0.2); // жирний шрифт лише ~5 центральним
   });
 }
 
 function openRecipe(id) {
-  const r = RECIPES.find(x => x.id === id);
+  const r = allRecipes().find(x => x.id === id);
   if (!r) return;
   curRecipe = r;
   const hero = $('recipe-hero');
@@ -1932,6 +2252,106 @@ function localNotify(title, body) {
     if (swReg && swReg.showNotification) swReg.showNotification(title, { body, icon: 'icons/icon-192.png' });
     else new Notification(title, { body, icon: 'icons/icon-192.png' });
   } catch { /* ignore */ }
+}
+
+// ── РЕДАКТОР ВЛАСНИХ РЕЦЕПТІВ ───────────────────────────────
+const DISH_ICONS = ['salad', 'soup', 'spaghetti', 'ricebowl', 'ramenbowl', 'pancakes', 'burger',
+  'friedegg', 'pizza', 'taco', 'dip', 'steak', 'shrimp', 'cake', 'toast', 'fish', 'chicken', 'meat', 'bowl'];
+
+function openRecipeEdit() {
+  editRecipe = { title: '', cat: 'meat', icon: 'salad', time: '', servings: '', ingredients: [{ name: '', qty: '' }], steps: [{ short: '', text: '', t: null }] };
+  $('redit-title').value = '';
+  $('redit-time').value = '';
+  $('redit-serv').value = '';
+  renderEditCats();
+  renderEditIcons();
+  renderEditIngs();
+  renderEditSteps();
+  $('recipe-edit-overlay').classList.add('open');
+}
+function closeRecipeEdit() { $('recipe-edit-overlay').classList.remove('open'); }
+
+function renderEditCats() {
+  $('redit-cats').innerHTML = DISH_CATS.filter(c => c.key !== 'all').map(c =>
+    `<button class="chip ${c.key === editRecipe.cat ? 'on' : ''}" data-cat="${c.key}">${esc(c.name)}</button>`).join('');
+  $('redit-cats').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { editRecipe.cat = b.dataset.cat; renderEditCats(); }));
+}
+function renderEditIcons() {
+  $('redit-icons').innerHTML = DISH_ICONS.map(k =>
+    `<button class="icon-cell ${k === editRecipe.icon ? 'sel' : ''}" data-ic="${k}">${ic(k)}</button>`).join('');
+  $('redit-icons').querySelectorAll('.icon-cell').forEach(b => b.addEventListener('click', () => { editRecipe.icon = b.dataset.ic; renderEditIcons(); }));
+}
+function renderEditIngs() {
+  const box = $('redit-ings');
+  box.innerHTML = editRecipe.ingredients.map((_, i) =>
+    `<div class="edit-ing" data-i="${i}">
+      <input class="edit-input ing-name" placeholder="Інгредієнт">
+      <input class="edit-input ing-qty" placeholder="К-сть / вага">
+      <button class="edit-del" title="Прибрати">✕</button>
+    </div>`).join('');
+  box.querySelectorAll('.edit-ing').forEach(row => {
+    const i = +row.dataset.i, ing = editRecipe.ingredients[i];
+    const n = row.querySelector('.ing-name'), q = row.querySelector('.ing-qty');
+    n.value = ing.name; q.value = ing.qty;
+    n.addEventListener('input', e => ing.name = e.target.value);
+    q.addEventListener('input', e => ing.qty = e.target.value);
+    row.querySelector('.edit-del').addEventListener('click', () => {
+      editRecipe.ingredients.splice(i, 1);
+      if (!editRecipe.ingredients.length) editRecipe.ingredients.push({ name: '', qty: '' });
+      renderEditIngs();
+    });
+  });
+}
+function renderEditSteps() {
+  const box = $('redit-steps');
+  box.innerHTML = editRecipe.steps.map((st, i) =>
+    `<div class="edit-step" data-i="${i}">
+      <div class="edit-step-head"><span class="edit-step-n">Крок ${i + 1}</span><button class="edit-del" title="Прибрати">✕</button></div>
+      <input class="edit-input step-short" placeholder="Коротка назва (напр. Смаження)">
+      <textarea class="edit-input step-text" rows="2" placeholder="Детальний опис кроку"></textarea>
+      <div class="edit-timer-row">
+        <button class="edit-timer-btn ${st.t ? 'on' : ''}">${st.t ? 'Таймер · ' + st.t + ' хв' : '+ Таймер'}</button>
+        ${st.t ? '<input class="edit-input step-min" type="number" inputmode="numeric"><span class="edit-min-lbl">хв</span>' : ''}
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.edit-step').forEach(row => {
+    const i = +row.dataset.i, st = editRecipe.steps[i];
+    const sh = row.querySelector('.step-short'), tx = row.querySelector('.step-text');
+    sh.value = st.short; tx.value = st.text;
+    sh.addEventListener('input', e => st.short = e.target.value);
+    tx.addEventListener('input', e => st.text = e.target.value);
+    row.querySelector('.edit-timer-btn').addEventListener('click', () => {
+      st.t = st.t ? null : 10; // увімкнув — дефолт 10 хв
+      renderEditSteps();
+    });
+    const min = row.querySelector('.step-min');
+    if (min) { min.value = st.t; min.addEventListener('input', e => st.t = e.target.value); }
+    row.querySelector('.edit-del').addEventListener('click', () => {
+      editRecipe.steps.splice(i, 1);
+      if (!editRecipe.steps.length) editRecipe.steps.push({ short: '', text: '', t: null });
+      renderEditSteps();
+    });
+  });
+}
+function saveRecipe() {
+  const title = ($('redit-title').value || '').trim();
+  if (!title) { toast('Вкажи назву страви'); return; }
+  const ings = editRecipe.ingredients.filter(x => x.name.trim())
+    .map(x => ({ name: x.name.trim(), qty: x.qty.trim(), icon: 'tag' }));
+  const steps = editRecipe.steps.filter(x => x.text.trim() || x.short.trim())
+    .map(x => { const s = { short: x.short.trim(), text: x.text.trim() }; if (+x.t > 0) s.t = +x.t; return s; });
+  if (!ings.length) { toast('Додай хоч один інгредієнт'); return; }
+  if (!steps.length) { toast('Додай хоч один крок'); return; }
+  const id = 'my_' + Date.now().toString(36);
+  const rec = {
+    id, title, color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    icon: editRecipe.icon, cat: editRecipe.cat,
+    time: +$('redit-time').value || 0, servings: +$('redit-serv').value || 1,
+    ingredients: ings, steps, custom: true,
+  };
+  set(ref(db, `${RECIPES_PATH}/${id}`), rec).catch(() => {});
+  closeRecipeEdit();
+  toast('Рецепт додано');
 }
 
 // ── HELPERS ────────────────────────────────────────────────

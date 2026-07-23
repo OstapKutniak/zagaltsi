@@ -467,7 +467,8 @@ html, body {
 }
 .rcp-row-circle img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
 .rcp-row-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.rcp-row-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.15; white-space: nowrap; }
+.rcp-row-title { font-size: 16px; font-weight: 400; color: var(--text); line-height: 1.15; white-space: nowrap; }
+.rcp-row.big .rcp-row-title { font-weight: 800; }
 .rcp-row-time { font-size: 13px; color: var(--text2); }
 .rcp-circle-ic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .rcp-circle-ic svg { width: 54%; height: 54%; fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -529,3 +530,46 @@ html, body {
 .cook-timer { font-size: 48px; font-weight: 800; color: var(--active-ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .cook-done { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 10px 0; }
 .cook-done-t { font-size: 22px; font-weight: 800; color: var(--text); }
+
+/* ── РЕЦЕПТИ: чипси-розділи (липкі згори) ── */
+.rcp-cats {
+  position: sticky; top: 0; z-index: 200; display: flex; gap: 8px; overflow-x: auto;
+  padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.rcp-cats::-webkit-scrollbar { display: none; }
+
+/* ── РЕДАКТОР ВЛАСНОГО РЕЦЕПТА ── */
+.edit-overlay {
+  position: fixed; inset: 0; z-index: 500; background: var(--bg); display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform 0.34s cubic-bezier(0.25,0.46,0.45,0.94);
+}
+.edit-overlay.open { transform: translateY(0); }
+.edit-head { display: flex; align-items: center; justify-content: space-between; padding: calc(var(--top) + 12px) 16px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.edit-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.edit-cancel { background: none; border: none; color: var(--text2); font-size: 15px; cursor: pointer; }
+.edit-save { background: none; border: none; color: var(--active-ink); font-size: 15px; font-weight: 800; cursor: pointer; }
+.edit-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 8px 0 calc(var(--bottom) + 40px); }
+.edit-body::-webkit-scrollbar { display: none; }
+.edit-sub { font-size: 13px; font-weight: 600; color: var(--active-ink); padding: 14px 16px 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.edit-input { display: block; width: calc(100% - 32px); margin: 0 16px; background: #f1f1f4; border: none; border-radius: 10px; padding: 12px 14px; font-size: 15px; font-family: inherit; color: var(--text); outline: none; }
+textarea.edit-input { resize: none; line-height: 1.35; }
+#redit-title { margin-top: 6px; }
+.edit-row2 { display: flex; gap: 10px; padding: 6px 16px 0; }
+.edit-row2 label { flex: 1; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text2); }
+.edit-row2 .edit-input { width: 100%; margin: 0; }
+.edit-ing { display: flex; align-items: center; gap: 8px; padding: 4px 16px; }
+.edit-ing .edit-input { margin: 0; width: auto; }
+.edit-ing .ing-name { flex: 2; }
+.edit-ing .ing-qty { flex: 1; }
+.edit-del { flex-shrink: 0; width: 34px; height: 34px; border: none; background: none; color: var(--text3); font-size: 17px; cursor: pointer; border-radius: 8px; }
+.edit-del:active { background: #f0f0f3; }
+.edit-add { display: block; width: calc(100% - 32px); margin: 10px 16px 0; background: var(--active); color: var(--active-ink); border: none; border-radius: 10px; padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.edit-step { margin: 8px 16px; padding: 10px 12px 12px; background: #f6f6f9; border-radius: 14px; }
+.edit-step .edit-input { width: 100%; margin: 7px 0 0; background: #fff; }
+.edit-step-head { display: flex; align-items: center; justify-content: space-between; }
+.edit-step-n { font-size: 13px; font-weight: 700; color: var(--text2); }
+.edit-timer-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.edit-timer-btn { background: #fff; border: 1.5px solid var(--line); color: var(--active-ink); border-radius: 100px; padding: 8px 15px; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+.edit-timer-btn.on { background: var(--active); border-color: var(--active); }
+.edit-step .step-min { width: 80px; margin: 0; background: #fff; }
+.edit-min-lbl { font-size: 13.5px; color: var(--text2); }
