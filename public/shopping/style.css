@@ -189,18 +189,16 @@ html, body {
 .price-panel { flex-shrink: 0; background: #fff; border-top: 1px solid var(--line); padding: 7px 0 3px; transition: background 0.2s; }
 .pp-drum { height: 34px; overflow: hidden; }
 .pp-track {
-  display: flex; height: 100%; overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  padding: 0 calc(50% - 60px); /* крайні магазини теж стають у центр */
+  position: relative; height: 100%; overflow: hidden; touch-action: none;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
 }
-.pp-track::-webkit-scrollbar { display: none; }
 .pp-item {
-  flex: 0 0 120px; scroll-snap-align: center; height: 100%;
+  position: absolute; top: 0; left: 0; width: 120px; height: 100%;
   display: flex; align-items: center; justify-content: center; gap: 7px;
   font-size: 15.5px; font-weight: 700; color: var(--text3);
   cursor: pointer; transition: color 0.15s;
+  will-change: transform;
 }
 .pp-item.sel { color: var(--text); }
 .pp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #c9c9d2); flex-shrink: 0; }

@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 32; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 33; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1427,67 +1427,118 @@ let ppFetchKey = '';   // хеш назв, для яких уже тягнули
 let ppScrollTimer = null;
 let storeSel = {};     // chain → {id,name,city,address}, обране в налаштуваннях (з Firebase)
 
-// Зациклений барабан: список магазинів рендериться PP_REP копій поспіль,
-// стартує в середній копії; докрутившись до краю — безшовно телепортується
-// на ту саму позицію в середині (та сама картинка, тож стрибок непомітний).
-const PP_REP = 7;
+// Ціновий барабан — таке саме нескінченне колесо, але горизонтальне: фіксовані
+// слоти, вміст по модулю; прилипає до центру (центральний магазин = обраний).
 let ppPositioned = false;
-function initPricePanel() {
-  $('pp-track').addEventListener('scroll', onPpScroll);
-  renderDrum();
-}
-// (пере)малювати стрічку магазинів під активну категорію
+let ppOffset = 0;      // віртуальне зміщення (px); центр-індекс = ppOffset/PP_ITEM
+let ppVel = 0, ppRaf = null, ppSlots = [], ppMoved = false;
+
+function initPricePanel() { renderDrum(); }
+
+// (пере)побудова колеса під активну категорію
 function renderDrum() {
   const track = $('pp-track');
-  const one = curStores().map(s =>
-    `<div class="pp-item" data-key="${s.key}"><span class="pp-dot" style="--c:${s.color}"></span>${esc(s.name)}</div>`).join('');
-  track.innerHTML = one.repeat(PP_REP);
-  track.querySelectorAll('.pp-item').forEach((el, i) =>
-    el.addEventListener('click', () => track.scrollTo({ left: i * PP_ITEM, behavior: 'smooth' })));
+  if (!track) return;
+  const W = track.clientWidth || 320;
+  const need = Math.ceil(W / PP_ITEM) + 4;
+  if (ppSlots.length !== need) {
+    track.innerHTML = '';
+    ppSlots = [];
+    for (let i = 0; i < need; i++) { const el = document.createElement('div'); el.className = 'pp-item'; track.appendChild(el); ppSlots.push(el); }
+    if (!track.dataset.ppBound) { bindPpInput(track); track.dataset.ppBound = '1'; }
+  }
+  ppLayout(true);
 }
-// затиск на категорії в списку → барабан перемикається на її магазини, панель
-// підсвічується кольором категорії; повторний затиск тієї ж категорії — скидає.
+// розкладка слотів: страва/магазин за модулем, позиція translateX, центр = обраний
+function ppLayout(force) {
+  const track = $('pp-track');
+  const stores = curStores(), N = stores.length;
+  if (!track || !N || !ppSlots.length) return;
+  const W = track.clientWidth || 320, center = W / 2;
+  const centerIdx = ppOffset / PP_ITEM;
+  const first = Math.round(centerIdx) - (ppSlots.length >> 1);
+  const selIdx = Math.round(centerIdx);
+  ppSlots.forEach((el, i) => {
+    const idx = first + i;
+    const s = stores[((idx % N) + N) % N];
+    if (force || el.dataset.key !== s.key) { el.innerHTML = `<span class="pp-dot" style="--c:${s.color}"></span>${esc(s.name)}`; el.dataset.key = s.key; }
+    el.dataset.idx = String(idx);
+    el.style.transform = `translateX(${(center + (idx - centerIdx) * PP_ITEM - PP_ITEM / 2).toFixed(1)}px)`;
+    el.classList.toggle('sel', idx === selIdx);
+  });
+}
+// затиск категорії в списку → барабан на її магазини + тінт; повторний — скидає
 function setPpCat(cid) {
-  if (!cats[cid]) return;                 // лише реальні категорії (не «Інше»)
+  if (!cats[cid]) return;
   ppCat = ppCat === cid ? null : cid;
   ppSel = 'avg';
+  ppOffset = 0; stopPpInertia();
   const c = ppCat && cats[ppCat];
   $('price-panel').style.background = c ? hexA(c.color, 0.13) : '';
   renderDrum();
-  ppStart();
-  ppFetchKey = '';                        // інший набір магазинів → перезапит цін
+  ppFetchKey = '';
   refreshPrices();
 }
-// поставити барабан у центральну копію (виклик, коли панель уже видима)
-function ppStart() {
-  const track = $('pp-track'), N = curStores().length;
-  track.scrollLeft = N * ((PP_REP - 1) >> 1) * PP_ITEM;
-  markPpSel(track.scrollLeft / PP_ITEM);
-}
-// підсвітити центральний магазин (і його копії — вони поза видимою зоною)
-function markPpSel(rawIdx) {
-  const N = curStores().length, sel = ((Math.round(rawIdx) % N) + N) % N;
-  $('pp-track').querySelectorAll('.pp-item').forEach((el, j) => el.classList.toggle('sel', (j % N) === sel));
-}
-function onPpScroll() {
-  const track = $('pp-track');
-  markPpSel(track.scrollLeft / PP_ITEM);
-  clearTimeout(ppScrollTimer);
-  ppScrollTimer = setTimeout(() => {
-    const N = curStores().length;
-    const raw = Math.round(track.scrollLeft / PP_ITEM);
-    const sel = ((raw % N) + N) % N;
-    if (curStores()[sel].key !== ppSel) { ppSel = curStores()[sel].key; renderPriceTotals(); }
-    // повернути в середню копію, якщо відкотилися на цілий список від центру
-    const target = N * ((PP_REP - 1) >> 1) + sel;
-    if (Math.abs(raw - target) >= N) {
-      const prev = track.style.scrollBehavior;
-      track.style.scrollBehavior = 'auto';
-      track.scrollLeft = target * PP_ITEM;
-      track.style.scrollBehavior = prev;
-      markPpSel(target);
+// панель стала видимою — перерахувати ширину й розкласти
+function ppStart() { ppOffset = 0; renderDrum(); }
+
+function bindPpInput(track) {
+  let dragging = false, lastX = 0, startX = 0, startY = 0, axisH = false, pid = null;
+  track.addEventListener('pointerdown', e => {
+    stopPpInertia();
+    dragging = true; axisH = false; ppMoved = false;
+    lastX = startX = e.clientX; startY = e.clientY; pid = e.pointerId;
+  });
+  track.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    if (!axisH) {
+      const tX = Math.abs(e.clientX - startX), tY = Math.abs(e.clientY - startY);
+      if (tX < 5 && tY < 5) return;
+      if (tY > tX) { dragging = false; return; }
+      axisH = true; try { track.setPointerCapture(pid); } catch (_) {}
     }
-  }, 90);
+    const dx = e.clientX - lastX;
+    if (Math.abs(e.clientX - startX) > 5) ppMoved = true;
+    ppOffset -= dx; ppVel = -dx; lastX = e.clientX; ppLayout(); e.preventDefault();
+  });
+  const end = () => { if (!dragging) return; dragging = false; startPpInertia(); };
+  track.addEventListener('pointerup', end);
+  track.addEventListener('pointercancel', end);
+  // тап по магазину — доїхати до нього (без руху)
+  track.addEventListener('click', e => {
+    if (ppMoved) return;
+    const it = e.target.closest('.pp-item');
+    if (it) ppAnimateTo(+it.dataset.idx * PP_ITEM);
+  });
+  track.addEventListener('wheel', e => { stopPpInertia(); ppOffset += (e.deltaX || e.deltaY); ppLayout(); ppSnapSoon(); e.preventDefault(); }, { passive: false });
+}
+function startPpInertia() {
+  stopPpInertia();
+  const step = () => {
+    ppOffset -= ppVel; ppVel *= 0.9; ppLayout();
+    if (Math.abs(ppVel) > 0.4) ppRaf = requestAnimationFrame(step);
+    else { ppRaf = null; ppSnap(); }
+  };
+  ppRaf = requestAnimationFrame(step);
+}
+function stopPpInertia() { if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = null; } ppVel = 0; }
+function ppSnap() { ppAnimateTo(Math.round(ppOffset / PP_ITEM) * PP_ITEM); }
+let ppSnapTimer = null;
+function ppSnapSoon() { clearTimeout(ppSnapTimer); ppSnapTimer = setTimeout(ppSnap, 120); }
+// плавно доїхати до цілого магазину й зафіксувати вибір
+function ppAnimateTo(target) {
+  stopPpInertia();
+  const anim = () => {
+    ppOffset += (target - ppOffset) * 0.22;
+    if (Math.abs(target - ppOffset) < 0.5) { ppOffset = target; ppLayout(true); commitPpSel(); ppRaf = null; return; }
+    ppLayout(); ppRaf = requestAnimationFrame(anim);
+  };
+  ppRaf = requestAnimationFrame(anim);
+}
+function commitPpSel() {
+  const stores = curStores(), N = stores.length;
+  const sel = ((Math.round(ppOffset / PP_ITEM) % N) + N) % N;
+  if (stores[sel] && stores[sel].key !== ppSel) { ppSel = stores[sel].key; renderPriceTotals(); }
 }
 // запит ціни для позиції: уточнення (variant) звужує пошук до конкретного товару
 function itemQuery(it) {
