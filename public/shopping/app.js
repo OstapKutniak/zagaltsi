@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 31; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 32; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1899,7 +1899,7 @@ function updateTabs() {
   $('btn-edit-prods').style.display = state.tab === 'add' ? '' : 'none';
   $('btn-calendar').style.display = state.tab === 'archive' ? '' : 'none';
   $('btn-add-recipe').style.display = state.tab === 'recipes' ? '' : 'none';
-  if (state.tab === 'recipes') requestAnimationFrame(updateRcpScale);
+  if (state.tab === 'recipes') requestAnimationFrame(() => { if (!rcpRows.length) renderRecipes(); else layoutWheel(true); });
   // цінова панель — лише на «Списку»
   $('price-panel').style.display = state.tab === 'list' ? '' : 'none';
   if (state.tab === 'list') { if (!ppPositioned) { ppStart(); ppPositioned = true; } refreshPrices(); }
@@ -1992,20 +1992,27 @@ const ingInList = name => Object.values(listMap).some(it => !it.done && it.name.
 // страви в алфавітному порядку
 const recipesSorted = () => allRecipes().sort((a, b) => a.title.localeCompare(b.title, 'uk'));
 const recipesFiltered = () => recipesSorted().filter(r => rcpCat === 'all' || r.cat === rcpCat);
-const LOOP_COPIES = 9; // мінімум копій списку для зациклення барабана
-let rcpLoopTimer = null;
-let rcpDrumCount = 0;   // скільки страв у поточному (відфільтрованому) барабані
-let rcpCopies = LOOP_COPIES; // фактична к-сть копій (адаптивна під фільтр/екран)
-const rcpRowHtml = r => `<button class="rcp-row" data-id="${r.id}">
-    <span class="rcp-row-circle" style="--c:${r.color || '#9E9E9E'}">
+// ── БАРАБАН РЕЦЕПТІВ — справжнє нескінченне колесо ──────────
+// Не native-scroll із копіями, а фіксований набір рядків, чий вміст
+// підставляється ПО МОДУЛЮ; позиція керується власним драгом + інерцією,
+// тож колесо крутиться безкінечно в обидва боки без країв і без копій.
+const RCP_STRIDE = 60;   // висота слота рядка (px)
+const RCP_BUFFER = 2;    // зайві рядки згори/знизу поза видимою зоною
+let rcpList = [];        // поточний (відфільтрований) список страв
+let rcpRows = [];        // DOM-рядки колеса (перевикористовуються)
+let rcpOffset = 0;       // віртуальне зміщення (px), необмежене
+let rcpVel = 0;          // швидкість інерції (px/кадр)
+let rcpRaf = null;
+let rcpMoved = false;    // чи був рух (щоб відрізнити тап від драгу)
+
+const rcpRowInner = r => `<span class="rcp-row-circle" style="--c:${r.color || '#9E9E9E'}">
       <img src="${recipeImg(r)}" alt="" onerror="this.remove()">
       <span class="rcp-circle-ic">${ic(r.icon)}</span>
     </span>
     <span class="rcp-row-tx">
       <span class="rcp-row-title">${esc(r.title)}</span>
       <span class="rcp-row-time">${hhmm(r.time)}</span>
-    </span>
-  </button>`;
+    </span>`;
 
 // чипси-розділи над барабаном (лише категорії, де є страви)
 function renderRcpCats() {
@@ -2020,86 +2027,101 @@ function renderRcpCats() {
   }));
 }
 
-// вертикальний зациклений барабан: база — як рядок списку, лише ~5 центральних
-// страв плавно більшають до центру екрана й стають жирними
+// (пере)побудова колеса під поточний фільтр
 function renderRecipes() {
-  const grid = $('rcp-grid');
-  if (!grid) return;
   renderRcpCats();
-  const list = recipesFiltered();
-  rcpDrumCount = list.length;
-  const one = list.map(rcpRowHtml).join('');
-  const screen = $('recipes-screen');
-  // 1) рендер однієї копії, щоб виміряти висоту рядка
-  grid.innerHTML = one;
-  if (!screen.dataset.rcpBound) {
-    screen.addEventListener('scroll', () => {
-      requestAnimationFrame(updateRcpScale);
-      clearTimeout(rcpLoopTimer);
-      rcpLoopTimer = setTimeout(loopRecenter, 100);
-    }, { passive: true });
-    screen.dataset.rcpBound = '1';
+  const wheel = $('rcp-wheel'), track = $('rcp-grid');
+  if (!wheel || !track) return;
+  rcpList = recipesFiltered();
+  const vpH = wheel.clientHeight || 600;
+  const need = Math.ceil(vpH / RCP_STRIDE) + RCP_BUFFER * 2;
+  if (rcpRows.length !== need) {
+    track.innerHTML = '';
+    rcpRows = [];
+    for (let i = 0; i < need; i++) {
+      const el = document.createElement('button');
+      el.className = 'rcp-row';
+      el.dataset.idx = '';
+      el.addEventListener('click', () => { if (!rcpMoved && el.dataset.rid) openRecipe(el.dataset.rid); });
+      track.appendChild(el);
+      rcpRows.push(el);
+    }
   }
-  requestAnimationFrame(() => {
-    // 2) копій має бути стільки, щоб контенту було ~12 екранів (для будь-якого фільтра)
-    const stride = rcpStride() || 58;
-    const lh = stride * rcpDrumCount;
-    const vp = screen.clientHeight || 700;
-    let copies = Math.max(LOOP_COPIES, Math.ceil(12 * vp / lh));
-    if (copies % 2 === 0) copies++;
-    rcpCopies = copies;
-    grid.innerHTML = one.repeat(copies);
-    grid.querySelectorAll('.rcp-row').forEach(el =>
-      el.addEventListener('click', () => openRecipe(el.dataset.id)));
-    centerLoop();
-    updateRcpScale();
-  });
+  if (!wheel.dataset.rcpBound) { bindWheelInput(wheel); wheel.dataset.rcpBound = '1'; }
+  rcpOffset = 0; rcpVel = 0;
+  layoutWheel(true);
 }
-const rcpStride = () => {
-  const rows = $('recipes-screen').querySelectorAll('.rcp-row');
-  if (rows.length > 1) return rows[1].offsetTop - rows[0].offsetTop;
-  if (rows.length === 1) return rows[0].offsetHeight + 16; // + gap
-  return 0;
-};
-function centerLoop() {
-  const sc = $('recipes-screen');
-  const lh = rcpStride() * rcpDrumCount;
-  if (lh) sc.scrollTop = lh * Math.floor(rcpCopies / 2);
-}
-// зациклення: після скролу підсовуємо scrollTop до центральної копії на ціле
-// число копій (картинка ідентична кожні lh, тож стрибка не видно)
-function loopRecenter() {
-  const sc = $('recipes-screen');
-  const lh = rcpStride() * rcpDrumCount;
-  if (!lh) return;
-  const mid = lh * Math.floor(rcpCopies / 2);
-  const d = sc.scrollTop - mid;
-  if (Math.abs(d) >= lh) {
-    const prev = sc.style.scrollBehavior;
-    sc.style.scrollBehavior = 'auto';
-    sc.scrollTop = mid + (d - Math.round(d / lh) * lh);
-    sc.style.scrollBehavior = prev;
-    updateRcpScale();
-  }
-}
-// масштаб: лише вузька зона біля центру (≈5 страв), решта — база 1.0 (розмір
-// списку); центральні також стають жирними (клас .big)
-function updateRcpScale() {
-  const screen = $('recipes-screen');
-  const rows = screen && screen.querySelectorAll('.rcp-row');
-  if (!rows || !rows.length || !screen.clientHeight) return;
-  const mid = screen.scrollTop + screen.clientHeight / 2;
-  const stride = rcpStride() || 58;
-  rows.forEach(row => {
-    const rc = row.offsetTop + row.offsetHeight / 2;
-    const lin = Math.max(0, 1 - Math.abs(rc - mid) / (stride * 2.5));
+
+// розкладка: кожен слот отримує страву за модулем + масштаб/вагу за відстанню від центру
+function layoutWheel(force) {
+  const wheel = $('rcp-wheel');
+  if (!wheel || !rcpList.length || !rcpRows.length) return;
+  const mid = (wheel.clientHeight || 600) / 2;
+  const N = rcpList.length;
+  const first = Math.floor(rcpOffset / RCP_STRIDE);
+  const frac = rcpOffset - first * RCP_STRIDE;
+  rcpRows.forEach((el, i) => {
+    const slot = i - RCP_BUFFER;
+    const y = slot * RCP_STRIDE - frac;
+    const idx = ((first + slot) % N + N) % N;
+    if (force || el.dataset.idx !== String(idx)) {
+      el.innerHTML = rcpRowInner(rcpList[idx]);
+      el.dataset.idx = String(idx);
+      el.dataset.rid = rcpList[idx].id;
+    }
+    const cy = y + RCP_STRIDE / 2;
+    const lin = Math.max(0, 1 - Math.abs(cy - mid) / (RCP_STRIDE * 2.5));
     const t = lin * lin * (3 - 2 * lin); // smoothstep
-    row.style.transform = `scale(${(1 + 0.28 * t).toFixed(3)})`;
-    row.style.opacity = (0.78 + 0.22 * t).toFixed(3);
-    row.style.zIndex = Math.round(t * 100);
-    row.classList.toggle('big', t > 0.2); // жирний шрифт лише ~5 центральним
+    el.style.transform = `translateY(${y.toFixed(1)}px) scale(${(1 + 0.28 * t).toFixed(3)})`;
+    el.style.opacity = (0.78 + 0.22 * t).toFixed(3);
+    el.style.zIndex = Math.round(t * 100);
+    el.classList.toggle('big', t > 0.2);
   });
 }
+
+// драг + інерція (Pointer Events — і миша, і тач); горизонталь віддаємо свайпу вкладок
+function bindWheelInput(wheel) {
+  let dragging = false, lastY = 0, startX = 0, startY = 0, axisV = false, pid = null;
+  wheel.addEventListener('pointerdown', e => {
+    stopInertia();
+    dragging = true; axisV = false; rcpMoved = false;
+    lastY = startY = e.clientY; startX = e.clientX; pid = e.pointerId;
+  });
+  wheel.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    if (!axisV) {
+      const tX = Math.abs(e.clientX - startX), tY = Math.abs(e.clientY - startY);
+      if (tX < 6 && tY < 6) return;
+      if (tX > tY) { dragging = false; return; } // це горизонтальний свайп вкладок
+      axisV = true;
+      try { wheel.setPointerCapture(pid); } catch (_) {}
+    }
+    const dy = e.clientY - lastY;
+    if (Math.abs(e.clientY - startY) > 6) rcpMoved = true;
+    rcpOffset -= dy; rcpVel = -dy; lastY = e.clientY;
+    layoutWheel();
+    e.preventDefault();
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (Math.abs(rcpVel) > 1) startInertia();
+    setTimeout(() => { rcpMoved = false; }, 0);
+  };
+  wheel.addEventListener('pointerup', end);
+  wheel.addEventListener('pointercancel', end);
+  wheel.addEventListener('wheel', e => { stopInertia(); rcpOffset += e.deltaY; layoutWheel(); e.preventDefault(); }, { passive: false });
+}
+function startInertia() {
+  stopInertia();
+  const step = () => {
+    rcpOffset -= rcpVel; rcpVel *= 0.94;
+    layoutWheel();
+    rcpRaf = Math.abs(rcpVel) > 0.15 ? requestAnimationFrame(step) : null;
+  };
+  rcpRaf = requestAnimationFrame(step);
+}
+function stopInertia() { if (rcpRaf) { cancelAnimationFrame(rcpRaf); rcpRaf = null; } rcpVel = 0; }
 
 function openRecipe(id) {
   const r = allRecipes().find(x => x.id === id);

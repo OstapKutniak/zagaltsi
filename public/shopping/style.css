@@ -451,13 +451,15 @@ html, body {
 .empty .fill { fill: var(--text3); stroke: none; }
 
 /* ── РЕЦЕПТИ: вертикальний зациклений барабан ── */
-#recipes-screen { overflow-x: hidden; }
-.rcp-grid { display: flex; flex-direction: column; gap: 16px; padding: 10px 16px calc(var(--bottom) + 90px); }
+#recipes-screen { overflow: hidden; display: flex; flex-direction: column; }
+.rcp-wheel { flex: 1; position: relative; overflow: hidden; min-height: 0; touch-action: none; }
+.rcp-track { position: absolute; inset: 0; }
 .rcp-row {
-  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  position: absolute; left: 16px; right: 16px; top: 0; height: 60px;
+  display: flex; align-items: center; gap: 12px; text-align: left;
   background: none; border: none; cursor: pointer; padding: 0;
   /* масштаб від лівого краю — кружечок на місці, нема горизонтального руху */
-  transform-origin: left center; transition: opacity 0.12s linear; will-change: transform;
+  transform-origin: left center; will-change: transform;
 }
 .rcp-row-circle {
   position: relative; width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; overflow: hidden;
@@ -531,10 +533,10 @@ html, body {
 .cook-done { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 10px 0; }
 .cook-done-t { font-size: 22px; font-weight: 800; color: var(--text); }
 
-/* ── РЕЦЕПТИ: чипси-розділи (липкі згори) ── */
+/* ── РЕЦЕПТИ: чипси-розділи (над колесом) ── */
 .rcp-cats {
-  position: sticky; top: 0; z-index: 200; display: flex; gap: 8px; overflow-x: auto;
-  padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--line);
+  flex-shrink: 0; display: flex; gap: 8px; overflow-x: auto;
+  padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--line); touch-action: pan-x;
 }
 .rcp-cats::-webkit-scrollbar { display: none; }
 
