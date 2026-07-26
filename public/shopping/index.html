@@ -146,6 +146,21 @@
     <div class="sheet">
       <div class="sheet-handle"></div>
       <div class="sheet-title" id="item-title">Продукт</div>
+      <div class="form-sub">Кількість</div>
+      <div class="qty-block" id="item-qty">
+        <div class="qty-modes">
+          <button class="qty-mode" data-mode="pcs" type="button">Штучно</button>
+          <button class="qty-mode" data-mode="weight" type="button">Вагово</button>
+        </div>
+        <div class="qty-counter off" id="item-qty-counter">
+          <button class="qty-btn" id="item-qty-minus" type="button" aria-label="менше">−</button>
+          <div class="qty-field">
+            <input class="qty-val" id="item-qty-val" type="text" inputmode="decimal" placeholder="—">
+            <span class="qty-unit" id="item-qty-unit"></span>
+          </div>
+          <button class="qty-btn" id="item-qty-plus" type="button" aria-label="більше">+</button>
+        </div>
+      </div>
       <div class="form-sub" id="item-which">Яке саме</div>
       <input class="sheet-search" id="item-variant" type="text">
       <div class="vsug-row" id="item-suggest"></div>

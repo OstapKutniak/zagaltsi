@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 36; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 37; // бампати разом із CACHE у sw.js — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -1097,10 +1097,12 @@ function renderList() {
       <div class="lcat-items"><div class="lcat-items-in">` +
       arr.map(it => {
         const sub = [it.variant, it.place].filter(Boolean).join(' · ');
+        const qLabel = formatQty(it.qty);
         return `
         <div class="litem ${it.done ? 'done' : ''} ${it.id === openActionsId ? 'open' : ''}" data-id="${it.id}">
           <div class="litem-ic" style="--c:${c.color}">${ic(it.icon)}</div>
           <div class="litem-name">${esc(it.name)}${sub ? `<div class="litem-sub">${esc(sub)}</div>` : ''}</div>
+          ${qLabel ? `<div class="litem-qty">${esc(qLabel)}</div>` : ''}
           <div class="litem-actions">
             <button class="lact lact-edit" data-id="${it.id}" title="Уточнити">${ic('pencil')}</button>
             <button class="lact lact-swap" data-id="${it.id}" title="Замінити">${ic('swap')}</button>
@@ -1166,6 +1168,50 @@ function renderList() {
   refreshPrices(); // оновити ціни/полоски після перемальовування списку
 }
 
+// ── КІЛЬКІСТЬ (лічильник у шторці товару) ──────────────────
+// itemQty: null (не задано) | { mode:'pcs'|'weight', value:number }.
+// pcs — штучно (крок 1, ціле), weight — вагово в кг (крок 0.5, дозволяє дроби).
+let itemQty = null;
+const QTY_UNIT = { pcs: 'шт', weight: 'кг' };
+const QTY_STEP = { pcs: 1, weight: 0.5 };
+function qtyValStr(q) {
+  if (!q || !q.value) return '';
+  return q.mode === 'pcs' ? String(Math.round(q.value)) : String(+q.value.toFixed(2));
+}
+// короткий підпис для рядка списку: 0.25 кг → «250 г», інакше «шт»/«кг»
+function formatQty(q) {
+  if (!q || !q.value) return '';
+  if (q.mode === 'pcs') return `${Math.round(q.value)} шт`;
+  return q.value < 1 ? `${Math.round(q.value * 1000)} г` : `${+q.value.toFixed(2)} кг`;
+}
+function renderItemQty() {
+  const mode = itemQty ? itemQty.mode : null;
+  document.querySelectorAll('#item-qty .qty-mode').forEach(b =>
+    b.classList.toggle('on', b.dataset.mode === mode));
+  $('item-qty-counter').classList.toggle('off', !mode);
+  $('item-qty-unit').textContent = mode ? QTY_UNIT[mode] : '';
+  $('item-qty-val').value = qtyValStr(itemQty);
+}
+function setQtyMode(mode) {
+  // повторний тап по активному режиму — зняти кількість
+  itemQty = (itemQty && itemQty.mode === mode) ? null : { mode, value: 1 };
+  renderItemQty();
+}
+function stepQty(dir) {
+  if (!itemQty) return;
+  const step = QTY_STEP[itemQty.mode];
+  itemQty.value = Math.max(step, +(itemQty.value + dir * step).toFixed(2));
+  renderItemQty();
+}
+function commitQtyInput(final) {
+  if (!itemQty) return;
+  let v = parseFloat($('item-qty-val').value.replace(',', '.').replace(/[^0-9.]/g, ''));
+  if (!isFinite(v) || v <= 0) { if (final) { itemQty = null; renderItemQty(); } return; }
+  if (itemQty.mode === 'pcs') v = Math.round(v);
+  itemQty.value = v;
+  if (final) renderItemQty();
+}
+
 // ── ITEM DETAIL (уточнення) ────────────────────────────────
 let itemSheetId = null;
 function openItemSheet(id) {
@@ -1177,6 +1223,8 @@ function openItemSheet(id) {
   $('item-which').textContent = `${whichWord(it.name)} саме`;
   $('item-variant').value = it.variant || '';
   $('item-place').value = it.place || '';
+  itemQty = (it.qty && it.qty.mode && it.qty.value) ? { ...it.qty } : null;
+  renderItemQty();
   $('item-overlay').classList.add('open');
   renderVariantSuggest(it.name);
 }
@@ -1204,9 +1252,11 @@ async function renderVariantSuggest(name) {
 function saveItemSheet() {
   if (!itemSheetId) return;
   // шторка їде вниз одразу, запис у базу доганяє у фоні
+  commitQtyInput(false); // підхопити те, що набрано вручну, без blur
   update(ref(db, `${LIST_PATH}/${itemSheetId}`), {
     variant: $('item-variant').value.trim() || null,
     place: $('item-place').value.trim() || null,
+    qty: (itemQty && itemQty.value) ? itemQty : null,
   }).catch(() => {});
   $('item-overlay').classList.remove('open');
 }
@@ -1903,6 +1953,12 @@ function bindEvents() {
   $('add-commit-btn').addEventListener('click', commitAddSelect);
   $('add-commit-cancel').addEventListener('click', () => { addSelect = null; renderAddCommit(); renderAddGrid(); });
   $('item-done').addEventListener('click', saveItemSheet);
+  document.querySelectorAll('#item-qty .qty-mode').forEach(b =>
+    b.addEventListener('click', () => setQtyMode(b.dataset.mode)));
+  $('item-qty-minus').addEventListener('click', () => stepQty(-1));
+  $('item-qty-plus').addEventListener('click', () => stepQty(1));
+  $('item-qty-val').addEventListener('input', () => commitQtyInput(false));
+  $('item-qty-val').addEventListener('blur', () => commitQtyInput(true));
   $('replace-search').addEventListener('input', renderReplaceGrid);
 
   $('btn-cats').addEventListener('click', openCatsSheet);

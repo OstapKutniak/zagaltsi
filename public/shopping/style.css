@@ -363,6 +363,40 @@ html, body {
 
 /* forms inside sheets */
 .form-sub { font-size: 13px; font-weight: 600; color: var(--active-ink); padding: 8px 20px 6px; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }
+
+/* блок кількості у шторці товару: перемикач «Штучно/Вагово» + лічильник */
+.qty-block { padding: 0 16px 4px; flex-shrink: 0; }
+.qty-modes { display: flex; gap: 8px; margin-bottom: 10px; }
+.qty-mode {
+  flex: 1; background: #f1f1f4; border: 1.5px solid transparent; color: var(--text2);
+  border-radius: 12px; padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.qty-mode.on { background: var(--active); color: var(--active-ink); border-color: var(--active-ink); }
+.qty-counter { display: flex; align-items: center; gap: 10px; transition: opacity 0.15s; }
+.qty-counter.off { opacity: 0.4; pointer-events: none; }
+.qty-btn {
+  width: 46px; height: 46px; flex-shrink: 0; border-radius: 12px; border: none;
+  background: #f1f1f4; color: var(--active-ink); font-size: 24px; font-weight: 500; line-height: 1;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.qty-btn:active { background: var(--active); }
+.qty-field {
+  flex: 1; display: flex; align-items: baseline; justify-content: center; gap: 6px;
+  background: #f1f1f4; border-radius: 12px; padding: 12px;
+}
+.qty-val {
+  width: 72px; text-align: center; background: none; border: none; outline: none;
+  font-family: inherit; font-size: 20px; font-weight: 700; color: var(--text);
+}
+.qty-unit { font-size: 14px; font-weight: 600; color: var(--text2); }
+
+/* бейдж кількості у рядку списку */
+.litem-qty {
+  flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--active-ink);
+  background: var(--active); border-radius: 100px; padding: 3px 10px;
+}
+.litem.done .litem-qty { background: #f1f1f2; color: var(--text3); }
 .color-grid {
   display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px;
   padding: 4px 20px 8px; flex-shrink: 0;
