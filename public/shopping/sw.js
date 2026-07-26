@@ -3,11 +3,13 @@
 // (копію для батьків робить vite.config.ts → shoppingSpacesPlugin).
 const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '/zagaltsi/shopping' або '/zagaltsi/shopping-parents'
 const SPACE = BASE.split('/').pop();
-const CACHE = `${SPACE}-v37`; // бампати разом із APP_VERSION в app.js
+const V = 38; // бампати разом із APP_VERSION в app.js і ?v= у index.html
+const CACHE = `${SPACE}-v${V}`;
 // style/app/icons завжди живуть в основному просторі — вони спільні
 const SHARED = BASE.replace(/shopping-[^/]+$/, 'shopping');
+// ?v=${V} на style/app має збігатися з посиланнями в index.html (той самий URL — інакше офлайн-кеш промахнеться)
 const ASSETS = [BASE + '/', BASE + '/index.html', BASE + '/manifest.json',
-  SHARED + '/style.css', SHARED + '/app.js'];
+  `${SHARED}/style.css?v=${V}`, `${SHARED}/app.js?v=${V}`];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {})));

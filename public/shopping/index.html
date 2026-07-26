@@ -10,7 +10,8 @@
   <title>SList</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v= бампати разом з APP_VERSION (app.js) і CACHE (sw.js): вибиває старий HTTP-кеш підресурсів на Pages -->
+  <link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
 <div id="app">
@@ -305,6 +306,6 @@
   <div class="toast" id="toast"></div>
 </div>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=38"></script>
 </body>
 </html>

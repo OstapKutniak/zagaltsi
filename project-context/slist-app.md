@@ -30,9 +30,13 @@ PWA-список покупок для двох телефонів зі спіл
 - **Ціновий воркер** `workers/shopping-price/` деплоїться окремим workflow
   `deploy-shopping-price.yml` (секрет `CLOUDFLARE_API_TOKEN`) при зміні
   `workers/shopping-price/**`. Живий: `shopping-price.priko1isf.workers.dev`.
-- **Правило:** при будь-якій зміні `public/shopping/*` бампати версію В ДВОХ
-  місцях: `APP_VERSION` в `app.js` і `CACHE = ${SPACE}-vNN` в `sw.js` (інакше
-  клієнти не підхоплять — механізм авто-reload через `meta/version`).
+- **Правило:** при будь-якій зміні `public/shopping/*` бампати версію В ТРЬОХ
+  місцях: `APP_VERSION` в `app.js`, `V`/`CACHE` в `sw.js` і `?v=NN` на
+  `style.css`/`app.js` в `index.html` (інакше клієнти не підхоплять —
+  механізм авто-reload через `meta/version`).
+  ⚠️ `?v=NN` в index.html обовʼязковий: SW працює network-first, тож старий
+  `style.css`/`app.js` інакше живе в HTTP-кеші Pages (`max-age=600`), і новий
+  `index.html` рендериться зі старим CSS (баг v37: UI виглядав «з 80-х»).
 - Тестити локально не можна напряму (Firebase-CDN блокується в пісочниці) —
   є харнес: підміна Firebase-модуля через importmap на заглушку + Playwright
   (`/opt/pw-browsers/chromium`, `NODE_PATH=/opt/node22/lib/node_modules`).
