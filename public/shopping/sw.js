@@ -3,7 +3,7 @@
 // (копію для батьків робить vite.config.ts → shoppingSpacesPlugin).
 const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '/zagaltsi/shopping' або '/zagaltsi/shopping-parents'
 const SPACE = BASE.split('/').pop();
-const V = 38; // бампати разом із APP_VERSION в app.js і ?v= у index.html
+const V = 39; // бампати разом із APP_VERSION в app.js і ?v= у index.html
 const CACHE = `${SPACE}-v${V}`;
 // style/app/icons завжди живуть в основному просторі — вони спільні
 const SHARED = BASE.replace(/shopping-[^/]+$/, 'shopping');

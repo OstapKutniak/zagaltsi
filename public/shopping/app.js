@@ -14,7 +14,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 38; // бампати разом із CACHE у sw.js і ?v= у index.html — клієнти зі старішою версією самі перезавантажаться
+const APP_VERSION = 39; // бампати разом із CACHE у sw.js і ?v= у index.html — клієнти зі старішою версією самі перезавантажаться
 // ── ПРОСТІР (space) ─────────────────────────────────────────
 // Один код обслуговує кілька родин: /shopping/ — наш простір,
 // /shopping-parents/ — батьки. Кожен простір = своя гілка в БД,
@@ -729,6 +729,63 @@ const RECIPES = [
       { short: 'Відпочинок', text: 'Дайте стейку відпочити під фольгою.', t: 5 },
       { short: 'Овочі', text: 'Підсмажте броколі й картоплю з часником і розмарином.', t: 10 },
       { short: 'Подача', text: 'Подавайте стейк з гарніром.' },
+    ],
+  },
+  {
+    id: 'spinachtomato', title: 'Паста зі шпинатом і томатами', color: '#219653', icon: 'spaghetti', cat: 'pasta', time: 20, servings: 2,
+    ingredients: [
+      { name: 'Паста', qty: '250 г', icon: 'pasta' }, { name: 'Шпинат', qty: '150 г', icon: 'tag' },
+      { name: 'Помідори чері', qty: '200 г', icon: 'tomato' }, { name: 'Часник', qty: '2 зубчики', icon: 'garlic' },
+      { name: 'Цибуля', qty: '1 шт', icon: 'onion' }, { name: 'Пармезан', qty: '40 г', icon: 'cheese' },
+      { name: 'Оливкова олія', qty: '3 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Паста', text: 'Відваріть пасту аль денте, лишіть трохи води.', t: 9 },
+      { short: 'Соус', text: 'На олії підсмажте цибулю й часник, додайте чері й потоміть до мʼякості.', t: 6 },
+      { short: 'Шпинат', text: 'Вкиньте шпинат і готуйте, поки опаде.', t: 2 },
+      { short: 'Змішати', text: 'Додайте пасту з ложкою води й пармезан, перемішайте.' },
+    ],
+  },
+  {
+    id: 'alfredo', title: 'Паста Альфредо з куркою', color: '#F2C94C', icon: 'spaghetti', cat: 'pasta', time: 30, servings: 2,
+    ingredients: [
+      { name: 'Паста', qty: '250 г', icon: 'pasta' }, { name: 'Куряче філе', qty: '300 г', icon: 'chicken' },
+      { name: 'Вершки', qty: '200 мл', icon: 'cream' }, { name: 'Пармезан', qty: '60 г', icon: 'cheese' },
+      { name: 'Вершкове масло', qty: '30 г', icon: 'butter' }, { name: 'Часник', qty: '2 зубчики', icon: 'garlic' },
+    ],
+    steps: [
+      { short: 'Курка', text: 'Наріжте філе й обсмажте до золотистого.', t: 8 },
+      { short: 'Соус', text: 'Розтопіть масло з часником, влийте вершки, всипте пармезан і проваріть до загустіння.', t: 5 },
+      { short: 'Паста', text: 'Відваріть пасту аль денте.', t: 10 },
+      { short: 'Подача', text: 'Змішайте пасту з соусом і куркою.' },
+    ],
+  },
+  {
+    id: 'arrabbiata', title: 'Паста Арабіата', color: '#EB5757', icon: 'spaghetti', cat: 'pasta', time: 25, servings: 2,
+    ingredients: [
+      { name: 'Паста', qty: '250 г', icon: 'pasta' }, { name: 'Помідори (пасата)', qty: '400 г', icon: 'tomato' },
+      { name: 'Часник', qty: '3 зубчики', icon: 'garlic' }, { name: 'Перець чилі', qty: '1 шт', icon: 'tag' },
+      { name: 'Оливкова олія', qty: '3 ст. л.', icon: 'oil' }, { name: 'Петрушка', qty: 'пучок', icon: 'tag' },
+    ],
+    steps: [
+      { short: 'Соус', text: 'На олії підсмажте часник і чилі, додайте пасату й тушкуйте до густоти.', t: 12 },
+      { short: 'Паста', text: 'Відваріть пасту аль денте.', t: 9 },
+      { short: 'Змішати', text: 'Змішайте пасту з соусом, посипте петрушкою.' },
+    ],
+  },
+  {
+    id: 'shrimppasta', title: 'Паста з креветками у вершковому соусі', color: '#F2994A', icon: 'spaghetti', cat: 'pasta', time: 25, servings: 2,
+    ingredients: [
+      { name: 'Паста', qty: '250 г', icon: 'pasta' }, { name: 'Креветки', qty: '250 г', icon: 'shrimp' },
+      { name: 'Вершки', qty: '150 мл', icon: 'cream' }, { name: 'Помідори чері', qty: '100 г', icon: 'tomato' },
+      { name: 'Часник', qty: '2 зубчики', icon: 'garlic' }, { name: 'Вершкове масло', qty: '20 г', icon: 'butter' },
+      { name: 'Оливкова олія', qty: '1 ст. л.', icon: 'oil' },
+    ],
+    steps: [
+      { short: 'Креветки', text: 'Обсмажте креветки на маслі з часником 2-3 хв, відкладіть.', t: 3 },
+      { short: 'Соус', text: 'У ту саму пательню додайте чері й вершки, проваріть до легкого загустіння.', t: 5 },
+      { short: 'Паста', text: 'Відваріть пасту аль денте.', t: 10 },
+      { short: 'Подача', text: 'Поверніть креветки в соус, змішайте з пастою.' },
     ],
   },
 ];
