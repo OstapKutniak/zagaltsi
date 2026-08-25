@@ -1953,12 +1953,12 @@ function drawCal() {
   grid.innerHTML = cells;
   grid.querySelectorAll('.cal-day[data-d]').forEach(el => el.onclick = () => calPick(new Date(y, m, +el.dataset.d)));
   const hint = document.getElementById('cal-hint'), done = document.getElementById('cal-done');
-  if (calMode === 'day' || calMode === 'recday') { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
+  if (calMode === 'day' || calMode === 'recday' || calMode === 'txday') { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
   else { hint.textContent = !calStart ? 'Оберіть початок' : !calEnd ? 'Оберіть кінець' : ''; done.disabled = !(calStart && calEnd); }
 }
 function calPick(d) {
   d.setHours(0, 0, 0, 0);
-  if (calMode === 'day' || calMode === 'recday') { calStart = d; calEnd = null; }
+  if (calMode === 'day' || calMode === 'recday' || calMode === 'txday') { calStart = d; calEnd = null; }
   else {
     if (!calStart || calEnd) { calStart = d; calEnd = null; }
     else if (d < calStart) { calEnd = calStart; calStart = d; }
@@ -1972,6 +1972,14 @@ function applyCal() {
     formState.recDay = calStart.getDate();
     document.getElementById('cal-overlay').classList.remove('open');
     document.getElementById('calc-date-label').textContent = `Щомісяця ${formState.recDay}-го числа`;
+    return;
+  }
+  if (calMode === 'txday') {
+    // Picking a date for the operation being added — set the form date only,
+    // never touch the global period/cursor shown in the header.
+    if (!calStart) return;
+    setFormDate(calStart);
+    document.getElementById('cal-overlay').classList.remove('open');
     return;
   }
   if (calMode === 'day') {
