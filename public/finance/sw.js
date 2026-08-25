@@ -1,4 +1,4 @@
-const CACHE = 'fin-v29';
+const CACHE = 'fin-v30';
 const BASE = '/zagaltsi/finance';
 const ASSETS = [BASE+'/', BASE+'/index.html', BASE+'/style.css', BASE+'/app.js', BASE+'/manifest.json'];
 

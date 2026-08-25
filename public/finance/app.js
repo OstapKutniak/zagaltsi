@@ -536,6 +536,7 @@ function openCatSheet(catName, dir, catList) {
   el.querySelector('.cas-count').textContent = `${count} операцій`;
   el.querySelector('.cas-total-val').textContent = `${fmt(total)} UAH`;
   el.querySelector('.cas-pct').textContent = `${pct}%`;
+  el.querySelector('#cas-period-lbl').textContent = dir === 'income' ? 'Усі доходи' : 'Усі витрати';
   el.querySelector('.cas-period-val').textContent = `${fmt(periodTotal)} UAH`;
 
   const subsEl = el.querySelector('.cas-subs');
