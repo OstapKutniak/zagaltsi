@@ -5,7 +5,7 @@ import {
 import {
   computeState, dayMarks, suppliesState, sexDays, conceptionChance,
   addDays, diffDays, toN, plural,
-} from './core.js?v=1';
+} from './core.js?v=2';
 
 // ── FIREBASE (та сама база, що в SList і 1мані) ─────────────
 const firebaseConfig = {
@@ -18,7 +18,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 1; // бампати разом із V у sw.js і ?v= у index.html (та в import core.js)
+const APP_VERSION = 2; // бампати разом із V у sw.js і ?v= у index.html (та в import core.js)
 const SPACE = 'cycle';
 // шляхи: cycle/periods, cycle/sex, cycle/supplies, cycle/settings, cycle/push, cycle/meta/version
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // той самий поштар пушів, що в SList
@@ -30,7 +30,6 @@ const C = { period: '#eb3b7e', fertile: '#8fdcc9', ovu: '#16a596', sex: '#6a5ae0
 const ICONS = {
   drop: '<path d="M12 3c3.5 4.5 6 7.8 6 11a6 6 0 01-12 0c0-3.2 2.5-6.5 6-11z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"/>',
-  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
   tampon: '<rect x="8.5" y="3" width="7" height="12" rx="3.5"/><path d="M12 15v6"/><path d="M8.5 7h7"/>',
   pill: '<rect x="3" y="8.5" width="18" height="7" rx="3.5" transform="rotate(-35 12 12)"/><path d="M9.7 8.8l4.6 6.4"/>',
   check: '<path d="M20 6L9 17l-5-5"/>',
@@ -172,7 +171,7 @@ function renderRing(s) {
     const d = diffDays(x.day, s.lastStart) + 1;
     if (d > L) return;
     const [hx, hy] = polar(dayFrac(d) + 0.5 / L, R + SW / 2 + 9);
-    html += `<text x="${hx.toFixed(1)}" y="${(hy + 4).toFixed(1)}" text-anchor="middle" class="ring-heart" fill="${x.protected ? C.sex : C.period}">♥</text>`;
+    html += `<text x="${hx.toFixed(1)}" y="${(hy + 4).toFixed(1)}" text-anchor="middle" class="ring-heart" fill="${C.sex}">♥</text>`;
   });
   // маркер «сьогодні»
   const tf = Math.min(s.cycleDay, L) - 0.5;
@@ -197,15 +196,7 @@ function renderRing(s) {
     $('ring-num').textContent = s.daysToNext;
     $('ring-sub').textContent = plural(s.daysToNext, 'день', 'дні', 'днів');
   }
-  const phaseTx = {
-    period: 'Місячні',
-    ovulation: 'Сьогодні овуляція · шанс зачаття високий',
-    fertile: `Фертильне вікно · шанс зачаття ${chanceWord(conceptionChance(today(), s.ovulation))}`,
-    follicular: s.daysToOvulation <= 7 ? `Овуляція через ${s.daysToOvulation} ${plural(s.daysToOvulation, 'день', 'дні', 'днів')}` : 'Фолікулярна фаза · шанс зачаття низький',
-    luteal: 'Лютеальна фаза · шанс зачаття низький',
-  }[s.phase];
-  const tx = s.late > 0 ? 'місячні запізнюються' : phaseTx;
-  $('phase').innerHTML = `<b>День ${s.cycleDay}</b> з ${L} · ${esc(tx)}`;
+  $('phase').textContent = s.late > 0 ? '' : `Шанс зачаття ${chanceWord(conceptionChance(today(), s.ovulation))}`;
 }
 const chanceWord = c => ({ high: 'високий', mid: 'середній', low: 'низький' }[c] || '—');
 
@@ -258,7 +249,7 @@ function renderForecast(s) {
 function renderAlert(s) {
   const el = $('alert');
   let msg = '';
-  if (s.suggestTest) msg = `<b>Затримка ${s.late} ${plural(s.late, 'день', 'дні', 'днів')}</b>, а у фертильні дні був незахищений секс — варто зробити тест на вагітність.`;
+  if (s.suggestTest) msg = `<b>Затримка ${s.late} ${plural(s.late, 'день', 'дні', 'днів')}</b>, а у фертильні дні був секс — варто зробити тест на вагітність.`;
   else if (s.late >= 7) msg = `<b>Затримка ${s.late} ${plural(s.late, 'день', 'дні', 'днів')}.</b> Якщо місячні вже почалися — відміть їх, натиснувши на кружок.`;
   el.innerHTML = msg;
   el.style.display = msg ? '' : 'none';
@@ -285,14 +276,12 @@ function renderAddSheet() {
   $('add-list').innerHTML = `
     <div class="sheet-item" data-act="period"><span class="sheet-item-ic" style="--c:${C.period}">${ic('drop')}</span>
       <span class="si-name">Початок місячних<div class="si-sub">${hasStart ? 'вже відмічено на ' + fmtDay(d) : fmtDay(d)}</div></span></div>
-    <div class="sheet-item" data-act="sex-p"><span class="sheet-item-ic" style="--c:${C.sex}">${ic('shield')}</span>
-      <span class="si-name">Секс · захищений<div class="si-sub">${fmtDay(d)}</div></span></div>
-    <div class="sheet-item" data-act="sex-u"><span class="sheet-item-ic" style="--c:${C.period}">${ic('heart')}</span>
-      <span class="si-name">Секс · без захисту<div class="si-sub">${fmtDay(d)} · шанс зачаття ${chanceWord(chanceFor(d))}</div></span></div>`;
+    <div class="sheet-item" data-act="sex"><span class="sheet-item-ic" style="--c:${C.sex}">${ic('heart')}</span>
+      <span class="si-name">Секс<div class="si-sub">${fmtDay(d)} · шанс зачаття ${chanceWord(chanceFor(d))}</div></span></div>`;
   $('add-list').querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', () => {
     const act = el.dataset.act;
     if (act === 'period') addPeriod(d);
-    else addSex(d, act === 'sex-p');
+    else addSex(d);
     $('add-overlay').classList.remove('open');
   }));
 }
@@ -313,9 +302,9 @@ function addPeriod(day) {
   toast(`Місячні з ${fmtDay(day)} відмічено`);
   notify('period', [fmtDay(day)]);
 }
-function addSex(day, prot) {
+function addSex(day) {
   if (day > today()) { toast('Це майбутній день'); return; }
-  set(push(ref(db, `${SPACE}/sex`)), { day, protected: !!prot, ts: Date.now() });
+  set(push(ref(db, `${SPACE}/sex`)), { day, ts: Date.now() });
   toast(`Секс ${fmtDay(day)} відмічено`);
 }
 
@@ -354,7 +343,7 @@ function renderCalendar() {
       if (key > t) cls.push('future');
       if (starts.has(key)) cls.push('start');
       const sx = sexMap[key];
-      const heart = sx ? `<i class="cal-heart ${sx.some(x => !x.protected) ? 'unprot' : ''}">♥</i>` : '';
+      const heart = sx ? `<i class="cal-heart">♥</i>` : '';
       cells += `<button class="${cls.join(' ')}" data-day="${key}"><span class="cal-n">${d}</span>${heart}</button>`;
     }
     const cur = y === ty && m === tm;
@@ -399,12 +388,11 @@ function renderDaySheet(day) {
   const sexes = Object.entries(data.sex || {}).filter(([, x]) => x.day === day);
   let html = '';
   if (startEntry) html += row('del-period', startEntry[0], C.period, 'drop', 'Початок місячних', 'Натисни кошик, щоб прибрати', true);
-  sexes.forEach(([id, x]) => { html += row('del-sex', id, x.protected ? C.sex : C.period, x.protected ? 'shield' : 'heart', x.protected ? 'Секс · захищений' : 'Секс · без захисту', '', true); });
+  sexes.forEach(([id]) => { html += row('del-sex', id, C.sex, 'heart', 'Секс', '', true); });
   if (future) html += '<div class="fc-empty">Майбутній день — відмітки можна ставити лише на сьогодні і раніше</div>';
   else {
     if (!startEntry) html += row('add-period', '', C.period, 'plus', 'Початок місячних', '');
-    html += row('add-sex-p', '', C.sex, 'plus', 'Секс · захищений', '');
-    html += row('add-sex-u', '', C.period, 'plus', 'Секс · без захисту', '');
+    html += row('add-sex', '', C.sex, 'plus', 'Секс', '');
   }
   $('day-list').innerHTML = html;
   $('day-list').querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', () => {
@@ -412,8 +400,7 @@ function renderDaySheet(day) {
     if (act === 'del-period') { remove(ref(db, `${SPACE}/periods/${id}`)); toast('Відмітку прибрано'); }
     else if (act === 'del-sex') { remove(ref(db, `${SPACE}/sex/${id}`)); toast('Відмітку прибрано'); }
     else if (act === 'add-period') addPeriod(day);
-    else if (act === 'add-sex-p') addSex(day, true);
-    else if (act === 'add-sex-u') addSex(day, false);
+    else if (act === 'add-sex') addSex(day);
   }));
 }
 function row(act, id, color, icon, name, sub, del) {

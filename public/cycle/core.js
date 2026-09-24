@@ -40,7 +40,7 @@ export function periodStarts(data) {
 export function sexDays(data) {
   return Object.entries((data && data.sex) || {})
     .filter(([, s]) => s && s.day)
-    .map(([id, s]) => ({ id, day: s.day, protected: !!s.protected }))
+    .map(([id, s]) => ({ id, day: s.day }))
     .sort((a, b) => a.day < b.day ? -1 : 1);
 }
 
@@ -90,10 +90,9 @@ export function computeState(data, today) {
   else if (today < fertileStart) res.phase = 'follicular';
   else res.phase = 'luteal';
 
-  // затримка + незахищений секс у фертильне вікно цього циклу → варто зробити тест
-  const unprot = sexDays(data).filter(s => !s.protected && s.day >= lastStart);
-  res.unprotectedInFertile = unprot.some(s => s.day >= fertileStart && s.day <= fertileEnd);
-  res.suggestTest = late >= 3 && res.unprotectedInFertile;
+  // затримка + секс у фертильне вікно цього циклу → варто зробити тест
+  res.sexInFertile = sexDays(data).some(s => s.day >= fertileStart && s.day <= fertileEnd);
+  res.suggestTest = late >= 3 && res.sexInFertile;
   return res;
 }
 
