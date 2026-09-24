@@ -9,3 +9,8 @@ compatibility_date = "2026-01-01"
 VAPID_PUBLIC = "BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzLJFg21tGxm6cWQ-zTECn4Fsg"
 VAPID_SUBJECT = "mailto:ostap.kutniak@naoma.edu.ua"
 DB_URL = "https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app"
+
+# Нагадування додатка «Цикл»: 06:00 і 18:00 UTC = 9:00 і 21:00 за Києвом влітку
+# (8:00 і 20:00 взимку) — раз на 12 годин.
+[triggers]
+crons = ["0 6,18 * * *"]

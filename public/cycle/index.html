@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Цикл">
+  <meta name="theme-color" content="#f4f4f7">
+  <title>Цикл</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <!-- ?v= бампати разом з APP_VERSION (app.js) і V (sw.js) -->
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<div id="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="topbar">
+      <button class="icon-btn" id="btn-settings" title="Налаштування">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </button>
+      <div class="total">
+        <div class="total-label" id="total-label">Цикл</div>
+        <div class="total-amount" id="total-amount">—</div>
+      </div>
+      <button class="icon-btn" id="btn-info" title="Як секс впливає на цикл">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r="1.1" class="fill"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="screen-wrap">
+    <!-- КРУЖОК -->
+    <div class="screen active" id="ring-screen">
+      <div class="ring-wrap">
+        <button class="ring" id="ring" type="button" aria-label="Додати відмітку">
+          <svg class="ring-svg" id="ring-svg" viewBox="0 0 300 300"></svg>
+          <div class="ring-center">
+            <div class="ring-top" id="ring-top"></div>
+            <div class="ring-num" id="ring-num">—</div>
+            <div class="ring-sub" id="ring-sub"></div>
+            <div class="ring-hint">натисни, щоб відмітити</div>
+          </div>
+        </button>
+        <div class="phase" id="phase"></div>
+      </div>
+      <div class="alert" id="alert" style="display:none"></div>
+      <div class="block-title">Запас на місячні</div>
+      <div class="supplies" id="supplies"></div>
+      <div class="block-title">Прогноз</div>
+      <div class="forecast" id="forecast"></div>
+    </div>
+
+    <!-- КАЛЕНДАР -->
+    <div class="screen" id="cal-screen">
+      <div class="legend">
+        <span><i class="lg lg-period"></i>Місячні</span>
+        <span><i class="lg lg-fertile"></i>Фертильні</span>
+        <span><i class="lg lg-ovu"></i>Овуляція</span>
+        <span><i class="lg-heart">♥</i>Секс</span>
+      </div>
+      <div class="cal-wrap" id="cal-wrap"></div>
+    </div>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tabbar">
+    <button class="tab active" data-tab="ring">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 018.5 8.5"/><circle cx="12" cy="12" r="2" class="fill"/></svg></span>
+      Цикл
+    </button>
+    <button class="tab" data-tab="cal">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+      Календар
+    </button>
+  </div>
+
+  <!-- ДІЯ З КРУЖКА: що відмітити -->
+  <div class="sheet-overlay" id="add-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Відмітити</div>
+      <div class="day-chips" id="add-days"></div>
+      <div class="sheet-list" id="add-list"></div>
+    </div>
+  </div>
+
+  <!-- ДЕНЬ З КАЛЕНДАРЯ -->
+  <div class="sheet-overlay" id="day-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" id="day-title">День</div>
+      <div class="day-info" id="day-info"></div>
+      <div class="sheet-list" id="day-list"></div>
+    </div>
+  </div>
+
+  <!-- ІНФО: секс і цикл -->
+  <div class="sheet-overlay" id="info-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Як секс впливає на цикл</div>
+      <div class="sheet-list info-text">
+        <p><b>Сам по собі секс цикл не зсуває.</b> Дослідження не знаходять, щоб регулярний секс чи оргазм змінювали довжину циклу або день місячних. Тому на прогноз днів він не впливає.</p>
+        <p><b>Впливає можлива вагітність.</b> Сперматозоїди живуть у тілі до 5 днів, яйцеклітина — близько доби. Тому незахищений секс за 5 днів до овуляції і в день овуляції може закінчитися вагітністю, а тоді місячні не прийдуть.</p>
+        <p><b>Що з цим робить додаток:</b></p>
+        <p>• у шторці дня показує шанс зачаття (високий / середній / низький);</p>
+        <p>• якщо місячні затримуються на 3+ дні, а в фертильні дні цього циклу був незахищений секс, — на головному екрані з’явиться порада зробити тест.</p>
+        <p><b>Інше, що реально зсуває цикл:</b> стрес, хвороба, різка зміна ваги чи навантажень, перельоти, гормональна контрацепція і таблетки «після».</p>
+        <p><b>Дрібниця:</b> оргазм може трохи полегшити спазми під час місячних.</p>
+        <p class="info-note">Прогноз — оцінка за середнім циклом, а не контрацепція.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ІМ'Я (щоб бачити, хто купив) -->
+  <div class="sheet-overlay" id="name-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Як тебе звати?</div>
+      <input class="sheet-search" id="name-input" type="text" placeholder="Ім’я — видно, хто що купив">
+      <div class="form-foot">
+        <button class="form-done" id="name-done">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- НАЛАШТУВАННЯ -->
+  <div class="sheet-overlay" id="settings-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Налаштування</div>
+      <div class="sheet-list">
+        <div class="settings-row" id="btn-name">
+          <span class="r-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+          <div class="r-tx">Моє ім’я<div class="r-sub" id="name-sub">Не вказано</div></div>
+        </div>
+        <div class="settings-row" id="btn-notify">
+          <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10 19a2 2 0 004 0"/></svg></span>
+          <div class="r-tx">Сповіщення<div class="r-sub" id="notify-sub">Натисни, щоб увімкнути</div></div>
+        </div>
+        <div class="settings-row" id="btn-test-push">
+          <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg></span>
+          <div class="r-tx">Перевірити пуш<div class="r-sub" id="testpush-sub">Надішле тестове сповіщення на інший телефон</div></div>
+        </div>
+        <div class="settings-row stepper-row">
+          <span class="r-ic"><svg viewBox="0 0 24 24"><path d="M12 3c3.5 4.5 6 7.8 6 11a6 6 0 01-12 0c0-3.2 2.5-6.5 6-11z"/></svg></span>
+          <div class="r-tx">Тривалість місячних<div class="r-sub">Скільки днів зазвичай</div></div>
+          <div class="stepper" data-key="periodLen" data-min="2" data-max="10"><button type="button" data-d="-1">−</button><span></span><button type="button" data-d="1">+</button></div>
+        </div>
+        <div class="settings-row stepper-row">
+          <span class="r-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></span>
+          <div class="r-tx">Довжина циклу<div class="r-sub" id="cyclelen-sub">Поки мало відміток — береться звідси</div></div>
+          <div class="stepper" data-key="cycleLen" data-min="18" data-max="45"><button type="button" data-d="-1">−</button><span></span><button type="button" data-d="1">+</button></div>
+        </div>
+        <div class="settings-row" style="cursor:default">
+          <span class="r-ic"><span class="dot" id="sync-dot"></span></span>
+          <div class="r-tx">Синхронізація<div class="r-sub" id="sync-sub">Підключення…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="app.js?v=1"></script>
+</body>
+</html>

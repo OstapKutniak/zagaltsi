@@ -2,7 +2,12 @@
 // Приймає POST {event:'added'|'bought', names:[...], from:'<deviceId>', space?},
 // читає підписки з Firebase ({space}/push) і шле Web Push (RFC 8291/8292)
 // на всі пристрої, КРІМ відправника. Мертві підписки прибирає з бази.
-// space — простір (родина): 'shopping' (дефолт) або 'shopping-parents'.
+// space — простір (родина): 'shopping' (дефолт) або 'shopping-parents';
+// 'cycle' — додаток «Цикл» (public/cycle): події 'period'/'bought'/'test'.
+// scheduled (cron, див. wrangler.toml) — нагадування «Циклу» двічі на добу:
+// купити тампони/знеболююче за добу до місячних і «завтра овуляція».
+
+import { dueReminders } from '../../../public/cycle/core.js';
 
 const te = new TextEncoder();
 
@@ -94,7 +99,11 @@ const CORS = {
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
 
-function buildMessage(event, names) {
+function buildMessage(event, names, space) {
+  if (space === 'cycle') {
+    if (event === 'period') return { title: 'Цикл', body: `Відмічено початок місячних · ${names[0]}` };
+    return { title: 'Цикл', body: `Куплено: ${names.join(', ')}` };
+  }
   const list = names.slice(0, 6).join(', ') + (names.length > 6 ? ` і ще ${names.length - 6}` : '');
   if (event === 'bought') return { title: 'Покупки', body: `Куплено: ${list}` };
   return { title: 'Покупки', body: `Додано до списку: ${list}` };
@@ -103,36 +112,69 @@ function buildMessage(event, names) {
 export default {
   async fetch(req, env) {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
-    if (req.method !== 'POST') return json({ ok: true, service: 'shopping-push' });
+    if (req.method !== 'POST') {
+      // ?cycle-dry — показати, які нагадування «Циклу» пішли б зараз (нічого не шле)
+      if (new URL(req.url).searchParams.has('cycle-dry')) {
+        const res = await fetch(`${env.DB_URL}/cycle.json`);
+        const today = kyivDay(Date.now());
+        return json({ today, am: dueReminders((await res.json()) || {}, today, 'am') });
+      }
+      return json({ ok: true, service: 'shopping-push' });
+    }
 
     let data;
     try { data = JSON.parse(await req.text()); } catch { return json({ error: 'bad json' }, 400); }
     const { event, names, from } = data || {};
-    if (!Array.isArray(names) || !names.length || !['added', 'bought', 'test'].includes(event))
+    if (!Array.isArray(names) || !names.length || !['added', 'bought', 'test', 'period'].includes(event))
       return json({ error: 'bad payload' }, 400);
-    const space = ['shopping', 'shopping-parents'].includes(data.space) ? data.space : 'shopping';
+    const space = ['shopping', 'shopping-parents', 'cycle'].includes(data.space) ? data.space : 'shopping';
 
-    const subsRes = await fetch(`${env.DB_URL}/${space}/push.json`);
-    const subs = (await subsRes.json()) || {};
     const msg = event === 'test'
-      ? { title: 'Покупки', body: names.join(', ') }
-      : buildMessage(event, names);
-    const payload = JSON.stringify({ ...msg, url: `/zagaltsi/${space}/` });
+      ? { title: space === 'cycle' ? 'Цикл' : 'Покупки', body: names.join(', ') }
+      : buildMessage(event, names, space);
+    return json(await broadcast(space, msg, from, env));
+  },
 
-    let sent = 0, dead = 0, errors = [];
-    await Promise.all(Object.entries(subs).map(async ([deviceId, rec]) => {
-      if (deviceId === from) return; // не шлемо самому собі
-      let sub;
-      try { sub = JSON.parse(rec.sub); } catch { return; }
-      try {
-        const res = await sendPush(sub, payload, env);
-        if (res.status === 404 || res.status === 410) {
-          dead++;
-          await fetch(`${env.DB_URL}/${space}/push/${deviceId}.json`, { method: 'DELETE' });
-        } else if (res.ok || res.status === 201) sent++;
-        else errors.push(`${deviceId}: ${res.status} ${(await res.text()).slice(0, 120)}`);
-      } catch (e) { errors.push(`${deviceId}: ${e.message}`); }
-    }));
-    return json({ sent, dead, errors });
+  // cron: нагадування додатка «Цикл» (двічі на добу, раз на 12 год)
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(cycleReminders(event.scheduledTime, env));
   },
 };
+
+// шле msg на всі підписки простору, крім from; мертві підписки прибирає
+async function broadcast(space, msg, from, env) {
+  const subsRes = await fetch(`${env.DB_URL}/${space}/push.json`);
+  const subs = (await subsRes.json()) || {};
+  const payload = JSON.stringify({ ...msg, url: `/zagaltsi/${space}/` });
+  let sent = 0, dead = 0, errors = [];
+  await Promise.all(Object.entries(subs).map(async ([deviceId, rec]) => {
+    if (deviceId === from) return; // не шлемо самому собі
+    let sub;
+    try { sub = JSON.parse(rec.sub); } catch { return; }
+    try {
+      const res = await sendPush(sub, payload, env);
+      if (res.status === 404 || res.status === 410) {
+        dead++;
+        await fetch(`${env.DB_URL}/${space}/push/${deviceId}.json`, { method: 'DELETE' });
+      } else if (res.ok || res.status === 201) sent++;
+      else errors.push(`${deviceId}: ${res.status} ${(await res.text()).slice(0, 120)}`);
+    } catch (e) { errors.push(`${deviceId}: ${e.message}`); }
+  }));
+  return { sent, dead, errors };
+}
+
+// «сьогодні» за Києвом (обидва телефони там), а не за UTC
+export function kyivDay(ts) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(ts));
+}
+
+async function cycleReminders(ts, env) {
+  const res = await fetch(`${env.DB_URL}/cycle.json`);
+  const data = (await res.json()) || {};
+  const hour = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: 'numeric', hourCycle: 'h23' }).format(new Date(ts));
+  const slot = hour < 15 ? 'am' : 'pm';
+  const due = dueReminders(data, kyivDay(ts), slot);
+  for (const m of due) await broadcast('cycle', { title: m.title, body: m.body }, null, env);
+  return due;
+}

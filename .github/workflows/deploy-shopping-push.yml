@@ -1,0 +1,24 @@
+# Автодеплой пуш-воркера shopping-push (SList + «Цикл») на Cloudflare.
+# Тригер: push у main, що чіпає воркер або логіку циклу (воркер імпортує public/cycle/core.js).
+# Секрет VAPID_PRIVATE_JWK уже живе у воркері — деплой його не чіпає.
+name: Deploy shopping-push worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/shopping-push/**'
+      - 'public/cycle/core.js'
+      - '.github/workflows/deploy-shopping-push.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: workers/shopping-push
