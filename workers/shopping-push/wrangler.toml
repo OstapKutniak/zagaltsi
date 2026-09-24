@@ -10,7 +10,8 @@ VAPID_PUBLIC = "BDL_rAqfpmJS7p0v1jcUCDHiNTmOAFQI4TT7zll7UfrFUOiEXmMwr8jMb106WwzL
 VAPID_SUBJECT = "mailto:ostap.kutniak@naoma.edu.ua"
 DB_URL = "https://horugva-ff8bd-default-rtdb.europe-west1.firebasedatabase.app"
 
-# Нагадування додатка «Цикл»: 06:00 і 18:00 UTC = 9:00 і 21:00 за Києвом влітку
-# (8:00 і 20:00 взимку) — раз на 12 годин.
+# Нагадування додатка «Цикл» о 11:00 і 20:00 за Києвом. Крон — в UTC, тож будимо
+# в обидві можливі години (літо UTC+3: 8 і 17, зима UTC+2: 9 і 18); зайві
+# запуски воркер сам пропускає, звіряючи годину за Europe/Kyiv.
 [triggers]
-crons = ["0 6,18 * * *"]
+crons = ["0 8,9,17,18 * * *"]

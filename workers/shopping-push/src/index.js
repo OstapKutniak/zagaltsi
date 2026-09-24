@@ -135,7 +135,7 @@ export default {
     return json(await broadcast(space, msg, from, env));
   },
 
-  // cron: нагадування додатка «Цикл» (двічі на добу, раз на 12 год)
+  // cron: нагадування додатка «Цикл» (11:00 і 20:00 за Києвом)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(cycleReminders(event.scheduledTime, env));
   },
@@ -173,7 +173,9 @@ async function cycleReminders(ts, env) {
   const res = await fetch(`${env.DB_URL}/cycle.json`);
   const data = (await res.json()) || {};
   const hour = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: 'numeric', hourCycle: 'h23' }).format(new Date(ts));
-  const slot = hour < 15 ? 'am' : 'pm';
+  // крон будить о двох можливих UTC-годинах (літо/зима) — шлемо лише о 11:00 і 20:00 за Києвом
+  const slot = hour === 11 ? 'am' : hour === 20 ? 'pm' : null;
+  if (!slot) return [];
   const due = dueReminders(data, kyivDay(ts), slot);
   for (const m of due) await broadcast('cycle', { title: m.title, body: m.body }, null, env);
   return due;

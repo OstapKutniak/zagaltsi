@@ -1,6 +1,6 @@
 // Service worker додатка «Цикл»: офлайн-кеш (network-first) + пуш-сповіщення.
 const BASE = self.location.pathname.replace(/\/sw\.js$/, ''); // '/zagaltsi/cycle'
-const V = 2; // бампати разом із APP_VERSION в app.js і ?v= у index.html
+const V = 3; // бампати разом із APP_VERSION в app.js і ?v= у index.html
 const CACHE = `cycle-v${V}`;
 const ASSETS = [BASE + '/', BASE + '/index.html', BASE + '/manifest.json',
   `${BASE}/style.css?v=${V}`, `${BASE}/app.js?v=${V}`, `${BASE}/core.js?v=${V}`];

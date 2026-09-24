@@ -5,7 +5,7 @@ import {
 import {
   computeState, dayMarks, suppliesState, sexDays, conceptionChance,
   addDays, diffDays, toN, plural,
-} from './core.js?v=2';
+} from './core.js?v=3';
 
 // ── FIREBASE (та сама база, що в SList і 1мані) ─────────────
 const firebaseConfig = {
@@ -18,7 +18,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 2; // бампати разом із V у sw.js і ?v= у index.html (та в import core.js)
+const APP_VERSION = 3; // бампати разом із V у sw.js і ?v= у index.html (та в import core.js)
 const SPACE = 'cycle';
 // шляхи: cycle/periods, cycle/sex, cycle/supplies, cycle/settings, cycle/push, cycle/meta/version
 const WORKER_URL = 'https://shopping-push.priko1isf.workers.dev'; // той самий поштар пушів, що в SList
