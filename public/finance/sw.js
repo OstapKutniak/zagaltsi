@@ -1,4 +1,4 @@
-const CACHE = 'fin-v40';   // keep in sync with APP_VERSION in app.js
+const CACHE = 'fin-v41';   // keep in sync with APP_VERSION in app.js
 const BASE = '/zagaltsi/finance';
 const ASSETS = [BASE+'/', BASE+'/index.html', BASE+'/style.css', BASE+'/app.js', BASE+'/manifest.json'];
 

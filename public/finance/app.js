@@ -15,7 +15,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 'fin-v40';   // keep in sync with CACHE in sw.js — shown in settings
+const APP_VERSION = 'fin-v41';   // keep in sync with CACHE in sw.js — shown in settings
 const TX_PATH = 'finance/transactions';
 const ACC_PATH = 'finance/accounts';
 const REC_PATH = 'finance/recurring';
@@ -1201,7 +1201,8 @@ function accRow(a) {
   const cur = CUR_SUFFIX[a.currency] || a.currency || 'UAH';
   const shown = computeLiveBalance(a.name) ?? a.balance ?? 0;
   const v = a.currency === 'UAH' ? fmt(shown) : fmtDec(shown);
-  return `<div class="acc-row" data-acc="${escAttr(a.name)}">
+  const dim = acctypeOf(a) === 'regular' && !accIncluded(a);   // not counted in «Всі рахунки»
+  return `<div class="acc-row${dim ? ' excl' : ''}" data-acc="${escAttr(a.name)}">
     <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
     <div class="acc-name">${esc(a.name)}</div>
     <div class="acc-balwrap">
