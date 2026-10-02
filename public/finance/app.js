@@ -478,7 +478,7 @@ function renderHeader() {
   let net;
   if (accountsList.length) {
     net = accountsList
-      .filter(a => !a.archived && accIncluded(a))
+      .filter(a => !a.archived && acctypeOf(a) === 'regular' && accIncluded(a))
       .reduce((s, a) => s + accUah(a), 0);
   } else { net = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') net -= Number(t.amount); else if (t.type === 'income') net += Number(t.amount); }); }
   document.getElementById('total-amount').innerHTML = `${fmt(net)} <span>UAH</span>`;
@@ -1163,7 +1163,7 @@ async function deleteAccForm() {
 function monthKey(d) { return `${d.getFullYear()}-${d.getMonth() + 1}`; }
 function generalTotal() {
   if (!accountsList.length) { let n = 0; Object.values(txMap).forEach(t => { if (t.type === 'expense') n -= +t.amount; else if (t.type === 'income') n += +t.amount; }); return n; }
-  return accountsList.filter(a => !a.archived && accIncluded(a)).reduce((s, a) => s + accUah(a), 0);
+  return accountsList.filter(a => !a.archived && acctypeOf(a) === 'regular' && accIncluded(a)).reduce((s, a) => s + accUah(a), 0);
 }
 // Щомісячне показує обраний місяць (state.cursor): минулі місяці — всі
 // операції з галочкою, поточний/майбутні — по факту оплати (r.paid[mk]).
