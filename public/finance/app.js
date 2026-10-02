@@ -43,140 +43,16 @@ function accUah(a) {
   return a.currency === 'UAH' ? lb : Math.round((a.balance || 0) * (fxRates[a.currency] || 1));
 }
 
-// ── DEPOSIT / BOND YIELD ───────────────────────────────────
-// Account types: regular (розрахунковий), savings (накопичувальний),
-// deposit (відсотки, податок 23%), bond (облігації, податок 0% — ОВДП звільнені).
-const YIELD_TAX = { deposit: 23, bond: 0 };   // % tax on accrued interest
+// ── ACCOUNT TYPES ──────────────────────────────────────────
+// regular (розрахунковий) / savings (накопичувальний). Deposits & bonds are
+// not accounts — they live in the «Вкладення» mode (see INVESTMENTS below).
 const ACC_TYPES = [
-  { k: 'regular',  label: 'Розрахунковий' },
-  { k: 'savings',  label: 'Накопичувальний' },
-  { k: 'deposit',  label: 'Депозит' },
-  { k: 'bond',     label: 'Облігації' },
+  { k: 'regular', label: 'Розрахунковий' },
+  { k: 'savings', label: 'Накопичувальний' },
 ];
 function acctypeOf(a) {
-  if (a.acctype) return a.acctype;                              // explicit (new accounts)
-  return (a.group === 'savings' || isSavings(a.name)) ? 'savings' : 'regular';  // legacy fallback
-}
-function isYield(a) {
-  const t = acctypeOf(a);
-  return (t === 'deposit' || t === 'bond') && a.yieldRate > 0 && !!a.yieldStart;
-}
-// Linear accrual from the open/purchase date: тіло + тіло×річний%×днів/365, мінус
-// податок. For bonds accrual stops at the maturity date.
-function depositInfo(a) {
-  const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
-  if (!isYield(a)) return { principal, gross: 0, net: 0, value: principal, days: 0 };
-  if (acctypeOf(a) === 'bond') return bondInfo(a, principal);
-  let until = Date.now();
-  const days = Math.max(0, (until - new Date(a.yieldStart).getTime()) / 86400000);
-  const gross = principal * (a.yieldRate / 100) * (days / 365);
-  const tax = gross * ((YIELD_TAX[acctypeOf(a)] || 0) / 100);
-  const net = gross - tax;
-  return { principal, gross, net, value: principal + net, days };
-}
-// Current withdrawal value in UAH (principal + net interest). Used in the
-// accounts section sums — NOT in the header total.
-function accValueUah(a) {
-  const info = depositInfo(a);
-  return a.currency === 'UAH' ? info.value : Math.round(info.value * (fxRates[a.currency] || 1));
-}
-// Bond coupon frequency options (months between payouts; 0 = all at maturity).
-const COUPON_FREQ = [
-  { m: 6,  label: 'Раз на пів року' },
-  { m: 3,  label: 'Щокварталу' },
-  { m: 12, label: 'Раз на рік' },
-  { m: 1,  label: 'Щомісяця' },
-  { m: 0,  label: 'При погашенні' },
-];
-// Bond model (ОВДП-style): balance = сума вкладення (what you paid), nominal =
-// сума погашення, yieldRate = купонна ставка % річних ВІД НОМІНАЛУ. Coupon dates
-// are anchored to the maturity date (maturity, maturity−period, …) like real
-// bonds, not to the purchase date. Each coupon = nominal × rate × period/12.
-// ОВДП nominal is 1000 ₴ per bond, so when nominal isn't entered assume the
-// cost rounded to whole bonds (2019.36 paid → 2000 nominal).
-function bondNominal(a, principal) {
-  if (a.nominal > 0) return a.nominal;
-  const n = Math.round(principal / 1000) * 1000;
-  return n > 0 ? n : principal;
-}
-function bondSchedule(a) {
-  if (acctypeOf(a) !== 'bond' || !(a.yieldRate > 0) || !a.yieldStart || !a.yieldEnd) return [];
-  const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
-  const nominal = bondNominal(a, principal);
-  const r = a.yieldRate / 100, start = new Date(a.yieldStart), end = new Date(a.yieldEnd);
-  if (end <= start) return [];
-  const freq = a.couponMonths ?? 6;
-  const out = [];
-  if (freq > 0) {
-    const coupon = nominal * r * freq / 12;
-    for (let k = 0; ; k++) {
-      const d = new Date(end); d.setMonth(end.getMonth() - k * freq);
-      if (d <= start) break;
-      out.unshift({ date: d, amount: coupon, kind: k === 0 ? 'final' : 'coupon', coupon, nominal: k === 0 ? nominal : 0 });
-    }
-    if (!out.length) out.push({ date: end, amount: nominal, kind: 'final', coupon: 0, nominal });
-    else out[out.length - 1].amount = coupon + nominal;
-  } else {
-    const c = nominal * r * ((end - start) / 86400000) / 365;
-    out.push({ date: end, amount: c + nominal, kind: 'final', coupon: c, nominal });
-  }
-  return out;
-}
-// Value now: cost + expected profit accrued linearly over the holding period,
-// minus payouts already paid out (they go to the payout account). 0 after maturity.
-// expected profit = Σ coupons + nominal − cost (matches the bank's «Очікуваний прибуток»).
-function bondInfo(a, principal) {
-  const sched = bondSchedule(a);
-  if (!sched.length) return { principal, gross: 0, net: 0, value: principal, days: 0 };
-  const start = new Date(a.yieldStart).getTime(), end = new Date(a.yieldEnd).getTime(), now = Date.now();
-  const total = sched.reduce((s, p) => s + p.amount, 0);
-  const profit = total - principal;
-  if (now >= end) return { principal, gross: profit, net: profit, value: 0, days: (end - start) / 86400000, profit, matured: true };
-  const frac = Math.max(0, Math.min(1, (now - start) / (end - start)));
-  const paid = sched.filter(p => p.date.getTime() <= now).reduce((s, p) => s + p.amount, 0);
-  const accrued = profit * frac;
-  return { principal, gross: accrued, net: accrued, value: principal + accrued - paid, days: (now - start) / 86400000, profit };
-}
-// Auto-credit bond payouts to the chosen account once their date has come.
-// Tx ids are deterministic, so two phones doing it at once write the same record
-// (no duplicates); finance/bondpaid remembers what was credited so a deleted
-// auto-operation is not recreated.
-let bondPaid = {}, bondPaidLoaded = false, bondCreditBusy = false;
-function bondTxId(a, d, kind) {
-  const p = n => String(n).padStart(2, '0');
-  return `bond_${metaKey(a.name).replace(/\s+/g, '_')}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${kind}`;
-}
-async function creditBondPayouts() {
-  if (bondCreditBusy || !bondPaidLoaded || !accountsList.length) return;
-  bondCreditBusy = true;
-  try {
-    const now = Date.now(), upd = {}, mark = {};
-    accountsList.forEach(a => {
-      if (!a || a.archived || acctypeOf(a) !== 'bond' || !a.payoutAccount) return;
-      bondSchedule(a).forEach(p => {
-        if (p.date.getTime() > now) return;
-        const date = new Date(p.date.getFullYear(), p.date.getMonth(), p.date.getDate(), 12).toISOString();
-        if (p.coupon > 0) {
-          const id = bondTxId(a, p.date, 'c');
-          if (!bondPaid[id]) { upd[`${TX_PATH}/${id}`] = { type: 'income', amount: Math.round(p.coupon * 100) / 100, account: a.payoutAccount, category: 'Відсотки', date, note: `Купон · ${a.name}` }; mark[id] = true; }
-        }
-        if (p.nominal > 0) {
-          const id = bondTxId(a, p.date, 'n');
-          if (!bondPaid[id]) { upd[`${TX_PATH}/${id}`] = { type: 'transfer', amount: Math.round(p.nominal * 100) / 100, account: a.name, category: a.payoutAccount, date, note: `Погашення · ${a.name}` }; mark[id] = true; }
-        }
-      });
-    });
-    if (Object.keys(mark).length) {
-      Object.keys(mark).forEach(id => { upd[`finance/bondpaid/${id}`] = true; });
-      await update(ref(db), upd);
-      toast('Виплати по облігаціях зараховано ✓');
-    }
-  } catch (e) { console.warn('bond credit', e); }
-  bondCreditBusy = false;
-}
-function upcomingPayouts(a) {
-  const cutoff = Date.now() - 86400000;
-  return bondSchedule(a).filter(p => p.date.getTime() >= cutoff);
+  if (a.acctype) return a.acctype;
+  return (a.group === 'savings' || isSavings(a.name)) ? 'savings' : 'regular';
 }
 
 // ── CONST ──────────────────────────────────────────────────
@@ -291,10 +167,6 @@ let accFormCurrency = 'UAH';
 let accFormIcon = null;
 let accFormColor = null;
 let accFormType = 'regular';
-let accFormYieldStart = null;   // Date | null — deposit open date
-let accFormYieldEnd = null;     // Date | null — bond maturity date
-let accFormCoupon = 6;          // bond coupon frequency in months (0 = at maturity)
-let accFormPayoutAcc = null;    // account name that receives bond coupons/redemption
 const SWIPE_TABS = ['accounts', 'categories', 'records', 'recurring', 'overview'];
 
 const CURRENCIES_LIST = [
@@ -327,15 +199,7 @@ async function migrateBaseBalances() {
   const updated = accountsList.map(a => {
     if (a.baseBalance !== undefined) return a;
     let delta = 0;
-    allTx.forEach(t => {
-      const amt = Number(t.amount);
-      if (t.type === 'expense' && t.account === a.name) delta -= amt;
-      else if (t.type === 'income' && t.account === a.name) delta += amt;
-      else if (t.type === 'transfer') {
-        if (t.account === a.name) delta -= amt;
-        if (t.category === a.name) delta += amt;
-      }
-    });
+    allTx.forEach(t => { delta += txAccDelta(t, a.name); });
     return { ...a, baseBalance: a.balance - delta };
   });
   await set(ref(db, ACC_PATH), updated);
@@ -349,11 +213,17 @@ function subscribe() {
   onValue(ref(db, ACC_PATH), s => {
     accountsList = s.val() || [];
     scheduleRender();
-    setTimeout(creditBondPayouts, 1500);
     migrateBaseBalances();
+    setTimeout(migrateLegacyInvestAccounts, 2500);
   });
   onValue(ref(db, REC_PATH), s => { recurringMap = s.val() || {}; scheduleRender(); });
-  onValue(ref(db, 'finance/bondpaid'), s => { bondPaid = s.val() || {}; bondPaidLoaded = true; setTimeout(creditBondPayouts, 1500); });
+  onValue(ref(db, INV_PATH), s => {
+    investMap = s.val() || {}; investLoaded = true; scheduleRender();
+    if (invViewId) renderInvView();
+    setTimeout(migrateLegacyInvestAccounts, 2500);
+    setTimeout(creditInvestPayouts, 2500);
+  });
+  onValue(ref(db, 'finance/invpaid'), s => { invPaid = s.val() || {}; invPaidLoaded = true; setTimeout(creditInvestPayouts, 2500); });
   onValue(ref(db, 'finance/catmeta'), s => { const v = s.val() || {}; catMeta = { icons: v.icons || {}, subs: v.subs || {}, colors: v.colors || {}, archived: v.archived || {}, cats: v.cats || {} }; scheduleRender(); });
   onValue(ref(db, 'finance/meta/importedUpTo'), s => {
     importedUpTo = s.val() || null;
@@ -369,17 +239,18 @@ async function deleteTx(id) { await remove(ref(db, `${TX_PATH}/${id}`)); }
 // ── LIVE BALANCE ───────────────────────────────────────────
 // New model: baseBalance (before any transactions) + sum of ALL txMap entries.
 // Legacy fallback (no baseBalance): snap.balance + only post-importedUpTo delta.
+// Effect of one operation on an account's balance. invest = money leaves the
+// account into an instrument; divest = money comes back from it.
+function txAccDelta(t, accName) {
+  const amt = Number(t.amount);
+  if (t.type === 'expense' || t.type === 'invest') return t.account === accName ? -amt : 0;
+  if (t.type === 'income' || t.type === 'divest') return t.account === accName ? amt : 0;
+  if (t.type === 'transfer') return (t.account === accName ? -amt : 0) + (t.category === accName ? amt : 0);
+  return 0;
+}
 function txDeltaFor(accName) {
   let delta = 0;
-  Object.values(txMap).forEach(t => {
-    const amt = Number(t.amount);
-    if (t.type === 'expense' && t.account === accName) delta -= amt;
-    else if (t.type === 'income' && t.account === accName) delta += amt;
-    else if (t.type === 'transfer') {
-      if (t.account === accName) delta -= amt;
-      if (t.category === accName) delta += amt;
-    }
-  });
+  Object.values(txMap).forEach(t => { delta += txAccDelta(t, accName); });
   return delta;
 }
 function computeLiveBalance(accName) {
@@ -391,15 +262,353 @@ function computeLiveBalance(accName) {
   let delta = 0;
   Object.values(txMap).forEach(t => {
     if (new Date(t.date).getTime() <= importedUpTo) return;
-    const amt = Number(t.amount);
-    if (t.type === 'expense' && t.account === accName) delta -= amt;
-    else if (t.type === 'income' && t.account === accName) delta += amt;
-    else if (t.type === 'transfer') {
-      if (t.account === accName) delta -= amt;
-      if (t.category === accName) delta += amt;
-    }
+    delta += txAccDelta(t, accName);
   });
   return snap.balance + delta;
+}
+
+// ── INVESTMENTS (Вкладення) ────────────────────────────────
+// Third mode of the categories ring (Витрати → Доходи → Вкладення). Each
+// instrument (облігації, депозит, …) lives in finance/invest/{id}; money moves
+// in/out with operations of type 'invest' (рахунок → інструмент) and 'divest'
+// (інструмент → рахунок), so card balances stay correct and nothing is counted
+// as an expense. Coupons/interest are credited automatically as income.
+const INV_PATH = 'finance/invest';
+const INV_KINDS = [
+  { k: 'bond',    label: 'Облігації' },
+  { k: 'deposit', label: 'Депозит' },
+  { k: 'other',   label: 'Інше' },
+];
+const INV_TAX = { bond: 0, deposit: 23, other: 0 };   // % tax on interest
+const COUPON_FREQ = [
+  { m: 6,  label: 'Раз на пів року' },
+  { m: 3,  label: 'Щокварталу' },
+  { m: 12, label: 'Раз на рік' },
+  { m: 1,  label: 'Щомісяця' },
+  { m: 0,  label: 'При погашенні' },
+];
+const DEP_PAYOUT = [
+  { k: 'end',     label: 'Накопичуються на депозиті' },
+  { k: 'monthly', label: 'Щомісяця на рахунок' },
+];
+const DAY_MS = 86400000;
+let investMap = {}, investLoaded = false;
+let invPaid = {}, invPaidLoaded = false, invCreditBusy = false, invMigrated = false;
+
+function instList(all = false) {
+  return Object.entries(investMap).map(([id, v]) => ({ id, ...v }))
+    .filter(i => all || !i.archived)
+    .sort((a, b) => (a.created || 0) - (b.created || 0));
+}
+const instById = id => investMap[id] ? { id, ...investMap[id] } : null;
+const instByName = n => instList(true).find(i => i.name === n) || null;
+function instTxs(inst) {
+  return Object.values(txMap)
+    .filter(t => (t.type === 'invest' || t.type === 'divest') && (t.inst ? t.inst === inst.id : t.category === inst.name))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+function invStyle(inst) {
+  const def = inst.kind === 'deposit' ? 'coins' : inst.kind === 'bond' ? 'percent' : 'chart';
+  return { color: inst.color || '#6A5AE0', icon: ic(inst.icon && ICONS[inst.icon] ? inst.icon : def) };
+}
+const addMonths = (d, m) => { const x = new Date(d); x.setMonth(x.getMonth() + m); return x; };
+
+// All payout events of an instrument (past and future), sorted by date:
+//   coupon/interest → income on the payout account; redeem → money back.
+// Bonds: coupon = номінал × ставка × період/12, dates counted back from the
+// maturity date (like real ОВДП). Deposits: simple interest per top-up, minus
+// 23% tax, paid monthly or at the end of the term.
+function instEvents(inst, txs = instTxs(inst)) {
+  const r = (inst.rate || 0) / 100;
+  if (!(r > 0)) return [];
+  const invested = txs.filter(t => t.type === 'invest').reduce((s, t) => s + +t.amount, 0);
+  const start = inst.start ? new Date(inst.start) : (txs[0] ? new Date(txs[0].date) : null);
+  const end = inst.end ? new Date(inst.end) : null;
+  if (!start) return [];
+  const out = [];
+  if (inst.kind === 'bond') {
+    if (!end || end <= start) return [];
+    const nominal = inst.nominal > 0 ? inst.nominal : (Math.round(invested / 1000) * 1000 || invested);
+    const freq = inst.couponMonths ?? 6;
+    if (freq > 0) {
+      const coupon = nominal * r * freq / 12;
+      for (let k = 0; ; k++) {
+        const d = addMonths(end, -k * freq);
+        if (d <= start) break;
+        out.unshift({ date: d, kind: 'coupon', amount: coupon });
+      }
+    } else {
+      out.push({ date: end, kind: 'coupon', amount: nominal * r * ((end - start) / DAY_MS) / 365 });
+    }
+    out.push({ date: end, kind: 'redeem', amount: nominal });
+    return out;
+  }
+  if (inst.kind === 'deposit') {
+    const net = 1 - (INV_TAX.deposit / 100);
+    const tranches = txs.map(t => ({ d: new Date(t.date).getTime(), a: (t.type === 'invest' ? 1 : -1) * +t.amount }));
+    const I = (from, to) => tranches.reduce((s, t) => {
+      const f = Math.max(from, t.d);
+      return to > f ? s + t.a * r * ((to - f) / DAY_MS) / 365 * net : s;
+    }, 0);
+    let prev = start.getTime();
+    if (inst.payoutMode === 'monthly') {
+      const horizon = end ? end.getTime() : Date.now() + 366 * DAY_MS;
+      for (let k = 1; ; k++) {
+        const d = addMonths(start, k).getTime();
+        if (d > horizon || (end && d >= end.getTime())) break;
+        out.push({ date: new Date(d), kind: 'interest', amount: I(prev, d) });
+        prev = d;
+      }
+    }
+    if (end) {
+      out.push({ date: end, kind: 'interest', amount: I(prev, end.getTime()) });
+      const held = tranches.filter(t => t.d < end.getTime()).reduce((s, t) => s + t.a, 0);
+      out.push({ date: end, kind: 'redeem', amount: held });
+    }
+    return out.filter(e => e.amount > 0.004);
+  }
+  return [];
+}
+
+// Current state: value = held + accrued to date − interest already paid out.
+function instCalc(inst) {
+  const txs = instTxs(inst);
+  const now = Date.now();
+  const invested = txs.filter(t => t.type === 'invest').reduce((s, t) => s + +t.amount, 0);
+  const withdrawn = txs.filter(t => t.type === 'divest').reduce((s, t) => s + +t.amount, 0);
+  const held = invested - withdrawn;
+  const events = instEvents(inst, txs);
+  const start = inst.start ? new Date(inst.start) : (txs[0] ? new Date(txs[0].date) : null);
+  const end = inst.end ? new Date(inst.end) : null;
+  const res = { invested, withdrawn, held, events, start, end, value: held, accrued: 0, profit: null, closed: false };
+  if (!events.length || !start) return res;
+  const income = events.filter(e => e.kind !== 'redeem');
+  const paid = income.filter(e => e.date.getTime() <= now).reduce((s, e) => s + e.amount, 0);
+  if (inst.kind === 'bond') {
+    const total = events.reduce((s, e) => s + e.amount, 0);
+    res.profit = total - invested;
+    const frac = Math.max(0, Math.min(1, (now - start) / (end - start)));
+    res.accrued = res.profit * frac;
+    res.value = held + res.accrued - paid;
+  } else {
+    const r = (inst.rate || 0) / 100, net = 1 - INV_TAX.deposit / 100;
+    const until = end ? Math.min(now, end.getTime()) : now;
+    res.accrued = txs.reduce((s, t) => {
+      const d = new Date(t.date).getTime(), sign = t.type === 'invest' ? 1 : -1;
+      return until > d ? s + sign * +t.amount * r * ((until - d) / DAY_MS) / 365 * net : s;
+    }, 0);
+    res.value = held + res.accrued - paid;
+    if (end) res.profit = income.reduce((s, e) => s + e.amount, 0);
+  }
+  if (end && now >= end.getTime()) { res.closed = true; res.value = 0; res.accrued = res.profit ?? res.accrued; }
+  return res;
+}
+function investTotals() {
+  let value = 0, accrued = 0;
+  instList().forEach(i => { const c = instCalc(i); if (!c.closed) { value += c.value; accrued += c.accrued; } });
+  return { value, accrued };
+}
+
+// Auto-credit: once an event date has come, write the operation to the payout
+// account. Deterministic ids + finance/invpaid make it idempotent across both
+// phones and stop a deleted auto-operation from coming back.
+function invTxId(inst, d, kind) {
+  const p = n => String(n).padStart(2, '0');
+  return `inv_${inst.id}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${kind}`;
+}
+async function creditInvestPayouts() {
+  if (invCreditBusy || !investLoaded || !invPaidLoaded) return;
+  invCreditBusy = true;
+  try {
+    const now = Date.now(), upd = {};
+    instList(true).forEach(inst => {
+      if (!inst.payoutAccount) return;
+      instEvents(inst).forEach(e => {
+        if (e.date.getTime() > now) return;
+        const id = invTxId(inst, e.date, e.kind === 'redeem' ? 'r' : 'c');
+        if (invPaid[id]) return;
+        const date = new Date(e.date.getFullYear(), e.date.getMonth(), e.date.getDate(), 12).toISOString();
+        const amount = Math.round(e.amount * 100) / 100;
+        upd[`${TX_PATH}/${id}`] = e.kind === 'redeem'
+          ? { type: 'divest', amount, account: inst.payoutAccount, category: inst.name, inst: inst.id, date, note: 'Погашення', auto: inst.id }
+          : { type: 'income', amount, account: inst.payoutAccount, category: 'Відсотки', date, note: `${e.kind === 'coupon' ? 'Купон' : 'Відсотки'} · ${inst.name}`, auto: inst.id };
+        upd[`finance/invpaid/${id}`] = true;
+      });
+    });
+    if (Object.keys(upd).length) { await update(ref(db), upd); toast('Виплати по вкладеннях зараховано ✓'); }
+  } catch (e) { console.warn('invest credit', e); }
+  invCreditBusy = false;
+}
+
+// One-time move of the old deposit/bond *accounts* into instruments.
+async function migrateLegacyInvestAccounts() {
+  if (invMigrated || !investLoaded || !accountsList.length) return;
+  const legacy = accountsList.filter(a => a && (a.acctype === 'deposit' || a.acctype === 'bond'));
+  if (!legacy.length) { invMigrated = true; return; }
+  invMigrated = true;
+  const upd = {};
+  legacy.forEach(a => {
+    const id = 'mig_' + metaKey(a.name).replace(/[\s'"]+/g, '_');
+    const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
+    const start = a.yieldStart || new Date().toISOString();
+    upd[`${INV_PATH}/${id}`] = {
+      name: a.name, kind: a.acctype, rate: a.yieldRate || 0, start, end: a.yieldEnd || null,
+      couponMonths: a.couponMonths ?? 6, nominal: a.nominal || null, payoutMode: 'end',
+      payoutAccount: a.payoutAccount || null, color: a.color || null, icon: a.icon || null, created: Date.now(),
+    };
+    if (principal > 0) upd[`${TX_PATH}/${id}_open`] = { type: 'invest', amount: principal, account: '', category: a.name, inst: id, date: start, note: 'Перенесено з рахунку' };
+  });
+  try {
+    await update(ref(db), upd);
+    await set(ref(db, ACC_PATH), accountsList.filter(a => !(a && (a.acctype === 'deposit' || a.acctype === 'bond'))));
+    toast('Депозити й облігації перенесено у Вкладення ✓');
+  } catch (e) { invMigrated = false; console.warn('invest migrate', e); }
+}
+
+// ── INVESTMENT DETAIL VIEW ─────────────────────────────────
+let invViewId = null;
+const fdate = d => `${d.getDate()} ${MON_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+function openInvView(id) {
+  invViewId = id;
+  renderInvView();
+  document.getElementById('inv-view').classList.add('active');
+}
+function closeInvView() { document.getElementById('inv-view').classList.remove('active'); invViewId = null; }
+function renderInvView() {
+  const inst = instById(invViewId);
+  if (!inst) { closeInvView(); return; }
+  const st = invStyle(inst), c = instCalc(inst), now = Date.now();
+  document.getElementById('inv-head').style.background = st.color;
+  document.getElementById('inv-ic').innerHTML = st.icon;
+  document.getElementById('inv-name').textContent = inst.name;
+  document.getElementById('inv-val').innerHTML = `${fmt(c.value)} <span>UAH</span>`;
+  document.getElementById('inv-sub').textContent = c.closed ? 'Погашено' : `нараховано +${fmtDec(c.accrued)} UAH`;
+  const kindLbl = (INV_KINDS.find(k => k.k === inst.kind) || {}).label || '';
+  const stats = [
+    ['Вкладено', `${fmt(c.held)} UAH`],
+    ['Ставка', inst.rate ? `${inst.rate}%${inst.kind === 'deposit' ? ' (−23% под.)' : ''}` : '—'],
+    [inst.kind === 'bond' ? 'Погашення' : 'Кінець', c.end ? fdate(c.end) : '—'],
+    ['Очікуваний прибуток', c.profit != null ? `${fmtDec(c.profit)} UAH` : '—'],
+  ];
+  document.getElementById('inv-stats').innerHTML = `<div class="inv-kind">${kindLbl}</div>` +
+    stats.map(([l, v]) => `<div class="inv-stat"><span>${l}</span><b>${v}</b></div>`).join('');
+  // timeline: real operations + auto incomes + upcoming events
+  const rows = [];
+  instTxs(inst).forEach(t => rows.push({ d: new Date(t.date), lbl: t.type === 'invest' ? `Вкладено${t.account ? ' з «' + esc(t.account) + '»' : ''}` : `${t.auto ? 'Погашення' : 'Забрано'} на «${esc(t.account)}»`, amt: (t.type === 'invest' ? '−' : '+') + fmtDec(t.amount), cls: '', id: t.id }));
+  Object.values(txMap).filter(t => t.auto === inst.id && t.type === 'income').forEach(t => rows.push({ d: new Date(t.date), lbl: `${t.note?.startsWith('Купон') ? 'Купон' : 'Відсотки'} на «${esc(t.account)}»`, amt: '+' + fmtDec(t.amount), cls: 'inc', id: t.id }));
+  c.events.filter(e => e.date.getTime() > now).forEach(e => rows.push({ d: e.date, lbl: e.kind === 'redeem' ? 'Погашення' : e.kind === 'coupon' ? 'Купон' : 'Відсотки', amt: '+' + fmtDec(e.amount), cls: 'future' }));
+  rows.sort((a, b) => a.d - b.d);
+  document.getElementById('inv-timeline').innerHTML = rows.length
+    ? rows.map(r => `<div class="inv-row ${r.cls}"${r.id ? ` data-tx="${r.id}"` : ''}><div class="inv-dot"></div><div class="inv-row-tx"><div class="inv-row-d">${fdate(r.d)}${r.cls === 'future' ? ' · очікується' : ''}</div><div class="inv-row-l">${r.lbl}</div></div><div class="inv-row-a">${r.amt} ₴</div></div>`).join('')
+    : `<div class="inv-empty">Ще немає операцій</div>`;
+  document.getElementById('inv-timeline').querySelectorAll('.inv-row[data-tx]').forEach(el => el.onclick = () => { closeInvView(); openForm(txMap[el.dataset.tx]); });
+  document.getElementById('inv-note').innerHTML = inst.rate > 0 && !inst.payoutAccount
+    ? '<span style="color:var(--exp)">Вкажи в редагуванні рахунок для виплат — тоді відсотки й погашення зараховуватимуться самі.</span>'
+    : inst.payoutAccount ? `Виплати автоматично падають на «${esc(inst.payoutAccount)}».` : '';
+}
+
+// ── INVESTMENT EDITOR ──────────────────────────────────────
+let invEdit = null;
+function openInvEdit(id = null) {
+  const i = id ? instById(id) : null;
+  invEdit = i
+    ? { id, kind: i.kind || 'other', color: i.color || null, icon: i.icon || null, start: i.start ? new Date(i.start) : null, end: i.end ? new Date(i.end) : null, coupon: i.couponMonths ?? 6, payoutMode: i.payoutMode || 'end', payAcc: i.payoutAccount || null, fromAcc: null, archived: !!i.archived }
+    : { id: null, kind: 'bond', color: PALETTE[5], icon: null, start: new Date(), end: null, coupon: 6, payoutMode: 'end', payAcc: null, fromAcc: accountsList.find(a => acctypeOf(a) === 'regular')?.name || null, archived: false };
+  document.getElementById('ie-name').value = i ? i.name : '';
+  document.getElementById('ie-rate').value = i && i.rate ? String(i.rate) : '';
+  document.getElementById('ie-nominal').value = i && i.nominal ? String(i.nominal) : '';
+  document.getElementById('ie-amount').value = '';
+  renderInvEdit();
+  document.getElementById('invedit-view').classList.add('active');
+}
+function closeInvEdit() { document.getElementById('invedit-view').classList.remove('active'); invEdit = null; }
+function renderInvEdit() {
+  const e = invEdit, isBond = e.kind === 'bond', isDep = e.kind === 'deposit';
+  document.getElementById('ie-title').textContent = e.id ? 'Вкладення' : 'Нове вкладення';
+  const ib = document.getElementById('ie-icon');
+  ib.style.setProperty('--c', e.color || '#6A5AE0');
+  ib.innerHTML = invStyle({ kind: e.kind, color: e.color, icon: e.icon }).icon;
+  const pal = document.getElementById('ie-colors');
+  pal.innerHTML = PALETTE.map(c => `<button class="pal-sw${e.color === c ? ' sel' : ''}" data-c="${c}" style="background:${c}"></button>`).join('');
+  pal.querySelectorAll('.pal-sw').forEach(b => b.onclick = () => { e.color = b.dataset.c; renderInvEdit(); });
+  const kb = document.getElementById('ie-kind');
+  kb.innerHTML = INV_KINDS.map(k => `<button class="afv-type${e.kind === k.k ? ' on' : ''}" data-k="${k.k}">${k.label}</button>`).join('');
+  kb.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { e.kind = b.dataset.k; renderInvEdit(); });
+  document.getElementById('ie-yield').style.display = (isBond || isDep) ? '' : 'none';
+  document.getElementById('ie-bond').style.display = isBond ? '' : 'none';
+  document.getElementById('ie-dep').style.display = isDep ? '' : 'none';
+  document.getElementById('ie-rate-label').textContent = isBond ? 'Купонна ставка, % річних' : 'Річний відсоток, %';
+  document.getElementById('ie-start-label').textContent = isBond ? 'Дата купівлі' : 'Дата відкриття';
+  document.getElementById('ie-end-label').textContent = isBond ? 'Дата погашення' : 'Дата закінчення (необовʼязково)';
+  document.getElementById('ie-start-val').textContent = e.start ? fdate(e.start) : 'Оберіть дату';
+  document.getElementById('ie-end-val').textContent = e.end ? fdate(e.end) : 'Оберіть дату';
+  document.getElementById('ie-payacc-val').textContent = e.payAcc || 'Оберіть рахунок';
+  document.getElementById('ie-taxnote').textContent = isBond
+    ? 'Податок 0% — ОВДП / військові облігації звільнені. Номінал ОВДП — 1000 ₴ за штуку; якщо не вкажеш, порахую з суми.'
+    : 'Податок на відсотки 23% (ПДФО 18% + військовий збір 5%) віднімається автоматично.';
+  const cb = document.getElementById('ie-coupon');
+  cb.innerHTML = COUPON_FREQ.map(f => `<button class="afv-type${e.coupon === f.m ? ' on' : ''}" data-m="${f.m}">${f.label}</button>`).join('');
+  cb.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { e.coupon = +b.dataset.m; renderInvEdit(); });
+  const pb = document.getElementById('ie-payout');
+  pb.innerHTML = DEP_PAYOUT.map(p => `<button class="afv-type${e.payoutMode === p.k ? ' on' : ''}" data-p="${p.k}">${p.label}</button>`).join('');
+  pb.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { e.payoutMode = b.dataset.p; renderInvEdit(); });
+  document.getElementById('ie-create').style.display = e.id ? 'none' : '';
+  document.getElementById('ie-from-val').textContent = e.fromAcc || 'Оберіть рахунок';
+  document.getElementById('ie-edit-actions').style.display = e.id ? '' : 'none';
+  document.getElementById('ie-archive').textContent = e.archived ? 'Розархівувати' : 'Архівувати';
+}
+const invAccNames = () => accountsList.filter(a => a && !a.archived).map(a => a.name);
+async function saveInvEdit() {
+  const e = invEdit;
+  const name = document.getElementById('ie-name').value.trim();
+  if (!name) return toast('Введи назву');
+  const clash = instByName(name);
+  if (clash && clash.id !== e.id) return toast('Вкладення з такою назвою вже є');
+  const rate = parseFloat(document.getElementById('ie-rate').value.replace(',', '.')) || 0;
+  const nominal = parseFloat(document.getElementById('ie-nominal').value.replace(',', '.')) || null;
+  if (e.kind === 'bond' && rate > 0 && !e.end) return toast('Вкажи дату погашення');
+  if (e.end && e.start && e.end <= e.start) return toast('Кінцева дата має бути пізніше за початкову');
+  const data = {
+    name, kind: e.kind, rate: e.kind === 'other' ? 0 : rate,
+    start: e.start ? e.start.toISOString() : new Date().toISOString(),
+    end: e.kind === 'other' ? null : (e.end ? e.end.toISOString() : null),
+    couponMonths: e.coupon, nominal: e.kind === 'bond' ? nominal : null,
+    payoutMode: e.payoutMode, payoutAccount: e.payAcc || null,
+    color: e.color || null, icon: e.icon || null, archived: e.archived || null,
+  };
+  try {
+    if (e.id) {
+      const old = instById(e.id);
+      const upd = {};
+      Object.entries(data).forEach(([k, v]) => { upd[`${INV_PATH}/${e.id}/${k}`] = v; });
+      if (old && old.name !== name) Object.entries(txMap).forEach(([tid, t]) => {
+        if ((t.type === 'invest' || t.type === 'divest') && (t.inst === e.id || t.category === old.name)) upd[`${TX_PATH}/${tid}/category`] = name;
+      });
+      await update(ref(db), upd);
+      toast('Збережено ✓');
+    } else {
+      const id = push(ref(db, INV_PATH)).key;
+      const amount = Math.round((parseFloat(document.getElementById('ie-amount').value.replace(',', '.')) || 0) * 100) / 100;
+      const upd = { [`${INV_PATH}/${id}`]: { ...data, created: Date.now() } };
+      if (amount > 0) {
+        if (!e.fromAcc) return toast('Обери, з якого рахунку списати');
+        const d = e.start || new Date();
+        upd[`${TX_PATH}/${push(ref(db, TX_PATH)).key}`] = { type: 'invest', amount, account: e.fromAcc, category: name, inst: id, date: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).toISOString(), note: null };
+      }
+      await update(ref(db), upd);
+      toast('Вкладення створено ✓');
+    }
+    closeInvEdit();
+    setTimeout(creditInvestPayouts, 800);
+  } catch (err) { toast('Помилка: ' + err.message); }
+}
+async function deleteInvEdit() {
+  const e = invEdit; if (!e || !e.id) return;
+  if (!confirm('Видалити вкладення? Операції вкладення/повернення теж видаляться — гроші повернуться на рахунки, з яких ти вкладав. Отримані відсотки лишаться.')) return;
+  const upd = { [`${INV_PATH}/${e.id}`]: null };
+  Object.entries(txMap).forEach(([tid, t]) => { if ((t.type === 'invest' || t.type === 'divest') && t.inst === e.id) upd[`${TX_PATH}/${tid}`] = null; });
+  try { await update(ref(db), upd); toast('Вкладення видалено'); closeInvEdit(); closeInvView(); }
+  catch (err) { toast('Помилка: ' + err.message); }
 }
 
 // ── DERIVED ────────────────────────────────────────────────
@@ -516,42 +725,57 @@ function orderedCats(dir, names, sums) {
 
 function renderCategories() {
   const dir = state.catDir;
+  const isInv = dir === 'invest';
   const txs = periodTxs();
-  const sums = new Map();
-  txs.filter(t => t.type === dir).forEach(t => {
-    const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
-  });
   const archived = catMeta.archived || {};
-  const declared = catMeta.cats?.[dir] || [];
-  const names = [...new Set([...catsParent[dir], ...declared, ...sums.keys()])];
-  let catList = orderedCats(dir, names, sums);
-  if (!state.showArchived) catList = catList.filter(x => !archived[metaKey(x.name)]);
-  if (state.catShowPct) catList = [...catList].sort((a, b) => b.v - a.v);
-
-  const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-  const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-  const segs = catList.filter(x => x.v > 0).map(x => ({ v: x.v, c: catStyle(x.name).color }));
-  const main = dir === 'expense' ? expTotal : incTotal;
-  const sub  = dir === 'expense' ? incTotal : expTotal;
-  const mc = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
-  const sc = dir === 'expense' ? 'var(--inc)' : 'var(--exp)';
+  let catList, segs, main, sub, mc, sc, label, dirTotal;
+  if (isInv) {
+    // Вкладення: whole portfolio (not period-bound) — value of each instrument now.
+    catList = instList(state.showArchived).map(i => { const c = instCalc(i); return { name: i.name, v: c.value, inst: i, arch: i.archived || c.closed }; })
+      .filter(x => state.showArchived || !x.arch);
+    if (state.catShowPct) catList = [...catList].sort((a, b) => b.v - a.v);
+    const tot = investTotals();
+    segs = catList.filter(x => x.v > 0 && !x.arch).map(x => ({ v: x.v, c: invStyle(x.inst).color }));
+    main = tot.value; dirTotal = tot.value; label = 'Вкладення';
+    mc = 'var(--active-ink)'; sc = 'var(--inc)';
+    sub = tot.accrued;
+  } else {
+    const sums = new Map();
+    txs.filter(t => t.type === dir).forEach(t => {
+      const p = parentCat(t.category); sums.set(p, (sums.get(p) || 0) + Number(t.amount));
+    });
+    const declared = catMeta.cats?.[dir] || [];
+    const names = [...new Set([...catsParent[dir], ...declared, ...sums.keys()])];
+    catList = orderedCats(dir, names, sums);
+    if (!state.showArchived) catList = catList.filter(x => !archived[metaKey(x.name)]);
+    if (state.catShowPct) catList = [...catList].sort((a, b) => b.v - a.v);
+    const expTotal = txs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+    const incTotal = txs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+    segs = catList.filter(x => x.v > 0).map(x => ({ v: x.v, c: catStyle(x.name).color }));
+    main = dir === 'expense' ? expTotal : incTotal;
+    sub  = dir === 'expense' ? incTotal : expTotal;
+    mc = dir === 'expense' ? 'var(--exp)' : 'var(--inc)';
+    sc = dir === 'expense' ? 'var(--inc)' : 'var(--exp)';
+    label = dir === 'expense' ? 'Витрати' : 'Доходи';
+    dirTotal = main;
+  }
 
   const donut = `<div class="donut-cell" id="donut-cell">
     <div class="donut">${donutSVG(segs)}
       <div class="donut-center">
-        <div class="donut-label">${dir === 'expense' ? 'Витрати' : 'Доходи'}</div>
+        <div class="donut-label">${label}</div>
         <div class="donut-main" style="color:${mc}">${fmt(main)} <span>UAH</span></div>
-        <div class="donut-sub" style="color:${sc}">${fmt(sub)} <span>UAH</span></div>
+        <div class="donut-sub" style="color:${sc}">${isInv ? '+' : ''}${fmt(sub)} <span>UAH</span></div>
       </div>
     </div></div>`;
 
-  const dirTotal = dir === 'expense' ? expTotal : incTotal;
   const cats = catList.map(x => {
-    const st = catStyle(x.name);
+    const st = isInv ? invStyle(x.inst) : catStyle(x.name);
     const valHtml = state.catShowPct
       ? `${dirTotal ? Math.round(x.v / dirTotal * 100) : 0}<span>%</span>`
       : `${fmt(x.v)} <span>UAH</span>`;
-    return `<button class="cat ${x.v ? '' : 'zero'}${archived[metaKey(x.name)] ? ' arch' : ''}" style="--c:${st.color}" data-cat="${escAttr(x.name)}">
+    const isArch = isInv ? x.arch : archived[metaKey(x.name)];
+    return `<button class="cat ${x.v ? '' : 'zero'}${isArch ? ' arch' : ''}" style="--c:${st.color}" data-cat="${escAttr(x.name)}"${isInv ? ` data-inv="${x.inst.id}"` : ''}>
       <div class="cat-name">${esc(x.name)}</div>
       <div class="cat-circle">${st.icon}</div>
       <div class="cat-amt">${valHtml}</div>
@@ -570,7 +794,7 @@ function renderCategories() {
     donutEl._animating = true;
     donutEl.style.animation = 'donutOut 0.22s ease-in both';
     setTimeout(() => {
-      state.catDir = state.catDir === 'expense' ? 'income' : 'expense';
+      state.catDir = { expense: 'income', income: 'invest', invest: 'expense' }[state.catDir] || 'expense';
       renderCategories();
       const nd = donutNow();
       if (nd) nd.style.animation = 'donutIn 0.32s cubic-bezier(0.34,1.56,0.64,1) both';
@@ -607,7 +831,7 @@ function renderCategories() {
   // Short tap → add form; long press → category detail sheet
   grid.querySelectorAll('.cat').forEach(el => {
     let lpTimer = null, activated = false;
-    const startLP = () => { lpTimer = setTimeout(() => { activated = true; openCatSheet(el.dataset.cat, dir, catList); }, 500); };
+    const startLP = () => { lpTimer = setTimeout(() => { activated = true; el.dataset.inv ? openInvView(el.dataset.inv) : openCatSheet(el.dataset.cat, dir, catList); }, 500); };
     const cancelLP = () => clearTimeout(lpTimer);
     el.addEventListener('touchstart', startLP, { passive: true });
     el.addEventListener('touchend', cancelLP, { passive: true });
@@ -615,7 +839,11 @@ function renderCategories() {
     el.addEventListener('mousedown', startLP);
     el.addEventListener('mouseup', cancelLP);
     el.addEventListener('mouseleave', cancelLP);
-    el.onclick = () => { if (activated) { activated = false; return; } openForm(null, el.dataset.cat, state.catDir); };
+    el.onclick = () => {
+      if (activated) { activated = false; return; }
+      if (el.dataset.inv) openInvView(el.dataset.inv);
+      else openForm(null, el.dataset.cat, state.catDir);
+    };
   });
 }
 
@@ -937,10 +1165,15 @@ function renderRecords() {
 }
 
 function recItem(t) {
-  const st = catStyle(t.category || t.account);
+  const isInv = t.type === 'invest' || t.type === 'divest';
+  const inst = isInv ? (instById(t.inst) || instByName(t.category)) : null;
+  const st = inst ? invStyle(inst) : catStyle(t.category || t.account);
   const sign = t.type === 'expense' ? '−' : t.type === 'income' ? '+' : '';
-  const col = t.type === 'expense' ? 'var(--exp)' : t.type === 'income' ? 'var(--inc)' : '#2f80ed';
-  const sub = t.type === 'transfer' ? `${esc(t.account)} → ${esc(t.category)}` : `${CARD_MINI} ${esc(t.account || '')}`;
+  const col = t.type === 'expense' ? 'var(--exp)' : t.type === 'income' ? 'var(--inc)' : isInv ? 'var(--active-ink)' : '#2f80ed';
+  const sub = t.type === 'transfer' ? `${esc(t.account)} → ${esc(t.category)}`
+    : t.type === 'invest' ? `${esc(t.account || '—')} → вкладення`
+    : t.type === 'divest' ? `вкладення → ${esc(t.account)}`
+    : `${CARD_MINI} ${esc(t.account || '')}`;
   return `<div class="rec-item" data-id="${t.id}">
     <div class="rec-icon" style="--c:${st.color}">${st.icon}</div>
     <div class="rec-info">
@@ -956,8 +1189,7 @@ function recItem(t) {
 function accRow(a) {
   const st = accStyle(a);
   const cur = CUR_SUFFIX[a.currency] || a.currency || 'UAH';
-  const info = depositInfo(a);
-  const shown = info.value;                       // current withdrawal value
+  const shown = computeLiveBalance(a.name) ?? a.balance ?? 0;
   const v = a.currency === 'UAH' ? fmt(shown) : fmtDec(shown);
   return `<div class="acc-row" data-acc="${escAttr(a.name)}">
     <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
@@ -976,16 +1208,20 @@ function renderAccounts() {
   }
   const live = accountsList.filter(a => !a.archived);
   const reg = live.filter(a => acctypeOf(a) === 'regular');
-  const inv = live.filter(a => ['deposit', 'bond'].includes(acctypeOf(a)));
   const sav = live.filter(a => acctypeOf(a) === 'savings');
-  const liveSum = arr => arr.reduce((s, a) => s + accValueUah(a), 0);
-  const section = (title, arr) => arr.length
-    ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${liveSum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(liveSum(arr))} UAH</span></div>${arr.map(a => accRow(a)).join('')}`
+  const liveSum = arr => arr.reduce((s, a) => s + accUah(a), 0);
+  const title = (t, sum, attr = '') => `<div class="acc-section-title"${attr}>${t}<span class="acc-section-sum" style="color:${sum < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(sum)} UAH</span></div>`;
+  const section = (t, arr) => arr.length ? title(t, liveSum(arr)) + arr.map(a => accRow(a)).join('') : '';
+  // «Вкладення»: just the portfolio total from the third ring mode — tap opens it.
+  const invHtml = instList().length
+    ? title('Вкладення', investTotals().value, ' id="acc-inv-link" style="cursor:pointer"')
     : '';
-  el.innerHTML = section('Рахунки', reg) + section('Вкладення', inv) + section('Заощадження', sav);
+  el.innerHTML = section('Рахунки', reg) + invHtml + section('Заощадження', sav);
   el.querySelectorAll('.acc-row').forEach(row => {
     row.onclick = () => openAccAction(row.dataset.acc);
   });
+  const link = document.getElementById('acc-inv-link');
+  if (link) link.onclick = () => { state.catDir = 'invest'; state.tab = 'categories'; syncTabs(); renderAll(); };
 }
 
 // ── ACCOUNT ACTION SHEET ───────────────────────────────────
@@ -993,28 +1229,13 @@ function openAccAction(accName) {
   accActionCurrent = accName;
   const a = accountsList.find(x => x.name === accName);
   const st = a ? accStyle(a) : catStyle(accName);
-  const info = a ? depositInfo(a) : { value: 0, principal: 0, net: 0 };
-  const lb = info.value;
+  const lb = computeLiveBalance(accName) ?? (a?.balance ?? 0);
   const cur = a ? (CUR_SUFFIX[a.currency] || a.currency || 'UAH') : 'UAH';
   const fmtc = n => a?.currency === 'UAH' ? fmt(n) : fmtDec(n);
-  let yieldLine = '';
-  if (a && isYield(a) && acctypeOf(a) === 'bond') {
-    const sched = bondSchedule(a), now = Date.now();
-    const rows = sched.map(p => {
-      const done = p.date.getTime() <= now;
-      return `<div class="aas-payout${done ? ' done' : ''}"><span>${p.date.getDate()} ${MON_SHORT[p.date.getMonth()]} ${p.date.getFullYear()} · ${p.kind === 'final' ? 'погашення' : 'купон'}${done ? ' · зараховано' : ''}</span><span>+${fmtc(p.amount)} ${cur}</span></div>`;
-    }).join('');
-    yieldLine = `<div class="aas-sub">нараховано +${fmtc(info.net)} ${cur} · купон ${a.yieldRate}% від номіналу ${fmtc(bondNominal(a, info.principal))}</div>
-      <div class="aas-payouts"><div class="aas-payout-title">Виплати</div>${rows}
-      <div class="aas-payout total"><span>Очікуваний прибуток</span><span>${fmtc(info.profit || 0)} ${cur}</span></div></div>
-      ${a.payoutAccount ? `<div class="aas-sub">Виплати автоматично падають на «${esc(a.payoutAccount)}»</div>` : `<div class="aas-sub" style="color:var(--exp)">Вкажи в редагуванні рахунок для виплат — тоді купони зараховуватимуться самі</div>`}`;
-  } else if (a && isYield(a)) {
-    yieldLine = `<div class="aas-sub">тіло ${fmtc(info.principal)} · +${fmtc(info.net)} ${cur} чистими (${a.yieldRate}%/рік, податок ${YIELD_TAX[acctypeOf(a)]}%)</div>`;
-  }
   document.getElementById('aas-ic').style.background = st.color;
   document.getElementById('aas-ic').innerHTML = st.icon;
   document.getElementById('aas-name').textContent = accName;
-  document.getElementById('aas-bal').innerHTML = `${fmtc(lb)} <span>${cur}</span>${yieldLine}`;
+  document.getElementById('aas-bal').innerHTML = `${fmtc(lb)} <span>${cur}</span>`;
   document.getElementById('aas-bal').style.color = lb < 0 ? 'var(--exp)' : 'var(--text)';
   document.getElementById('acc-action-overlay').classList.add('open');
 }
@@ -1032,13 +1253,7 @@ function openAccForm(accName = null) {
     accFormCurrency = a.currency || 'UAH';
     accFormIcon = a.icon || null;
     accFormColor = a.color || null;
-    accFormType = acctypeOf(a);
-    accFormYieldStart = a.yieldStart ? new Date(a.yieldStart) : null;
-    accFormYieldEnd = a.yieldEnd ? new Date(a.yieldEnd) : null;
-    accFormCoupon = a.couponMonths ?? 6;
-    accFormPayoutAcc = a.payoutAccount || null;
-    document.getElementById('acc-form-nominal').value = a.nominal ? String(a.nominal) : '';
-    document.getElementById('acc-form-rate').value = a.yieldRate ? String(a.yieldRate) : '';
+    accFormType = acctypeOf(a) === 'savings' ? 'savings' : 'regular';
     document.getElementById('acc-form-balance').value = String(computeLiveBalance(a.name) ?? a.balance);
     document.getElementById('acc-form-include').checked = accIncluded(a);
     document.getElementById('acc-form-archived').checked = !!a.archived;
@@ -1052,12 +1267,6 @@ function openAccForm(accName = null) {
     accFormIcon = null;
     accFormColor = null;
     accFormType = 'regular';
-    accFormYieldStart = null;
-    accFormYieldEnd = null;
-    accFormCoupon = 6;
-    accFormPayoutAcc = null;
-    document.getElementById('acc-form-nominal').value = '';
-    document.getElementById('acc-form-rate').value = '';
     document.getElementById('acc-form-balance').value = '0';
     document.getElementById('acc-form-include').checked = true;
     document.getElementById('acc-form-archived').checked = false;
@@ -1080,28 +1289,9 @@ function renderAccFormAppearance() {
   pal.querySelectorAll('.pal-sw').forEach(b => b.onclick = () => { accFormColor = b.dataset.c; renderAccFormAppearance(); });
 }
 function renderAccFormType() {
-  document.getElementById('acc-form-balance-label').textContent = accFormType === 'bond' ? 'Сума вкладення (скільки заплатив)' : 'Початковий баланс';
   const box = document.getElementById('acc-form-type');
   box.innerHTML = ACC_TYPES.map(t => `<button class="afv-type${accFormType === t.k ? ' on' : ''}" data-t="${t.k}">${t.label}</button>`).join('');
   box.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { accFormType = b.dataset.t; renderAccFormType(); });
-  const isDep = accFormType === 'deposit', isBond = accFormType === 'bond';
-  document.getElementById('acc-form-yield').style.display = (isDep || isBond) ? '' : 'none';
-  document.getElementById('acc-form-bonds').style.display = isBond ? '' : 'none';
-  if (!(isDep || isBond)) return;
-  const fd = d => d ? `${d.getDate()} ${MON_SHORT[d.getMonth()]} ${d.getFullYear()}` : 'Оберіть дату';
-  document.getElementById('acc-form-start-label').textContent = isBond ? 'Дата купівлі' : 'Дата відкриття';
-  document.getElementById('acc-form-rate-label').textContent = isBond ? 'Купонна ставка, % річних' : 'Річний відсоток, %';
-  document.getElementById('acc-form-start-val').textContent = fd(accFormYieldStart);
-  document.getElementById('acc-form-taxnote').textContent = isBond
-    ? 'Податок: 0% (ОВДП / військові облігації звільнені)'
-    : 'Податок на відсотки: 23% (ПДФО 18% + військовий збір 5%)';
-  if (isBond) {
-    document.getElementById('acc-form-end-val').textContent = fd(accFormYieldEnd);
-    document.getElementById('acc-form-payacc-val').textContent = accFormPayoutAcc || 'Оберіть рахунок';
-    const fb = document.getElementById('acc-form-coupon');
-    fb.innerHTML = COUPON_FREQ.map(f => `<button class="afv-type${accFormCoupon === f.m ? ' on' : ''}" data-m="${f.m}">${f.label}</button>`).join('');
-    fb.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { accFormCoupon = +b.dataset.m; renderAccFormType(); });
-  }
 }
 function updateAccFormCurrency() {
   const c = CURRENCIES_LIST.find(x => x.code === accFormCurrency);
@@ -1118,25 +1308,10 @@ async function saveAccForm() {
   // baseBalance = entered balance minus all existing txMap entries for this account,
   // so computeLiveBalance returns the entered value as the current balance.
   const baseBalance = balance - txDeltaFor(name);
-  // account type → group + yield/payout fields
   const acctype = accFormType;
-  const group = acctype === 'regular' ? 'regular' : 'savings';
-  let yieldRate = null, yieldStart = null, yieldEnd = null, couponMonths = null, nominal = null, payoutAccount = null;
-  if (acctype === 'deposit' || acctype === 'bond') {
-    yieldRate = parseFloat(document.getElementById('acc-form-rate').value.replace(',', '.')) || 0;
-    if (yieldRate > 0 && !accFormYieldStart) accFormYieldStart = new Date();   // default to today
-    yieldStart = accFormYieldStart ? accFormYieldStart.toISOString() : null;
-  }
-  if (acctype === 'bond') {
-    if (yieldRate > 0 && !accFormYieldEnd) return toast('Вкажи дату погашення');
-    if (accFormYieldEnd && accFormYieldStart && accFormYieldEnd <= accFormYieldStart) return toast('Погашення має бути пізніше за купівлю');
-    yieldEnd = accFormYieldEnd ? accFormYieldEnd.toISOString() : null;
-    couponMonths = accFormCoupon;
-    nominal = parseFloat(document.getElementById('acc-form-nominal').value.replace(',', '.')) || null;
-    payoutAccount = accFormPayoutAcc;
-  }
+  const group = acctype === 'savings' ? 'savings' : 'regular';
   const newList = [...accountsList];
-  const typeFields = { acctype, group, yieldRate, yieldStart, yieldEnd, couponMonths, nominal, payoutAccount, payouts: null };
+  const typeFields = { acctype, group, yieldRate: null, yieldStart: null, yieldEnd: null, couponMonths: null, nominal: null, payoutAccount: null, payouts: null };
   if (accFormMode === 'edit' && accFormEditIdx >= 0) {
     const old = newList[accFormEditIdx];
     newList[accFormEditIdx] = { ...old, name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived, icon: accFormIcon || null, color: accFormColor || null, ...typeFields };
@@ -1558,13 +1733,14 @@ function openForm(tx = null, presetParent = null, presetDir = null, presetAccoun
   editingRec = null;
   editingTx = tx;
   const dir = tx ? tx.type : (presetDir || (state.catDir === 'income' ? 'income' : 'expense'));
+  const invLike = dir === 'invest' || dir === 'divest';
   const defaultAcc = presetAccount
     || accountsList.find(a => !isSavings(a.name) && a.group !== 'savings')?.name
     || accountsAll[0] || '';
   formState = {
     type: dir,
-    parent: tx ? (tx.type === 'transfer' ? '' : parentCat(tx.category)) : (presetParent || ''),
-    sub: tx ? subCat(tx.category) : '',
+    parent: tx ? (tx.type === 'transfer' ? '' : invLike ? (tx.category || '') : parentCat(tx.category)) : (presetParent || ''),
+    sub: tx && !invLike ? subCat(tx.category) : '',
     account: tx ? (tx.account || '') : defaultAcc,
     toAccount: tx && tx.type === 'transfer' ? (tx.category || '') : '',
     date: tx ? toLocal(tx.date) : nowLocal(),
@@ -1609,8 +1785,16 @@ function renderForm() {
   const rl = document.getElementById('right-label'), rv = document.getElementById('right-val');
   const L = document.getElementById('side-left'), R = document.getElementById('side-right');
   const ACC = '#2D9CDB', CYAN = '#17B9CE';
-  const pcol = formState.parent ? catStyle(formState.parent).color : '#c7c7cc';
-  if (t === 'income') {
+  const invLike = t === 'invest' || t === 'divest';
+  const pinst = invLike ? instByName(formState.parent) : null;
+  const pcol = invLike ? (pinst ? invStyle(pinst).color : '#c7c7cc') : formState.parent ? catStyle(formState.parent).color : '#c7c7cc';
+  if (t === 'invest') {
+    ll.textContent = 'З рахунку'; lv.textContent = formState.account || 'Рахунок'; L.style.background = ACC;
+    rl.textContent = 'У вкладення'; rv.textContent = formState.parent || 'Вкладення'; R.style.background = pcol;
+  } else if (t === 'divest') {
+    ll.textContent = 'З вкладення'; lv.textContent = formState.parent || 'Вкладення'; L.style.background = pcol;
+    rl.textContent = 'На рахунок'; rv.textContent = formState.account || 'Рахунок'; R.style.background = CYAN;
+  } else if (t === 'income') {
     ll.textContent = 'З категорії'; lv.textContent = formState.parent || 'Категорія'; L.style.background = pcol;
     rl.textContent = 'На рахунок'; rv.textContent = formState.account || 'Рахунок'; R.style.background = CYAN;
   } else if (t === 'transfer') {
@@ -1621,7 +1805,7 @@ function renderForm() {
     rl.textContent = 'До категорії'; rv.textContent = formState.parent || 'Категорія'; R.style.background = pcol;
   }
   const orbInner = document.getElementById('orb-inner');
-  orbInner.innerHTML = t === 'transfer' ? ARROW_ICON : (formState.parent ? catStyle(formState.parent).icon : '');
+  orbInner.innerHTML = t === 'transfer' ? ARROW_ICON : pinst ? invStyle(pinst).icon : (formState.parent && !invLike ? catStyle(formState.parent).icon : '');
   orbInner.querySelectorAll('svg').forEach(s => s.style.stroke = t === 'transfer' ? '#2D9CDB' : pcol);
   renderSubchips();
   renderDisplay();
@@ -1638,7 +1822,7 @@ function getSubs(parent, dir) {
 
 function renderSubchips() {
   const box = document.getElementById('subchips');
-  if (formState.type === 'transfer' || !formState.parent) { box.innerHTML = ''; return; }
+  if (['transfer', 'invest', 'divest'].includes(formState.type) || !formState.parent) { box.innerHTML = ''; return; }
   const subs = getSubs(formState.parent, formState.type);
   box.innerHTML = subs.map(s => `<button class="chip ${formState.sub === s ? 'on' : ''}" data-sub="${escAttr(s)}">${esc(s)}</button>`).join('')
     + `<button class="chip add" data-sub="__new">＋</button>`;
@@ -1651,8 +1835,9 @@ function renderSubchips() {
 }
 
 function renderDisplay() {
-  const col = formState.type === 'expense' ? 'var(--exp)' : formState.type === 'income' ? 'var(--inc)' : '#2f80ed';
-  document.getElementById('ca-label').textContent = formState.type === 'expense' ? 'Витрата' : formState.type === 'income' ? 'Дохід' : 'Переказ';
+  const ft = formState.type;
+  const col = ft === 'expense' ? 'var(--exp)' : ft === 'income' ? 'var(--inc)' : (ft === 'invest' || ft === 'divest') ? 'var(--active-ink)' : '#2f80ed';
+  document.getElementById('ca-label').textContent = { expense: 'Витрата', income: 'Дохід', transfer: 'Переказ', invest: 'Вкладення', divest: 'Повернення з вкладення' }[ft] || 'Переказ';
   document.getElementById('ca-label').style.color = col;
   const d = document.getElementById('ca-display');
   d.innerHTML = `${esc(calcExpr || '0')} <span>UAH</span>`;
@@ -1692,10 +1877,13 @@ async function saveCalc() {
   const amount = Math.round((evalExpr(calcExpr) || 0) * 100) / 100;
   if (!amount || amount <= 0) return toast('Введи суму');
   const t = formState.type;
-  if (t !== 'transfer' && !formState.parent) return toast('Оберіть категорію');
+  const invLike = t === 'invest' || t === 'divest';
+  if (t !== 'transfer' && !formState.parent) return toast(invLike ? 'Оберіть вкладення' : 'Оберіть категорію');
   if (!formState.account) return toast('Оберіть рахунок');
   if (t === 'transfer' && !formState.toAccount) return toast('Оберіть рахунок призначення');
-  const category = t === 'transfer' ? formState.toAccount : (formState.sub ? `${formState.parent} (${formState.sub})` : formState.parent);
+  const category = t === 'transfer' ? formState.toAccount : invLike ? formState.parent : (formState.sub ? `${formState.parent} (${formState.sub})` : formState.parent);
+  const inst = invLike ? instByName(formState.parent) : null;
+  if (invLike && !inst) return toast('Такого вкладення немає');
   const note = document.getElementById('note-input').value.trim();
 
   if (formMode === 'recurring') {
@@ -1710,6 +1898,7 @@ async function saveCalc() {
 
   const dv = formState.date;
   const tx = { type: t, amount, account: formState.account, category, date: dv ? new Date(dv).toISOString() : new Date().toISOString(), note: note || null };
+  if (inst) tx.inst = inst.id;
   try {
     if (editingTx) { await updateTx(editingTx.id, tx); toast('Оновлено ✓'); }
     else { await saveTx(tx); toast('Збережено ✓'); }
@@ -1717,11 +1906,14 @@ async function saveCalc() {
   } catch (e) { toast('Помилка: ' + e.message); }
 }
 
+const instNames = () => instList().map(i => i.name);
 async function pickSideLeft() {
+  if (formState.type === 'divest') { const v = await openPicker('Вкладення', instNames()); if (v) { formState.parent = v; renderForm(); } return; }
   if (formState.type === 'income') { const v = await openPicker('Категорія', catsParent.income); if (v) { formState.parent = v; formState.sub = ''; renderForm(); } }
   else { const v = await openPicker('Рахунок', accountsAll); if (v) { formState.account = v; renderForm(); } }
 }
 async function pickSideRight() {
+  if (formState.type === 'invest') { const v = await openPicker('Вкладення', instNames()); if (v) { formState.parent = v; renderForm(); } return; }
   if (formState.type === 'expense') { const v = await openPicker('Категорія', catsParent.expense); if (v) { formState.parent = v; formState.sub = ''; renderForm(); } }
   else if (formState.type === 'transfer') { const v = await openPicker('На рахунок', accountsAll); if (v) { formState.toAccount = v; renderForm(); } }
   else { const v = await openPicker('Рахунок', accountsAll); if (v) { formState.account = v; renderForm(); } }
@@ -1907,7 +2099,7 @@ function bindEvents() {
   document.getElementById('fab').onclick = () =>
     state.tab === 'accounts' ? openAccForm()
     : state.tab === 'recurring' ? openRecurringForm()
-    : state.tab === 'categories' ? openCatCreate(state.catDir)
+    : state.tab === 'categories' ? (state.catDir === 'invest' ? openInvEdit() : openCatCreate(state.catDir))
     : openForm();
   document.getElementById('cat-arch').onclick = () => {
     state.showArchived = !state.showArchived;
@@ -2005,15 +2197,21 @@ function bindEvents() {
     const chosen = await openPicker('Валюта', labels);
     if (chosen) { const c = CURRENCIES_LIST.find(x => x.label === chosen); if (c) { accFormCurrency = c.code; updateAccFormCurrency(); } }
   };
-  document.getElementById('acc-form-startrow').onclick = () => openCal('accstart');
-  document.getElementById('acc-form-endrow').onclick = () => openCal('accend');
-  document.getElementById('acc-form-payaccrow').onclick = async () => {
-    const self = document.getElementById('acc-form-name').value.trim();
-    const names = accountsList.filter(x => !x.archived && x.name !== self && !['deposit', 'bond'].includes(acctypeOf(x))).map(x => x.name);
-    const v = await openPicker('Рахунок для виплат', names);
-    if (v) { accFormPayoutAcc = v; renderAccFormType(); }
-  };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(creditBondPayouts, 800); });
+  // investments: detail view + editor
+  document.getElementById('inv-close').onclick = closeInvView;
+  document.getElementById('inv-buy').onclick = () => { const i = instById(invViewId); if (i) { closeInvView(); openForm(null, i.name, 'invest'); } };
+  document.getElementById('inv-sell').onclick = () => { const i = instById(invViewId); if (i) { closeInvView(); openForm(null, i.name, 'divest'); } };
+  document.getElementById('inv-edit').onclick = () => { const id = invViewId; closeInvView(); openInvEdit(id); };
+  document.getElementById('ie-close').onclick = closeInvEdit;
+  document.getElementById('ie-save').onclick = saveInvEdit;
+  document.getElementById('ie-delete').onclick = deleteInvEdit;
+  document.getElementById('ie-archive').onclick = () => { invEdit.archived = !invEdit.archived; renderInvEdit(); };
+  document.getElementById('ie-icon').onclick = () => openIconPick(n => { invEdit.icon = n; renderInvEdit(); });
+  document.getElementById('ie-startrow').onclick = () => openCal('invstart');
+  document.getElementById('ie-endrow').onclick = () => openCal('invend');
+  document.getElementById('ie-payaccrow').onclick = async () => { const v = await openPicker('Рахунок для виплат', invAccNames()); if (v) { invEdit.payAcc = v; renderInvEdit(); } };
+  document.getElementById('ie-fromrow').onclick = async () => { const v = await openPicker('З якого рахунку', invAccNames()); if (v) { invEdit.fromAcc = v; renderInvEdit(); } };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(creditInvestPayouts, 800); });
 
   // Category detail sheet
   document.getElementById('cat-action-overlay').onclick = e => { if (e.target.id === 'cat-action-overlay') closeCatSheet(); };
@@ -2150,13 +2348,13 @@ function openCal(mode) {
     calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
-  else if (mode === 'accstart') {
-    const d = accFormYieldStart || new Date();
+  else if (mode === 'invstart') {
+    const d = invEdit?.start || new Date();
     calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
-  else if (mode === 'accend') {
-    const d = accFormYieldEnd || (() => { const x = new Date(accFormYieldStart || Date.now()); x.setFullYear(x.getFullYear() + 1); return x; })();
+  else if (mode === 'invend') {
+    const d = invEdit?.end || (() => { const x = new Date(invEdit?.start || Date.now()); x.setFullYear(x.getFullYear() + 1); return x; })();
     calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
@@ -2195,12 +2393,12 @@ function drawCal() {
   grid.innerHTML = cells;
   grid.querySelectorAll('.cal-day[data-d]').forEach(el => el.onclick = () => calPick(new Date(y, m, +el.dataset.d)));
   const hint = document.getElementById('cal-hint'), done = document.getElementById('cal-done');
-  if (['day', 'recday', 'txday', 'accstart', 'accend'].includes(calMode)) { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
+  if (['day', 'recday', 'txday', 'invstart', 'invend'].includes(calMode)) { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
   else { hint.textContent = !calStart ? 'Оберіть початок' : !calEnd ? 'Оберіть кінець' : ''; done.disabled = !(calStart && calEnd); }
 }
 function calPick(d) {
   d.setHours(0, 0, 0, 0);
-  if (['day', 'recday', 'txday', 'accstart', 'accend'].includes(calMode)) { calStart = d; calEnd = null; }
+  if (['day', 'recday', 'txday', 'invstart', 'invend'].includes(calMode)) { calStart = d; calEnd = null; }
   else {
     if (!calStart || calEnd) { calStart = d; calEnd = null; }
     else if (d < calStart) { calEnd = calStart; calStart = d; }
@@ -2224,18 +2422,11 @@ function applyCal() {
     document.getElementById('cal-overlay').classList.remove('open');
     return;
   }
-  if (calMode === 'accstart') {   // deposit open date — form field only
-    if (!calStart) return;
-    accFormYieldStart = calStart;
+  if (calMode === 'invstart' || calMode === 'invend') {   // investment editor dates — form only
+    if (!calStart || !invEdit) return;
+    if (calMode === 'invstart') invEdit.start = calStart; else invEdit.end = calStart;
     document.getElementById('cal-overlay').classList.remove('open');
-    renderAccFormType();
-    return;
-  }
-  if (calMode === 'accend') {     // bond maturity date — form field only
-    if (!calStart) return;
-    accFormYieldEnd = calStart;
-    document.getElementById('cal-overlay').classList.remove('open');
-    renderAccFormType();
+    renderInvEdit();
     return;
   }
   if (calMode === 'day') {
