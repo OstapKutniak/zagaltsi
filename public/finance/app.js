@@ -1212,14 +1212,22 @@ function renderAccounts() {
   const liveSum = arr => arr.reduce((s, a) => s + accUah(a), 0);
   const title = (t, sum, attr = '') => `<div class="acc-section-title"${attr}>${t}<span class="acc-section-sum" style="color:${sum < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(sum)} UAH</span></div>`;
   const section = (t, arr) => arr.length ? title(t, liveSum(arr)) + arr.map(a => accRow(a)).join('') : '';
+  // «Заощадження» collapses into one line on tap (remembered per phone).
+  let savCollapsed = false;
+  try { savCollapsed = localStorage.getItem('fin_sav_collapsed') === '1'; } catch {}
+  const savHtml = sav.length
+    ? title(`Заощадження<span class="acc-caret">${savCollapsed ? '▸' : '▾'}</span>`, liveSum(sav), ' id="acc-sav-toggle" style="cursor:pointer"') + (savCollapsed ? '' : sav.map(a => accRow(a)).join(''))
+    : '';
   // «Вкладення»: just the portfolio total from the third ring mode — tap opens it.
   const invHtml = instList().length
     ? title('Вкладення', investTotals().value, ' id="acc-inv-link" style="cursor:pointer"')
     : '';
-  el.innerHTML = section('Рахунки', reg) + invHtml + section('Заощадження', sav);
+  el.innerHTML = section('Рахунки', reg) + invHtml + savHtml;
   el.querySelectorAll('.acc-row').forEach(row => {
     row.onclick = () => openAccAction(row.dataset.acc);
   });
+  const savT = document.getElementById('acc-sav-toggle');
+  if (savT) savT.onclick = () => { try { localStorage.setItem('fin_sav_collapsed', savCollapsed ? '0' : '1'); } catch {} renderAccounts(); };
   const link = document.getElementById('acc-inv-link');
   if (link) link.onclick = () => { state.catDir = 'invest'; state.tab = 'categories'; syncTabs(); renderAll(); };
 }

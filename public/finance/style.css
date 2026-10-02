@@ -655,3 +655,4 @@ input[type="file"] { display: none; }
 .inv-foot { display: flex; gap: 8px; padding: 10px 14px calc(var(--bottom) + 12px); border-top: 1px solid var(--line); flex-shrink: 0; }
 .inv-btn { flex: 1; border: none; border-radius: 14px; padding: 15px 6px; font-size: 15px; font-weight: 600; cursor: pointer; background: var(--active-ink); color: #fff; font-family: inherit; }
 .inv-btn.alt { background: #f1f1f4; color: var(--text); }
+.acc-caret { font-size: 12px; color: var(--text3); margin-left: 6px; font-weight: 400; }
