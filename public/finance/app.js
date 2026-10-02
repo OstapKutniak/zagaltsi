@@ -15,7 +15,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
-const APP_VERSION = 'fin-v39';   // keep in sync with CACHE in sw.js — shown in settings
+const APP_VERSION = 'fin-v40';   // keep in sync with CACHE in sw.js — shown in settings
 const TX_PATH = 'finance/transactions';
 const ACC_PATH = 'finance/accounts';
 const REC_PATH = 'finance/recurring';
@@ -1226,7 +1226,7 @@ function renderAccounts() {
   let savCollapsed = false;
   try { savCollapsed = localStorage.getItem('fin_sav_collapsed') === '1'; } catch {}
   const savHtml = sav.length
-    ? title(`Заощадження<span class="acc-caret">${savCollapsed ? '▸' : '▾'}</span>`, liveSum(sav), ' id="acc-sav-toggle" style="cursor:pointer"') + (savCollapsed ? '' : sav.map(a => accRow(a)).join(''))
+    ? title('Заощадження', liveSum(sav), ' id="acc-sav-toggle" style="cursor:pointer"') + (savCollapsed ? '' : sav.map(a => accRow(a)).join(''))
     : '';
   // «Вкладення»: just the portfolio total from the third ring mode — tap opens it.
   const invHtml = instList().length
