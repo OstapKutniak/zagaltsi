@@ -15,6 +15,7 @@ const firebaseConfig = {
   appId: '1:1011491870660:web:e02210da9c21bb38a5b691',
 };
 const db = getDatabase(initializeApp(firebaseConfig));
+const APP_VERSION = 'fin-v39';   // keep in sync with CACHE in sw.js — shown in settings
 const TX_PATH = 'finance/transactions';
 const ACC_PATH = 'finance/accounts';
 const REC_PATH = 'finance/recurring';
@@ -178,8 +179,17 @@ const CURRENCIES_LIST = [
 
 // ── INIT ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  if ('serviceWorker' in navigator)
-    navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/' }).catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // When a new version's service worker takes over, reload once so the new
+    // app.js is used right away (not only on the next launch).
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('/zagaltsi/finance/sw.js', { scope: '/zagaltsi/finance/', updateViaCache: 'none' })
+      .then(r => r.update()).catch(() => {});
+  }
+  const ver = document.getElementById('app-ver');
+  if (ver) ver.textContent = APP_VERSION;
   initSwipeLayout();
   bindEvents();
   subscribe();
