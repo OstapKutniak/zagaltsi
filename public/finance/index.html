@@ -377,6 +377,26 @@
         <button class="afv-icon" id="acc-form-icon"></button>
         <div class="pal" id="acc-form-colors"></div>
       </div>
+      <div class="afv-section">Тип рахунку</div>
+      <div class="afv-types" id="acc-form-type"></div>
+      <div id="acc-form-yield" style="display:none">
+        <div class="afv-section">Дохідність</div>
+        <div class="afv-row">
+          <span class="afv-row-label">Річний відсоток, %</span>
+          <input class="afv-row-input" id="acc-form-rate" type="number" inputmode="decimal" placeholder="0">
+        </div>
+        <div class="afv-row afv-row-tap" id="acc-form-startrow">
+          <span class="afv-row-label">Дата відкриття</span>
+          <span class="afv-row-val" id="acc-form-start-val">Оберіть дату</span>
+        </div>
+        <div class="afv-note" id="acc-form-taxnote"></div>
+      </div>
+      <div id="acc-form-bonds" style="display:none">
+        <div class="afv-section">Графік виплат</div>
+        <div id="acc-form-payouts"></div>
+        <button class="ce-addsub" id="acc-form-addpayout">+ Додати виплату</button>
+        <div class="afv-note">Суми вписуй чистими — ОВДП/військові облігації без податку.</div>
+      </div>
       <div class="afv-section">Рахунок</div>
       <div class="afv-row afv-row-tap" id="acc-form-currency-row">
         <span class="afv-row-label">Валюта</span>
