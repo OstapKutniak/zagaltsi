@@ -382,7 +382,7 @@
       <div id="acc-form-yield" style="display:none">
         <div class="afv-section">Дохідність</div>
         <div class="afv-row">
-          <span class="afv-row-label">Річний відсоток, %</span>
+          <span class="afv-row-label" id="acc-form-rate-label">Річний відсоток, %</span>
           <input class="afv-row-input" id="acc-form-rate" type="number" inputmode="decimal" placeholder="0">
         </div>
         <div class="afv-row afv-row-tap" id="acc-form-startrow">
@@ -390,12 +390,20 @@
           <span class="afv-row-val" id="acc-form-start-val">Оберіть дату</span>
         </div>
         <div id="acc-form-bonds" style="display:none">
+          <div class="afv-row">
+            <span class="afv-row-label">Номінал (сума погашення)</span>
+            <input class="afv-row-input" id="acc-form-nominal" type="number" inputmode="decimal" placeholder="напр. 2000">
+          </div>
           <div class="afv-row afv-row-tap" id="acc-form-endrow">
             <span class="afv-row-label">Дата погашення</span>
             <span class="afv-row-val" id="acc-form-end-val">Оберіть дату</span>
           </div>
           <div class="afv-section">Виплата купонів</div>
           <div class="afv-types" id="acc-form-coupon"></div>
+          <div class="afv-row afv-row-tap" id="acc-form-payaccrow">
+            <span class="afv-row-label">Зараховувати виплати на</span>
+            <span class="afv-row-val" id="acc-form-payacc-val">Оберіть рахунок</span>
+          </div>
         </div>
         <div class="afv-note" id="acc-form-taxnote"></div>
       </div>
@@ -406,7 +414,7 @@
       </div>
       <div class="afv-section">Баланс</div>
       <div class="afv-row">
-        <span class="afv-row-label">Початковий баланс</span>
+        <span class="afv-row-label" id="acc-form-balance-label">Початковий баланс</span>
         <input class="afv-row-input" id="acc-form-balance" type="number" inputmode="decimal" placeholder="0">
       </div>
       <div class="afv-row">
