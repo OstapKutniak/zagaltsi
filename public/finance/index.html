@@ -386,16 +386,18 @@
           <input class="afv-row-input" id="acc-form-rate" type="number" inputmode="decimal" placeholder="0">
         </div>
         <div class="afv-row afv-row-tap" id="acc-form-startrow">
-          <span class="afv-row-label">Дата відкриття</span>
+          <span class="afv-row-label" id="acc-form-start-label">Дата відкриття</span>
           <span class="afv-row-val" id="acc-form-start-val">Оберіть дату</span>
         </div>
+        <div id="acc-form-bonds" style="display:none">
+          <div class="afv-row afv-row-tap" id="acc-form-endrow">
+            <span class="afv-row-label">Дата погашення</span>
+            <span class="afv-row-val" id="acc-form-end-val">Оберіть дату</span>
+          </div>
+          <div class="afv-section">Виплата купонів</div>
+          <div class="afv-types" id="acc-form-coupon"></div>
+        </div>
         <div class="afv-note" id="acc-form-taxnote"></div>
-      </div>
-      <div id="acc-form-bonds" style="display:none">
-        <div class="afv-section">Графік виплат</div>
-        <div id="acc-form-payouts"></div>
-        <button class="ce-addsub" id="acc-form-addpayout">+ Додати виплату</button>
-        <div class="afv-note">Суми вписуй чистими — ОВДП/військові облігації без податку.</div>
       </div>
       <div class="afv-section">Рахунок</div>
       <div class="afv-row afv-row-tap" id="acc-form-currency-row">

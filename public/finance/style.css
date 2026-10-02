@@ -204,7 +204,6 @@ html, body {
 .acc-name { flex: 1; font-size: 16px; min-width: 0; }
 .acc-balwrap { text-align: right; min-width: 0; }
 .acc-bal { font-size: 16px; font-weight: 600; }
-.acc-sub { font-size: 11px; color: var(--text3); margin-top: 2px; white-space: nowrap; }
 
 /* ── ACCOUNT ACTION SHEET ── */
 .aas-header { display: flex; align-items: center; gap: 14px; padding: 12px 20px 16px; }
@@ -574,11 +573,6 @@ input[type="file"] { display: none; }
 .afv-type { flex: 1 1 calc(50% - 4px); background: #f4f4f6; border: 1.5px solid transparent; color: var(--text2); border-radius: 12px; padding: 12px 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .afv-type.on { background: var(--active); border-color: var(--active-ink); color: var(--active-ink); }
 .afv-note { font-size: 12px; color: var(--text2); padding: 6px 20px 2px; line-height: 1.4; }
-/* bond payout rows */
-.afv-payout { display: flex; align-items: center; gap: 8px; padding: 6px 16px; }
-.afv-payout-amt { flex: 1; min-width: 0; border: none; border-bottom: 1px solid var(--line); background: transparent; font-size: 16px; font-family: inherit; color: var(--text); outline: none; padding: 6px 0; }
-.afv-payout-date { flex-shrink: 0; background: #f4f4f6; border: none; border-radius: 10px; padding: 8px 12px; font-size: 14px; font-weight: 600; color: var(--active-ink); cursor: pointer; font-family: inherit; }
-.afv-payout-del { flex-shrink: 0; background: none; border: none; color: var(--exp); font-size: 17px; cursor: pointer; width: 30px; }
 
 /* ── TOGGLE ── */
 .tog { position: relative; display: inline-block; width: 51px; height: 31px; flex-shrink: 0; }

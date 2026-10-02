@@ -61,30 +61,59 @@ function isYield(a) {
   const t = acctypeOf(a);
   return (t === 'deposit' || t === 'bond') && a.yieldRate > 0 && !!a.yieldStart;
 }
-// Linear accrual from the open date: тіло + тіло×річний%×днів/365, мінус податок.
+// Linear accrual from the open/purchase date: тіло + тіло×річний%×днів/365, мінус
+// податок. For bonds accrual stops at the maturity date.
 function depositInfo(a) {
   const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
   if (!isYield(a)) return { principal, gross: 0, net: 0, value: principal, days: 0 };
-  const days = Math.max(0, (Date.now() - new Date(a.yieldStart).getTime()) / 86400000);
+  let until = Date.now();
+  if (acctypeOf(a) === 'bond' && a.yieldEnd) until = Math.min(until, new Date(a.yieldEnd).getTime());
+  const days = Math.max(0, (until - new Date(a.yieldStart).getTime()) / 86400000);
   const gross = principal * (a.yieldRate / 100) * (days / 365);
   const tax = gross * ((YIELD_TAX[acctypeOf(a)] || 0) / 100);
   const net = gross - tax;
   return { principal, gross, net, value: principal + net, days };
 }
 // Current withdrawal value in UAH (principal + net interest). Used in the
-// accounts cards and the «Заощадження» section sum — NOT in the header total.
+// accounts section sums — NOT in the header total.
 function accValueUah(a) {
   const info = depositInfo(a);
   return a.currency === 'UAH' ? info.value : Math.round(info.value * (fxRates[a.currency] || 1));
 }
-// Bond payout schedule (sorted by date); upcoming = still to be paid.
-function bondPayouts(a) {
-  return (Array.isArray(a.payouts) ? a.payouts : []).filter(p => p && p.date)
-    .slice().sort((x, y) => new Date(x.date) - new Date(y.date));
+// Bond coupon frequency options (months between payouts; 0 = all at maturity).
+const COUPON_FREQ = [
+  { m: 6,  label: 'Раз на пів року' },
+  { m: 3,  label: 'Щокварталу' },
+  { m: 12, label: 'Раз на рік' },
+  { m: 1,  label: 'Щомісяця' },
+  { m: 0,  label: 'При погашенні' },
+];
+// Computed bond payout schedule from principal, annual %, purchase & maturity
+// dates and coupon frequency: coupons along the way, principal + last coupon
+// at maturity. No manual amounts.
+function bondSchedule(a) {
+  if (acctypeOf(a) !== 'bond' || !(a.yieldRate > 0) || !a.yieldStart || !a.yieldEnd) return [];
+  const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
+  const r = a.yieldRate / 100, start = new Date(a.yieldStart), end = new Date(a.yieldEnd);
+  if (end <= start) return [];
+  const freq = a.couponMonths ?? 6;
+  const interest = (from, to) => principal * r * ((to - from) / 86400000) / 365;
+  const out = [];
+  let prev = start;
+  if (freq > 0) {
+    for (let k = 1; ; k++) {
+      const d = new Date(start); d.setMonth(start.getMonth() + k * freq);
+      if (d.getTime() >= end.getTime() - 86400000) break;
+      out.push({ date: d, amount: principal * r * freq / 12, kind: 'coupon' });
+      prev = d;
+    }
+  }
+  out.push({ date: end, amount: principal + interest(prev, end), kind: 'final' });
+  return out;
 }
 function upcomingPayouts(a) {
   const cutoff = Date.now() - 86400000;
-  return bondPayouts(a).filter(p => new Date(p.date).getTime() >= cutoff);
+  return bondSchedule(a).filter(p => p.date.getTime() >= cutoff);
 }
 
 // ── CONST ──────────────────────────────────────────────────
@@ -200,8 +229,8 @@ let accFormIcon = null;
 let accFormColor = null;
 let accFormType = 'regular';
 let accFormYieldStart = null;   // Date | null — deposit open date
-let accFormPayouts = [];        // [{amount:number, date:Date|null}] — bond payout schedule
-let accFormPayoutIdx = -1;      // which payout row's date is being picked
+let accFormYieldEnd = null;     // Date | null — bond maturity date
+let accFormCoupon = 6;          // bond coupon frequency in months (0 = at maturity)
 const SWIPE_TABS = ['accounts', 'categories', 'records', 'recurring', 'overview'];
 
 const CURRENCIES_LIST = [
@@ -864,24 +893,11 @@ function accRow(a) {
   const info = depositInfo(a);
   const shown = info.value;                       // current withdrawal value
   const v = a.currency === 'UAH' ? fmt(shown) : fmtDec(shown);
-  const fmtc = n => a.currency === 'UAH' ? fmt(n) : fmtDec(n);
-  let sub = '';
-  if (isYield(a)) {
-    sub = `<div class="acc-sub">тіло ${fmtc(info.principal)} · +${fmtc(info.net)} ${cur}</div>`;
-  } else if (acctypeOf(a) === 'bond') {
-    const up = upcomingPayouts(a);
-    if (up.length) {
-      const n0 = up[0], d0 = new Date(n0.date);
-      const totalUp = up.reduce((s, p) => s + p.amount, 0);
-      sub = `<div class="acc-sub">виплата ${fmtc(n0.amount)} · ${d0.getDate()} ${MON_SHORT[d0.getMonth()]}${up.length > 1 ? ` · ще ${up.length - 1}` : ''} · усього ${fmtc(totalUp)} ${cur}</div>`;
-    }
-  }
   return `<div class="acc-row" data-acc="${escAttr(a.name)}">
     <div class="acc-ic" style="--c:${st.color}">${st.icon}</div>
     <div class="acc-name">${esc(a.name)}</div>
     <div class="acc-balwrap">
       <div class="acc-bal" style="color:${shown < 0 ? 'var(--exp)' : 'var(--text)'}">${v} <span style="font-size:11px;color:var(--text3)">${cur}</span></div>
-      ${sub}
     </div>
   </div>`;
 }
@@ -892,13 +908,15 @@ function renderAccounts() {
     el.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ic-svg"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><path d="M16 15h2"/></svg></div>Імпортуй CSV з 1money — й тут з'являться рахунки з балансами.</div>`;
     return;
   }
-  const reg = accountsList.filter(a => !a.archived && !isSavings(a.name) && a.group !== 'savings');
-  const sav = accountsList.filter(a => !a.archived && (isSavings(a.name) || a.group === 'savings'));
+  const live = accountsList.filter(a => !a.archived);
+  const reg = live.filter(a => acctypeOf(a) === 'regular');
+  const inv = live.filter(a => ['deposit', 'bond'].includes(acctypeOf(a)));
+  const sav = live.filter(a => acctypeOf(a) === 'savings');
   const liveSum = arr => arr.reduce((s, a) => s + accValueUah(a), 0);
   const section = (title, arr) => arr.length
     ? `<div class="acc-section-title">${title}<span class="acc-section-sum" style="color:${liveSum(arr) < 0 ? 'var(--exp)' : 'var(--inc)'}">${fmt(liveSum(arr))} UAH</span></div>${arr.map(a => accRow(a)).join('')}`
     : '';
-  el.innerHTML = section('Рахунки', reg) + section('Заощадження', sav);
+  el.innerHTML = section('Рахунки', reg) + section('Вкладення', inv) + section('Заощадження', sav);
   el.querySelectorAll('.acc-row').forEach(row => {
     row.onclick = () => openAccAction(row.dataset.acc);
   });
@@ -916,12 +934,11 @@ function openAccAction(accName) {
   let yieldLine = '';
   if (a && isYield(a)) {
     yieldLine = `<div class="aas-sub">тіло ${fmtc(info.principal)} · +${fmtc(info.net)} ${cur} чистими (${a.yieldRate}%/рік, податок ${YIELD_TAX[acctypeOf(a)]}%)</div>`;
-  } else if (a && acctypeOf(a) === 'bond') {
     const up = upcomingPayouts(a);
     if (up.length) {
-      const rows = up.map(p => { const d = new Date(p.date); return `<div class="aas-payout"><span>${d.getDate()} ${MON_SHORT[d.getMonth()]} ${d.getFullYear()}</span><span>${fmtc(p.amount)} ${cur}</span></div>`; }).join('');
+      const rows = up.map(p => `<div class="aas-payout"><span>${p.date.getDate()} ${MON_SHORT[p.date.getMonth()]} ${p.date.getFullYear()}${p.kind === 'final' ? ' · погашення' : ''}</span><span>${fmtc(p.amount)} ${cur}</span></div>`).join('');
       const total = up.reduce((s, p) => s + p.amount, 0);
-      yieldLine = `<div class="aas-payouts"><div class="aas-payout-title">Очікувані виплати</div>${rows}<div class="aas-payout total"><span>Усього</span><span>${fmtc(total)} ${cur}</span></div></div>`;
+      yieldLine += `<div class="aas-payouts"><div class="aas-payout-title">Очікувані виплати</div>${rows}<div class="aas-payout total"><span>Усього</span><span>${fmtc(total)} ${cur}</span></div></div>`;
     }
   }
   document.getElementById('aas-ic').style.background = st.color;
@@ -947,7 +964,8 @@ function openAccForm(accName = null) {
     accFormColor = a.color || null;
     accFormType = acctypeOf(a);
     accFormYieldStart = a.yieldStart ? new Date(a.yieldStart) : null;
-    accFormPayouts = Array.isArray(a.payouts) ? a.payouts.map(p => ({ amount: p.amount, date: p.date ? new Date(p.date) : null })) : [];
+    accFormYieldEnd = a.yieldEnd ? new Date(a.yieldEnd) : null;
+    accFormCoupon = a.couponMonths ?? 6;
     document.getElementById('acc-form-rate').value = a.yieldRate ? String(a.yieldRate) : '';
     document.getElementById('acc-form-balance').value = String(computeLiveBalance(a.name) ?? a.balance);
     document.getElementById('acc-form-include').checked = accIncluded(a);
@@ -963,7 +981,8 @@ function openAccForm(accName = null) {
     accFormColor = null;
     accFormType = 'regular';
     accFormYieldStart = null;
-    accFormPayouts = [];
+    accFormYieldEnd = null;
+    accFormCoupon = 6;
     document.getElementById('acc-form-rate').value = '';
     document.getElementById('acc-form-balance').value = '0';
     document.getElementById('acc-form-include').checked = true;
@@ -990,30 +1009,22 @@ function renderAccFormType() {
   const box = document.getElementById('acc-form-type');
   box.innerHTML = ACC_TYPES.map(t => `<button class="afv-type${accFormType === t.k ? ' on' : ''}" data-t="${t.k}">${t.label}</button>`).join('');
   box.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { accFormType = b.dataset.t; renderAccFormType(); });
-  document.getElementById('acc-form-yield').style.display = accFormType === 'deposit' ? '' : 'none';
-  document.getElementById('acc-form-bonds').style.display = accFormType === 'bond' ? '' : 'none';
-  if (accFormType === 'deposit') {
-    const sv = document.getElementById('acc-form-start-val');
-    sv.textContent = accFormYieldStart
-      ? `${accFormYieldStart.getDate()} ${MON_SHORT[accFormYieldStart.getMonth()]} ${accFormYieldStart.getFullYear()}`
-      : 'Оберіть дату';
-    document.getElementById('acc-form-taxnote').textContent = 'Податок на відсотки: 23% (ПДФО 18% + військовий збір 5%)';
+  const isDep = accFormType === 'deposit', isBond = accFormType === 'bond';
+  document.getElementById('acc-form-yield').style.display = (isDep || isBond) ? '' : 'none';
+  document.getElementById('acc-form-bonds').style.display = isBond ? '' : 'none';
+  if (!(isDep || isBond)) return;
+  const fd = d => d ? `${d.getDate()} ${MON_SHORT[d.getMonth()]} ${d.getFullYear()}` : 'Оберіть дату';
+  document.getElementById('acc-form-start-label').textContent = isBond ? 'Дата купівлі' : 'Дата відкриття';
+  document.getElementById('acc-form-start-val').textContent = fd(accFormYieldStart);
+  document.getElementById('acc-form-taxnote').textContent = isBond
+    ? 'Податок: 0% (ОВДП / військові облігації звільнені)'
+    : 'Податок на відсотки: 23% (ПДФО 18% + військовий збір 5%)';
+  if (isBond) {
+    document.getElementById('acc-form-end-val').textContent = fd(accFormYieldEnd);
+    const fb = document.getElementById('acc-form-coupon');
+    fb.innerHTML = COUPON_FREQ.map(f => `<button class="afv-type${accFormCoupon === f.m ? ' on' : ''}" data-m="${f.m}">${f.label}</button>`).join('');
+    fb.querySelectorAll('.afv-type').forEach(b => b.onclick = () => { accFormCoupon = +b.dataset.m; renderAccFormType(); });
   }
-  if (accFormType === 'bond') renderAccFormPayouts();
-}
-function renderAccFormPayouts() {
-  const box = document.getElementById('acc-form-payouts');
-  box.innerHTML = accFormPayouts.map((p, i) => `
-    <div class="afv-payout" data-i="${i}">
-      <input class="afv-payout-amt" data-amt="${i}" type="number" inputmode="decimal" placeholder="Сума" value="${p.amount || ''}">
-      <button class="afv-payout-date" data-date="${i}">${p.date ? `${p.date.getDate()} ${MON_SHORT[p.date.getMonth()]} ${p.date.getFullYear()}` : 'Дата'}</button>
-      <button class="afv-payout-del" data-del="${i}">✕</button>
-    </div>`).join('');
-  box.querySelectorAll('.afv-payout-amt').forEach(inp => inp.oninput = e => {
-    accFormPayouts[+e.target.dataset.amt].amount = parseFloat(e.target.value.replace(',', '.')) || 0;
-  });
-  box.querySelectorAll('.afv-payout-date').forEach(b => b.onclick = () => { accFormPayoutIdx = +b.dataset.date; openCal('payout'); });
-  box.querySelectorAll('.afv-payout-del').forEach(b => b.onclick = () => { accFormPayouts.splice(+b.dataset.del, 1); renderAccFormPayouts(); });
 }
 function updateAccFormCurrency() {
   const c = CURRENCIES_LIST.find(x => x.code === accFormCurrency);
@@ -1033,18 +1044,20 @@ async function saveAccForm() {
   // account type → group + yield/payout fields
   const acctype = accFormType;
   const group = acctype === 'regular' ? 'regular' : 'savings';
-  let yieldRate = null, yieldStart = null, payouts = null;
-  if (acctype === 'deposit') {
+  let yieldRate = null, yieldStart = null, yieldEnd = null, couponMonths = null;
+  if (acctype === 'deposit' || acctype === 'bond') {
     yieldRate = parseFloat(document.getElementById('acc-form-rate').value.replace(',', '.')) || 0;
     if (yieldRate > 0 && !accFormYieldStart) accFormYieldStart = new Date();   // default to today
     yieldStart = accFormYieldStart ? accFormYieldStart.toISOString() : null;
-  } else if (acctype === 'bond') {
-    payouts = accFormPayouts
-      .filter(p => p.amount > 0 && p.date)
-      .map(p => ({ amount: p.amount, date: p.date.toISOString() }));
+  }
+  if (acctype === 'bond') {
+    if (yieldRate > 0 && !accFormYieldEnd) return toast('Вкажи дату погашення');
+    if (accFormYieldEnd && accFormYieldStart && accFormYieldEnd <= accFormYieldStart) return toast('Погашення має бути пізніше за купівлю');
+    yieldEnd = accFormYieldEnd ? accFormYieldEnd.toISOString() : null;
+    couponMonths = accFormCoupon;
   }
   const newList = [...accountsList];
-  const typeFields = { acctype, group, yieldRate, yieldStart, payouts };
+  const typeFields = { acctype, group, yieldRate, yieldStart, yieldEnd, couponMonths, payouts: null };
   if (accFormMode === 'edit' && accFormEditIdx >= 0) {
     const old = newList[accFormEditIdx];
     newList[accFormEditIdx] = { ...old, name, balance, baseBalance, currency, uah: currency === 'UAH' ? balance : (old.uah || 0), includeInTotal: include, archived, icon: accFormIcon || null, color: accFormColor || null, ...typeFields };
@@ -1914,7 +1927,7 @@ function bindEvents() {
     if (chosen) { const c = CURRENCIES_LIST.find(x => x.label === chosen); if (c) { accFormCurrency = c.code; updateAccFormCurrency(); } }
   };
   document.getElementById('acc-form-startrow').onclick = () => openCal('accstart');
-  document.getElementById('acc-form-addpayout').onclick = () => { accFormPayouts.push({ amount: 0, date: null }); renderAccFormPayouts(); };
+  document.getElementById('acc-form-endrow').onclick = () => openCal('accend');
 
   // Category detail sheet
   document.getElementById('cat-action-overlay').onclick = e => { if (e.target.id === 'cat-action-overlay') closeCatSheet(); };
@@ -2054,9 +2067,8 @@ function openCal(mode) {
     calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
-  else if (mode === 'payout') {
-    const p = accFormPayouts[accFormPayoutIdx];
-    const d = (p && p.date) || new Date();
+  else if (mode === 'accend') {
+    const d = accFormYieldEnd || (() => { const x = new Date(accFormYieldStart || Date.now()); x.setFullYear(x.getFullYear() + 1); return x; })();
     calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     calStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
@@ -2095,12 +2107,12 @@ function drawCal() {
   grid.innerHTML = cells;
   grid.querySelectorAll('.cal-day[data-d]').forEach(el => el.onclick = () => calPick(new Date(y, m, +el.dataset.d)));
   const hint = document.getElementById('cal-hint'), done = document.getElementById('cal-done');
-  if (['day', 'recday', 'txday', 'accstart', 'payout'].includes(calMode)) { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
+  if (['day', 'recday', 'txday', 'accstart', 'accend'].includes(calMode)) { hint.textContent = calStart ? '' : 'Оберіть день'; done.disabled = !calStart; }
   else { hint.textContent = !calStart ? 'Оберіть початок' : !calEnd ? 'Оберіть кінець' : ''; done.disabled = !(calStart && calEnd); }
 }
 function calPick(d) {
   d.setHours(0, 0, 0, 0);
-  if (['day', 'recday', 'txday', 'accstart', 'payout'].includes(calMode)) { calStart = d; calEnd = null; }
+  if (['day', 'recday', 'txday', 'accstart', 'accend'].includes(calMode)) { calStart = d; calEnd = null; }
   else {
     if (!calStart || calEnd) { calStart = d; calEnd = null; }
     else if (d < calStart) { calEnd = calStart; calStart = d; }
@@ -2131,11 +2143,11 @@ function applyCal() {
     renderAccFormType();
     return;
   }
-  if (calMode === 'payout') {     // bond payout date — form field only
+  if (calMode === 'accend') {     // bond maturity date — form field only
     if (!calStart) return;
-    if (accFormPayouts[accFormPayoutIdx]) accFormPayouts[accFormPayoutIdx].date = calStart;
+    accFormYieldEnd = calStart;
     document.getElementById('cal-overlay').classList.remove('open');
-    renderAccFormPayouts();
+    renderAccFormType();
     return;
   }
   if (calMode === 'day') {
