@@ -92,7 +92,13 @@ const COUPON_FREQ = [
 // сума погашення, yieldRate = купонна ставка % річних ВІД НОМІНАЛУ. Coupon dates
 // are anchored to the maturity date (maturity, maturity−period, …) like real
 // bonds, not to the purchase date. Each coupon = nominal × rate × period/12.
-function bondNominal(a, principal) { return a.nominal > 0 ? a.nominal : principal; }
+// ОВДП nominal is 1000 ₴ per bond, so when nominal isn't entered assume the
+// cost rounded to whole bonds (2019.36 paid → 2000 nominal).
+function bondNominal(a, principal) {
+  if (a.nominal > 0) return a.nominal;
+  const n = Math.round(principal / 1000) * 1000;
+  return n > 0 ? n : principal;
+}
 function bondSchedule(a) {
   if (acctypeOf(a) !== 'bond' || !(a.yieldRate > 0) || !a.yieldStart || !a.yieldEnd) return [];
   const principal = computeLiveBalance(a.name) ?? a.balance ?? 0;
